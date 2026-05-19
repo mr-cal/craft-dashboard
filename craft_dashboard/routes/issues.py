@@ -24,9 +24,7 @@ def _compute_age_days(created_at: datetime | None) -> int:
         return 0
     now = datetime.now(tz=UTC)
     created = (
-        created_at.replace(tzinfo=UTC)
-        if created_at.tzinfo is None
-        else created_at
+        created_at.replace(tzinfo=UTC) if created_at.tzinfo is None else created_at
     )
     return (now - created).days
 

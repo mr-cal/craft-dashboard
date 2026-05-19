@@ -1,0 +1,129 @@
+"""Tests for the OpenRouter client."""
+
+from unittest.mock import AsyncMock, patch
+
+import httpx
+import pytest
+from craft_dashboard.llm.client import (
+    LocalLLMClient,
+    OpenRouterClient,
+    OpenRouterResponse,
+    QuotaExhaustedError,
+    create_llm_client,
+)
+from craft_dashboard.settings import Settings
+
+
+class TestOpenRouterClient:
+    """Tests for OpenRouterClient."""
+
+    def test_init(self) -> None:
+        """Client initializes with API key."""
+        client = OpenRouterClient(api_key="sk-or-test123")
+
+        assert client.api_key == "sk-or-test123"
+
+    def test_init_with_custom_base_url(self) -> None:
+        """Client accepts custom base URL."""
+        client = OpenRouterClient(
+            api_key="sk-or-test",
+            base_url="https://custom.api/v1",
+        )
+
+        assert client.base_url == "https://custom.api/v1"
+
+
+class TestQuotaExhaustedError:
+    """Tests for QuotaExhaustedError detection."""
+
+    @pytest.mark.asyncio
+    async def test_raises_quota_error_on_402(self) -> None:
+        """HTTP 402 response raises QuotaExhaustedError, not HTTPStatusError."""
+        mock_response = httpx.Response(402, request=httpx.Request("POST", "http://x"))
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+            client = OpenRouterClient(api_key="test")
+
+            with pytest.raises(QuotaExhaustedError):
+                await client.chat(
+                    model="test/model", messages=[{"role": "user", "content": "hi"}]
+                )
+
+
+class TestLocalLLMClient:
+    """Tests for LocalLLMClient."""
+
+    def test_init_default_url(self) -> None:
+        """LocalLLMClient uses the configured base URL."""
+        client = LocalLLMClient()
+
+        assert "localhost:11434" in client.base_url
+
+    def test_init_custom_url(self) -> None:
+        """LocalLLMClient accepts a custom base URL."""
+        client = LocalLLMClient(base_url="http://192.168.1.5:11434/v1")
+
+        assert client.base_url == "http://192.168.1.5:11434/v1"
+
+
+class TestCreateLLMClient:
+    """Tests for the create_llm_client factory."""
+
+    def test_openrouter_backend(self, monkeypatch) -> None:
+        """create_llm_client returns OpenRouterClient for openrouter backend."""
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+        monkeypatch.setenv("LLM_BACKEND", "openrouter")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+
+        client = create_llm_client(Settings())
+
+        assert isinstance(client, OpenRouterClient)
+
+    def test_local_backend(self, monkeypatch) -> None:
+        """create_llm_client returns LocalLLMClient for local backend."""
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+        monkeypatch.setenv("LLM_BACKEND", "local")
+
+        client = create_llm_client(Settings())
+
+        assert isinstance(client, LocalLLMClient)
+
+
+class TestOpenRouterResponse:
+    """Tests for OpenRouterResponse."""
+
+    def test_from_api_response(self) -> None:
+        """Parse a typical OpenRouter API response."""
+        api_data = {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"summary": "Test summary"}',
+                    }
+                }
+            ],
+            "usage": {
+                "total_tokens": 150,
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+            },
+        }
+
+        response = OpenRouterResponse.from_api_response(api_data)
+
+        assert response.content == '{"summary": "Test summary"}'
+        assert response.total_tokens == 150
+        assert response.prompt_tokens == 100
+        assert response.completion_tokens == 50
+
+    def test_from_api_response_missing_usage(self) -> None:
+        """Handle response with missing usage data."""
+        api_data = {
+            "choices": [{"message": {"content": "hello"}}],
+        }
+
+        response = OpenRouterResponse.from_api_response(api_data)
+
+        assert response.content == "hello"
+        assert response.total_tokens == 0
