@@ -15,7 +15,7 @@ craft-dashboard provides:
 
 You only need these on your local machine:
 
-- **uv** — Python package manager (runs the app and scripts)
+- **uv** — Python package manager
 - **Ansible 2.16+** — provisions the LXD VM and VPS over SSH
 - **git**
 
@@ -27,7 +27,7 @@ PostgreSQL runs inside the LXD VM. You do not need it locally.
 
 Unit tests use mocks and do not require a running database:
 
-```bash
+```fish
 make test   # run unit tests
 make lint   # run linter
 ```
@@ -47,67 +47,31 @@ environment exactly.
 
 If you don't have one already:
 
-```bash
-# On your local machine:
+```fish
 lxc launch ubuntu:24.04 craft-dashboard-dev --vm
 lxc exec craft-dashboard-dev -- cloud-init status --wait
 ```
 
 Alternatively, if you use [local-llm](https://github.com/mr-cal/local-llm):
 
-```bash
+```fish
 uv run llm lxd create 1 --lxd-vm
 ```
 
 > local-llm renames the VM's default user to match your host username.
 > Standard `lxc launch` keeps the user as `ubuntu`.
 
-### 3b. Get the VM's IP address and username
+### 3b. Configure secrets
 
-```bash
-# On your local machine:
-VM_IP=$(lxc list craft-dashboard-dev --format csv -c 4 | cut -d' ' -f1)
-echo "IP: $VM_IP"
-
-# The VM username:
-#   - standard lxc launch: ubuntu
-#   - local-llm --lxd-vm:  your host username (run: echo $USER)
-VM_USER=ubuntu   # adjust if needed
-```
-
-### 3c. Set up SSH access
-
-Ansible provisions the VM by SSHing into it and running commands remotely —
-the same way it will later connect to the production VPS. Ansible passes the
-username via `ssh -o User="..."`, so usernames containing `@` work without
-any special handling.
-
-```bash
-# On your local machine:
-lxc exec craft-dashboard-dev -- mkdir -p /home/$VM_USER/.ssh
-lxc file push ~/.ssh/id_ed25519.pub \
-  "craft-dashboard-dev/home/$VM_USER/.ssh/authorized_keys"
-lxc exec craft-dashboard-dev -- \
-  chown -R $VM_USER:$VM_USER /home/$VM_USER/.ssh
-lxc exec craft-dashboard-dev -- \
-  chmod 600 /home/$VM_USER/.ssh/authorized_keys
-
-# Verify:
-ssh -o StrictHostKeyChecking=no -l "$VM_USER" $VM_IP "echo SSH works"
-```
-
-### 3d. Configure secrets
-
-```bash
-# On your local machine:
+```fish
 cp provisioning/secrets.env.example provisioning/secrets.env
 ```
 
-Edit `provisioning/secrets.env` and set at minimum:
+Edit `provisioning/secrets.env`. Set at minimum:
 
-```bash
-DASHBOARD_HOST=<VM_IP from step 3b>
-DASHBOARD_USER=<VM_USER from step 3b>
+```
+VM_NAME=craft-dashboard-dev         # LXD VM name (lxc commands only)
+DASHBOARD_USER=ubuntu               # VM SSH user (your host username if using local-llm)
 DOMAIN_NAME=localhost
 DB_PASSWORD=dev-password-123
 GITHUB_TOKEN=<your GitHub fine-grained token>
@@ -115,54 +79,72 @@ GITHUB_TOKEN=<your GitHub fine-grained token>
 
 `provisioning/secrets.env` is gitignored — never committed.
 
+### 3c. Get the VM's IP address
+
+The VM has one IP per network interface; CSV output quotes multi-IP fields.
+Parse with grep to reliably extract the first IPv4 address:
+
+```fish
+set VM_NAME (grep '^VM_NAME=' provisioning/secrets.env | cut -d= -f2)
+set VM_IP (lxc list $VM_NAME -c4 --format csv | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+echo "IP: $VM_IP"
+```
+
+Update `DASHBOARD_HOST` in `provisioning/secrets.env` with this IP, then re-run
+whenever the VM is restarted (LXD may assign a new IP).
+
+### 3d. Set up SSH access
+
+Ansible provisions the VM by SSHing in and running commands remotely — the same
+way it will later connect to the production VPS. Ansible passes the username as
+`-o User=...` internally, so usernames containing `@` work without any workarounds.
+
+```fish
+set VM_USER (grep '^DASHBOARD_USER=' provisioning/secrets.env | cut -d= -f2)
+lxc exec $VM_NAME -- mkdir -p /home/$VM_USER/.ssh
+lxc file push ~/.ssh/id_ed25519.pub $VM_NAME/home/$VM_USER/.ssh/authorized_keys
+lxc exec $VM_NAME -- chown -R $VM_USER:$VM_USER /home/$VM_USER/.ssh
+lxc exec $VM_NAME -- chmod 600 /home/$VM_USER/.ssh/authorized_keys
+ssh -o StrictHostKeyChecking=no -l $VM_USER $VM_IP "echo SSH works"
+```
+
 ### 3e. Provision the VM
 
-```bash
-# On your local machine — Ansible SSHes into the VM and sets everything up:
+```fish
 make deploy-vm
 ```
 
-This installs PostgreSQL, the app, nginx, and systemd timers. It also runs
-**database migrations** — the process that creates or updates the database
-schema (tables, columns, indexes). You never need to run migrations by hand;
-`make deploy-vm` does it on every run.
-
-Re-run `make deploy-vm` any time after a code change to update the VM.
+This installs PostgreSQL, the app, nginx, and systemd timers inside the VM.
+It also runs **database migrations** — the process that creates or updates the
+database schema (tables, columns, indexes) in PostgreSQL. Re-run any time after
+code changes; it is idempotent.
 
 ---
 
 ## 4. Bootstrapping Data (First Time)
 
 After provisioning, collect and evaluate all historical data inside the VM before
-deploying to a production VPS. Using your local LLM server avoids OpenRouter API
-costs for this one-time full pass.
+deploying to a production VPS. Using your local LLM server avoids OpenRouter costs
+for this one-time full pass over all historical issues.
 
 ### Step 1: Collect data from GitHub and Launchpad
 
-```bash
-# Trigger from your local machine; runs inside the VM:
-lxc exec craft-dashboard-dev -- systemctl start collect-data
-
-# Watch progress:
-lxc exec craft-dashboard-dev -- journalctl -u collect-data -f
+```fish
+lxc exec $VM_NAME -- systemctl start collect-data
+lxc exec $VM_NAME -- journalctl -u collect-data -f
 ```
 
 This fetches issues, PRs, releases, and snapstore data. Re-run any time to update.
 
 ### Step 2: Run LLM evaluation
 
-For the initial full pass of all issues (open and closed):
-
-```bash
-# Inside the VM (this may take several hours):
-lxc exec craft-dashboard-dev -- \
-  sudo -u craft-dashboard \
-  /opt/craft-dashboard/.venv/bin/python \
-  /opt/craft-dashboard/scripts/run_llm.py
+```fish
+# Full pass over all issues — may take several hours:
+lxc exec $VM_NAME -- sudo -u craft-dashboard /opt/craft-dashboard/.venv/bin/python /opt/craft-dashboard/scripts/run_llm.py
 ```
 
 After migration, the daily cron (`run_llm.py --open-only`) only processes
-newly-changed open issues incrementally, so you only pay OpenRouter for updates.
+newly-changed open issues, so you only pay OpenRouter for incremental updates.
 
 ---
 
@@ -175,23 +157,21 @@ newly-changed open issues incrementally, so you only pay OpenRouter for updates.
 
 ### Configure secrets for VPS
 
-Update `provisioning/secrets.env` with your VPS details (or keep separate files
-for dev vs prod):
+Update `provisioning/secrets.env` with production values:
 
-```bash
+```
 DASHBOARD_HOST=<VPS IP>
 DASHBOARD_USER=<SSH user on VPS>
 DOMAIN_NAME=yourdomain.example.com
 SSL_EMAIL=you@example.com
 DB_PASSWORD=<strong password>
 GITHUB_TOKEN=<your token>
-OPENROUTER_API_KEY=<your key>   # used for ongoing incremental evaluations
+OPENROUTER_API_KEY=<your key>
 ```
 
 ### Deploy
 
-```bash
-# On your local machine:
+```fish
 make deploy
 ```
 
@@ -199,52 +179,54 @@ make deploy
 
 ## 6. Migrating Bootstrapped Data to the VPS
 
-After provisioning the VPS (step 5), import the data you collected in the VM so
-production starts with a fully-evaluated dataset.
+After provisioning the VPS (step 5), import the data from the VM so production
+starts with a fully-evaluated dataset.
 
-```bash
-# On your local machine:
+```fish
+# Dump from the dev VM and copy to VPS
+lxc exec $VM_NAME -- sudo -u postgres pg_dump craft_dashboard | gzip > craft-dashboard-initial.sql.gz
+scp craft-dashboard-initial.sql.gz $DASHBOARD_USER@$DASHBOARD_HOST:~
 
-# Dump data from the dev VM
-lxc exec craft-dashboard-dev -- \
-  sudo -u postgres pg_dump craft_dashboard | gzip > craft-dashboard-initial.sql.gz
-
-# Copy to VPS and restore
-scp craft-dashboard-initial.sql.gz $DASHBOARD_HOST:~
-
-# (sourcing secrets.env gives you $DASHBOARD_USER and $DASHBOARD_HOST)
-source provisioning/secrets.env
-ssh -l "$DASHBOARD_USER" $DASHBOARD_HOST "sudo systemctl stop craft-dashboard"
-ssh -l "$DASHBOARD_USER" $DASHBOARD_HOST \
-  "gunzip -c craft-dashboard-initial.sql.gz | sudo -u postgres psql craft_dashboard"
-ssh -l "$DASHBOARD_USER" $DASHBOARD_HOST "sudo systemctl start craft-dashboard"
+# Restore on VPS
+ssh -l $DASHBOARD_USER $DASHBOARD_HOST "sudo systemctl stop craft-dashboard"
+ssh -l $DASHBOARD_USER $DASHBOARD_HOST "gunzip -c craft-dashboard-initial.sql.gz | sudo -u postgres psql craft_dashboard"
+ssh -l $DASHBOARD_USER $DASHBOARD_HOST "sudo systemctl start craft-dashboard"
 ```
+
+> Load `$DASHBOARD_USER` and `$DASHBOARD_HOST` from secrets.env first:
+> ```fish
+> for line in (grep -v '^#' provisioning/secrets.env | grep '=')
+>     set -x (string split -m1 = $line)[1] (string split -m1 = $line)[2]
+> end
+> ```
 
 ---
 
 ## 7. Ongoing Operations
 
-Source `provisioning/secrets.env` to get `$DASHBOARD_USER` and `$DASHBOARD_HOST`,
-then SSH into the server. All commands below run **on your local machine**.
+Load variables from `secrets.env`, then SSH into the server.
 
-```bash
-source provisioning/secrets.env
+```fish
+# Load deployment vars into fish
+for line in (grep -v '^#' provisioning/secrets.env | grep '=')
+    set -x (string split -m1 = $line)[1] (string split -m1 = $line)[2]
+end
 
 # Application logs
-ssh -l "$DASHBOARD_USER" $DASHBOARD_HOST "journalctl -u craft-dashboard -f"
+ssh -l $DASHBOARD_USER $DASHBOARD_HOST "journalctl -u craft-dashboard -f"
 
 # Data collection logs
-ssh -l "$DASHBOARD_USER" $DASHBOARD_HOST "journalctl -u collect-data -f"
+ssh -l $DASHBOARD_USER $DASHBOARD_HOST "journalctl -u collect-data -f"
 
 # Trigger manual data collection
-ssh -l "$DASHBOARD_USER" $DASHBOARD_HOST "sudo systemctl start collect-data"
+ssh -l $DASHBOARD_USER $DASHBOARD_HOST "sudo systemctl start collect-data"
 
 # Trigger manual LLM evaluation
-ssh -l "$DASHBOARD_USER" $DASHBOARD_HOST "sudo systemctl start run-llm"
+ssh -l $DASHBOARD_USER $DASHBOARD_HOST "sudo systemctl start run-llm"
 
 # List scheduled timers
-ssh -l "$DASHBOARD_USER" $DASHBOARD_HOST "systemctl list-timers"
+ssh -l $DASHBOARD_USER $DASHBOARD_HOST "systemctl list-timers"
 
 # Download latest database backup
-scp "$DASHBOARD_USER@$DASHBOARD_HOST:/opt/craft-dashboard/backups/craft-dashboard-$(date +%Y%m%d).sql.gz" ~/backups/
+scp $DASHBOARD_USER@$DASHBOARD_HOST:/opt/craft-dashboard/backups/craft-dashboard-(date +%Y%m%d).sql.gz ~/backups/
 ```
