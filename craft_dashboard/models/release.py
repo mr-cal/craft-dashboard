@@ -1,0 +1,35 @@
+"""Release model for tracking project versions."""
+
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from craft_dashboard.models.base import Base
+
+
+class Release(Base):
+    """A release version of a project."""
+
+    __tablename__ = "releases"
+    __table_args__ = (UniqueConstraint("project_id", "version"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[str] = mapped_column(String(100), nullable=False)
+    branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    is_hotfix: Mapped[bool] = mapped_column(Boolean, default=False)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+
+    # Relationships
+    project: Mapped["Project"] = relationship(back_populates="releases")  # noqa: F821
+
+    def __repr__(self) -> str:
+        """Return a string representation."""
+        return f"<Release(project_id={self.project_id}, version={self.version!r})>"

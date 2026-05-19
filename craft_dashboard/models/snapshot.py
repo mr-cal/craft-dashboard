@@ -1,0 +1,35 @@
+"""Daily snapshot model for tracking issue/PR trends over time."""
+
+from datetime import date
+
+from sqlalchemy import Date, ForeignKey, Integer, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from craft_dashboard.models.base import Base
+
+
+class Snapshot(Base):
+    """A daily snapshot of open issue and PR counts for a project."""
+
+    __tablename__ = "snapshots"
+    __table_args__ = (UniqueConstraint("project_id", "snapshot_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    open_issues: Mapped[int] = mapped_column(Integer, default=0)
+    open_prs: Mapped[int] = mapped_column(Integer, default=0)
+    open_issues_external: Mapped[int] = mapped_column(Integer, default=0)
+    open_issues_internal: Mapped[int] = mapped_column(Integer, default=0)
+    open_prs_external: Mapped[int] = mapped_column(Integer, default=0)
+    open_prs_internal: Mapped[int] = mapped_column(Integer, default=0)
+    open_bugs: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Relationships
+    project: Mapped["Project"] = relationship(back_populates="snapshots")  # noqa: F821
+
+    def __repr__(self) -> str:
+        """Return a string representation."""
+        return f"<Snapshot(project_id={self.project_id}, date={self.snapshot_date})>"

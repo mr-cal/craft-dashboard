@@ -1,0 +1,21 @@
+"""SQLAlchemy models for craft-dashboard."""
+
+from craft_dashboard.models.base import Base
+from craft_dashboard.models.dependency import Dependency
+from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.llm_evaluation import LLMEvaluation
+from craft_dashboard.models.project import Project
+from craft_dashboard.models.refresh_schedule import RefreshSchedule
+from craft_dashboard.models.release import Release
+from craft_dashboard.models.snapshot import Snapshot
+
+__all__ = [
+    "Base",
+    "Dependency",
+    "Issue",
+    "LLMEvaluation",
+    "Project",
+    "RefreshSchedule",
+    "Release",
+    "Snapshot",
+]
