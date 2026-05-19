@@ -1,0 +1,193 @@
+"""Issue and PR triage routes."""
+
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from craft_dashboard.dependencies import get_db_session
+from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.llm_evaluation import LLMEvaluation
+from craft_dashboard.models.project import Project
+
+router = APIRouter(prefix="/issues")
+
+ITEMS_PER_PAGE = 50
+
+
+def _compute_age_days(created_at: datetime | None) -> int:
+    """Compute days since creation."""
+    if created_at is None:
+        return 0
+    now = datetime.now(tz=UTC)
+    created = (
+        created_at.replace(tzinfo=UTC)
+        if created_at.tzinfo is None
+        else created_at
+    )
+    return (now - created).days
+
+
+async def _query_issues(
+    session: AsyncSession,
+    *,
+    project: str = "",
+    source: str = "",
+    issue_type: str = "",
+    action: str = "",
+    sort_by: str = "staleness",
+    page: int = 1,
+) -> tuple[list[dict], int]:
+    """Query issues with filters and return (issues, total_pages)."""
+    query = (
+        select(
+            Issue,
+            Project.name.label("project_name"),
+            LLMEvaluation.summary,
+            LLMEvaluation.suggested_action,
+            LLMEvaluation.scores,
+        )
+        .join(Project, Issue.project_id == Project.id)
+        .outerjoin(
+            LLMEvaluation,
+            (LLMEvaluation.issue_id == Issue.id) & LLMEvaluation.latest.is_(True),
+        )
+        .where(Issue.state == "open")
+    )
+
+    if project:
+        query = query.where(Project.name == project)
+    if source:
+        query = query.where(Issue.source == source)
+    if issue_type:
+        query = query.where(Issue.issue_type == issue_type)
+    if action:
+        query = query.where(LLMEvaluation.suggested_action == action)
+
+    count_query = select(func.count()).select_from(query.subquery())
+    total = await session.scalar(count_query) or 0
+    total_pages = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+
+    if sort_by == "age":
+        query = query.order_by(Issue.created_at.asc())
+    elif sort_by == "updated":
+        query = query.order_by(Issue.updated_at.desc())
+    else:
+        query = query.order_by(
+            func.coalesce(LLMEvaluation.scores["staleness"].as_float(), 0).desc()
+        )
+
+    offset = (page - 1) * ITEMS_PER_PAGE
+    query = query.offset(offset).limit(ITEMS_PER_PAGE)
+
+    result = await session.execute(query)
+
+    issues = []
+    for row in result:
+        issue = row[0]
+        scores = row.scores or {}
+        issues.append(
+            {
+                "project_name": row.project_name,
+                "source": issue.source,
+                "issue_type": issue.issue_type,
+                "title": issue.title,
+                "author": issue.author,
+                "url": issue.url,
+                "age_days": _compute_age_days(issue.created_at),
+                "staleness": scores.get("staleness"),
+                "suggested_action": row.suggested_action,
+                "summary": row.summary,
+            }
+        )
+
+    return issues, total_pages
+
+
+@router.get("", response_class=HTMLResponse)
+async def issue_list(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    project: str = Query("", alias="project"),
+    source: str = Query("", alias="source"),
+    issue_type: str = Query("", alias="type"),
+    action: str = Query("", alias="action"),
+    sort: str = Query("staleness", alias="sort"),
+    page: int = Query(1, ge=1),
+) -> HTMLResponse:
+    """Render the issue triage list page."""
+    templates: Jinja2Templates = request.app.state.templates
+
+    issues, total_pages = await _query_issues(
+        session,
+        project=project,
+        source=source,
+        issue_type=issue_type,
+        action=action,
+        sort_by=sort,
+        page=page,
+    )
+
+    project_result = await session.execute(
+        select(Project.name).order_by(Project.display_order)
+    )
+    project_names = [row.name for row in project_result]
+
+    return templates.TemplateResponse(
+        request,
+        "issues/list.html",
+        {
+            "issues": issues,
+            "project_names": project_names,
+            "filter_project": project,
+            "filter_source": source,
+            "filter_type": issue_type,
+            "filter_action": action,
+            "sort_by": sort,
+            "page": page,
+            "total_pages": total_pages,
+        },
+    )
+
+
+@router.get("/table", response_class=HTMLResponse)
+async def issue_table_partial(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    project: str = Query("", alias="project"),
+    source: str = Query("", alias="source"),
+    issue_type: str = Query("", alias="type"),
+    action: str = Query("", alias="action"),
+    sort: str = Query("staleness", alias="sort"),
+    page: int = Query(1, ge=1),
+) -> HTMLResponse:
+    """Return just the issue table partial (for HTMX swapping)."""
+    templates: Jinja2Templates = request.app.state.templates
+
+    issues, total_pages = await _query_issues(
+        session,
+        project=project,
+        source=source,
+        issue_type=issue_type,
+        action=action,
+        sort_by=sort,
+        page=page,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "issues/partials/issue_table.html",
+        {
+            "issues": issues,
+            "filter_project": project,
+            "filter_source": source,
+            "filter_type": issue_type,
+            "filter_action": action,
+            "sort_by": sort,
+            "page": page,
+            "total_pages": total_pages,
+        },
+    )

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Issues — craft-dashboard{% endblock %}
+{% block content %}
+<h1>Issue & PR Triage</h1>
+
+<div class="filter-bar">
+  <select name="project"
+          hx-get="/issues/table"
+          hx-target="#issue-table"
+          hx-swap="outerHTML"
+          hx-include=".filter-bar [name]">
+    <option value="">All Projects</option>
+    {% for p in project_names %}
+    <option value="{{ p }}" {% if filter_project == p %}selected{% endif %}>{{ p }}</option>
+    {% endfor %}
+  </select>
+
+  <select name="source"
+          hx-get="/issues/table"
+          hx-target="#issue-table"
+          hx-swap="outerHTML"
+          hx-include=".filter-bar [name]">
+    <option value="">All Sources</option>
+    <option value="github" {% if filter_source == "github" %}selected{% endif %}>GitHub</option>
+    <option value="launchpad" {% if filter_source == "launchpad" %}selected{% endif %}>Launchpad</option>
+  </select>
+
+  <select name="type"
+          hx-get="/issues/table"
+          hx-target="#issue-table"
+          hx-swap="outerHTML"
+          hx-include=".filter-bar [name]">
+    <option value="">All Types</option>
+    <option value="issue" {% if filter_type == "issue" %}selected{% endif %}>Issues</option>
+    <option value="pull_request" {% if filter_type == "pull_request" %}selected{% endif %}>PRs</option>
+  </select>
+
+  <select name="action"
+          hx-get="/issues/table"
+          hx-target="#issue-table"
+          hx-swap="outerHTML"
+          hx-include=".filter-bar [name]">
+    <option value="">All Actions</option>
+    <option value="close_stale">Close (Stale)</option>
+    <option value="close_duplicate">Close (Duplicate)</option>
+    <option value="close_not_a_bug">Close (Not a Bug)</option>
+    <option value="close_outdated">Close (Outdated)</option>
+    <option value="needs_triage">Needs Triage</option>
+    <option value="needs_review">Needs Review</option>
+    <option value="needs_rebase">Needs Rebase</option>
+    <option value="keep_open">Keep Open</option>
+  </select>
+
+  <select name="sort"
+          hx-get="/issues/table"
+          hx-target="#issue-table"
+          hx-swap="outerHTML"
+          hx-include=".filter-bar [name]">
+    <option value="staleness" {% if sort_by == "staleness" %}selected{% endif %}>Sort: Staleness ↓</option>
+    <option value="age" {% if sort_by == "age" %}selected{% endif %}>Sort: Age ↓</option>
+    <option value="updated" {% if sort_by == "updated" %}selected{% endif %}>Sort: Recently Updated</option>
+  </select>
+</div>
+
+{% include "issues/partials/issue_table.html" %}
+{% endblock %}

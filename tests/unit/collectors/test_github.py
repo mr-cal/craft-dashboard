@@ -92,7 +92,9 @@ class TestGitHubCollector:
     def test_is_maintainer(self) -> None:
         """is_maintainer checks against the maintainer list."""
         collector = GitHubCollector(
-            token="ghp_test", org="canonical", maintainers=["mr-cal", "lengau"]  # noqa: S106
+            token="ghp_test",
+            org="canonical",
+            maintainers=["mr-cal", "lengau"],
         )
 
         assert collector.is_maintainer("mr-cal") is True

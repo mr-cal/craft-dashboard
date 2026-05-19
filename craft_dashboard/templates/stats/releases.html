@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Releases — craft-dashboard{% endblock %}
+{% block content %}
+<h1>Releases</h1>
+
+<table>
+  <thead>
+    <tr>
+      <th>Project</th>
+      <th>Version</th>
+      <th>Branch</th>
+      <th>Released</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for rel in releases %}
+    <tr>
+      <td>{{ rel.project_name }}</td>
+      <td>{{ rel.version }}</td>
+      <td>{{ rel.branch or "—" }}</td>
+      <td>{{ rel.released_at.strftime("%Y-%m-%d") if rel.released_at else "—" }}</td>
+    </tr>
+    {% else %}
+    <tr>
+      <td colspan="4">No release data available yet.</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

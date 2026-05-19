@@ -1,0 +1,377 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.2, pluggy-1.6.0 -- /home/callahan.kovacs@canonical.com/dev/craft/craft-dashboard/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/callahan.kovacs@canonical.com/dev/craft/craft-dashboard
+configfile: pyproject.toml
+plugins: cov-7.1.0, mock-3.15.1, anyio-4.13.0, asyncio-0.26.0
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 89 items
+
+tests/unit/collectors/test_dependencies.py::TestParseRequirementsLine::test_simple_dependency PASSED [  1%]
+tests/unit/collectors/test_dependencies.py::TestParseRequirementsLine::test_dependency_with_version PASSED [  2%]
+tests/unit/collectors/test_dependencies.py::TestParseRequirementsLine::test_dependency_with_tilde PASSED [  3%]
+tests/unit/collectors/test_dependencies.py::TestParseRequirementsLine::test_dependency_with_extras PASSED [  4%]
+tests/unit/collectors/test_dependencies.py::TestParseRequirementsLine::test_empty_line PASSED [  5%]
+tests/unit/collectors/test_dependencies.py::TestParseRequirementsLine::test_comment_line PASSED [  6%]
+tests/unit/collectors/test_dependencies.py::TestDependencyCollector::test_init PASSED [  7%]
+tests/unit/collectors/test_github.py::TestClassifyIssue::test_classify_open_issue PASSED [  8%]
+tests/unit/collectors/test_github.py::TestClassifyIssue::test_classify_open_pr PASSED [ 10%]
+tests/unit/collectors/test_github.py::TestClassifyIssue::test_classify_closed_issue PASSED [ 11%]
+tests/unit/collectors/test_github.py::TestClassifyIssue::test_classify_merged_pr PASSED [ 12%]
+tests/unit/collectors/test_github.py::TestComputeIssueHash::test_same_content_same_hash PASSED [ 13%]
+tests/unit/collectors/test_github.py::TestComputeIssueHash::test_different_content_different_hash PASSED [ 14%]
+tests/unit/collectors/test_github.py::TestComputeIssueHash::test_hash_is_hex_string PASSED [ 15%]
+tests/unit/collectors/test_github.py::TestGitHubCollector::test_init PASSED [ 16%]
+tests/unit/collectors/test_github.py::TestGitHubCollector::test_is_maintainer PASSED [ 17%]
+tests/unit/collectors/test_github.py::TestGitHubCollector::test_is_maintainer_empty_list PASSED [ 19%]
+tests/unit/collectors/test_launchpad.py::TestMapLpStatus::test_open_statuses PASSED [ 20%]
+tests/unit/collectors/test_launchpad.py::TestMapLpStatus::test_closed_statuses PASSED [ 21%]
+tests/unit/collectors/test_launchpad.py::TestMapLpStatus::test_unknown_status_defaults_to_open PASSED [ 22%]
+tests/unit/collectors/test_launchpad.py::TestLaunchpadCollector::test_init PASSED [ 23%]
+tests/unit/collectors/test_scheduler.py::TestIsDueForRefresh::test_none_next_refresh_is_due PASSED [ 24%]
+tests/unit/collectors/test_scheduler.py::TestIsDueForRefresh::test_past_date_is_due PASSED [ 25%]
+tests/unit/collectors/test_scheduler.py::TestIsDueForRefresh::test_future_date_not_due PASSED [ 26%]
+tests/unit/collectors/test_scheduler.py::TestDistributeRefreshDates::test_distributes_evenly PASSED [ 28%]
+tests/unit/collectors/test_scheduler.py::TestDistributeRefreshDates::test_empty_projects PASSED [ 29%]
+tests/unit/collectors/test_scheduler.py::TestDistributeRefreshDates::test_single_project PASSED [ 30%]
+tests/unit/collectors/test_snapshots.py::TestComputeSnapshotCounts::test_empty_issues PASSED [ 31%]
+tests/unit/collectors/test_snapshots.py::TestComputeSnapshotCounts::test_counts_open_issues PASSED [ 32%]
+tests/unit/collectors/test_snapshots.py::TestComputeSnapshotCounts::test_counts_open_prs PASSED [ 33%]
+tests/unit/test_database.py::TestGetEngine::test_creates_async_engine PASSED [ 34%]
+tests/unit/test_database.py::TestGetEngine::test_engine_uses_pool_settings PASSED [ 35%]
+tests/unit/test_database.py::TestGetSessionFactory::test_creates_session_factory PASSED [ 37%]
+tests/unit/models/test_base.py::TestBase::test_base_has_metadata PASSED  [ 38%]
+tests/unit/models/test_base.py::TestBase::test_timestamp_mixin_has_created_at PASSED [ 39%]
+tests/unit/models/test_base.py::TestBase::test_timestamp_mixin_has_updated_at PASSED [ 40%]
+tests/unit/models/test_dependency.py::TestDependencyModel::test_tablename PASSED [ 41%]
+tests/unit/models/test_dependency.py::TestDependencyModel::test_required_columns PASSED [ 42%]
+tests/unit/models/test_dependency.py::TestDependencyModel::test_unique_constraint PASSED [ 43%]
+tests/unit/models/test_issue.py::TestIssueModel::test_tablename PASSED   [ 44%]
+tests/unit/models/test_issue.py::TestIssueModel::test_required_columns PASSED [ 46%]
+tests/unit/models/test_issue.py::TestIssueModel::test_unique_constraint PASSED [ 47%]
+tests/unit/models/test_issue.py::TestIssueModel::test_project_id_foreign_key PASSED [ 48%]
+tests/unit/models/test_llm_evaluation.py::TestLLMEvaluationModel::test_tablename PASSED [ 49%]
+tests/unit/models/test_llm_evaluation.py::TestLLMEvaluationModel::test_required_columns PASSED [ 50%]
+tests/unit/models/test_llm_evaluation.py::TestLLMEvaluationModel::test_partial_unique_index_on_latest PASSED [ 51%]
+tests/unit/models/test_llm_evaluation.py::TestLLMEvaluationModel::test_issue_id_foreign_key PASSED [ 52%]
+tests/unit/models/test_project.py::TestProjectModel::test_tablename PASSED [ 53%]
+tests/unit/models/test_project.py::TestProjectModel::test_required_columns PASSED [ 55%]
+tests/unit/models/test_project.py::TestProjectModel::test_name_is_unique PASSED [ 56%]
+tests/unit/models/test_project.py::TestProjectModel::test_category_is_not_nullable PASSED [ 57%]
+tests/unit/models/test_refresh_schedule.py::TestRefreshScheduleModel::test_tablename PASSED [ 58%]
+tests/unit/models/test_refresh_schedule.py::TestRefreshScheduleModel::test_required_columns PASSED [ 59%]
+tests/unit/models/test_refresh_schedule.py::TestRefreshScheduleModel::test_unique_constraint PASSED [ 60%]
+tests/unit/models/test_refresh_schedule.py::TestRefreshScheduleModel::test_default_consecutive_failures PASSED [ 61%]
+tests/unit/models/test_release.py::TestReleaseModel::test_tablename PASSED [ 62%]
+tests/unit/models/test_release.py::TestReleaseModel::test_required_columns PASSED [ 64%]
+tests/unit/models/test_release.py::TestReleaseModel::test_unique_constraint PASSED [ 65%]
+tests/unit/models/test_snapshot.py::TestSnapshotModel::test_tablename PASSED [ 66%]
+tests/unit/models/test_snapshot.py::TestSnapshotModel::test_required_columns PASSED [ 67%]
+tests/unit/models/test_snapshot.py::TestSnapshotModel::test_unique_constraint PASSED [ 68%]
+tests/unit/test_dependencies.py::TestGetDbSession::test_get_db_session_is_async_generator PASSED [ 69%]
+tests/unit/test_app.py::TestCreateApp::test_app_returns_fastapi_instance PASSED [ 70%]
+tests/unit/test_app.py::TestCreateApp::test_health_endpoint PASSED       [ 71%]
+tests/unit/test_app.py::TestCreateApp::test_index_page FAILED            [ 73%]
+tests/unit/test_config.py::TestDashboardConfig::test_load_config_from_file PASSED [ 74%]
+tests/unit/test_config.py::TestDashboardConfig::test_load_config_default_refresh_interval PASSED [ 75%]
+tests/unit/test_config.py::TestDashboardConfig::test_load_config_missing_file PASSED [ 76%]
+tests/unit/test_settings.py::TestSettings::test_default_settings PASSED  [ 77%]
+tests/unit/test_settings.py::TestSettings::test_settings_from_env PASSED [ 78%]
+tests/unit/test_settings.py::TestSettings::test_default_llm_backend PASSED [ 79%]
+tests/unit/test_settings.py::TestSettings::test_local_llm_backend PASSED [ 80%]
+tests/unit/test_cli.py::TestCLI::test_main_help PASSED                   [ 82%]
+tests/unit/test_cli.py::TestCLI::test_serve_command_exists PASSED        [ 83%]
+tests/unit/test_cli.py::TestCLI::test_collect_command_exists PASSED      [ 84%]
+tests/unit/test_auth.py::TestVerifyAdminToken::test_valid_token PASSED   [ 85%]
+tests/unit/test_auth.py::TestVerifyAdminToken::test_invalid_token_raises PASSED [ 86%]
+tests/unit/test_auth.py::TestVerifyAdminToken::test_missing_bearer_prefix_raises PASSED [ 87%]
+tests/unit/test_auth.py::TestVerifyAdminToken::test_empty_admin_token_raises PASSED [ 88%]
+tests/unit/routes/test_admin.py::TestAdminRoutes::test_admin_refresh_requires_auth PASSED [ 89%]
+tests/unit/routes/test_admin.py::TestAdminRoutes::test_admin_refresh_rejects_bad_token PASSED [ 91%]
+tests/unit/routes/test_admin.py::TestAdminRoutes::test_admin_health_requires_auth PASSED [ 92%]
+tests/unit/routes/test_dashboard.py::TestDashboardIndex::test_index_returns_html FAILED [ 93%]
+tests/unit/routes/test_issues.py::TestIssueList::test_issues_page_returns_html PASSED [ 94%]
+tests/unit/routes/test_issues.py::TestIssueList::test_issues_page_has_filters PASSED [ 95%]
+tests/unit/routes/test_stats.py::TestStatsRoutes::test_dependencies_page PASSED [ 96%]
+tests/unit/routes/test_stats.py::TestStatsRoutes::test_releases_page PASSED [ 97%]
+tests/unit/routes/test_stats.py::TestStatsRoutes::test_trends_page PASSED [ 98%]
+tests/unit/routes/test_stats.py::TestStatsRoutes::test_stats_index_redirects PASSED [100%]
+
+=================================== FAILURES ===================================
+________________________ TestCreateApp.test_index_page _________________________
+tests/unit/test_app.py:30: in test_index_page
+    response = client.get("/")
+               ^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/starlette/testclient.py:473: in get
+    return super().get(
+.venv/lib/python3.12/site-packages/httpx/_client.py:1053: in get
+    return self.request(
+.venv/lib/python3.12/site-packages/starlette/testclient.py:445: in request
+    return super().request(
+.venv/lib/python3.12/site-packages/httpx/_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/httpx/_client.py:914: in send
+    response = self._send_handling_auth(
+.venv/lib/python3.12/site-packages/httpx/_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+.venv/lib/python3.12/site-packages/httpx/_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/httpx/_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/starlette/testclient.py:348: in handle_request
+    raise exc
+.venv/lib/python3.12/site-packages/starlette/testclient.py:345: in handle_request
+    portal.call(self.app, scope, receive, send)
+.venv/lib/python3.12/site-packages/anyio/from_thread.py:334: in call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:456: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:401: in __get_result
+    raise self._exception
+.venv/lib/python3.12/site-packages/anyio/from_thread.py:259: in _call_func
+    retval = await retval_or_awaitable
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/fastapi/applications.py:1159: in __call__
+    await super().__call__(scope, receive, send)
+.venv/lib/python3.12/site-packages/starlette/applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+.venv/lib/python3.12/site-packages/starlette/middleware/errors.py:186: in __call__
+    raise exc
+.venv/lib/python3.12/site-packages/starlette/middleware/errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+.venv/lib/python3.12/site-packages/starlette/middleware/exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+.venv/lib/python3.12/site-packages/starlette/_exception_handler.py:53: in wrapped_app
+    raise exc
+.venv/lib/python3.12/site-packages/starlette/_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+.venv/lib/python3.12/site-packages/fastapi/middleware/asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+.venv/lib/python3.12/site-packages/starlette/routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+.venv/lib/python3.12/site-packages/starlette/routing.py:680: in app
+    await route.handle(scope, receive, send)
+.venv/lib/python3.12/site-packages/starlette/routing.py:276: in handle
+    await self.app(scope, receive, send)
+.venv/lib/python3.12/site-packages/fastapi/routing.py:134: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+.venv/lib/python3.12/site-packages/starlette/_exception_handler.py:53: in wrapped_app
+    raise exc
+.venv/lib/python3.12/site-packages/starlette/_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+.venv/lib/python3.12/site-packages/fastapi/routing.py:120: in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/fastapi/routing.py:457: in app
+    solved_result = await solve_dependencies(
+.venv/lib/python3.12/site-packages/fastapi/dependencies/utils.py:672: in solve_dependencies
+    solved = await _solve_generator(
+.venv/lib/python3.12/site-packages/fastapi/dependencies/utils.py:586: in _solve_generator
+    return await stack.enter_async_context(cm)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/contextlib.py:659: in enter_async_context
+    result = await _enter(cm)
+             ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/contextlib.py:210: in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+craft_dashboard/dependencies.py:36: in get_db_session
+    raise RuntimeError(msg)
+E   RuntimeError: Database session factory not initialized. Call set_session_factory first.
+__________________ TestDashboardIndex.test_index_returns_html __________________
+tests/unit/routes/test_dashboard.py:27: in test_index_returns_html
+    response = client.get("/")
+               ^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/starlette/testclient.py:473: in get
+    return super().get(
+.venv/lib/python3.12/site-packages/httpx/_client.py:1053: in get
+    return self.request(
+.venv/lib/python3.12/site-packages/starlette/testclient.py:445: in request
+    return super().request(
+.venv/lib/python3.12/site-packages/httpx/_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/httpx/_client.py:914: in send
+    response = self._send_handling_auth(
+.venv/lib/python3.12/site-packages/httpx/_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+.venv/lib/python3.12/site-packages/httpx/_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/httpx/_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/starlette/testclient.py:348: in handle_request
+    raise exc
+.venv/lib/python3.12/site-packages/starlette/testclient.py:345: in handle_request
+    portal.call(self.app, scope, receive, send)
+.venv/lib/python3.12/site-packages/anyio/from_thread.py:334: in call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:456: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:401: in __get_result
+    raise self._exception
+.venv/lib/python3.12/site-packages/anyio/from_thread.py:259: in _call_func
+    retval = await retval_or_awaitable
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/fastapi/applications.py:1159: in __call__
+    await super().__call__(scope, receive, send)
+.venv/lib/python3.12/site-packages/starlette/applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+.venv/lib/python3.12/site-packages/starlette/middleware/errors.py:186: in __call__
+    raise exc
+.venv/lib/python3.12/site-packages/starlette/middleware/errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+.venv/lib/python3.12/site-packages/starlette/middleware/exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+.venv/lib/python3.12/site-packages/starlette/_exception_handler.py:53: in wrapped_app
+    raise exc
+.venv/lib/python3.12/site-packages/starlette/_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+.venv/lib/python3.12/site-packages/fastapi/middleware/asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+.venv/lib/python3.12/site-packages/starlette/routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+.venv/lib/python3.12/site-packages/starlette/routing.py:680: in app
+    await route.handle(scope, receive, send)
+.venv/lib/python3.12/site-packages/starlette/routing.py:276: in handle
+    await self.app(scope, receive, send)
+.venv/lib/python3.12/site-packages/fastapi/routing.py:134: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+.venv/lib/python3.12/site-packages/starlette/_exception_handler.py:53: in wrapped_app
+    raise exc
+.venv/lib/python3.12/site-packages/starlette/_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+.venv/lib/python3.12/site-packages/fastapi/routing.py:120: in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/fastapi/routing.py:674: in app
+    raw_response = await run_endpoint_function(
+.venv/lib/python3.12/site-packages/fastapi/routing.py:328: in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+craft_dashboard/routes/dashboard.py:30: in index
+    project_count = await session.scalar(select(func.count(Project.id)))
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/session.py:505: in scalar
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py:201: in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py:2399: in scalar
+    return self._execute_internal(
+.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py:2239: in _execute_internal
+    conn = self._connection_for_bind(bind)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py:2108: in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<string>:2: in _connection_for_bind
+    ???
+.venv/lib/python3.12/site-packages/sqlalchemy/orm/state_changes.py:137: in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py:1187: in _connection_for_bind
+    conn = bind.connect()
+           ^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py:3293: in connect
+    return self._connection_cls(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py:143: in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py:3317: in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py:448: in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py:1272: in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py:712: in checkout
+    rec = pool._do_get()
+          ^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/pool/impl.py:177: in _do_get
+    with util.safe_reraise():
+.venv/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py:121: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.12/site-packages/sqlalchemy/pool/impl.py:175: in _do_get
+    return self._create_connection()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py:389: in _create_connection
+    return _ConnectionRecord(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py:674: in __init__
+    self.__connect()
+.venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py:900: in __connect
+    with util.safe_reraise():
+.venv/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py:121: in __exit__
+    raise exc_value.with_traceback(exc_tb)
+.venv/lib/python3.12/site-packages/sqlalchemy/pool/base.py:896: in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/engine/create.py:667: in connect
+    return dialect.connect(*cargs_tup, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py:630: in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py:955: in connect
+    await_only(creator_fn(*arg, **kw)),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py:132: in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/sqlalchemy/util/_concurrency_py3k.py:196: in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/asyncpg/connection.py:2443: in connect
+    return await connect_utils._connect(
+.venv/lib/python3.12/site-packages/asyncpg/connect_utils.py:1249: in _connect
+    raise last_error or exceptions.TargetServerAttributeNotMatched(
+.venv/lib/python3.12/site-packages/asyncpg/connect_utils.py:1218: in _connect
+    conn = await _connect_addr(
+.venv/lib/python3.12/site-packages/asyncpg/connect_utils.py:1054: in _connect_addr
+    return await __connect_addr(params, True, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/asyncpg/connect_utils.py:1099: in __connect_addr
+    tr, pr = await connector
+             ^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/asyncpg/connect_utils.py:969: in _create_ssl_connection
+    tr, pr = await loop.create_connection(
+/usr/lib/python3.12/asyncio/base_events.py:1122: in create_connection
+    raise exceptions[0]
+/usr/lib/python3.12/asyncio/base_events.py:1104: in create_connection
+    sock = await self._connect_sock(
+/usr/lib/python3.12/asyncio/base_events.py:1007: in _connect_sock
+    await self.sock_connect(sock, address)
+/usr/lib/python3.12/asyncio/selector_events.py:651: in sock_connect
+    return await fut
+           ^^^^^^^^^
+/usr/lib/python3.12/asyncio/selector_events.py:691: in _sock_connect_cb
+    raise OSError(err, f'Connect call failed {address}')
+E   ConnectionRefusedError: [Errno 111] Connect call failed ('127.0.0.1', 5432)
+=============================== warnings summary ===============================
+tests/unit/collectors/test_dependencies.py::TestDependencyCollector::test_init
+  /home/callahan.kovacs@canonical.com/dev/craft/craft-dashboard/craft_dashboard/collectors/dependencies.py:52: DeprecationWarning: Argument login_or_token is deprecated, please use auth=github.Auth.Token(...) instead
+    self.gh = Github(token)
+
+tests/unit/collectors/test_github.py::TestGitHubCollector::test_init
+tests/unit/collectors/test_github.py::TestGitHubCollector::test_is_maintainer
+tests/unit/collectors/test_github.py::TestGitHubCollector::test_is_maintainer_empty_list
+  /home/callahan.kovacs@canonical.com/dev/craft/craft-dashboard/craft_dashboard/collectors/github.py:73: DeprecationWarning: Argument login_or_token is deprecated, please use auth=github.Auth.Token(...) instead
+    self.gh = Github(token)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/unit/test_app.py::TestCreateApp::test_index_page - RuntimeError:...
+FAILED tests/unit/routes/test_dashboard.py::TestDashboardIndex::test_index_returns_html
+=================== 2 failed, 87 passed, 4 warnings in 2.15s ===================

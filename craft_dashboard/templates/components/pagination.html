@@ -1,0 +1,14 @@
+{# Pagination component. Expects: page (int), total_pages (int), base_url (str) #}
+{% if total_pages > 1 %}
+<nav aria-label="Pagination">
+  <ul>
+    {% if page > 1 %}
+    <li><a href="{{ base_url }}&page={{ page - 1 }}" hx-get="{{ base_url }}&page={{ page - 1 }}" hx-target="#issue-table" hx-swap="outerHTML">&laquo; Previous</a></li>
+    {% endif %}
+    <li><span>Page {{ page }} of {{ total_pages }}</span></li>
+    {% if page < total_pages %}
+    <li><a href="{{ base_url }}&page={{ page + 1 }}" hx-get="{{ base_url }}&page={{ page + 1 }}" hx-target="#issue-table" hx-swap="outerHTML">Next &raquo;</a></li>
+    {% endif %}
+  </ul>
+</nav>
+{% endif %}

@@ -2,5 +2,41 @@
 {% block title %}Dashboard — craft-dashboard{% endblock %}
 {% block content %}
 <h1>Dashboard</h1>
-<p>Welcome to craft-dashboard. Data views will be added in subsequent plans.</p>
+
+<div class="grid">
+  <article>
+    <header>Projects</header>
+    <p style="font-size: 2rem; font-weight: bold;">{{ project_count }}</p>
+  </article>
+  <article>
+    <header>Open Issues</header>
+    <p style="font-size: 2rem; font-weight: bold;">{{ open_issues }}</p>
+  </article>
+  <article>
+    <header>Open PRs</header>
+    <p style="font-size: 2rem; font-weight: bold;">{{ open_prs }}</p>
+  </article>
+</div>
+
+<h2>Projects</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Project</th>
+      <th>Category</th>
+      <th>Open Issues</th>
+      <th>Open PRs</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for project in projects %}
+    <tr>
+      <td><a href="/issues?project={{ project.name }}">{{ project.name }}</a></td>
+      <td>{{ project.category }}</td>
+      <td>{{ project.open_issues }}</td>
+      <td>{{ project.open_prs }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
 {% endblock %}

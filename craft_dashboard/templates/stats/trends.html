@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Trends — craft-dashboard{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+{% endblock %}
+{% block content %}
+<h1>Issue & PR Trends</h1>
+
+<div class="filter-bar">
+  <select id="trend-project"
+          name="project"
+          hx-get="/stats/trends/data"
+          hx-target="#trend-chart-container"
+          hx-swap="innerHTML">
+    {% for p in project_names %}
+    <option value="{{ p }}">{{ p }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div id="trend-chart-container">
+  <canvas id="trendChart" width="800" height="400"></canvas>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof chartData !== 'undefined') {
+        const ctx = document.getElementById('trendChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: chartData,
+            options: {
+                responsive: true,
+                scales: {
+                    x: { title: { display: true, text: 'Date' } },
+                    y: { title: { display: true, text: 'Count' }, beginAtZero: true }
+                }
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

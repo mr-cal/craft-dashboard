@@ -1,6 +1,5 @@
 """Tests for the snapshot generator."""
 
-
 from craft_dashboard.collectors.snapshots import compute_snapshot_counts
 
 

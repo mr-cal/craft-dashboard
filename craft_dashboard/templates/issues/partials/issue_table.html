@@ -1,0 +1,52 @@
+{# Partial: issue table body, swapped via HTMX #}
+<div id="issue-table">
+  <table>
+    <thead>
+      <tr>
+        <th>Project</th>
+        <th>Source</th>
+        <th>Type</th>
+        <th>Title</th>
+        <th>Author</th>
+        <th>Age</th>
+        <th>Staleness</th>
+        <th>Action</th>
+        <th>Summary</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for issue in issues %}
+      <tr>
+        <td>{{ issue.project_name }}</td>
+        <td>{{ issue.source }}</td>
+        <td>{{ issue.issue_type }}</td>
+        <td><a href="{{ issue.url }}" target="_blank" rel="noopener">{{ issue.title|truncate(80) }}</a></td>
+        <td>{{ issue.author or "unknown" }}</td>
+        <td>{{ issue.age_days }}d</td>
+        <td>
+          {% if issue.staleness is not none %}
+          {% set score_value = issue.staleness %}
+          {% set score_name = "Staleness" %}
+          {% include "components/score_badge.html" %}
+          {% else %}
+          <span class="score-badge" style="background:#ccc;color:#666;">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if issue.suggested_action %}
+          <span class="action-badge">{{ issue.suggested_action|replace("_", " ") }}</span>
+          {% endif %}
+        </td>
+        <td>{{ (issue.summary or "")|truncate(120) }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="9">No issues found matching the current filters.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&source=" ~ (filter_source or "") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&sort=" ~ (sort_by or "staleness") %}
+  {% include "components/pagination.html" %}
+</div>

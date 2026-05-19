@@ -1,6 +1,5 @@
 """Tests for the Launchpad data collector."""
 
-
 from craft_dashboard.collectors.launchpad import (
     LaunchpadCollector,
     _map_lp_status,

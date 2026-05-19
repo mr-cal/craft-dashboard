@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Dependencies — craft-dashboard{% endblock %}
+{% block content %}
+<h1>Dependency Usage</h1>
+<p>Which *craft libraries are used by which applications, and on which branches.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Application</th>
+      <th>Branch</th>
+      <th>Dependency</th>
+      <th>Version Spec</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for dep in dependencies %}
+    <tr>
+      <td>{{ dep.project_name }}</td>
+      <td>{{ dep.branch }}</td>
+      <td>{{ dep.dependency_name }}</td>
+      <td><code>{{ dep.version_spec or "any" }}</code></td>
+    </tr>
+    {% else %}
+    <tr>
+      <td colspan="4">No dependency data available yet. Run data collection first.</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
