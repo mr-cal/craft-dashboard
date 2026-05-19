@@ -1,75 +1,62 @@
-"""Tests for Config model and CraftApplicationBranch."""
+"""Tests for the configuration system."""
+
+import pathlib
+import textwrap
 
 import pytest
-from starcraft_stats.application import CraftApplicationBranch
-from starcraft_stats.config import Config
+from craft_dashboard.config import load_config
 
 
-class TestCraftApplicationBranch:
-    def test_str_returns_name_slash_branch(self):
-        branch = CraftApplicationBranch(
-            name="snapcraft", branch="main", owner="canonical"
+class TestDashboardConfig:
+    """Tests for DashboardConfig."""
+
+    def test_load_config_from_file(self, tmp_path: pathlib.Path) -> None:
+        """Load a valid config file."""
+        config_file = tmp_path / "craft-dashboard.toml"
+        config_file.write_text(
+            textwrap.dedent("""\
+                craft-applications = ["snapcraft", "charmcraft"]
+                craft-libraries = ["craft-cli"]
+                craft-projects = ["snapcraft", "charmcraft", "craft-cli"]
+                refresh-interval-days = 7
+                launchpad-projects = ["snapcraft"]
+                maintainers = ["mr-cal"]
+
+                [hotfix-min-versions]
+                snapcraft = "8.0"
+            """)
         )
-        assert str(branch) == "snapcraft/main"
 
-    def test_str_with_non_main_branch(self):
-        branch = CraftApplicationBranch(
-            name="charmcraft", branch="hotfix/4.1", owner="canonical"
-        )
-        assert str(branch) == "charmcraft/hotfix/4.1"
+        config = load_config(config_file)
 
-
-class TestConfig:
-    def test_load_all_fields_from_toml(self, tmp_path):
-        config_file = tmp_path / "config.toml"
-        config_file.write_bytes(
-            b'craft-libraries = ["craft-cli", "craft-parts"]\n'
-            b'craft-projects = ["snapcraft"]\n'
-            b'craft-applications = ["snapcraft"]\n'
-            b"refresh-interval-days = 14\n"
-            b'launchpad-projects = ["snapcraft"]\n'
-            b'maintainers = ["mr-cal", "lengau"]\n'
-        )
-        config = Config.from_toml_file(config_file)
-
-        assert config.craft_libraries == ["craft-cli", "craft-parts"]
-        assert config.craft_projects == ["snapcraft"]
-        assert config.craft_applications == ["snapcraft"]
-        assert config.refresh_interval_days == 14
+        assert config.craft_applications == ["snapcraft", "charmcraft"]
+        assert config.craft_libraries == ["craft-cli"]
+        assert config.craft_projects == ["snapcraft", "charmcraft", "craft-cli"]
+        assert config.refresh_interval_days == 7
         assert config.launchpad_projects == ["snapcraft"]
-        assert config.maintainers == ["mr-cal", "lengau"]
+        assert config.maintainers == ["mr-cal"]
+        assert config.hotfix_min_versions == {"snapcraft": "8.0"}
 
-    def test_maintainers_defaults_to_empty(self, tmp_path):
-        config_file = tmp_path / "config.toml"
-        config_file.write_bytes(
-            b"craft-libraries = []\ncraft-projects = []\ncraft-applications = []\n"
+    def test_load_config_default_refresh_interval(self, tmp_path: pathlib.Path) -> None:
+        """Default refresh interval is 7 days."""
+        config_file = tmp_path / "craft-dashboard.toml"
+        config_file.write_text(
+            textwrap.dedent("""\
+                craft-applications = []
+                craft-libraries = []
+                craft-projects = []
+                launchpad-projects = []
+                maintainers = []
+            """)
         )
-        config = Config.from_toml_file(config_file)
 
-        assert config.maintainers == []
-
-    def test_launchpad_projects_defaults_to_empty(self, tmp_path):
-        config_file = tmp_path / "config.toml"
-        config_file.write_bytes(
-            b"craft-libraries = []\ncraft-projects = []\ncraft-applications = []\n"
-        )
-        config = Config.from_toml_file(config_file)
-
-        assert config.launchpad_projects == []
-
-    def test_refresh_interval_defaults_to_7(self, tmp_path):
-        config_file = tmp_path / "config.toml"
-        config_file.write_bytes(
-            b"craft-libraries = []\ncraft-projects = []\ncraft-applications = []\n"
-        )
-        config = Config.from_toml_file(config_file)
+        config = load_config(config_file)
 
         assert config.refresh_interval_days == 7
 
-    def test_missing_required_field_raises(self, tmp_path):
-        config_file = tmp_path / "config.toml"
-        # craft-projects is missing
-        config_file.write_bytes(b"craft-libraries = []\ncraft-applications = []\n")
+    def test_load_config_missing_file(self, tmp_path: pathlib.Path) -> None:
+        """Raise FileNotFoundError for missing config file."""
+        config_file = tmp_path / "nonexistent.toml"
 
-        with pytest.raises(Exception, match="craft-projects"):
-            Config.from_toml_file(config_file)
+        with pytest.raises(FileNotFoundError):
+            load_config(config_file)

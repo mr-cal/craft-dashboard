@@ -1,0 +1,47 @@
+/* Override grid max-width */
+@supports (display: grid) {
+  .p-navigation__row--25-75,
+  .row--25-75,
+  .row--50-50,
+  .row {
+    max-width: 120rem;
+  }
+}
+
+.score-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.score-high {
+  background-color: #dc3545;
+  color: white;
+}
+
+.score-medium {
+  background-color: #ffc107;
+  color: black;
+}
+
+.score-low {
+  background-color: #28a745;
+  color: white;
+}
+
+.action-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.8rem;
+  background-color: #6c757d;
+  color: white;
+}
+
+.filter-bar {
+  margin-bottom: 1rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}

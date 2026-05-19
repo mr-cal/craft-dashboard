@@ -1,54 +1,47 @@
-# craft-stats
+# craft-dashboard
 
-[![Test Status](https://github.com/mr-cal/starcraft-stats/actions/workflows/qa.yaml/badge.svg?branch=main)](https://github.com/mr-cal/starcraft-stats/actions/workflows/qa.yaml)
-[![Fast Data Collection](https://github.com/mr-cal/starcraft-stats/actions/workflows/fast-data-collection.yaml/badge.svg?branch=main)](https://github.com/mr-cal/starcraft-stats/actions/workflows/fast-data-collection.yaml)
-[![Slow Data Collection](https://github.com/mr-cal/starcraft-stats/actions/workflows/slow-data-collection.yaml/badge.svg?branch=main)](https://github.com/mr-cal/starcraft-stats/actions/workflows/slow-data-collection.yaml)
+Dashboard, insights, and issue triage for the \*craft applications and libraries.
 
 ## Overview
 
-Dashboard, insights, and statistics for the \*craft applications and libraries.
+craft-dashboard provides:
+- **Issue & PR triage dashboard** with LLM-powered scoring and action suggestions
+- **Statistics & trends** for open issues, PRs, releases, and dependencies
+- **Multi-source data** from GitHub and Launchpad
 
-https://mr-cal.github.io/starcraft-stats/html/index.html
+## Development
 
-## Design
+### Prerequisites
 
-This project contains a few parts:
+- Python 3.12+
+- PostgreSQL 16+
+- uv
 
-- A Python command-line application that retrieves, processes, and stores data
-  in a set of CSV and JSON files.
-- A static webpage that loads and displays the JSON as tables and CSV as graphs.
-- A nightly cron job to refresh data.
+### Setup
 
-## How to
+\`\`\`bash
+# Install dependencies
+uv sync --group dev
 
-### How to update data
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your database URL and API tokens
 
-Data is updated once a day, but you can manually trigger the
-`data-collection` workflow in GitHub.
+# Run database migrations
+uv run alembic upgrade head
 
-### How to update what data is collected
+# Start development server
+uv run uvicorn craft_dashboard.app:create_app --factory --reload
+\`\`\`
 
-Update the `starcraft-config.yaml` file.
+### Testing
 
-### How to run locally
+\`\`\`bash
+make test
+\`\`\`
 
-It's a Python package with a CLI, so it can be installed and run locally.
+### Linting
 
-You will need a [fine-grained GitHub token](https://github.com/settings/tokens?type=beta) with no extra permissions, just read-only access to public repositories.
-
-```bash
-export GITHUB_TOKEN=<your token from github>
-uv tool install -e .
-starcraft-stats --help
-```
-
-Web browsers will not run Javascript from a local webpage.
-The easiest way to view the webpage locally is to use Python:
-
-.. code-block::
-
-```bash
-cd html
-python3 -m http.server 8000
-open http://127.0.0.1:8000
-```
+\`\`\`bash
+make lint
+\`\`\`

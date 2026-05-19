@@ -1,71 +1,57 @@
-PROJECT=starcraft_stats
-JS_SOURCES := html/js/
-BIOME=npm exec --package=@biomejs/biome@1.9.4 -- biome # renovate: datasource=npm depName=@biomejs/biome
-# Define when more than the main package tree requires coverage
-# like is the case for snapcraft (snapcraft and snapcraft_legacy):
-# COVERAGE_SOURCE="starcraft"
-UV_TEST_GROUPS := "--group=dev"
-UV_LINT_GROUPS := "--group=lint" "--group=types"
-UV_TICS_GROUPS := "--group=tics"
+PROJECT := craft_dashboard
+SOURCES := $(PROJECT) tests scripts
 
-# If you have dev dependencies that depend on your distro version, uncomment these:
-# ifneq ($(wildcard /etc/os-release),)
-# include /etc/os-release
-# endif
-# ifdef VERSION_CODENAME
-# UV_TEST_GROUPS += "--group=dev-$(VERSION_CODENAME)"
-# UV_LINT_GROUPS += "--group=dev-$(VERSION_CODENAME)"
-# UV_TICS_GROUPS += "--group=dev-$(VERSION_CODENAME)"
-# endif
+.DEFAULT_GOAL := help
 
-include common.mk
+.PHONY: help
+help:  ## Show this help
+@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+.PHONY: setup
+setup:  ## Install all dependencies
+uv sync --group dev --group lint --group types
 
 .PHONY: format
-format: format-ruff format-codespell format-prettier format-biome format-pre-commit  ## Run all automatic formatters
+format:  ## Auto-format code with ruff
+uv run ruff check --fix $(SOURCES)
+uv run ruff format $(SOURCES)
 
 .PHONY: lint
-lint: lint-ruff lint-ty lint-codespell lint-prettier lint-biome lint-shellcheck lint-twine lint-uv-lockfile  ## Run all linters
+lint:  ## Lint with ruff and check types with ty
+uv run ruff check $(SOURCES)
+uv run ruff format --diff $(SOURCES)
+uv run ty check $(SOURCES)
 
-.PHONY: format-biome
-format-biome: install-npm  ##- Automatically format JavaScript with biome
-	$(BIOME) format --write $(JS_SOURCES)
+.PHONY: test
+test:  ## Run all tests
+uv run pytest
 
-.PHONY: lint-biome
-lint-biome: install-npm  ##- Lint JavaScript with biome
-ifneq ($(CI),)
-	@echo ::group::$@
-endif
-	$(BIOME) lint $(JS_SOURCES)
-ifneq ($(CI),)
-	@echo ::endgroup::
-endif
+.PHONY: test-cov
+test-cov:  ## Run tests with coverage report
+uv run pytest --cov=$(PROJECT) --cov-report=html --cov-report=term-missing
 
-.PHONY: pack
-pack: pack-pip  ## Build all packages
+.PHONY: dev
+dev:  ## Run development server with hot reload
+uv run uvicorn craft_dashboard.app:create_app --factory --reload --host 0.0.0.0 --port 8000
 
-# Find dependencies that need installing
-APT_PACKAGES :=
-ifeq ($(wildcard /usr/include/libxml2/libxml/xpath.h),)
-APT_PACKAGES += libxml2-dev
-endif
-ifeq ($(wildcard /usr/include/libxslt/xslt.h),)
-APT_PACKAGES += libxslt1-dev
-endif
-ifeq ($(wildcard /usr/share/doc/python3-venv/copyright),)
-APT_PACKAGES += python3-venv
-endif
+.PHONY: migrate
+migrate:  ## Apply database migrations
+uv run alembic upgrade head
 
-# Used for installing build dependencies in CI.
-.PHONY: install-build-deps
-install-build-deps: install-lint-build-deps
-ifeq ($(APT_PACKAGES),)
-else ifeq ($(shell which apt-get),)
-	$(warning Cannot install build dependencies without apt.)
-	$(warning Please ensure the equivalents to these packages are installed: $(APT_PACKAGES))
-else
-	sudo $(APT) install $(APT_PACKAGES)
-endif
+.PHONY: collect
+collect:  ## Run data collection (all sources)
+uv run scripts/collect_data.py --source all
 
-# If additional build dependencies need installing in order to build the linting env.
-.PHONY: install-lint-build-deps
-install-lint-build-deps:
+.PHONY: llm
+llm:  ## Run LLM evaluation (open issues only)
+uv run scripts/run_llm.py --open-only
+
+.PHONY: migrate-csv
+migrate-csv:  ## One-time CSV migration from starcraft-stats
+uv run scripts/migrate_csv.py
+
+.PHONY: clean
+clean:  ## Clean build artifacts and caches
+rm -rf dist build .coverage htmlcov .pytest_cache
+find . -name __pycache__ -type d -exec rm -rf {} +
+find . -name "*.pyc" -delete
