@@ -1,42 +1,58 @@
 ---
-- name: Install uv
+- name: Install uv system-wide
   ansible.builtin.shell: |
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
   args:
-    creates: /root/.local/bin/uv
+    creates: /usr/local/bin/uv
 
-- name: Clone or update application repo
+- name: Allow git to operate on the app directory (safe.directory)
+  ansible.builtin.shell: |
+    git config --system --add safe.directory {{ app_dir }}
+  changed_when: false
+
+- name: Check if app is already cloned
+  ansible.builtin.stat:
+    path: "{{ app_dir }}/.git"
+  register: app_git
+
+- name: Clone application repo (first time)
+  ansible.builtin.git:
+    repo: "{{ app_repo }}"
+    dest: "{{ app_dir }}"
+    version: "{{ app_branch }}"
+  when: not app_git.stat.exists
+  notify: Restart craft-dashboard
+
+- name: Update application repo (subsequent runs)
   ansible.builtin.git:
     repo: "{{ app_repo }}"
     dest: "{{ app_dir }}"
     version: "{{ app_branch }}"
     force: true
-  become: true
-  become_user: "{{ app_user }}"
+  when: app_git.stat.exists
   notify: Restart craft-dashboard
 
-- name: Create virtual environment and install dependencies
-  ansible.builtin.shell: |
-    /root/.local/bin/uv venv {{ app_venv }} --python {{ python_version }}
-    /root/.local/bin/uv pip install --python {{ app_venv }}/bin/python -e "{{ app_dir }}"
-  args:
-    chdir: "{{ app_dir }}"
-  notify: Restart craft-dashboard
-
-- name: Deploy environment file
-  ansible.builtin.template:
-    src: env.j2
-    dest: "{{ app_dir }}/.env"
+- name: Set application directory ownership
+  ansible.builtin.file:
+    path: "{{ app_dir }}"
+    state: directory
     owner: "{{ app_user }}"
     group: "{{ app_group }}"
-    mode: "0600"
-  notify: Restart craft-dashboard
+    recurse: true
 
-- name: Install psycopg2 for sync Alembic migrations
+- name: Create virtual environment
   ansible.builtin.shell: |
-    /root/.local/bin/uv pip install --python {{ app_venv }}/bin/python psycopg2-binary
+    /usr/local/bin/uv venv {{ app_venv }} --python {{ python_version }}
+  args:
+    creates: "{{ app_venv }}/bin/python"
+
+- name: Install application dependencies
+  ansible.builtin.shell: |
+    /usr/local/bin/uv pip install --python {{ app_venv }}/bin/python -e "{{ app_dir }}" psycopg2-binary
   args:
     chdir: "{{ app_dir }}"
+  changed_when: false
+  notify: Restart craft-dashboard
 
 - name: Run database migrations
   ansible.builtin.shell: |
@@ -46,6 +62,16 @@
   environment: "{{ app_env }}"
   become: true
   become_user: "{{ app_user }}"
+  changed_when: false
+
+- name: Deploy environment file
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ app_dir }}/.env"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: "0600"
+  notify: Restart craft-dashboard
 
 - name: Deploy systemd service
   ansible.builtin.template:

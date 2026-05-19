@@ -56,8 +56,12 @@ clean:  ## Clean build artifacts and caches
 	find . -name __pycache__ -type d -exec rm -rf {} +
 	find . -name "*.pyc" -delete
 
+.PHONY: ansible-deps
+ansible-deps:  ## Install required Ansible collections
+	ansible-galaxy collection install -r provisioning/requirements.yml
+
 .PHONY: deploy
-deploy:  ## Deploy to VPS (sources provisioning/secrets.env)
+deploy: ansible-deps  ## Deploy to VPS (sources provisioning/secrets.env)
 	@if [ ! -f provisioning/secrets.env ]; then \
 		echo "Missing provisioning/secrets.env -- copy provisioning/secrets.env.example and fill in your values."; \
 		exit 1; \
@@ -65,7 +69,7 @@ deploy:  ## Deploy to VPS (sources provisioning/secrets.env)
 	set -a; . provisioning/secrets.env; set +a; cd provisioning && ansible-playbook playbook.yml
 
 .PHONY: deploy-vm
-deploy-vm:  ## Deploy to LXD VM with SSL skipped (sources provisioning/secrets.env)
+deploy-vm: ansible-deps  ## Deploy to LXD VM with SSL skipped (sources provisioning/secrets.env)
 	@if [ ! -f provisioning/secrets.env ]; then \
 		echo "Missing provisioning/secrets.env -- copy provisioning/secrets.env.example and fill in your values."; \
 		exit 1; \

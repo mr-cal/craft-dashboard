@@ -7,6 +7,7 @@
 - name: Install base packages
   ansible.builtin.apt:
     name:
+      - acl
       - build-essential
       - curl
       - git

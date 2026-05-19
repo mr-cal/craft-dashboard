@@ -15,11 +15,18 @@ craft-dashboard provides:
 
 You only need these on your local machine:
 
-- **uv** — Python package manager
-- **Ansible 2.16+** — provisions the LXD VM and VPS over SSH
+- **uv** — Python package manager (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
+- **Ansible 2.16+** — `uv tool install ansible-core`
 - **git**
 
 PostgreSQL runs inside the LXD VM. You do not need it locally.
+
+Ansible also needs two Galaxy collections. `make deploy-vm` installs them automatically,
+or install manually:
+
+```fish
+ansible-galaxy collection install -r provisioning/requirements.yml
+```
 
 ---
 
@@ -114,10 +121,13 @@ ssh -o StrictHostKeyChecking=no -l $VM_USER $VM_IP "echo SSH works"
 make deploy-vm
 ```
 
-This installs PostgreSQL, the app, nginx, and systemd timers inside the VM.
-It also runs **database migrations** — the process that creates or updates the
-database schema (tables, columns, indexes) in PostgreSQL. Re-run any time after
-code changes; it is idempotent.
+This SSHes into the VM and runs Ansible to install PostgreSQL, the app, nginx, and
+systemd timers. It also runs **database migrations** — the process that creates or
+updates the database schema (tables, columns, indexes) in PostgreSQL.
+
+The playbook deploys by cloning from the GitHub repo (`app_repo` in `group_vars/all.yml`).
+To deploy local changes, push them to the configured branch first, then re-run
+`make deploy-vm`. It is idempotent.
 
 ---
 
