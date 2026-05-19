@@ -1,7 +1,11 @@
 """CLI entry point for craft-dashboard."""
 
+import pathlib
+
 import click
 import uvicorn
+
+from craft_dashboard.config import load_config
 
 
 @click.group()
@@ -31,6 +35,17 @@ def serve(*, host: str, port: int, reload: bool) -> None:
     default="all",
     help="Data source to collect from.",
 )
-def collect(*, source: str) -> None:
+@click.option(
+    "--config-file",
+    type=click.Path(exists=True),
+    default="craft-dashboard.toml",
+    help="Path to configuration file.",
+)
+def collect(*, source: str, config_file: str) -> None:
     """Collect data from external sources."""
+    config = load_config(pathlib.Path(config_file))
     click.echo(f"Collecting data from: {source}")
+    click.echo(f"Projects: {len(config.craft_projects)}")
+    # The actual async collection is handled by scripts/collect_data.py
+    # This CLI command delegates to it
+    click.echo("Use 'uv run scripts/collect_data.py' for cron-based collection.")
