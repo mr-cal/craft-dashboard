@@ -1,0 +1,63 @@
+---
+- name: Install uv
+  ansible.builtin.shell: |
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+  args:
+    creates: /root/.local/bin/uv
+
+- name: Clone or update application repo
+  ansible.builtin.git:
+    repo: "{{ app_repo }}"
+    dest: "{{ app_dir }}"
+    version: "{{ app_branch }}"
+    force: true
+  become: true
+  become_user: "{{ app_user }}"
+  notify: Restart craft-dashboard
+
+- name: Create virtual environment and install dependencies
+  ansible.builtin.shell: |
+    /root/.local/bin/uv venv {{ app_venv }} --python {{ python_version }}
+    /root/.local/bin/uv pip install --python {{ app_venv }}/bin/python -e "{{ app_dir }}"
+  args:
+    chdir: "{{ app_dir }}"
+  notify: Restart craft-dashboard
+
+- name: Deploy environment file
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ app_dir }}/.env"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: "0600"
+  notify: Restart craft-dashboard
+
+- name: Install psycopg2 for sync Alembic migrations
+  ansible.builtin.shell: |
+    /root/.local/bin/uv pip install --python {{ app_venv }}/bin/python psycopg2-binary
+  args:
+    chdir: "{{ app_dir }}"
+
+- name: Run database migrations
+  ansible.builtin.shell: |
+    {{ app_venv }}/bin/alembic upgrade head
+  args:
+    chdir: "{{ app_dir }}"
+  environment: "{{ app_env }}"
+  become: true
+  become_user: "{{ app_user }}"
+
+- name: Deploy systemd service
+  ansible.builtin.template:
+    src: craft-dashboard.service.j2
+    dest: /etc/systemd/system/craft-dashboard.service
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart craft-dashboard
+
+- name: Enable and start craft-dashboard
+  ansible.builtin.systemd:
+    name: craft-dashboard
+    state: started
+    enabled: true

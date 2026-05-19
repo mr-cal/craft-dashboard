@@ -1,0 +1,33 @@
+# Application settings
+app_name: craft-dashboard
+app_user: craft-dashboard
+app_group: craft-dashboard
+app_dir: /opt/craft-dashboard
+app_venv: /opt/craft-dashboard/.venv
+app_repo: https://github.com/mr-cal/craft-dashboard.git
+app_branch: main
+
+# Python
+python_version: "3.12"
+
+# PostgreSQL
+db_name: craft_dashboard
+db_user: craft_dashboard
+db_password: "{{ lookup('env', 'DB_PASSWORD') }}"
+
+# Networking
+domain_name: "{{ lookup('env', 'DOMAIN_NAME') | default('dashboard.example.com', true) }}"
+app_port: 8000
+nginx_ssl_email: "{{ lookup('env', 'SSL_EMAIL') | default('admin@example.com', true) }}"
+
+# Environment variables for the application
+app_env:
+  DATABASE_URL: "postgresql+asyncpg://{{ db_user }}:{{ db_password }}@localhost/{{ db_name }}"
+  GITHUB_TOKEN: "{{ lookup('env', 'GITHUB_TOKEN') }}"
+  OPENROUTER_API_KEY: "{{ lookup('env', 'OPENROUTER_API_KEY') }}"
+  ADMIN_TOKEN: "{{ lookup('env', 'ADMIN_TOKEN') }}"
+  DEBUG: "false"
+
+# Cron schedules (systemd timer OnCalendar format)
+collect_schedule: "*-*-* 02:00:00"    # Daily at 2 AM UTC
+llm_schedule: "*-*-* 06:00:00"       # Daily at 6 AM UTC (4 hours after collection)

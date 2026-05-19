@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily data collection for craft-dashboard
+
+[Timer]
+OnCalendar={{ collect_schedule }}
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

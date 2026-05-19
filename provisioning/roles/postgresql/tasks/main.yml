@@ -1,0 +1,38 @@
+---
+- name: Install PostgreSQL 16
+  ansible.builtin.apt:
+    name:
+      - postgresql-16
+      - postgresql-client-16
+      - python3-psycopg2
+    state: present
+
+- name: Ensure PostgreSQL is running
+  ansible.builtin.systemd:
+    name: postgresql
+    state: started
+    enabled: true
+
+- name: Create database user
+  become: true
+  become_user: postgres
+  community.postgresql.postgresql_user:
+    name: "{{ db_user }}"
+    password: "{{ db_password }}"
+    role_attr_flags: CREATEDB
+
+- name: Create database
+  become: true
+  become_user: postgres
+  community.postgresql.postgresql_db:
+    name: "{{ db_name }}"
+    owner: "{{ db_user }}"
+    encoding: UTF-8
+
+- name: Allow local password authentication for app user
+  ansible.builtin.lineinfile:
+    path: /etc/postgresql/16/main/pg_hba.conf
+    insertbefore: "^local\\s+all\\s+all"
+    line: "local   {{ db_name }}    {{ db_user }}    scram-sha-256"
+    state: present
+  notify: Restart PostgreSQL

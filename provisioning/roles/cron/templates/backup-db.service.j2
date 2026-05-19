@@ -1,0 +1,11 @@
+[Unit]
+Description=craft-dashboard PostgreSQL backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+ExecStart=/bin/bash -c 'pg_dump {{ db_name }} | gzip > {{ app_dir }}/backups/craft-dashboard-$(date +%%Y%%m%%d).sql.gz'
+ExecStartPost=/bin/bash -c 'find {{ app_dir }}/backups -name "*.sql.gz" -mtime +7 -delete'
+StandardOutput=journal
+StandardError=journal

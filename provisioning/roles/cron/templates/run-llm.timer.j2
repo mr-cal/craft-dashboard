@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily LLM evaluation for craft-dashboard
+
+[Timer]
+OnCalendar={{ llm_schedule }}
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

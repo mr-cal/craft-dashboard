@@ -1,0 +1,23 @@
+[Unit]
+Description=craft-dashboard web application
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=exec
+User={{ app_user }}
+Group={{ app_group }}
+WorkingDirectory={{ app_dir }}
+EnvironmentFile={{ app_dir }}/.env
+ExecStart={{ app_venv }}/bin/gunicorn \
+    --bind 127.0.0.1:{{ app_port }} \
+    --workers 4 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --access-logfile - \
+    --error-logfile - \
+    "craft_dashboard.app:create_app()"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
