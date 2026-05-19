@@ -165,18 +165,20 @@ LOCAL_LLM_BASE_URL = "http://localhost:11434/v1"
 class LocalLLMClient:
     """HTTP client for a locally-hosted LLM (any OpenAI-compatible server).
 
-    No API key or quota management required. Retries on timeout/network errors only.
+    Retries on timeout/network errors only.
     """
 
-    def __init__(self, base_url: str = LOCAL_LLM_BASE_URL) -> None:
+    def __init__(self, base_url: str = LOCAL_LLM_BASE_URL, api_key: str = "") -> None:
         """Initialize the local LLM client.
 
         Args:
             base_url: Base URL for the OpenAI-compatible API endpoint.
                       Default: http://localhost:11434/v1
+            api_key: Optional bearer token for servers that require authentication.
 
         """
         self.base_url = base_url
+        self.api_key = api_key
 
     @retry(
         retry=retry_if_exception(
@@ -221,9 +223,12 @@ class LocalLLMClient:
             payload["response_format"] = response_format
 
         async with httpx.AsyncClient() as http:
+            headers: dict[str, str] = {"Content-Type": "application/json"}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
             response = await http.post(
                 f"{self.base_url}/chat/completions",
-                headers={"Content-Type": "application/json"},
+                headers=headers,
                 json=payload,
                 timeout=120.0,  # Local models can be slow
             )
@@ -255,7 +260,7 @@ def create_llm_client(settings: "Settings") -> "OpenRouterClient | LocalLLMClien
 
     """
     if settings.llm_backend == "local":
-        return LocalLLMClient(base_url=settings.local_llm_url)
+        return LocalLLMClient(base_url=settings.local_llm_url, api_key=settings.local_llm_api_key)
     if settings.llm_backend == "openrouter":
         return OpenRouterClient(api_key=settings.openrouter_api_key)
     raise ValueError(

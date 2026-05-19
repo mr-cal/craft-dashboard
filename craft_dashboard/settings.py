@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     # Local LLM settings (any OpenAI-compatible server)
     local_llm_url: str = "http://localhost:11434/v1"
+    local_llm_api_key: str = ""
     local_llm_summary_model: str = "llama3.2"
     local_llm_evaluation_model: str = "llama3.2"
 

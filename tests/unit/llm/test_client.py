@@ -66,6 +66,18 @@ class TestLocalLLMClient:
 
         assert client.base_url == "http://192.168.1.5:11434/v1"
 
+    def test_init_with_api_key(self) -> None:
+        """LocalLLMClient stores an optional API key."""
+        client = LocalLLMClient(api_key="my-bearer-token")
+
+        assert client.api_key == "my-bearer-token"  # noqa: S105
+
+    def test_init_default_no_api_key(self) -> None:
+        """LocalLLMClient defaults to no API key."""
+        client = LocalLLMClient()
+
+        assert client.api_key == ""
+
 
 class TestCreateLLMClient:
     """Tests for the create_llm_client factory."""
@@ -88,6 +100,17 @@ class TestCreateLLMClient:
         client = create_llm_client(Settings())
 
         assert isinstance(client, LocalLLMClient)
+
+    def test_local_backend_with_api_key(self, monkeypatch) -> None:
+        """create_llm_client passes the API key to LocalLLMClient."""
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+        monkeypatch.setenv("LLM_BACKEND", "local")
+        monkeypatch.setenv("LOCAL_LLM_API_KEY", "my-secret-token")
+
+        client = create_llm_client(Settings())
+
+        assert isinstance(client, LocalLLMClient)
+        assert client.api_key == "my-secret-token"  # noqa: S105
 
 
 class TestOpenRouterResponse:

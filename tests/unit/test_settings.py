@@ -36,11 +36,13 @@ class TestSettings:
     def test_default_llm_backend(self, monkeypatch) -> None:
         """Default LLM backend is openrouter."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+        monkeypatch.setenv("LLM_BACKEND", "openrouter")
+        monkeypatch.setenv("LOCAL_LLM_API_KEY", "")
 
         settings = Settings()
 
         assert settings.llm_backend == "openrouter"
-        assert settings.local_llm_url == "http://localhost:11434/v1"
+        assert settings.local_llm_api_key == ""
 
     def test_local_llm_backend(self, monkeypatch) -> None:
         """Local LLM backend can be configured via env vars."""
@@ -48,9 +50,11 @@ class TestSettings:
         monkeypatch.setenv("LLM_BACKEND", "local")
         monkeypatch.setenv("LOCAL_LLM_URL", "http://192.168.1.10:11434/v1")
         monkeypatch.setenv("LOCAL_LLM_SUMMARY_MODEL", "qwen2.5")
+        monkeypatch.setenv("LOCAL_LLM_API_KEY", "my-bearer-token")
 
         settings = Settings()
 
         assert settings.llm_backend == "local"
         assert settings.local_llm_url == "http://192.168.1.10:11434/v1"
         assert settings.local_llm_summary_model == "qwen2.5"
+        assert settings.local_llm_api_key == "my-bearer-token"  # noqa: S105

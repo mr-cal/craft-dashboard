@@ -55,3 +55,21 @@ clean:  ## Clean build artifacts and caches
 rm -rf dist build .coverage htmlcov .pytest_cache
 find . -name __pycache__ -type d -exec rm -rf {} +
 find . -name "*.pyc" -delete
+
+.PHONY: deploy
+deploy:  ## Deploy to VPS (sources provisioning/secrets.env)
+@if [ ! -f provisioning/secrets.env ]; then \
+echo "Missing provisioning/secrets.env — copy provisioning/secrets.env.example and fill in your values."; \
+exit 1; \
+fi
+set -a; . provisioning/secrets.env; set +a; \
+  cd provisioning && ansible-playbook playbook.yml
+
+.PHONY: deploy-vm
+deploy-vm:  ## Deploy to LXD VM with SSL skipped (sources provisioning/secrets.env)
+@if [ ! -f provisioning/secrets.env ]; then \
+echo "Missing provisioning/secrets.env — copy provisioning/secrets.env.example and fill in your values."; \
+exit 1; \
+fi
+set -a; . provisioning/secrets.env; set +a; \
+  cd provisioning && ansible-playbook playbook.yml --skip-tags ssl
