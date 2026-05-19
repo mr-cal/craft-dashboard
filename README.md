@@ -79,19 +79,20 @@ GITHUB_TOKEN=<your GitHub fine-grained token>
 
 `provisioning/secrets.env` is gitignored — never committed.
 
-### 3c. Get the VM's IP address
+### 3c. Load VM variables
 
-The VM has one IP per network interface; CSV output quotes multi-IP fields.
-Parse with grep to reliably extract the first IPv4 address:
+The VM may have multiple network interfaces; CSV output quotes multi-IP fields,
+so parse with grep. Load all three variables at once:
 
 ```fish
 set VM_NAME (grep '^VM_NAME=' provisioning/secrets.env | cut -d= -f2)
+set VM_USER (grep '^DASHBOARD_USER=' provisioning/secrets.env | cut -d= -f2)
 set VM_IP (lxc list $VM_NAME -c4 --format csv | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-echo "IP: $VM_IP"
+echo "VM: $VM_NAME  user: $VM_USER  IP: $VM_IP"
 ```
 
-Update `DASHBOARD_HOST` in `provisioning/secrets.env` with this IP, then re-run
-whenever the VM is restarted (LXD may assign a new IP).
+Update `DASHBOARD_HOST` in `provisioning/secrets.env` with this IP. Re-run this
+block whenever the VM restarts, as LXD may assign a new IP.
 
 ### 3d. Set up SSH access
 
@@ -100,7 +101,6 @@ way it will later connect to the production VPS. Ansible passes the username as
 `-o User=...` internally, so usernames containing `@` work without any workarounds.
 
 ```fish
-set VM_USER (grep '^DASHBOARD_USER=' provisioning/secrets.env | cut -d= -f2)
 lxc exec $VM_NAME -- mkdir -p /home/$VM_USER/.ssh
 lxc file push ~/.ssh/id_ed25519.pub $VM_NAME/home/$VM_USER/.ssh/authorized_keys
 lxc exec $VM_NAME -- chown -R $VM_USER:$VM_USER /home/$VM_USER/.ssh
