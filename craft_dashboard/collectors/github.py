@@ -4,6 +4,7 @@ import hashlib
 import logging
 from datetime import UTC, datetime
 
+import sqlalchemy as sa
 from github import Github
 from github.Issue import Issue as GHIssue
 
@@ -210,6 +211,22 @@ class GitHubCollector:
             label_names = [label.name for label in gh_issue.labels]
             author = gh_issue.user.login if gh_issue.user else None
 
+            # Fetch comments for all items (open and closed)
+            comments = _fetch_issue_comments(gh_issue)
+
+            # For all PRs, fetch reviews, CI status, and diff stats
+            extra_metadata: dict = {}
+            if issue_type == "pull_request":
+                try:
+                    gh_pr = repo.get_pull(gh_issue.number)
+                    extra_metadata = _fetch_pr_details(gh_pr)
+                except Exception:
+                    logger.warning(
+                        "Failed to fetch PR details for %s#%d",
+                        repo_name,
+                        gh_issue.number,
+                    )
+
             stmt = insert(Issue).values(
                 project_id=project_id,
                 source="github",
@@ -231,6 +248,8 @@ class GitHubCollector:
                 if gh_issue.closed_at
                 else None,
                 url=gh_issue.html_url,
+                metadata_=extra_metadata,
+                comments=comments,
                 last_fetched_at=datetime.now(tz=UTC),
             )
             stmt = stmt.on_conflict_do_update(
@@ -244,6 +263,8 @@ class GitHubCollector:
                     "labels": stmt.excluded.labels,
                     "updated_at": stmt.excluded.updated_at,
                     "closed_at": stmt.excluded.closed_at,
+                    "metadata": sa.literal_column("excluded.metadata"),
+                    "comments": stmt.excluded.comments,
                     "last_fetched_at": stmt.excluded.last_fetched_at,
                 },
             )
