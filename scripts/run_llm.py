@@ -194,9 +194,12 @@ async def _evaluate_issues(
     return stats
 
 
-async def _main(project: str, limit: int, backend: str, open_only: bool) -> None:
+async def _main(project: str, limit: int, backend: str, open_only: bool, verbose: bool) -> None:
     """Run LLM evaluation."""
     settings = Settings()
+
+    log_level = logging.DEBUG if verbose else getattr(logging, settings.log_level.upper(), logging.INFO)
+    logging.getLogger().setLevel(log_level)
 
     # Allow CLI flag to override settings
     if backend:
@@ -241,8 +244,7 @@ async def _main(project: str, limit: int, backend: str, open_only: bool) -> None
             project_filter=project,
             limit=limit,
             open_only=open_only,
-        )
-        logger.info(
+        )        logger.info(
             "Evaluation complete: %d evaluated, %d skipped, %d errors, %d total tokens",
             stats["evaluated"],
             stats["skipped"],
@@ -268,7 +270,13 @@ async def _main(project: str, limit: int, backend: str, open_only: bool) -> None
     default=False,
     help="Only evaluate open issues (used for daily cron; default evaluates all).",
 )
-def main(project: str, limit: int, backend: str, open_only: bool) -> None:
+@click.option(
+    "--verbose", "-v",
+    is_flag=True,
+    default=False,
+    help="Enable debug logging (LLM prompts, token counts). Overrides LOG_LEVEL.",
+)
+def main(project: str, limit: int, backend: str, open_only: bool, verbose: bool) -> None:
     """Run LLM evaluation on issues and PRs.
 
     By default evaluates all issues (open and closed). Use --open-only
@@ -276,7 +284,7 @@ def main(project: str, limit: int, backend: str, open_only: bool) -> None:
     Use --backend local to run against a locally-hosted OpenAI-compatible LLM server
     without spending tokens on OpenRouter.
     """
-    asyncio.run(_main(project, limit, backend, open_only))
+    asyncio.run(_main(project, limit, backend, open_only, verbose))
 
 
 if __name__ == "__main__":

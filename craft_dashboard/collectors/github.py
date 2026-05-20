@@ -212,9 +212,15 @@ class GitHubCollector:
             if limit > 0 and count >= limit:
                 logger.info("Reached issue limit (%d) for %s/%s", limit, self.org, repo_name)
                 break
+
             issue_type, state = _classify_issue(gh_issue)
             label_names = [label.name for label in gh_issue.labels]
             author = gh_issue.user.login if gh_issue.user else None
+
+            logger.debug(
+                "  %s/%s#%d  %s (%s)",
+                self.org, repo_name, gh_issue.number, issue_type, state,
+            )
 
             # Fetch comments for all items (open and closed)
             comments: list = []
@@ -231,6 +237,10 @@ class GitHubCollector:
             # For all PRs, fetch reviews, CI status, and diff stats
             extra_metadata: dict = {}
             if issue_type == "pull_request":
+                logger.debug(
+                    "  Fetching PR details for %s/%s#%d",
+                    self.org, repo_name, gh_issue.number,
+                )
                 try:
                     gh_pr = repo.get_pull(gh_issue.number)
                     extra_metadata = _fetch_pr_details(gh_pr)
@@ -285,6 +295,11 @@ class GitHubCollector:
             )
             await session.execute(stmt)
             count += 1
+            if count % 25 == 0:
+                logger.info(
+                    "  %s/%s: %d issues fetched so far...",
+                    self.org, repo_name, count,
+                )
 
         await session.commit()
         logger.info("Collected %d issues from %s/%s", count, self.org, repo_name)

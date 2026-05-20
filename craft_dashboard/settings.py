@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
     config_file: str = "craft-dashboard.toml"
+    log_level: str = "INFO"
 
     # LLM backend: "openrouter" (production) or "local" (local LLM server)
     llm_backend: str = "openrouter"

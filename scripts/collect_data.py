@@ -42,7 +42,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
 async def _get_or_create_project(session, name: str, category: str, order: int) -> int:
     """Get or create a project, returning its ID."""
     from sqlalchemy import select
@@ -149,9 +148,13 @@ async def _collect_launchpad(config, session_factory, projects: list[str] | None
             await collector.collect_bugs(lp_name, project_id, session)
 
 
-async def _main(source: str, limit: int, projects: list[str]) -> None:
+async def _main(source: str, limit: int, projects: list[str], verbose: bool) -> None:
     """Run data collection."""
     settings = Settings()
+
+    log_level = logging.DEBUG if verbose else getattr(logging, settings.log_level.upper(), logging.INFO)
+    logging.getLogger().setLevel(log_level)
+
     config = load_config(pathlib.Path(settings.config_file))
     engine = get_engine(settings.database_url)
     session_factory = get_session_factory(engine)
@@ -190,9 +193,15 @@ async def _main(source: str, limit: int, projects: list[str]) -> None:
     multiple=True,
     help="Only collect data for these projects (repeatable). Default: all configured projects.",
 )
-def main(source: str, limit: int, projects: tuple[str, ...]) -> None:
+@click.option(
+    "--verbose", "-v",
+    is_flag=True,
+    default=False,
+    help="Enable debug logging (individual issues, API calls). Overrides LOG_LEVEL.",
+)
+def main(source: str, limit: int, projects: tuple[str, ...], verbose: bool) -> None:
     """Collect data from external sources."""
-    asyncio.run(_main(source, limit, list(projects)))
+    asyncio.run(_main(source, limit, list(projects), verbose))
 
 
 if __name__ == "__main__":
