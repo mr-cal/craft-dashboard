@@ -26,7 +26,8 @@ app_env:
   GITHUB_TOKEN: "{{ lookup('env', 'GITHUB_TOKEN') }}"
   OPENROUTER_API_KEY: "{{ lookup('env', 'OPENROUTER_API_KEY') }}"
   ADMIN_TOKEN: "{{ lookup('env', 'ADMIN_TOKEN') }}"
-  DEBUG: "false"
+  LLM_BACKEND: "{{ lookup('env', 'LLM_BACKEND') | default('openrouter', true) }}"
+  LOG_LEVEL: "{{ lookup('env', 'LOG_LEVEL') | default('INFO', true) }}"
 
 # Cron schedules (systemd timer OnCalendar format)
 collect_schedule: "*-*-* 02:00:00"    # Daily at 2 AM UTC

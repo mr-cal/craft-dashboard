@@ -41,10 +41,12 @@ def create_app() -> FastAPI:
         A configured FastAPI instance.
 
     """
+    settings = Settings()
     app = FastAPI(
         title="craft-dashboard",
         description="Dashboard, insights, and issue triage for *craft applications.",
         lifespan=lifespan,
+        debug=settings.debug,
     )
 
     app.state.templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
