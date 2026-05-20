@@ -32,7 +32,8 @@ def _needs_reevaluation(
 def _parse_evaluation_response(content: str) -> dict | None:
     """Parse the LLM evaluation response as JSON.
 
-    Handles responses that may be wrapped in markdown code fences.
+    Handles responses that may be wrapped in markdown code fences or contain
+    surrounding text.
 
     Args:
         content: Raw LLM response content.
@@ -41,18 +42,34 @@ def _parse_evaluation_response(content: str) -> dict | None:
         Parsed dict with scores and action, or None if parsing fails.
 
     """
-    # Strip markdown code fences if present
-    cleaned = content.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        # Remove first and last lines (the fences)
-        cleaned = "\n".join(lines[1:-1]).strip()
+    import re
 
+    cleaned = content.strip()
+
+    # Try direct parse first
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
-        logger.warning("Failed to parse LLM evaluation response as JSON")
-        return None
+        pass
+
+    # Strip markdown code fences (```json ... ``` or ``` ... ```)
+    fence_match = re.search(r"```(?:json)?\s*\n(.*?)\n```", cleaned, re.DOTALL)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    # Extract first {...} block in case of surrounding text
+    brace_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if brace_match:
+        try:
+            return json.loads(brace_match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    logger.warning("Failed to parse LLM evaluation response as JSON: %s", cleaned[:200])
+    return None
 
 
 def _compute_content_hash(

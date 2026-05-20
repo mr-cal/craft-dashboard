@@ -3,6 +3,8 @@
 import logging
 from datetime import UTC, datetime
 
+import sqlalchemy as sa
+
 logger = logging.getLogger(__name__)
 
 _OPEN_STATUSES = frozenset(
@@ -137,8 +139,8 @@ class LaunchpadCollector:
                     "labels": stmt.excluded.labels,
                     "updated_at": stmt.excluded.updated_at,
                     "closed_at": stmt.excluded.closed_at,
-                    "metadata_": stmt.excluded.metadata_,
                     "last_fetched_at": stmt.excluded.last_fetched_at,
+                    "metadata": sa.literal_column("excluded.metadata"),
                 },
             )
             await session.execute(stmt)

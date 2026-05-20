@@ -250,7 +250,7 @@ async def _main(project: str, limit: int, backend: str, open_only: bool) -> None
 @click.option(
     "--backend",
     type=click.Choice(["openrouter", "local"]),
-    default="",
+    default=None,
     help="LLM backend to use (overrides LLM_BACKEND env var).",
 )
 @click.option(

@@ -56,7 +56,8 @@ If you don't have one already:
 
 ```fish
 lxc launch ubuntu:24.04 craft-dashboard-dev --vm
-lxc exec craft-dashboard-dev -- cloud-init status --wait
+# The VM agent takes a moment to start — wait before using cloud-init
+sleep 15 && lxc exec craft-dashboard-dev -- cloud-init status --wait
 ```
 
 Alternatively, if you use [local-llm](https://github.com/mr-cal/local-llm):
@@ -68,7 +69,15 @@ uv run llm lxd create 1 --lxd-vm
 > local-llm renames the VM's default user to match your host username.
 > Standard `lxc launch` keeps the user as `ubuntu`.
 
-### 3b. Configure secrets
+### 3b. Generate an SSH key (if you don't have one)
+
+Ansible connects over SSH. If `~/.ssh/id_ed25519` doesn't exist yet:
+
+```fish
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
+```
+
+### 3c. Configure secrets
 
 ```fish
 cp provisioning/secrets.env.example provisioning/secrets.env
@@ -86,7 +95,7 @@ GITHUB_TOKEN=<your GitHub fine-grained token>
 
 `provisioning/secrets.env` is gitignored — never committed.
 
-### 3c. Load VM variables
+### 3d. Load VM variables
 
 The VM may have multiple network interfaces; CSV output quotes multi-IP fields,
 so parse with grep. Load all three variables at once:
@@ -101,7 +110,7 @@ echo "VM: $VM_NAME  user: $VM_USER  IP: $VM_IP"
 Update `DASHBOARD_HOST` in `provisioning/secrets.env` with this IP. Re-run this
 block whenever the VM restarts, as LXD may assign a new IP.
 
-### 3d. Set up SSH access
+### 3e. Set up SSH access
 
 Ansible provisions the VM by SSHing in and running commands remotely — the same
 way it will later connect to the production VPS. Ansible passes the username as
@@ -115,7 +124,7 @@ lxc exec $VM_NAME -- chmod 600 /home/$VM_USER/.ssh/authorized_keys
 ssh -o StrictHostKeyChecking=no -l $VM_USER $VM_IP "echo SSH works"
 ```
 
-### 3e. Provision the VM
+### 3f. Provision the VM
 
 ```fish
 make deploy-vm
@@ -133,15 +142,18 @@ To deploy local changes, push them to the configured branch first, then re-run
 
 ## 4. Bootstrapping Data (First Time)
 
-After provisioning, collect and evaluate all historical data inside the VM before
-deploying to a production VPS. Using your local LLM server avoids OpenRouter costs
-for this one-time full pass over all historical issues.
+After provisioning, collect and evaluate all historical data inside the VM.
+Use your local LLM server (`--backend local`) for the first full pass to avoid
+OpenRouter costs, or limit the run with `--limit` while testing.
 
 ### Step 1: Collect data from GitHub and Launchpad
 
+Run inside the VM via `lxc exec` (all commands below run on your **local machine**):
+
 ```fish
-lxc exec $VM_NAME -- systemctl start collect-data
-lxc exec $VM_NAME -- journalctl -u collect-data -f
+lxc exec $VM_NAME -- sudo systemctl start collect-data
+# Follow logs until it finishes (Ctrl-C when done):
+lxc exec $VM_NAME -- sudo journalctl -u collect-data -f
 ```
 
 This fetches issues, PRs, releases, and snapstore data. Re-run any time to update.
@@ -149,11 +161,16 @@ This fetches issues, PRs, releases, and snapstore data. Re-run any time to updat
 ### Step 2: Run LLM evaluation
 
 ```fish
-# Full pass over all issues — may take several hours:
-lxc exec $VM_NAME -- sudo -u craft-dashboard /opt/craft-dashboard/.venv/bin/python /opt/craft-dashboard/scripts/run_llm.py
+# Test with 40 issues to verify everything works before a full run:
+lxc exec $VM_NAME -- sudo -u craft-dashboard bash -c \
+  'cd /opt/craft-dashboard && source .env && .venv/bin/python scripts/run_llm.py --open-only --limit 40'
+
+# Full pass over all open issues (uses OpenRouter credits):
+lxc exec $VM_NAME -- sudo -u craft-dashboard bash -c \
+  'cd /opt/craft-dashboard && source .env && .venv/bin/python scripts/run_llm.py --open-only'
 ```
 
-After migration, the daily cron (`run_llm.py --open-only`) only processes
+After the first pass, the daily cron (`run_llm.py --open-only`) only processes
 newly-changed open issues, so you only pay OpenRouter for incremental updates.
 
 ---

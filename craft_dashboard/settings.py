@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     local_llm_evaluation_model: str = "llama3.2"
 
     # OpenRouter model settings
-    openrouter_summary_model: str = "google/gemini-flash-1.5"
-    openrouter_evaluation_model: str = "anthropic/claude-sonnet-4-20250514"
+    openrouter_summary_model: str = "google/gemini-2.5-flash-lite"
+    openrouter_evaluation_model: str = "anthropic/claude-haiku-4.5"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

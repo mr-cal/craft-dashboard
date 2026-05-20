@@ -68,7 +68,7 @@ def build_summary_prompt(
         f"Type: {type_label}\n"
         f"Title: {title}\n"
         f"Labels: {label_str}\n"
-        f"Body:\n{body or '(no body)'}"
+        f"Body:\n{(body or '(no body)')[:3000]}"
     )
 
     return [

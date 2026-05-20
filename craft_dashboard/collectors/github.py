@@ -205,7 +205,6 @@ class GitHubCollector:
                 set_={
                     "branch": stmt.excluded.branch,
                     "released_at": stmt.excluded.released_at,
-                    "metadata_": stmt.excluded.metadata_,
                 },
             )
             await session.execute(stmt)
