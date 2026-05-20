@@ -5,6 +5,9 @@ Usage:
     uv run scripts/collect_data.py --source all
     uv run scripts/collect_data.py --source github
     uv run scripts/collect_data.py --source launchpad
+    uv run scripts/collect_data.py --source github --limit 25
+    uv run scripts/collect_data.py --source github --project snapcraft --project rockcraft
+    uv run scripts/collect_data.py --source github --limit 25 --project snapcraft
 
 Environment variables:
     DATABASE_URL: PostgreSQL connection URL
@@ -64,6 +67,8 @@ async def _collect_github(
     settings: Settings,
     config,
     session_factory,
+    limit: int = 0,
+    projects: list[str] | None = None,
 ) -> None:
     """Run GitHub data collection for all projects due for refresh."""
     from sqlalchemy import select
@@ -76,7 +81,8 @@ async def _collect_github(
         maintainers=config.maintainers,
     )
 
-    for i, project_name in enumerate(config.craft_projects):
+    project_list = projects if projects else config.craft_projects
+    for i, project_name in enumerate(project_list):
         async with session_factory() as session:
             category = "application" if project_name in config.craft_applications else (
                 "library" if project_name in config.craft_libraries else "other"
@@ -100,7 +106,7 @@ async def _collect_github(
 
             logger.info("Collecting GitHub data for %s", project_name)
             try:
-                await collector.collect_issues(project_name, project_id, session)
+                await collector.collect_issues(project_name, project_id, session, limit=limit)
                 await collector.collect_releases(project_name, project_id, session)
                 await generate_snapshot(
                     project_id, session, set(config.maintainers)
@@ -120,11 +126,12 @@ async def _collect_github(
             await asyncio.sleep(1)
 
 
-async def _collect_launchpad(config, session_factory) -> None:
+async def _collect_launchpad(config, session_factory, projects: list[str] | None = None) -> None:
     """Run Launchpad data collection for all configured projects."""
     collector = LaunchpadCollector(projects=config.launchpad_projects)
 
-    for lp_name in config.launchpad_projects:
+    lp_list = [p for p in config.launchpad_projects if projects is None or p in projects]
+    for lp_name in lp_list:
         async with session_factory() as session:
             from sqlalchemy import select
 
@@ -142,18 +149,24 @@ async def _collect_launchpad(config, session_factory) -> None:
             await collector.collect_bugs(lp_name, project_id, session)
 
 
-async def _main(source: str) -> None:
+async def _main(source: str, limit: int, projects: list[str]) -> None:
     """Run data collection."""
     settings = Settings()
     config = load_config(pathlib.Path(settings.config_file))
     engine = get_engine(settings.database_url)
     session_factory = get_session_factory(engine)
 
+    project_filter = list(projects) if projects else None
+    if limit:
+        logger.info("Issue collection limit: %d per repo", limit)
+    if project_filter:
+        logger.info("Project filter: %s", project_filter)
+
     try:
         if source in ("all", "github"):
-            await _collect_github(settings, config, session_factory)
+            await _collect_github(settings, config, session_factory, limit=limit, projects=project_filter)
         if source in ("all", "launchpad"):
-            await _collect_launchpad(config, session_factory)
+            await _collect_launchpad(config, session_factory, projects=project_filter)
     finally:
         await engine.dispose()
 
@@ -165,9 +178,21 @@ async def _main(source: str) -> None:
     default="all",
     help="Data source to collect from.",
 )
-def main(source: str) -> None:
+@click.option(
+    "--limit",
+    default=0,
+    type=int,
+    help="Max issues to fetch per repository (0 = all). Useful for testing.",
+)
+@click.option(
+    "--project",
+    "projects",
+    multiple=True,
+    help="Only collect data for these projects (repeatable). Default: all configured projects.",
+)
+def main(source: str, limit: int, projects: tuple[str, ...]) -> None:
     """Collect data from external sources."""
-    asyncio.run(_main(source))
+    asyncio.run(_main(source, limit, list(projects)))
 
 
 if __name__ == "__main__":

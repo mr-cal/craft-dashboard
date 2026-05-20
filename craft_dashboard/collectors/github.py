@@ -184,8 +184,9 @@ class GitHubCollector:
         repo_name: str,
         project_id: int,
         session,  # noqa: ANN001
+        limit: int = 0,
     ) -> int:
-        """Collect all open issues and PRs for a repository.
+        """Collect issues and PRs for a repository.
 
         Fetches issues from GitHub and upserts them into the database.
 
@@ -193,6 +194,7 @@ class GitHubCollector:
             repo_name: Repository name (without org prefix).
             project_id: The database ID of the project.
             session: An async SQLAlchemy session.
+            limit: Maximum number of issues to fetch per repo (0 = all).
 
         Returns:
             The number of issues upserted.
@@ -207,6 +209,9 @@ class GitHubCollector:
         count = 0
 
         for gh_issue in gh_issues:
+            if limit > 0 and count >= limit:
+                logger.info("Reached issue limit (%d) for %s/%s", limit, self.org, repo_name)
+                break
             issue_type, state = _classify_issue(gh_issue)
             label_names = [label.name for label in gh_issue.labels]
             author = gh_issue.user.login if gh_issue.user else None
