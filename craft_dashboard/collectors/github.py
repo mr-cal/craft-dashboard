@@ -220,6 +220,7 @@ class GitHubCollector:
                     "Failed to fetch comments for %s#%d",
                     repo_name,
                     gh_issue.number,
+                    exc_info=True,
                 )
 
             # For all PRs, fetch reviews, CI status, and diff stats
@@ -233,6 +234,7 @@ class GitHubCollector:
                         "Failed to fetch PR details for %s#%d",
                         repo_name,
                         gh_issue.number,
+                        exc_info=True,
                     )
 
             stmt = insert(Issue).values(

@@ -119,6 +119,21 @@ class TestComputeContentHash:
 
         assert h1 == h2
 
+    def test_comment_order_does_not_affect_hash(self) -> None:
+        """Same comments in different order produce same hash."""
+        from craft_dashboard.llm.evaluator import _compute_content_hash
+
+        comments_a = [
+            {"author": "alice", "body": "first", "created_at": "2024-01-01T00:00:00+00:00", "type": "comment"},
+            {"author": "bob", "body": "second", "created_at": "2024-01-02T00:00:00+00:00", "type": "comment"},
+        ]
+        comments_b = list(reversed(comments_a))
+
+        hash_a = _compute_content_hash("t", "b", "open", [], comments=comments_a)
+        hash_b = _compute_content_hash("t", "b", "open", [], comments=comments_b)
+
+        assert hash_a == hash_b
+
 
 class TestEvaluateIssueWithComments:
     """Tests that evaluate_issue passes comments and pr_details to prompt builders."""

@@ -98,7 +98,7 @@ def _compute_content_hash(
     if comments:
         comments_repr = "|" + ";".join(
             f"{c.get('author','')}:{c.get('body','')[:100]}"
-            for c in comments
+            for c in sorted(comments, key=lambda c: c.get("created_at") or "")
         )
     content = f"{title}|{body or ''}|{state}|{','.join(sorted(labels))}{comments_repr}"
     return hashlib.sha256(content.encode()).hexdigest()
