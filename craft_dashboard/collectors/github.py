@@ -53,6 +53,98 @@ def _compute_issue_hash(
     return hashlib.sha256(content.encode()).hexdigest()
 
 
+def _fetch_issue_comments(gh_issue) -> list[dict]:  # noqa: ANN001
+    """Fetch the last 10 comments from a GitHub issue.
+
+    Args:
+        gh_issue: A PyGithub Issue object.
+
+    Returns:
+        List of comment dicts, each with author/body/created_at/type.
+
+    """
+    comments = list(gh_issue.get_comments())
+    # Keep only the last 10
+    recent = comments[-10:]
+    result = []
+    for c in recent:
+        result.append({
+            "author": c.user.login if c.user else "unknown",
+            "body": (c.body or "")[:1000],
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "type": "comment",
+        })
+    return result
+
+
+def _fetch_pr_details(gh_pr) -> dict:  # noqa: ANN001
+    """Fetch PR-specific data: reviews, CI checks, and diff stats.
+
+    Review status is determined by taking the latest review per reviewer
+    (later reviews override earlier ones) and classifying as:
+    - 'changes_requested' if any reviewer's latest is CHANGES_REQUESTED
+    - 'approved' if all unique reviewers approved
+    - 'pending' otherwise
+
+    CI checks are taken from the last commit's check runs.
+
+    Args:
+        gh_pr: A PyGithub PullRequest object.
+
+    Returns:
+        Dict with review_status, review_count, unresolved_review_comments,
+        ci_passing, ci_failing, ci_pending, diff_additions, diff_deletions,
+        diff_files_changed.
+
+    """
+    # Reviews: take latest review per reviewer
+    reviews = list(gh_pr.get_reviews())
+    latest_per_reviewer: dict[str, str] = {}
+    for review in reviews:
+        if review.user and review.state not in ("COMMENTED", "DISMISSED"):
+            latest_per_reviewer[review.user.login] = review.state
+
+    if any(s == "CHANGES_REQUESTED" for s in latest_per_reviewer.values()):
+        review_status = "changes_requested"
+    elif latest_per_reviewer and all(
+        s == "APPROVED" for s in latest_per_reviewer.values()
+    ):
+        review_status = "approved"
+    else:
+        review_status = "pending"
+
+    # Unresolved review comments: position is None when a comment is resolved
+    review_comments = list(gh_pr.get_review_comments())
+    unresolved = sum(1 for c in review_comments if c.position is not None)
+
+    # CI checks from last commit
+    ci_passing: list[str] = []
+    ci_failing: list[str] = []
+    ci_pending: list[str] = []
+    commits = gh_pr.get_commits()
+    if commits.totalCount > 0:
+        last_commit = commits[commits.totalCount - 1]
+        for check in last_commit.get_check_runs():
+            if check.conclusion in ("success", "skipped", "neutral"):
+                ci_passing.append(check.name)
+            elif check.conclusion in ("failure", "cancelled", "timed_out", "action_required"):
+                ci_failing.append(check.name)
+            else:
+                ci_pending.append(check.name)
+
+    return {
+        "review_status": review_status,
+        "review_count": len(latest_per_reviewer),
+        "unresolved_review_comments": unresolved,
+        "ci_passing": ci_passing,
+        "ci_failing": ci_failing,
+        "ci_pending": ci_pending,
+        "diff_additions": gh_pr.additions,
+        "diff_deletions": gh_pr.deletions,
+        "diff_files_changed": gh_pr.changed_files,
+    }
+
+
 class GitHubCollector:
     """Collects issue, PR, release, and dependency data from GitHub."""
 
