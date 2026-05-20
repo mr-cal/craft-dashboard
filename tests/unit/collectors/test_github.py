@@ -177,15 +177,13 @@ class TestFetchPRDetails:
         mock_review.user.login = "reviewer1"
         mock_review.state = "APPROVED"
 
+        last_commit = MagicMock()
+        last_commit.get_check_runs.return_value = []
+
         mock_pr = MagicMock()
         mock_pr.get_reviews.return_value = [mock_review]
         mock_pr.get_review_comments.return_value = []
-        commits_list = MagicMock()
-        commits_list.totalCount = 1
-        commits_list.__getitem__ = MagicMock(return_value=MagicMock(
-            get_check_runs=MagicMock(return_value=[])
-        ))
-        mock_pr.get_commits.return_value = commits_list
+        mock_pr.get_commits.return_value = [last_commit]
         mock_pr.additions = 50
         mock_pr.deletions = 20
         mock_pr.changed_files = 3
@@ -210,9 +208,7 @@ class TestFetchPRDetails:
         mock_pr = MagicMock()
         mock_pr.get_reviews.return_value = reviews
         mock_pr.get_review_comments.return_value = []
-        commits_list = MagicMock()
-        commits_list.totalCount = 0
-        mock_pr.get_commits.return_value = commits_list
+        mock_pr.get_commits.return_value = []
         mock_pr.additions = 10
         mock_pr.deletions = 5
         mock_pr.changed_files = 2
@@ -267,9 +263,7 @@ class TestFetchPRDetails:
         mock_pr = MagicMock()
         mock_pr.get_reviews.return_value = []
         mock_pr.get_review_comments.return_value = [resolved, unresolved]
-        commits_list = MagicMock()
-        commits_list.totalCount = 0
-        mock_pr.get_commits.return_value = commits_list
+        mock_pr.get_commits.return_value = []
         mock_pr.additions = 0
         mock_pr.deletions = 0
         mock_pr.changed_files = 0
