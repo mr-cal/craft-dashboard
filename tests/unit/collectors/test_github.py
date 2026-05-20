@@ -240,9 +240,7 @@ class TestFetchPRDetails:
             passing_check, failing_check, pending_check
         ]
 
-        commits_list = MagicMock()
-        commits_list.totalCount = 1
-        commits_list.__getitem__ = MagicMock(return_value=last_commit)
+        commits_list = [last_commit]
 
         mock_pr = MagicMock()
         mock_pr.get_reviews.return_value = []

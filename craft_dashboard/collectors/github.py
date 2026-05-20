@@ -122,9 +122,9 @@ def _fetch_pr_details(gh_pr) -> dict:  # noqa: ANN001
     ci_passing: list[str] = []
     ci_failing: list[str] = []
     ci_pending: list[str] = []
-    commits = gh_pr.get_commits()
-    if commits.totalCount > 0:
-        last_commit = commits[commits.totalCount - 1]
+    commits_list = list(gh_pr.get_commits())
+    if commits_list:
+        last_commit = commits_list[-1]
         for check in last_commit.get_check_runs():
             if check.conclusion in ("success", "skipped", "neutral"):
                 ci_passing.append(check.name)
@@ -212,7 +212,15 @@ class GitHubCollector:
             author = gh_issue.user.login if gh_issue.user else None
 
             # Fetch comments for all items (open and closed)
-            comments = _fetch_issue_comments(gh_issue)
+            comments: list = []
+            try:
+                comments = _fetch_issue_comments(gh_issue)
+            except Exception:
+                logger.warning(
+                    "Failed to fetch comments for %s#%d",
+                    repo_name,
+                    gh_issue.number,
+                )
 
             # For all PRs, fetch reviews, CI status, and diff stats
             extra_metadata: dict = {}
