@@ -236,7 +236,7 @@ on your local machine via `lxc exec`.
 For a full collection across all 18 configured repos (takes 20-40 minutes):
 
 ```fish
-lxc exec $VM_NAME -- sudo systemctl start collect-data
+lxc exec $VM_NAME -- sudo systemctl restart collect-data
 lxc exec $VM_NAME -- sudo journalctl -u collect-data -f
 ```
 
@@ -328,7 +328,7 @@ scp craft-dashboard-initial.sql.gz $DASHBOARD_USER@$DASHBOARD_HOST:~
 # Restore on VPS
 ssh -l $DASHBOARD_USER $DASHBOARD_HOST "sudo systemctl stop craft-dashboard"
 ssh -l $DASHBOARD_USER $DASHBOARD_HOST "gunzip -c craft-dashboard-initial.sql.gz | sudo -u postgres psql craft_dashboard"
-ssh -l $DASHBOARD_USER $DASHBOARD_HOST "sudo systemctl start craft-dashboard"
+ssh -l $DASHBOARD_USER $DASHBOARD_HOST "sudo systemctl restart craft-dashboard"
 ```
 
 Load `$DASHBOARD_USER` and `$DASHBOARD_HOST` from secrets.env first:
@@ -358,10 +358,10 @@ ssh -l $DASHBOARD_USER $DASHBOARD_HOST "journalctl -u craft-dashboard -f"
 ssh -l $DASHBOARD_USER $DASHBOARD_HOST "journalctl -u collect-data -f"
 
 # Trigger manual data collection
-ssh -l $DASHBOARD_USER $DASHBOARD_HOST "sudo systemctl start collect-data"
+ssh -l $DASHBOARD_USER $DASHBOARD_HOST "sudo systemctl restart collect-data"
 
 # Trigger manual LLM evaluation
-ssh -l $DASHBOARD_USER $DASHBOARD_HOST "sudo systemctl start run-llm"
+ssh -l $DASHBOARD_USER $DASHBOARD_HOST "sudo systemctl restart run-llm"
 
 # List scheduled timers
 ssh -l $DASHBOARD_USER $DASHBOARD_HOST "systemctl list-timers"
