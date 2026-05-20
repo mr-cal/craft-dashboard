@@ -8,28 +8,20 @@
           hx-get="/issues/table"
           hx-target="#issue-table"
           hx-swap="outerHTML"
-          hx-include=".filter-bar [name]">
+          hx-include=".filter-bar [name]"
+          hx-push-url="true">
     <option value="">All Projects</option>
     {% for p in project_names %}
     <option value="{{ p }}" {% if filter_project == p %}selected{% endif %}>{{ p }}</option>
     {% endfor %}
   </select>
 
-  <select name="source"
-          hx-get="/issues/table"
-          hx-target="#issue-table"
-          hx-swap="outerHTML"
-          hx-include=".filter-bar [name]">
-    <option value="">All Sources</option>
-    <option value="github" {% if filter_source == "github" %}selected{% endif %}>GitHub</option>
-    <option value="launchpad" {% if filter_source == "launchpad" %}selected{% endif %}>Launchpad</option>
-  </select>
-
   <select name="type"
           hx-get="/issues/table"
           hx-target="#issue-table"
           hx-swap="outerHTML"
-          hx-include=".filter-bar [name]">
+          hx-include=".filter-bar [name]"
+          hx-push-url="true">
     <option value="">All Types</option>
     <option value="issue" {% if filter_type == "issue" %}selected{% endif %}>Issues</option>
     <option value="pull_request" {% if filter_type == "pull_request" %}selected{% endif %}>PRs</option>
@@ -39,7 +31,8 @@
           hx-get="/issues/table"
           hx-target="#issue-table"
           hx-swap="outerHTML"
-          hx-include=".filter-bar [name]">
+          hx-include=".filter-bar [name]"
+          hx-push-url="true">
     <option value="">All Actions</option>
     <option value="close_stale">Close (Stale)</option>
     <option value="close_duplicate">Close (Duplicate)</option>
@@ -55,7 +48,8 @@
           hx-get="/issues/table"
           hx-target="#issue-table"
           hx-swap="outerHTML"
-          hx-include=".filter-bar [name]">
+          hx-include=".filter-bar [name]"
+          hx-push-url="true">
     <option value="staleness" {% if sort_by == "staleness" %}selected{% endif %}>Sort: Staleness ↓</option>
     <option value="age" {% if sort_by == "age" %}selected{% endif %}>Sort: Age ↓</option>
     <option value="updated" {% if sort_by == "updated" %}selected{% endif %}>Sort: Recently Updated</option>

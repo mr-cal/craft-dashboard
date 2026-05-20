@@ -113,12 +113,8 @@ async def trends_page(
     )
 
 
-@router.get("/trends/data", response_class=JSONResponse)
-async def trends_data(
-    session: AsyncSession = Depends(get_db_session),
-    project: str = Query(...),
-) -> JSONResponse:
-    """Return trend data as JSON for Chart.js."""
+async def _get_trend_chart_data(session: AsyncSession, project: str) -> dict:
+    """Fetch snapshot trend data for a project and return Chart.js-compatible dict."""
     result = await session.execute(
         select(
             Snapshot.snapshot_date,
@@ -131,10 +127,10 @@ async def trends_data(
         .order_by(Snapshot.snapshot_date)
     )
 
-    dates = []
-    open_issues = []
-    open_prs = []
-    open_bugs = []
+    dates: list[str] = []
+    open_issues: list[int] = []
+    open_prs: list[int] = []
+    open_bugs: list[int] = []
 
     for row in result:
         dates.append(row.snapshot_date.isoformat())
@@ -142,21 +138,44 @@ async def trends_data(
         open_prs.append(row.open_prs)
         open_bugs.append(row.open_bugs)
 
-    return JSONResponse(
-        {
-            "labels": dates,
-            "datasets": [
-                {
-                    "label": "Open Issues",
-                    "data": open_issues,
-                    "borderColor": "#4e79a7",
-                },
-                {"label": "Open PRs", "data": open_prs, "borderColor": "#f28e2b"},
-                {
-                    "label": "Open Bugs",
-                    "data": open_bugs,
-                    "borderColor": "#e15759",
-                },
-            ],
-        }
+    return {
+        "labels": dates,
+        "datasets": [
+            {"label": "Open Issues", "data": open_issues, "borderColor": "#4e79a7"},
+            {"label": "Open PRs", "data": open_prs, "borderColor": "#f28e2b"},
+            {"label": "Open Bugs", "data": open_bugs, "borderColor": "#e15759"},
+        ],
+    }
+
+
+@router.get("/trends/data", response_class=JSONResponse)
+async def trends_data(
+    session: AsyncSession = Depends(get_db_session),
+    project: str = Query(...),
+) -> JSONResponse:
+    """Return trend data as JSON for Chart.js (API endpoint)."""
+    data = await _get_trend_chart_data(session, project)
+    return JSONResponse(data)
+
+
+@router.get("/trends/chart", response_class=HTMLResponse)
+async def trends_chart_partial(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    project: str = Query(...),
+) -> HTMLResponse:
+    """Return an HTML partial that renders the trend chart for a given project.
+
+    Called by HTMX when the project selector changes or the page loads.
+    Embeds chart data as inline JS so Chart.js can render without a second request.
+    """
+    templates: Jinja2Templates = request.app.state.templates
+    import json  # noqa: PLC0415
+
+    chart_data = await _get_trend_chart_data(session, project)
+
+    return templates.TemplateResponse(
+        request,
+        "stats/partials/trend_chart.html",
+        {"chart_data_json": json.dumps(chart_data), "project": project},
     )

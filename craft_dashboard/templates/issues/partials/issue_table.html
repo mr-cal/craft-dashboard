@@ -4,7 +4,6 @@
     <thead>
       <tr>
         <th>Project</th>
-        <th>Source</th>
         <th>Type</th>
         <th>Title</th>
         <th>Author</th>
@@ -18,8 +17,7 @@
       {% for issue in issues %}
       <tr>
         <td>{{ issue.project_name }}</td>
-        <td>{{ issue.source }}</td>
-        <td>{{ issue.issue_type }}</td>
+        <td>{{ "PR" if issue.issue_type == "pull_request" else "Issue" }}</td>
         <td><a href="{{ issue.url }}" target="_blank" rel="noopener">{{ issue.title|truncate(80) }}</a></td>
         <td>{{ issue.author or "unknown" }}</td>
         <td>{{ issue.age_days }}d</td>
@@ -41,7 +39,7 @@
       </tr>
       {% else %}
       <tr>
-        <td colspan="9">No issues found matching the current filters.</td>
+        <td colspan="8">No issues found matching the current filters.</td>
       </tr>
       {% endfor %}
     </tbody>

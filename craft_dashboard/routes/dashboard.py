@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 
 router = APIRouter()
@@ -36,6 +37,21 @@ async def index(
         select(func.count(Issue.id)).where(
             Issue.state == "open", Issue.issue_type == "pull_request"
         )
+    )
+
+    # LLM triage action counts (open issues only)
+    action_rows = await session.execute(
+        select(LLMEvaluation.suggested_action, func.count(LLMEvaluation.id))
+        .join(Issue, LLMEvaluation.issue_id == Issue.id)
+        .where(LLMEvaluation.latest.is_(True), Issue.state == "open")
+        .group_by(LLMEvaluation.suggested_action)
+    )
+    action_counts = {row[0]: row[1] for row in action_rows}
+
+    evaluated_count = await session.scalar(
+        select(func.count(LLMEvaluation.id))
+        .join(Issue, LLMEvaluation.issue_id == Issue.id)
+        .where(LLMEvaluation.latest.is_(True), Issue.state == "open")
     )
 
     # Per-project summary
@@ -72,6 +88,8 @@ async def index(
             "project_count": project_count or 0,
             "open_issues": open_issues or 0,
             "open_prs": open_prs or 0,
+            "evaluated_count": evaluated_count or 0,
+            "action_counts": action_counts,
             "projects": projects,
         },
     )

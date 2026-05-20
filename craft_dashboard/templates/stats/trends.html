@@ -9,9 +9,10 @@
 <div class="filter-bar">
   <select id="trend-project"
           name="project"
-          hx-get="/stats/trends/data"
+          hx-get="/stats/trends/chart"
           hx-target="#trend-chart-container"
-          hx-swap="innerHTML">
+          hx-swap="innerHTML"
+          hx-trigger="change, load">
     {% for p in project_names %}
     <option value="{{ p }}">{{ p }}</option>
     {% endfor %}
@@ -19,27 +20,6 @@
 </div>
 
 <div id="trend-chart-container">
-  <canvas id="trendChart" width="800" height="400"></canvas>
+  <p>Loading chart…</p>
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    if (typeof chartData !== 'undefined') {
-        const ctx = document.getElementById('trendChart').getContext('2d');
-        new Chart(ctx, {
-            type: 'line',
-            data: chartData,
-            options: {
-                responsive: true,
-                scales: {
-                    x: { title: { display: true, text: 'Date' } },
-                    y: { title: { display: true, text: 'Count' }, beginAtZero: true }
-                }
-            }
-        });
-    }
-});
-</script>
 {% endblock %}

@@ -151,12 +151,23 @@ OpenRouter costs, or limit the run with `--limit` while testing.
 Run inside the VM via `lxc exec` (all commands below run on your **local machine**):
 
 ```fish
+# Full collection across all configured projects:
 lxc exec $VM_NAME -- sudo systemctl start collect-data
 # Follow logs until it finishes (Ctrl-C when done):
 lxc exec $VM_NAME -- sudo journalctl -u collect-data -f
 ```
 
 This fetches issues, PRs, releases, and snapstore data. Re-run any time to update.
+
+**Testing with limited data** — to avoid thousands of API calls during development,
+use `--limit` (issues per repo) and `--project` (filter to specific repos):
+
+```fish
+# Fetch only 25 issues from 2 projects (fast, good for testing):
+lxc exec $VM_NAME -- sudo -u craft-dashboard bash -c \
+  'cd /opt/craft-dashboard && source .env && .venv/bin/python scripts/collect_data.py \
+   --source github --limit 25 --project snapcraft --project rockcraft'
+```
 
 ### Step 2: Run LLM evaluation
 

@@ -1,0 +1,22 @@
+{# Partial: trend chart canvas + inline data. Swapped via HTMX on project change. #}
+<canvas id="trendChart" width="800" height="400"></canvas>
+<script>
+(function() {
+    var chartData = {{ chart_data_json | safe }};
+    var canvas = document.getElementById('trendChart');
+    if (window._trendChart) {
+        window._trendChart.destroy();
+    }
+    window._trendChart = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: chartData,
+        options: {
+            responsive: true,
+            scales: {
+                x: { title: { display: true, text: 'Date' } },
+                y: { title: { display: true, text: 'Count' }, beginAtZero: true }
+            }
+        }
+    });
+})();
+</script>
