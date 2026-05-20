@@ -17,18 +17,14 @@ The main features are:
 ## Architecture
 
 ```
+     your machine
   ┌─────────────────────────────────────────────────────────────────┐
-  │  your machine                                                   │
-  │                                                                 │
   │  provisioning/secrets.env ──> make deploy-vm ──> Ansible ──┐    │
-  │                                                            │    │
   └────────────────────────────────────────────────────────────┼────┘
                                                                │
                                                          SSH   │
-                                                               ▼
+     LXD VM or VPS                                             ▼
   ┌─────────────────────────────────────────────────────────────────┐
-  │  LXD VM or VPS                                                  │
-  │                                                                 │
   │  nginx :80/:443                                                 │
   │    └──▶ gunicorn 127.0.0.1:8000 (4 uvicorn workers)             │
   │           └──▶ FastAPI app (craft_dashboard/)                   │
