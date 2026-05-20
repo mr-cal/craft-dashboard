@@ -47,6 +47,7 @@ class Issue(Base):
     )
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    comments: Mapped[list] = mapped_column(JSONB, nullable=True, default=list)
     last_fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
