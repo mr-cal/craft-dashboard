@@ -58,7 +58,7 @@ def _format_comments(comments: list[dict]) -> str:
     for c in comments:
         date = (c.get("created_at") or "")[:10]
         ctype = " [review]" if c.get("type") == "review_comment" else ""
-        lines.append(f"- @{c['author']}{ctype} ({date}): {c['body']}")
+        lines.append(f"- @{c.get('author', 'unknown')}{ctype} ({date}): {c.get('body') or '(no comment)'}")
     return "\n".join(lines)
 
 

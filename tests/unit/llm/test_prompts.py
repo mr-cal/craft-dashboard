@@ -227,3 +227,46 @@ class TestBuildEvaluationPromptWithContext:
 
         assert isinstance(messages, list)
         assert len(messages) == 2
+
+
+class TestFormatCommentsEdgeCases:
+    """Edge case tests for _format_comments helper."""
+
+    def test_missing_author_key(self) -> None:
+        """Missing 'author' key falls back to 'unknown'."""
+        from craft_dashboard.llm.prompts import _format_comments
+
+        comments = [{"body": "hello", "created_at": "2024-01-01T00:00:00+00:00", "type": "comment"}]
+        result = _format_comments(comments)
+
+        assert "unknown" in result
+        assert "hello" in result
+
+    def test_missing_body_key(self) -> None:
+        """Missing 'body' key falls back to '(no comment)'."""
+        from craft_dashboard.llm.prompts import _format_comments
+
+        comments = [{"author": "alice", "created_at": "2024-01-01T00:00:00+00:00", "type": "comment"}]
+        result = _format_comments(comments)
+
+        assert "alice" in result
+        assert "(no comment)" in result
+
+    def test_none_body(self) -> None:
+        """None body falls back to '(no comment)'."""
+        from craft_dashboard.llm.prompts import _format_comments
+
+        comments = [{"author": "alice", "body": None, "created_at": "2024-01-01T00:00:00+00:00", "type": "comment"}]
+        result = _format_comments(comments)
+
+        assert "(no comment)" in result
+
+    def test_none_created_at(self) -> None:
+        """None created_at produces empty date field without crash."""
+        from craft_dashboard.llm.prompts import _format_comments
+
+        comments = [{"author": "alice", "body": "hi", "created_at": None, "type": "comment"}]
+        result = _format_comments(comments)
+
+        assert "alice" in result
+        assert "hi" in result
