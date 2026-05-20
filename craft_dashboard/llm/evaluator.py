@@ -77,20 +77,30 @@ def _compute_content_hash(
     body: str | None,
     state: str,
     labels: list[str],
+    comments: list[dict] | None = None,
 ) -> str:
     """Compute a SHA-256 hash of issue content for change detection.
+
+    Includes comments so that new discussion triggers re-evaluation.
 
     Args:
         title: Issue title.
         body: Issue body text.
         state: Issue state.
         labels: List of label names.
+        comments: Recent comments list (optional).
 
     Returns:
         A 64-character hex string.
 
     """
-    content = f"{title}|{body or ''}|{state}|{','.join(sorted(labels))}"
+    comments_repr = ""
+    if comments:
+        comments_repr = "|" + ";".join(
+            f"{c.get('author','')}:{c.get('body','')[:100]}"
+            for c in comments
+        )
+    content = f"{title}|{body or ''}|{state}|{','.join(sorted(labels))}{comments_repr}"
     return hashlib.sha256(content.encode()).hexdigest()
 
 
@@ -127,6 +137,8 @@ class IssueEvaluator:
         author: str,
         is_maintainer: bool,
         comment_count: int,
+        comments: list[dict] | None = None,
+        pr_details: dict | None = None,
         existing_hash: str | None = None,
     ) -> dict | None:
         """Evaluate a single issue or PR.
@@ -141,6 +153,8 @@ class IssueEvaluator:
             author: Author username.
             is_maintainer: Whether the author is a project maintainer.
             comment_count: Number of comments.
+            comments: Recent comment dicts (optional).
+            pr_details: PR review/CI/diff data (optional).
             existing_hash: Content hash from previous evaluation, if any.
 
         Returns:
@@ -148,7 +162,9 @@ class IssueEvaluator:
 
         """
         label_names = labels if isinstance(labels, list) else []
-        current_hash = _compute_content_hash(title, body, "open", label_names)
+        current_hash = _compute_content_hash(
+            title, body, "open", label_names, comments=comments
+        )
 
         if not _needs_reevaluation(existing_hash, current_hash):
             logger.debug("Skipping evaluation (content unchanged): %s", title)
@@ -162,6 +178,7 @@ class IssueEvaluator:
             body=body,
             issue_type=issue_type,
             labels=label_names,
+            comments=comments,
         )
         summary_response = await self.client.chat(
             model=self.summary_model,
@@ -182,6 +199,8 @@ class IssueEvaluator:
             author=author,
             is_maintainer=is_maintainer,
             comment_count=comment_count,
+            comments=comments,
+            pr_details=pr_details,
         )
         eval_response = await self.client.chat(
             model=self.evaluation_model,

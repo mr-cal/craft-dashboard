@@ -1,7 +1,8 @@
 """Tests for the issue evaluator."""
 
 import json
-from unittest.mock import MagicMock
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from craft_dashboard.llm.evaluator import (
     IssueEvaluator,
@@ -80,3 +81,101 @@ class TestIssueEvaluator:
 
         assert evaluator.summary_model == "google/gemini-flash-1.5"
         assert evaluator.evaluation_model == "anthropic/claude-sonnet-4-20250514"
+
+
+class TestComputeContentHash:
+    """Tests for _compute_content_hash."""
+
+    def test_new_comment_triggers_reevaluation(self) -> None:
+        """Adding a new comment changes the content hash."""
+        from craft_dashboard.llm.evaluator import _compute_content_hash
+
+        hash_no_comments = _compute_content_hash(
+            "title", "body", "open", ["bug"], comments=[]
+        )
+        hash_with_comment = _compute_content_hash(
+            "title", "body", "open", ["bug"],
+            comments=[{"author": "alice", "body": "Is this fixed?", "created_at": "2024-01-01T00:00:00+00:00", "type": "comment"}],
+        )
+
+        assert hash_no_comments != hash_with_comment
+
+    def test_same_comments_same_hash(self) -> None:
+        """Same comments produce same hash."""
+        from craft_dashboard.llm.evaluator import _compute_content_hash
+
+        comments = [{"author": "alice", "body": "hi", "created_at": "2024-01-01T00:00:00+00:00", "type": "comment"}]
+        hash1 = _compute_content_hash("t", "b", "open", [], comments=comments)
+        hash2 = _compute_content_hash("t", "b", "open", [], comments=comments)
+
+        assert hash1 == hash2
+
+    def test_comments_default_empty(self) -> None:
+        """Hash is stable when comments kwarg is omitted."""
+        from craft_dashboard.llm.evaluator import _compute_content_hash
+
+        h1 = _compute_content_hash("t", "b", "open", [])
+        h2 = _compute_content_hash("t", "b", "open", [], comments=None)
+
+        assert h1 == h2
+
+
+class TestEvaluateIssueWithComments:
+    """Tests that evaluate_issue passes comments and pr_details to prompt builders."""
+
+    @pytest.mark.asyncio
+    async def test_evaluate_passes_comments_to_prompt(self) -> None:
+        """Comments from call are forwarded to the prompt builders."""
+        from craft_dashboard.llm.client import OpenRouterResponse
+
+        mock_summary_response = OpenRouterResponse(
+            content="A bug report.",
+            total_tokens=15,
+            prompt_tokens=10,
+            completion_tokens=5,
+        )
+        mock_eval_response = OpenRouterResponse(
+            content='{"scores": {"staleness": 10}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
+            total_tokens=50,
+            prompt_tokens=20,
+            completion_tokens=30,
+        )
+
+        mock_client = MagicMock()
+        mock_client.chat = AsyncMock(
+            side_effect=[mock_summary_response, mock_eval_response]
+        )
+
+        evaluator = IssueEvaluator(
+            client=mock_client,
+            summary_model="test-sum",
+            evaluation_model="test-eval",
+        )
+
+        comments = [{"author": "alice", "body": "hi", "created_at": "2024-01-01T00:00:00+00:00", "type": "comment"}]
+
+        with patch("craft_dashboard.llm.evaluator.build_summary_prompt") as mock_sum, \
+             patch("craft_dashboard.llm.evaluator.build_evaluation_prompt") as mock_eval:
+            mock_sum.return_value = [{"role": "user", "content": "test"}]
+            mock_eval.return_value = [{"role": "user", "content": "test"}]
+
+            await evaluator.evaluate_issue(
+                title="Bug",
+                body="Body",
+                issue_type="issue",
+                labels=[],
+                age_days=5,
+                last_activity_days=1,
+                author="user",
+                is_maintainer=False,
+                comment_count=1,
+                comments=comments,
+            )
+
+        mock_sum.assert_called_once()
+        call_kwargs = mock_sum.call_args.kwargs
+        assert call_kwargs["comments"] == comments
+
+        mock_eval.assert_called_once()
+        eval_kwargs = mock_eval.call_args.kwargs
+        assert eval_kwargs["comments"] == comments
