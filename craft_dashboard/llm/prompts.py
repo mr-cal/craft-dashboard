@@ -68,7 +68,7 @@ def build_summary_prompt(
         f"Type: {type_label}\n"
         f"Title: {title}\n"
         f"Labels: {label_str}\n"
-        f"Body:\n{(body or '(no body)')[:3000]}"
+        f"Body:\n{(body or '(no body)')[:10000]}"
     )
 
     return [
@@ -122,7 +122,7 @@ def build_evaluation_prompt(  # noqa: PLR0913
         f"Age: {age_days} days\n"
         f"Last activity: {last_activity_days} days ago\n"
         f"Comment count: {comment_count}\n"
-        f"Body:\n{(body or '(no body)')[:3000]}"
+        f"Body:\n{(body or '(no body)')[:10000]}"
     )
 
     return [
