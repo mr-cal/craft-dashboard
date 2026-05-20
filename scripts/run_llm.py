@@ -118,6 +118,13 @@ async def _evaluate_issues(
         age_days = (now - created).days
         last_activity_days = (now - updated).days
 
+        issue_comments = issue.comments if issue.comments else []
+        pr_details = (
+            issue.metadata_
+            if issue.issue_type == "pull_request" and issue.metadata_
+            else None
+        )
+
         try:
             result = await evaluator.evaluate_issue(
                 title=issue.title,
@@ -128,7 +135,9 @@ async def _evaluate_issues(
                 last_activity_days=last_activity_days,
                 author=issue.author or "unknown",
                 is_maintainer=issue.author in maintainers if issue.author else False,
-                comment_count=0,  # Could be fetched from metadata
+                comment_count=len(issue_comments),
+                comments=issue_comments,
+                pr_details=pr_details,
                 existing_hash=existing_hash,
             )
         except QuotaExhaustedError:
