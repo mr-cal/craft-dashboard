@@ -31,16 +31,87 @@
 
 <hr class="p-rule" />
 
-<h3>API Endpoints</h3>
-<p>These require a bearer token (<code>ADMIN_TOKEN</code> from secrets.env).</p>
-<table>
-  <thead>
-    <tr><th>Endpoint</th><th>Method</th><th>Description</th></tr>
-  </thead>
-  <tbody>
-    <tr><td><code>/admin/refresh</code></td><td>POST</td><td>Trigger data collection</td></tr>
-    <tr><td><code>/admin/re-evaluate</code></td><td>POST</td><td>Trigger LLM re-evaluation</td></tr>
-    <tr><td><code>/admin/health</code></td><td>GET</td><td>Detailed health check (requires auth)</td></tr>
-  </tbody>
-</table>
+<h3>Admin Actions</h3>
+<div style="margin-bottom: 1rem;">
+  <label for="admin-token">Admin Token:</label>
+  <input type="password" id="admin-token" placeholder="Enter admin token" style="width: 300px; margin-right: 0.5rem;" />
+  <button class="p-button--neutral" onclick="saveToken()">Save Token</button>
+  <small id="token-status" style="margin-left: 0.5rem;"></small>
+</div>
+
+<div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+  <div style="flex: 1; min-width: 200px;">
+    <button class="p-button--positive" id="refresh-btn" onclick="triggerRefresh()">Refresh Data</button>
+    <div id="refresh-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
+  </div>
+  <div style="flex: 1; min-width: 200px;">
+    <button class="p-button--positive" id="evaluate-btn" onclick="triggerEvaluate()">Re-evaluate Issues</button>
+    <div id="evaluate-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
+  </div>
+  <div style="flex: 1; min-width: 200px;">
+    <button class="p-button--neutral" id="distribute-btn" onclick="triggerDistribute()">Redistribute Schedule</button>
+    <div id="distribute-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
+  </div>
+</div>
+
+<script>
+function saveToken() {
+  const token = document.getElementById('admin-token').value;
+  if (token) {
+    sessionStorage.setItem('adminToken', token);
+    document.getElementById('token-status').textContent = '✓ Token saved';
+    document.getElementById('token-status').style.color = 'green';
+  } else {
+    document.getElementById('token-status').textContent = '✗ Token required';
+    document.getElementById('token-status').style.color = 'red';
+  }
+}
+
+async function callEndpoint(endpoint, btnId, statusId, successMsg) {
+  const token = sessionStorage.getItem('adminToken');
+  if (!token) {
+    document.getElementById(statusId).innerHTML = '<span style="color: red;">✗ No token saved</span>';
+    return;
+  }
+
+  const btn = document.getElementById(btnId);
+  const statusDiv = document.getElementById(statusId);
+  
+  btn.disabled = true;
+  statusDiv.innerHTML = '<span style="color: gray;">Running...</span>';
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      statusDiv.innerHTML = `<span style="color: green;">✓ ${data.message || successMsg}</span>`;
+    } else {
+      statusDiv.innerHTML = `<span style="color: red;">✗ ${data.detail || 'Error'}</span>`;
+    }
+  } catch (error) {
+    statusDiv.innerHTML = `<span style="color: red;">✗ ${error.message}</span>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function triggerRefresh() {
+  callEndpoint('/admin/refresh', 'refresh-btn', 'refresh-status', 'Refresh queued');
+}
+
+function triggerEvaluate() {
+  callEndpoint('/admin/re-evaluate', 'evaluate-btn', 'evaluate-status', 'Evaluation queued');
+}
+
+function triggerDistribute() {
+  callEndpoint('/admin/distribute', 'distribute-btn', 'distribute-status', 'Schedule redistributed');
+}
+</script>
 {% endblock %}

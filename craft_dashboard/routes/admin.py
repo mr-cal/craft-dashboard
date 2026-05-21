@@ -104,6 +104,52 @@ async def trigger_re_evaluation(
     )
 
 
+@router.post("/distribute")
+async def distribute_refresh_schedule(
+    request: Request,
+    authorization: str = Header(default=""),
+    session: AsyncSession = Depends(get_db_session),
+) -> JSONResponse:
+    """Distribute refresh schedules evenly over the next N days.
+
+    Requires admin authentication via Bearer token.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from craft_dashboard.models.refresh_schedule import RefreshSchedule
+
+    admin_token = _get_admin_token(request)
+    verify_admin_token(authorization, admin_token)
+
+    settings = request.app.state.settings
+    refresh_age_days = settings.refresh_age_days
+
+    result = await session.execute(select(RefreshSchedule))
+    schedules = list(result.scalars())
+
+    if not schedules:
+        return JSONResponse(
+            {"status": "success", "message": "No schedules to distribute.", "count": 0}
+        )
+
+    now = datetime.now(timezone.utc)
+    total_schedules = len(schedules)
+
+    for idx, schedule in enumerate(schedules):
+        day_offset = (idx * refresh_age_days) // total_schedules
+        schedule.next_refresh_at = now + timedelta(days=day_offset)
+
+    await session.commit()
+
+    return JSONResponse(
+        {
+            "status": "success",
+            "message": f"Distributed {total_schedules} schedules over {refresh_age_days} days.",
+            "count": total_schedules,
+        }
+    )
+
+
 @router.get("/health")
 async def admin_health(
     request: Request,
