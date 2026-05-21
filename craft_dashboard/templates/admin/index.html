@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Admin - craft-dashboard{% endblock %}
+{% block content %}
+<h2>Admin</h2>
+
+<h3>LLM Triage Status</h3>
+<p>{{ evaluated_count }} of {{ total_open }} open issues and PRs have been evaluated by the LLM.</p>
+
+{% if action_counts %}
+<table>
+  <thead>
+    <tr>
+      <th>Suggested Action</th>
+      <th>Count</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for action, count in action_counts.items() | sort %}
+    <tr>
+      <td><span class="action-badge">{{ action | replace("_", " ") }}</span></td>
+      <td>{{ count }}</td>
+      <td><a href="/issues?action={{ action }}">View</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No evaluations yet. Run <code>scripts/run_llm.py</code> to triage open issues.</p>
+{% endif %}
+
+<hr class="p-rule" />
+
+<h3>API Endpoints</h3>
+<p>These require a bearer token (<code>ADMIN_TOKEN</code> from secrets.env).</p>
+<table>
+  <thead>
+    <tr><th>Endpoint</th><th>Method</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>/admin/refresh</code></td><td>POST</td><td>Trigger data collection</td></tr>
+    <tr><td><code>/admin/re-evaluate</code></td><td>POST</td><td>Trigger LLM re-evaluation</td></tr>
+    <tr><td><code>/admin/health</code></td><td>GET</td><td>Detailed health check (requires auth)</td></tr>
+  </tbody>
+</table>
+{% endblock %}
