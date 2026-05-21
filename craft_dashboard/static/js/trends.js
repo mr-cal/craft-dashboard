@@ -123,10 +123,16 @@ function updateOpenIssuesChart() {
   const firstProject = selected[0];
   issuesChart.data.labels = filteredProjects[firstProject].dates;
   
-  const dataKey = getCurrentView() === "all" ? "open_issues" : "open_issues_external";
+  const dataKey = getDataKey("open_issues");
+  if (!dataKey) {
+    issuesChart.data.labels = [];
+    issuesChart.data.datasets = [];
+    issuesChart.update();
+    return;
+  }
   
   issuesChart.data.datasets = selected.map((name) => {
-    const rawData = filteredProjects[name][dataKey];
+    const rawData = filteredProjects[name][dataKey] || filteredProjects[name]["open_issues"];
     const smoothedData = rollingAverage(rawData, 28); // 4-week rolling average
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
     const color = colors[colorIdx % colors.length];
@@ -209,10 +215,16 @@ function updateClosedChart() {
   const firstProject = selected[0];
   closedChart.data.labels = filteredProjects[firstProject].dates;
   
-  const dataKey = getCurrentView() === "all" ? "closed_issues" : "closed_issues_external";
+  const dataKey = getDataKey("closed_issues");
+  if (!dataKey) {
+    closedChart.data.labels = [];
+    closedChart.data.datasets = [];
+    closedChart.update();
+    return;
+  }
   
   closedChart.data.datasets = selected.map((name) => {
-    const rawData = filteredProjects[name][dataKey].map(v => v * 7); // Scale to per-week
+    const rawData = (filteredProjects[name][dataKey] || filteredProjects[name]["closed_issues"]).map(v => v * 7); // Scale to per-week
     const smoothedData = rollingAverage(rawData, 30); // 30-day rolling average
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
     const color = colors[colorIdx % colors.length];
@@ -261,10 +273,24 @@ function updateSnapshotCharts() {
   }
   
   const labels = selected;
+  const view = getCurrentView();
+  
+  if (view === "none") {
+    snapshotOpenChart.data.labels = [];
+    snapshotOpenChart.data.datasets = [];
+    snapshotAgeChart.data.labels = [];
+    snapshotAgeChart.data.datasets = [];
+    snapshotClosedChart.data.labels = [];
+    snapshotClosedChart.data.datasets = [];
+    snapshotOpenChart.update();
+    snapshotAgeChart.update();
+    snapshotClosedChart.update();
+    return;
+  }
   
   // Open Issues/PRs Chart
-  const issueKey = getCurrentView() === "all" ? "open_issues" : "nm_open_issues";
-  const prKey = getCurrentView() === "all" ? "open_prs" : "nm_open_prs";
+  const issueKey = view === "external" ? "nm_open_issues" : "open_issues";
+  const prKey = view === "external" ? "nm_open_prs" : "open_prs";
   
   snapshotOpenChart.data.labels = labels;
   snapshotOpenChart.data.datasets = [
@@ -285,8 +311,8 @@ function updateSnapshotCharts() {
   ];
   
   // Median Age Chart
-  const issueAgeKey = getCurrentView() === "all" ? "median_issue_age" : "nm_median_issue_age";
-  const prAgeKey = getCurrentView() === "all" ? "median_pr_age" : "nm_median_pr_age";
+  const issueAgeKey = view === "external" ? "nm_median_issue_age" : "median_issue_age";
+  const prAgeKey = view === "external" ? "nm_median_pr_age" : "median_pr_age";
   
   snapshotAgeChart.data.labels = labels;
   snapshotAgeChart.data.datasets = [
@@ -307,8 +333,8 @@ function updateSnapshotCharts() {
   ];
   
   // Closed Last Year Chart
-  const closedIssueKey = getCurrentView() === "all" ? "closed_issues_year" : "nm_closed_issues_year";
-  const closedPrKey = getCurrentView() === "all" ? "closed_prs_year" : "nm_closed_prs_year";
+  const closedIssueKey = view === "external" ? "nm_closed_issues_year" : "closed_issues_year";
+  const closedPrKey = view === "external" ? "nm_closed_prs_year" : "closed_prs_year";
   
   snapshotClosedChart.data.labels = labels;
   snapshotClosedChart.data.datasets = [
@@ -348,13 +374,26 @@ function getCurrentView() {
   const maintainers = document.getElementById("view-maintainers")?.checked ?? true;
   const contributors = document.getElementById("view-contributors")?.checked ?? true;
   const bots = document.getElementById("view-bots")?.checked ?? true;
-  // Only "contributors only" maps to external data; everything else uses all data
-  if (contributors && !maintainers && !bots) return "external";
+  
+  if (!maintainers && !contributors && !bots) return "none";
+  if (maintainers && contributors && bots) return "all";
+  if (!maintainers && (contributors || bots)) return "external";
+  if (maintainers && !contributors && !bots) return "internal";
+  // Mixed: maintainers + some external
   return "all";
+}
+
+function getDataKey(baseKey) {
+  const view = getCurrentView();
+  if (view === "none") return null;
+  if (view === "external") return baseKey + "_external";
+  if (view === "internal") return baseKey + "_internal";
+  return baseKey; // "all"
 }
 
 function onViewChange() {
   updateOpenIssuesChart();
+  updateMedianAgeChart();
   updateClosedChart();
   updateSnapshotCharts();
 }
@@ -423,15 +462,10 @@ function applyDateFilter() {
 }
 
 function resetDateFilter() {
-  filteredProjects = allProjects;
   const today = new Date().toISOString().slice(0, 10);
-  document.getElementById("date-start").value = "2020-01-01";
+  document.getElementById("date-start").value = "2021-01-01";
   document.getElementById("date-end").value = today;
-  
-  updateOpenIssuesChart();
-  updateMedianAgeChart();
-  updateClosedChart();
-  updateSnapshotCharts();
+  applyDateFilter();
 }
 
 // ============================================================================
@@ -516,17 +550,17 @@ populateSnapshotCheckboxes();
   document.getElementById(id)?.addEventListener("change", onViewChange);
 });
 
-// Initialize date range inputs
+// Initialize date range inputs and apply default filter
 const today = new Date().toISOString().slice(0, 10);
-document.getElementById("date-start").value = "2020-01-01";
+document.getElementById("date-start").value = "2021-01-01";
 document.getElementById("date-end").value = today;
 
 // Wire up date filter buttons (module scope, so we use addEventListener)
 document.getElementById("btn-date-apply").addEventListener("click", applyDateFilter);
 document.getElementById("btn-date-reset").addEventListener("click", resetDateFilter);
 
-// Initial render
-updateOpenIssuesChart();
-updateMedianAgeChart();
-updateClosedChart();
+// Apply default date filter on page load (2021 to today)
+applyDateFilter();
+
+// Initial render (applyDateFilter already calls these, but ensure snapshot charts are updated)
 updateSnapshotCharts();

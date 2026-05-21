@@ -15,9 +15,11 @@ Environment variables:
 """
 
 import asyncio
+from dataclasses import dataclass, field
 import logging
 import pathlib
 import sys
+import time
 
 import click
 
@@ -42,6 +44,35 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CollectionStats:
+    """Collection summary for logging."""
+
+    projects_processed: set[str] = field(default_factory=set)
+    issues_collected: int = 0
+
+    def merge(self, other: "CollectionStats") -> None:
+        """Merge another collection summary into this one."""
+        self.projects_processed.update(other.projects_processed)
+        self.issues_collected += other.issues_collected
+
+
+def _format_duration(seconds: float) -> str:
+    """Format elapsed seconds for human-readable logs."""
+    total_seconds = max(0, round(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+
+    parts: list[str] = []
+    if hours:
+        parts.append(f"{hours}h")
+    if hours or minutes:
+        parts.append(f"{minutes}m")
+    parts.append(f"{secs}s")
+    return " ".join(parts)
+
 
 async def _get_or_create_project(session, name: str, category: str, order: int) -> int:
     """Get or create a project, returning its ID."""
@@ -69,7 +100,8 @@ async def _collect_github(
     session_factory,
     limit: int = 0,
     projects: list[str] | None = None,
-) -> None:
+    run_started_at: float | None = None,
+) -> CollectionStats:
     """Run GitHub data collection for all projects due for refresh."""
     from sqlalchemy import select
 
@@ -80,6 +112,7 @@ async def _collect_github(
         org="canonical",
         maintainers=config.maintainers,
     )
+    stats = CollectionStats()
 
     project_list = projects if projects else config.craft_projects
     for i, project_name in enumerate(project_list):
@@ -90,6 +123,13 @@ async def _collect_github(
             project_id = await _get_or_create_project(
                 session, project_name, category, i
             )
+            stats.projects_processed.add(project_name)
+            project_started_at = time.monotonic()
+            elapsed = ""
+            if run_started_at is not None:
+                elapsed = f" (elapsed: {_format_duration(time.monotonic() - run_started_at)})"
+
+            logger.info("Collecting GitHub data for %s%s", project_name, elapsed)
 
             # Always collect dependencies (independent of refresh schedule)
             dep_collector = DependencyCollector(
@@ -97,8 +137,15 @@ async def _collect_github(
                 org="canonical",
             )
             try:
-                await dep_collector.collect_dependencies(
+                dep_started_at = time.monotonic()
+                dependency_count = await dep_collector.collect_dependencies(
                     project_name, project_id, ["main"], session,
+                )
+                logger.info(
+                    "  canonical/%s: dependencies collected (%d dependencies) in %s",
+                    project_name,
+                    dependency_count,
+                    _format_duration(time.monotonic() - dep_started_at),
                 )
             except Exception:
                 logger.warning(
@@ -118,25 +165,57 @@ async def _collect_github(
 
             if not is_due_for_refresh(next_refresh):
                 logger.info("Skipping %s (not due for full refresh)", project_name)
+                logger.info(
+                    "Completed GitHub data for %s in %s (full refresh skipped)",
+                    project_name,
+                    _format_duration(time.monotonic() - project_started_at),
+                )
                 continue
 
-            logger.info("Collecting GitHub data for %s", project_name)
             try:
-                await collector.collect_issues(
+                issues_started_at = time.monotonic()
+                issues_collected = await collector.collect_issues(
                     project_name, project_id, session,
                     limit=limit,
                     refresh_age_days=settings.refresh_age_days,
                 )
-                await collector.collect_releases(
+                stats.issues_collected += issues_collected
+                logger.info(
+                    "  canonical/%s: issues collection completed in %s (%d issues collected)",
+                    project_name,
+                    _format_duration(time.monotonic() - issues_started_at),
+                    issues_collected,
+                )
+
+                releases_started_at = time.monotonic()
+                release_count = await collector.collect_releases(
                     project_name, project_id, session,
                     hotfix_min_version=config.hotfix_min_versions.get(project_name),
                 )
+                logger.info(
+                    "  canonical/%s: releases collected (%d branches) in %s",
+                    project_name,
+                    release_count,
+                    _format_duration(time.monotonic() - releases_started_at),
+                )
+
+                snapshot_started_at = time.monotonic()
                 await generate_snapshot(
                     project_id, session, set(config.maintainers)
+                )
+                logger.info(
+                    "  Generated snapshot for %s in %s",
+                    project_name,
+                    _format_duration(time.monotonic() - snapshot_started_at),
                 )
 
                 await update_refresh_schedule(
                     project_id, "github", config.refresh_interval_days, session
+                )
+                logger.info(
+                    "Completed GitHub data for %s in %s",
+                    project_name,
+                    _format_duration(time.monotonic() - project_started_at),
                 )
             except Exception as exc:
                 logger.exception("Failed to collect GitHub data for %s", project_name)
@@ -149,28 +228,33 @@ async def _collect_github(
             # Avoid GitHub secondary rate limits between repos
             await asyncio.sleep(1)
 
+    return stats
+
 
 async def _collect_launchpad(config, session_factory, projects: list[str] | None = None) -> None:
-    """Run Launchpad data collection for all configured projects."""
+    """Run Launchpad data collection for all configured projects.
+    
+    Creates a separate project entry like "snapcraft (launchpad)" for each
+    Launchpad project so it appears as a distinct series in trends charts.
+    """
     collector = LaunchpadCollector(projects=config.launchpad_projects)
 
+    # Get the display order of the last project to place LP projects after
+    last_order = len(config.craft_projects)
+
     lp_list = [p for p in config.launchpad_projects if projects is None or p in projects]
-    for lp_name in lp_list:
+    for i, lp_name in enumerate(lp_list):
         async with session_factory() as session:
-            from sqlalchemy import select
-
-            from craft_dashboard.models.project import Project
-
-            result = await session.execute(
-                select(Project.id).where(Project.name == lp_name)
+            lp_project_name = f"{lp_name} (launchpad)"
+            project_id = await _get_or_create_project(
+                session, lp_project_name, "launchpad", last_order + i
             )
-            project_id = result.scalar_one_or_none()
-            if project_id is None:
-                logger.warning("Project %s not found in DB, skipping LP collection", lp_name)
-                continue
 
-            logger.info("Collecting Launchpad data for %s", lp_name)
+            logger.info("Collecting Launchpad data for %s", lp_project_name)
             await collector.collect_bugs(lp_name, project_id, session)
+            await generate_snapshot(
+                project_id, session, set(config.maintainers)
+            )
 
 
 async def _main(source: str, limit: int, projects: list[str], verbose: bool) -> None:
@@ -190,11 +274,36 @@ async def _main(source: str, limit: int, projects: list[str], verbose: bool) -> 
     if project_filter:
         logger.info("Project filter: %s", project_filter)
 
+    run_started_at = time.monotonic()
+    stats = CollectionStats()
+
     try:
         if source in ("all", "github"):
-            await _collect_github(settings, config, session_factory, limit=limit, projects=project_filter)
+            stats.merge(
+                await _collect_github(
+                    settings,
+                    config,
+                    session_factory,
+                    limit=limit,
+                    projects=project_filter,
+                    run_started_at=run_started_at,
+                )
+            )
         if source in ("all", "launchpad"):
-            await _collect_launchpad(config, session_factory, projects=project_filter)
+            stats.merge(
+                await _collect_launchpad(
+                    config,
+                    session_factory,
+                    projects=project_filter,
+                    run_started_at=run_started_at,
+                )
+            )
+        logger.info(
+            "Collection complete: %d projects processed, %d issues collected, total time: %s",
+            len(stats.projects_processed),
+            stats.issues_collected,
+            _format_duration(time.monotonic() - run_started_at),
+        )
     finally:
         await engine.dispose()
 

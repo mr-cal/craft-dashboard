@@ -1,7 +1,8 @@
 """Snapshot generator for daily issue/PR count tracking."""
 
 import logging
-from datetime import date
+import statistics
+from datetime import UTC, date, datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -9,18 +10,26 @@ logger = logging.getLogger(__name__)
 def compute_snapshot_counts(
     issues: list[dict],
     maintainers: set[str],
+    today: date | None = None,
 ) -> dict[str, int]:
     """Compute snapshot counts from a list of issue dicts.
 
     Args:
-        issues: List of dicts with keys: issue_type, state, author, labels.
+        issues: List of dicts with keys: issue_type, state, author, labels,
+                created_at, closed_at.
         maintainers: Set of maintainer usernames.
+        today: Reference date for age calculations (defaults to today).
 
     Returns:
         Dict with snapshot count fields.
 
     """
-    counts = {
+    if today is None:
+        today = date.today()
+    today_dt = datetime.combine(today, datetime.min.time(), tzinfo=UTC)
+    one_day_ago = today_dt - timedelta(days=1)
+
+    counts: dict[str, int] = {
         "open_issues": 0,
         "open_prs": 0,
         "open_issues_external": 0,
@@ -28,29 +37,69 @@ def compute_snapshot_counts(
         "open_prs_external": 0,
         "open_prs_internal": 0,
         "open_bugs": 0,
+        "median_issue_age": 0,
+        "median_pr_age": 0,
+        "closed_issues": 0,
+        "closed_prs": 0,
+        "closed_issues_external": 0,
+        "closed_issues_internal": 0,
+        "closed_prs_external": 0,
+        "closed_prs_internal": 0,
     }
 
+    open_issue_ages: list[int] = []
+    open_pr_ages: list[int] = []
+
     for issue in issues:
-        if issue["state"] not in ("open",):
-            continue
-
         is_internal = issue.get("author") in maintainers
+        created_at = issue.get("created_at")
+        closed_at = issue.get("closed_at")
 
-        if issue["issue_type"] == "issue":
-            counts["open_issues"] += 1
-            if is_internal:
-                counts["open_issues_internal"] += 1
-            else:
-                counts["open_issues_external"] += 1
-            if "bug" in issue.get("labels", []):
-                counts["open_bugs"] += 1
+        if issue["state"] in ("open",):
+            age_days = 0
+            if created_at:
+                ca = created_at.replace(tzinfo=UTC) if created_at.tzinfo is None else created_at
+                age_days = max(0, (today_dt - ca).days)
 
-        elif issue["issue_type"] == "pull_request":
-            counts["open_prs"] += 1
-            if is_internal:
-                counts["open_prs_internal"] += 1
-            else:
-                counts["open_prs_external"] += 1
+            if issue["issue_type"] == "issue":
+                counts["open_issues"] += 1
+                open_issue_ages.append(age_days)
+                if is_internal:
+                    counts["open_issues_internal"] += 1
+                else:
+                    counts["open_issues_external"] += 1
+                if "bug" in issue.get("labels", []):
+                    counts["open_bugs"] += 1
+            elif issue["issue_type"] == "pull_request":
+                counts["open_prs"] += 1
+                open_pr_ages.append(age_days)
+                if is_internal:
+                    counts["open_prs_internal"] += 1
+                else:
+                    counts["open_prs_external"] += 1
+
+        elif issue["state"] in ("closed", "merged"):
+            # Count issues closed on this snapshot day
+            if closed_at:
+                ca = closed_at.replace(tzinfo=UTC) if closed_at.tzinfo is None else closed_at
+                if ca >= one_day_ago:
+                    if issue["issue_type"] == "issue":
+                        counts["closed_issues"] += 1
+                        if is_internal:
+                            counts["closed_issues_internal"] += 1
+                        else:
+                            counts["closed_issues_external"] += 1
+                    elif issue["issue_type"] == "pull_request":
+                        counts["closed_prs"] += 1
+                        if is_internal:
+                            counts["closed_prs_internal"] += 1
+                        else:
+                            counts["closed_prs_external"] += 1
+
+    if open_issue_ages:
+        counts["median_issue_age"] = int(statistics.median(open_issue_ages))
+    if open_pr_ages:
+        counts["median_pr_age"] = int(statistics.median(open_pr_ages))
 
     return counts
 
@@ -82,6 +131,8 @@ async def generate_snapshot(
             Issue.state,
             Issue.author,
             Issue.labels,
+            Issue.created_at,
+            Issue.closed_at,
         ).where(Issue.project_id == project_id)
     )
 
@@ -91,16 +142,18 @@ async def generate_snapshot(
             "state": row.state,
             "author": row.author,
             "labels": row.labels if isinstance(row.labels, list) else [],
+            "created_at": row.created_at,
+            "closed_at": row.closed_at,
         }
         for row in result
     ]
 
     counts = compute_snapshot_counts(issues, maintainers)
-    today = date.today()
+    today_val = date.today()
 
     stmt = insert(Snapshot).values(
         project_id=project_id,
-        snapshot_date=today,
+        snapshot_date=today_val,
         **counts,
     )
     stmt = stmt.on_conflict_do_update(
@@ -110,4 +163,4 @@ async def generate_snapshot(
     await session.execute(stmt)
     await session.commit()
 
-    logger.info("Generated snapshot for project_id=%d on %s", project_id, today)
+    logger.info("Generated snapshot for project_id=%d on %s", project_id, today_val)
