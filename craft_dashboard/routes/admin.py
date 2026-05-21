@@ -1,7 +1,7 @@
 """Admin routes for triggering refreshes and re-evaluations."""
 
 from fastapi import APIRouter, Depends, Header, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -195,3 +195,37 @@ async def admin_health(
             "failing_collectors": failing,
         }
     )
+
+
+@router.get("/logs", response_class=PlainTextResponse)
+async def admin_logs(
+    request: Request,
+    authorization: str = Header(default=""),
+) -> PlainTextResponse:
+    """Return recent service logs. Requires admin auth."""
+    import subprocess  # noqa: PLC0415
+
+    admin_token = _get_admin_token(request)
+    verify_admin_token(authorization, admin_token)
+
+    try:
+        result = subprocess.run(
+            [
+                "journalctl",
+                "-u",
+                "collect-data",
+                "-u",
+                "craft-dashboard",
+                "-n",
+                "100",
+                "--no-pager",
+                "--output",
+                "short",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return PlainTextResponse(result.stdout or "(no logs)")
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return PlainTextResponse("(journalctl not available)")

@@ -54,6 +54,11 @@
   </div>
 </div>
 
+<hr class="p-rule" />
+<h3>Service Logs</h3>
+<button class="p-button--neutral" id="logs-btn" onclick="loadLogs()">Refresh Logs</button>
+<pre id="logs-output" style="max-height: 400px; overflow-y: auto; font-size: 0.75rem; background: #f5f5f5; padding: 1rem; white-space: pre-wrap; margin-top: 1rem;">(click Refresh Logs to load)</pre>
+
 <script>
 function saveToken() {
   const token = document.getElementById('admin-token').value;
@@ -113,5 +118,28 @@ function triggerEvaluate() {
 function triggerDistribute() {
   callEndpoint('/admin/distribute', 'distribute-btn', 'distribute-status', 'Schedule redistributed');
 }
+
+async function loadLogs() {
+  const token = sessionStorage.getItem('adminToken');
+  if (!token) {
+    document.getElementById('logs-output').textContent = 'No token saved. Save a token first.';
+    return;
+  }
+  document.getElementById('logs-btn').disabled = true;
+  document.getElementById('logs-output').textContent = 'Loading...';
+  try {
+    const resp = await fetch('/admin/logs', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    document.getElementById('logs-output').textContent = resp.ok ? await resp.text() : `Error: ${resp.status}`;
+  } catch (e) {
+    document.getElementById('logs-output').textContent = `Error: ${e.message}`;
+  } finally {
+    document.getElementById('logs-btn').disabled = false;
+  }
+}
+
+// Auto-load if token exists
+if (sessionStorage.getItem('adminToken')) loadLogs();
 </script>
 {% endblock %}
