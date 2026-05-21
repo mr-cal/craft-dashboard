@@ -17,27 +17,48 @@
     {% block head %}{% endblock %}
   </head>
   <body class="is-paper">
-    <nav class="container">
-      <ul>
-        <li><strong>craft-dashboard</strong></li>
-      </ul>
-      <ul>
-        <li><a href="/">Dashboard</a></li>
-        <li><a href="/issues">Issues & PRs</a></li>
-        <li>
-          <details class="dropdown">
-            <summary>Stats</summary>
-            <ul>
-              <li><a href="/stats/dependencies">Dependencies</a></li>
-              <li><a href="/stats/releases">Releases</a></li>
-              <li><a href="/stats/trends">Trends</a></li>
-            </ul>
-          </details>
-        </li>
-      </ul>
-    </nav>
-    <main>
-      {% block content %}{% endblock %}
+    <header id="navigation" class="p-navigation is-dark">
+      <div class="p-navigation__row--25-75">
+        <div class="p-navigation__banner">
+          <div class="p-navigation__tagged-logo">
+            <a class="p-navigation__link" href="/">
+              <span class="p-navigation__logo-title">craft-dashboard</span>
+            </a>
+          </div>
+          <ul class="p-navigation__items">
+            <li class="p-navigation__item">
+              <button class="js-menu-button p-navigation__link">Menu</button>
+            </li>
+          </ul>
+        </div>
+        <nav class="p-navigation__nav" aria-label="Main navigation">
+          <ul class="p-navigation__items">
+            <li class="p-navigation__item {% if request.url.path == '/' %}is-selected{% endif %}">
+              <a class="p-navigation__link" href="/">Dashboard</a>
+            </li>
+            <li class="p-navigation__item {% if request.url.path.startswith('/issues') %}is-selected{% endif %}">
+              <a class="p-navigation__link" href="/issues">Issues & PRs</a>
+            </li>
+            <li class="p-navigation__item {% if request.url.path.startswith('/stats') %}is-selected{% endif %}">
+              <a class="p-navigation__link" href="/stats/trends">Stats</a>
+            </li>
+            <li class="p-navigation__item {% if request.url.path.startswith('/admin') %}is-selected{% endif %}">
+              <a class="p-navigation__link" href="/admin">Admin</a>
+            </li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+    <main class="l-main">
+      {% block layout %}
+      <div class="p-strip">
+        <div class="row">
+          <div class="col-12">
+            {% block content %}{% endblock %}
+          </div>
+        </div>
+      </div>
+      {% endblock %}
     </main>
     <footer class="l-footer--sticky p-strip is-dark is-shallow">
       <div class="row">
