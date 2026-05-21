@@ -197,6 +197,11 @@ def backfill_project(session: Session, project: Project) -> None:
 
 def main() -> None:
     """Main entry point."""
+    # Change to app directory so Settings finds the .env file.
+    import os  # noqa: PLC0415
+    app_dir = Path(__file__).parent.parent
+    os.chdir(app_dir)
+
     settings = Settings()
     
     # Convert async URL to sync URL for synchronous SQLAlchemy
