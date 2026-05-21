@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — craft-dashboard{% endblock %}
+{% block title %}Dashboard - craft-dashboard{% endblock %}
 {% block content %}
-<h1>Dashboard</h1>
+<h2>Dashboard</h2>
 
 <div class="grid">
   <article>
@@ -16,34 +16,7 @@
     <header>Open PRs</header>
     <p style="font-size: 2rem; font-weight: bold;">{{ open_prs }}</p>
   </article>
-  <article>
-    <header>Triaged</header>
-    <p style="font-size: 2rem; font-weight: bold;">{{ evaluated_count }}</p>
-    <small>of {{ open_issues + open_prs }} open</small>
-  </article>
 </div>
-
-{% if action_counts %}
-<h2>Triage Summary</h2>
-<table>
-  <thead>
-    <tr>
-      <th>Suggested Action</th>
-      <th>Count</th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for action, count in action_counts.items() | sort %}
-    <tr>
-      <td><span class="action-badge">{{ action | replace("_", " ") }}</span></td>
-      <td>{{ count }}</td>
-      <td><a href="/issues?action={{ action }}">View →</a></td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% endif %}
 
 <h2>Projects</h2>
 <table>

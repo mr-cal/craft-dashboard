@@ -1,7 +1,9 @@
 """Admin routes for triggering refreshes and re-evaluations."""
 
 from fastapi import APIRouter, Depends, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.auth import verify_admin_token
@@ -13,6 +15,52 @@ router = APIRouter(prefix="/admin")
 def _get_admin_token(request: Request) -> str:
     """Get the admin token from app settings."""
     return request.app.state.settings.admin_token
+
+
+@router.get("", response_class=HTMLResponse)
+async def admin_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    """Render the admin dashboard page."""
+    templates: Jinja2Templates = request.app.state.templates
+
+    from craft_dashboard.models.issue import Issue
+    from craft_dashboard.models.llm_evaluation import LLMEvaluation
+
+    total_open = await session.scalar(
+        select(func.count()).select_from(Issue).where(Issue.state == "open")
+    ) or 0
+
+    evaluated_count = await session.scalar(
+        select(func.count(func.distinct(LLMEvaluation.issue_id)))
+        .select_from(LLMEvaluation)
+        .join(Issue, LLMEvaluation.issue_id == Issue.id)
+        .where(Issue.state == "open")
+        .where(LLMEvaluation.latest.is_(True))
+    ) or 0
+
+    result = await session.execute(
+        select(
+            LLMEvaluation.suggested_action,
+            func.count().label("count"),
+        )
+        .join(Issue, LLMEvaluation.issue_id == Issue.id)
+        .where(Issue.state == "open")
+        .where(LLMEvaluation.latest.is_(True))
+        .group_by(LLMEvaluation.suggested_action)
+    )
+    action_counts = {row.suggested_action: row.count for row in result}
+
+    return templates.TemplateResponse(
+        request,
+        "admin/index.html",
+        {
+            "evaluated_count": evaluated_count,
+            "total_open": total_open,
+            "action_counts": action_counts,
+        },
+    )
 
 
 @router.post("/refresh")

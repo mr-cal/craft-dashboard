@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.dependencies import get_db_session
@@ -17,8 +17,8 @@ router = APIRouter(prefix="/stats")
 
 @router.get("", response_class=RedirectResponse)
 async def stats_index() -> RedirectResponse:
-    """Redirect /stats to /stats/dependencies."""
-    return RedirectResponse(url="/stats/dependencies", status_code=302)
+    """Redirect /stats to /stats/trends."""
+    return RedirectResponse(url="/stats/trends", status_code=302)
 
 
 @router.get("/dependencies", response_class=HTMLResponse)
@@ -62,29 +62,56 @@ async def releases_page(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
-    """Render the releases table."""
+    """Render the releases table showing the latest release per project+branch."""
     templates: Jinja2Templates = request.app.state.templates
+
+    from datetime import UTC, datetime
+
+    from sqlalchemy import and_
+
+    # Subquery: latest release per project+branch
+    latest_sub = (
+        select(
+            Release.project_id,
+            Release.branch,
+            func.max(Release.released_at).label("max_released_at"),
+        )
+        .group_by(Release.project_id, Release.branch)
+        .subquery()
+    )
 
     result = await session.execute(
         select(
-            Release.version,
-            Release.branch,
-            Release.released_at,
             Project.name.label("project_name"),
+            Release.branch,
+            Release.version,
+            Release.released_at,
         )
         .join(Project, Release.project_id == Project.id)
-        .order_by(Release.released_at.desc().nullslast())
+        .join(
+            latest_sub,
+            and_(
+                Release.project_id == latest_sub.c.project_id,
+                Release.branch == latest_sub.c.branch,
+                Release.released_at == latest_sub.c.max_released_at,
+            ),
+        )
+        .order_by(Project.display_order, Release.branch)
     )
 
-    releases = [
-        {
+    releases = []
+    for row in result:
+        days_ago = None
+        if row.released_at:
+            released = row.released_at.replace(tzinfo=UTC) if row.released_at.tzinfo is None else row.released_at
+            days_ago = (datetime.now(tz=UTC) - released).days
+        releases.append({
             "project_name": row.project_name,
-            "version": row.version,
             "branch": row.branch,
+            "version": row.version,
             "released_at": row.released_at,
-        }
-        for row in result
-    ]
+            "days_ago": days_ago,
+        })
 
     return templates.TemplateResponse(
         request,

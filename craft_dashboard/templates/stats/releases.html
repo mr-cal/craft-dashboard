@@ -1,28 +1,31 @@
 {% extends "base.html" %}
-{% block title %}Releases — craft-dashboard{% endblock %}
+{% block title %}Releases - craft-dashboard{% endblock %}
 {% block content %}
-<h1>Releases</h1>
+<h2>Releases</h2>
+<p>Latest release for each project and branch.</p>
 
 <table>
   <thead>
     <tr>
       <th>Project</th>
-      <th>Version</th>
       <th>Branch</th>
+      <th>Latest Version</th>
       <th>Released</th>
+      <th>Days Ago</th>
     </tr>
   </thead>
   <tbody>
     {% for rel in releases %}
     <tr>
       <td>{{ rel.project_name }}</td>
-      <td>{{ rel.version }}</td>
-      <td>{{ rel.branch or "—" }}</td>
-      <td>{{ rel.released_at.strftime("%Y-%m-%d") if rel.released_at else "—" }}</td>
+      <td>{{ rel.branch or "main" }}</td>
+      <td><code>{{ rel.version }}</code></td>
+      <td>{{ rel.released_at.strftime("%Y-%m-%d") if rel.released_at else "-" }}</td>
+      <td>{{ rel.days_ago if rel.days_ago is not none else "-" }}</td>
     </tr>
     {% else %}
     <tr>
-      <td colspan="4">No release data available yet.</td>
+      <td colspan="5">No release data available yet.</td>
     </tr>
     {% endfor %}
   </tbody>
