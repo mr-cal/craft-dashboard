@@ -15,13 +15,15 @@ Environment variables:
 """
 
 import asyncio
-from dataclasses import dataclass, field
 import logging
 import pathlib
 import sys
 import time
+from dataclasses import dataclass, field
 
 import click
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 
 # Add project root to path
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
@@ -37,6 +39,8 @@ from craft_dashboard.collectors.scheduler import (
 from craft_dashboard.collectors.snapshots import generate_snapshot
 from craft_dashboard.config import load_config
 from craft_dashboard.database import get_engine, get_session_factory
+from craft_dashboard.models.project import Project
+from craft_dashboard.models.refresh_schedule import RefreshSchedule
 from craft_dashboard.settings import Settings
 
 logging.basicConfig(
@@ -74,13 +78,13 @@ def _format_duration(seconds: float) -> str:
     return " ".join(parts)
 
 
-async def _get_or_create_project(session, name: str, category: str, order: int) -> int:
+async def _get_or_create_project(
+    session: object,
+    name: str,
+    category: str,
+    order: int,
+) -> int:
     """Get or create a project, returning its ID."""
-    from sqlalchemy import select
-    from sqlalchemy.dialects.postgresql import insert
-
-    from craft_dashboard.models.project import Project
-
     stmt = insert(Project).values(
         name=name,
         category=category,
@@ -96,17 +100,13 @@ async def _get_or_create_project(session, name: str, category: str, order: int) 
 
 async def _collect_github(
     settings: Settings,
-    config,
-    session_factory,
+    config: object,
+    session_factory: object,
     limit: int = 0,
     projects: list[str] | None = None,
     run_started_at: float | None = None,
 ) -> CollectionStats:
     """Run GitHub data collection for all projects due for refresh."""
-    from sqlalchemy import select
-
-    from craft_dashboard.models.refresh_schedule import RefreshSchedule
-
     collector = GitHubCollector(
         token=settings.github_token,
         org="canonical",
@@ -147,7 +147,7 @@ async def _collect_github(
                     dependency_count,
                     _format_duration(time.monotonic() - dep_started_at),
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning(
                     "Failed to collect dependencies for %s",
                     project_name,
@@ -231,17 +231,21 @@ async def _collect_github(
     return stats
 
 
-async def _collect_launchpad(config, session_factory, projects: list[str] | None = None) -> None:
+async def _collect_launchpad(
+    config: object,
+    session_factory: object,
+    projects: list[str] | None = None,
+    run_started_at: float | None = None,
+) -> CollectionStats:
     """Run Launchpad data collection for all configured projects.
-    
+
     Creates a separate project entry like "snapcraft (launchpad)" for each
     Launchpad project so it appears as a distinct series in trends charts.
     """
     collector = LaunchpadCollector(projects=config.launchpad_projects)
+    stats = CollectionStats()
 
-    # Get the display order of the last project to place LP projects after
     last_order = len(config.craft_projects)
-
     lp_list = [p for p in config.launchpad_projects if projects is None or p in projects]
     for i, lp_name in enumerate(lp_list):
         async with session_factory() as session:
@@ -249,15 +253,41 @@ async def _collect_launchpad(config, session_factory, projects: list[str] | None
             project_id = await _get_or_create_project(
                 session, lp_project_name, "launchpad", last_order + i
             )
+            stats.projects_processed.add(lp_name)
+            elapsed = ""
+            if run_started_at is not None:
+                elapsed = f" (elapsed: {_format_duration(time.monotonic() - run_started_at)})"
 
-            logger.info("Collecting Launchpad data for %s", lp_project_name)
-            await collector.collect_bugs(lp_name, project_id, session)
+            logger.info("Collecting Launchpad data for %s%s", lp_name, elapsed)
+            bugs_started_at = time.monotonic()
+            bug_count = await collector.collect_bugs(lp_name, project_id, session)
+            stats.issues_collected += bug_count
+            logger.info(
+                "  %s: %d bugs fetched in %s",
+                lp_project_name,
+                bug_count,
+                _format_duration(time.monotonic() - bugs_started_at),
+            )
+
+            snapshot_started_at = time.monotonic()
             await generate_snapshot(
                 project_id, session, set(config.maintainers)
             )
+            logger.info(
+                "  Generated snapshot for %s in %s",
+                lp_project_name,
+                _format_duration(time.monotonic() - snapshot_started_at),
+            )
+
+    return stats
 
 
-async def _main(source: str, limit: int, projects: list[str], verbose: bool) -> None:
+async def _main(
+    source: str,
+    limit: int,
+    projects: list[str],
+    verbose: bool,  # noqa: FBT001
+) -> None:
     """Run data collection."""
     settings = Settings()
 
@@ -333,7 +363,12 @@ async def _main(source: str, limit: int, projects: list[str], verbose: bool) -> 
     default=False,
     help="Enable debug logging (individual issues, API calls). Overrides LOG_LEVEL.",
 )
-def main(source: str, limit: int, projects: tuple[str, ...], verbose: bool) -> None:
+def main(
+    source: str,
+    limit: int,
+    projects: tuple[str, ...],
+    verbose: bool,  # noqa: FBT001
+) -> None:
     """Collect data from external sources."""
     asyncio.run(_main(source, limit, list(projects), verbose))
 
