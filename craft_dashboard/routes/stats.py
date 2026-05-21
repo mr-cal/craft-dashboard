@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.dependencies import get_db_session
@@ -97,20 +97,7 @@ async def releases_page(
     """Render the releases table showing the latest release per project+branch."""
     templates: Jinja2Templates = request.app.state.templates
 
-    from datetime import UTC, datetime
-
-    from sqlalchemy import and_
-
-    # Subquery: latest release per project+branch
-    latest_sub = (
-        select(
-            Release.project_id,
-            Release.branch,
-            func.max(Release.released_at).label("max_released_at"),
-        )
-        .group_by(Release.project_id, Release.branch)
-        .subquery()
-    )
+    from datetime import UTC, datetime  # noqa: PLC0415
 
     result = await session.execute(
         select(
@@ -121,14 +108,6 @@ async def releases_page(
             Release.metadata_,
         )
         .join(Project, Release.project_id == Project.id)
-        .join(
-            latest_sub,
-            and_(
-                Release.project_id == latest_sub.c.project_id,
-                Release.branch == latest_sub.c.branch,
-                Release.released_at == latest_sub.c.max_released_at,
-            ),
-        )
         .where(Project.category == "application")
         .order_by(Project.display_order, Release.branch)
     )
@@ -144,7 +123,7 @@ async def releases_page(
             commits_since_tag = row.metadata_.get("commits_since_tag")
         releases.append({
             "project_name": row.project_name,
-            "branch": row.branch,
+            "branch": row.branch or "main",
             "version": row.version,
             "released_at": row.released_at,
             "days_ago": days_ago,

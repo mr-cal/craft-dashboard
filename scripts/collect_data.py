@@ -127,7 +127,10 @@ async def _collect_github(
                     limit=limit,
                     refresh_age_days=settings.refresh_age_days,
                 )
-                await collector.collect_releases(project_name, project_id, session)
+                await collector.collect_releases(
+                    project_name, project_id, session,
+                    hotfix_min_version=config.hotfix_min_versions.get(project_name),
+                )
                 await generate_snapshot(
                     project_id, session, set(config.maintainers)
                 )

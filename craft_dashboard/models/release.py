@@ -13,7 +13,7 @@ class Release(Base):
     """A release version of a project."""
 
     __tablename__ = "releases"
-    __table_args__ = (UniqueConstraint("project_id", "version"),)
+    __table_args__ = (UniqueConstraint("project_id", "branch"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(

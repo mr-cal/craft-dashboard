@@ -352,102 +352,146 @@ class GitHubCollector:
         repo_name: str,
         project_id: int,
         session,  # noqa: ANN001
+        hotfix_min_version: str | None = None,
     ) -> int:
-        """Collect releases for a repository and compute commits since latest tag.
+        """Collect releases for a repository, one row per branch.
+
+        Enumerates hotfix/* branches from GitHub, finds the latest matching
+        release tag per branch, and computes commits_since_tag.
 
         Args:
             repo_name: Repository name (without org prefix).
             project_id: The database ID of the project.
             session: An async SQLAlchemy session.
+            hotfix_min_version: Minimum version string (e.g. "3.0") for hotfix branches.
 
         Returns:
-            The number of releases upserted.
-
+            Number of branch+release rows upserted.
         """
+        import re  # noqa: PLC0415
+
         from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415
 
         from craft_dashboard.models.release import Release  # noqa: PLC0415
 
+        HOTFIX_RE = re.compile(r"^hotfix/(\d+)\.(\d+)$")
+
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
+
+        # Collect all non-prerelease, non-draft releases
+        all_releases: dict[str, object] = {}  # tag_name → GH release object
+        for gh_rel in repo.get_releases():
+            if not gh_rel.prerelease and not gh_rel.draft:
+                all_releases[gh_rel.tag_name] = gh_rel
+
+        logger.info("  %s/%s: found %d non-prerelease tags", self.org, repo_name, len(all_releases))
+
+        # Determine branches to track
+        branches_to_track: list[str] = ["main"]
+
+        # Parse min version filter
+        min_major, min_minor = 0, 0
+        if hotfix_min_version:
+            try:
+                parts = hotfix_min_version.split(".")
+                min_major, min_minor = int(parts[0]), int(parts[1])
+            except (ValueError, IndexError):
+                logger.warning("Could not parse hotfix_min_version %r", hotfix_min_version)
+
+        # List hotfix/* branches from GitHub
+        for branch in repo.get_branches():
+            m = HOTFIX_RE.match(branch.name)
+            if m:
+                major, minor = int(m.group(1)), int(m.group(2))
+                if (major, minor) >= (min_major, min_minor):
+                    branches_to_track.append(branch.name)
+
+        logger.info("  %s/%s: tracking branches: %s", self.org, repo_name, branches_to_track)
+
+        def parse_version(tag: str) -> tuple[int, ...] | None:
+            """Parse a version tag like '4.2.1' or 'v4.2.1' into a tuple."""
+            clean = tag.lstrip("v")
+            try:
+                return tuple(int(p) for p in clean.split("."))
+            except ValueError:
+                return None
+
         count = 0
-        latest_per_branch: dict[str, tuple[str, datetime]] = {}
+        for branch_name in branches_to_track:
+            # Find the best matching tag for this branch
+            best_tag: str | None = None
+            best_ver: tuple[int, ...] = ()
 
-        for gh_release in repo.get_releases():
-            branch = gh_release.target_commitish
-            tag = gh_release.tag_name
-            pub = gh_release.published_at
+            if branch_name == "main":
+                # Latest tag overall
+                for tag in all_releases:
+                    ver = parse_version(tag)
+                    if ver and ver > best_ver:
+                        best_ver = ver
+                        best_tag = tag
+            else:
+                # hotfix/X.Y → latest X.Y.* tag
+                m = HOTFIX_RE.match(branch_name)
+                if not m:
+                    continue
+                hf_major, hf_minor = int(m.group(1)), int(m.group(2))
+                for tag in all_releases:
+                    ver = parse_version(tag)
+                    if ver and len(ver) >= 2 and ver[0] == hf_major and ver[1] == hf_minor:
+                        if ver > best_ver:
+                            best_ver = ver
+                            best_tag = tag
 
+            if not best_tag:
+                logger.debug("  %s/%s: no matching tag for branch %s", self.org, repo_name, branch_name)
+                continue
+
+            gh_rel = all_releases[best_tag]
+            pub = gh_rel.published_at
+            metadata: dict = {"prerelease": False, "draft": False}
+
+            # Upsert: one row per project+branch
             stmt = insert(Release).values(
                 project_id=project_id,
-                version=tag,
-                branch=branch,
-                released_at=pub.replace(tzinfo=UTC)
-                if pub
-                else None,
-                is_hotfix=False,
-                metadata_={
-                    "prerelease": gh_release.prerelease,
-                    "draft": gh_release.draft,
-                },
+                version=best_tag,
+                branch=branch_name,
+                released_at=pub.replace(tzinfo=UTC) if pub else None,
+                is_hotfix=(branch_name != "main"),
+                metadata_=metadata,
             )
             stmt = stmt.on_conflict_do_update(
-                index_elements=["project_id", "version"],
+                index_elements=["project_id", "branch"],
                 set_={
-                    "branch": stmt.excluded.branch,
+                    "version": stmt.excluded.version,
                     "released_at": stmt.excluded.released_at,
+                    "is_hotfix": stmt.excluded.is_hotfix,
                     "metadata": sa.literal_column("excluded.metadata"),
                 },
             )
             await session.execute(stmt)
             count += 1
 
-            # Track latest tag per branch for commits-since-tag
-            if pub:
-                pub_utc = pub.replace(tzinfo=UTC)
-                if branch not in latest_per_branch or pub_utc > latest_per_branch[branch][1]:
-                    latest_per_branch[branch] = (tag, pub_utc)
-
-        await session.commit()
-        logger.info("Collected %d releases from %s/%s", count, self.org, repo_name)
-
-        # Compute commits since latest tag per branch
-        for branch, (tag, _) in latest_per_branch.items():
+            # Compute commits since tag
             try:
-                # If target_commitish is a commit SHA (40-char hex), fall back to default branch
-                head = branch
-                if len(branch) == 40 and all(c in '0123456789abcdef' for c in branch.lower()):
-                    head = repo.default_branch
-                    logger.debug("  %s: target_commitish %s is a SHA, using default branch %s",
-                                 repo_name, branch[:8], head)
-                comparison = repo.compare(tag, head)
+                comparison = repo.compare(best_tag, branch_name)
                 commits_since = comparison.ahead_by
-                # Read existing metadata and merge
                 result = await session.execute(
                     sa.select(Release.metadata_).where(
                         Release.project_id == project_id,
-                        Release.version == tag,
+                        Release.branch == branch_name,
                     )
                 )
-                existing_meta = result.scalar_one_or_none() or {}
-                existing_meta["commits_since_tag"] = commits_since
+                meta = result.scalar_one_or_none() or {}
+                meta["commits_since_tag"] = commits_since
                 await session.execute(
                     sa.update(Release)
-                    .where(
-                        Release.project_id == project_id,
-                        Release.version == tag,
-                    )
-                    .values(metadata_=existing_meta)
+                    .where(Release.project_id == project_id, Release.branch == branch_name)
+                    .values(metadata_=meta)
                 )
-                logger.info(
-                    "  %s@%s: %d commits since %s",
-                    repo_name, branch, commits_since, tag,
-                )
-            except Exception:
-                logger.warning(
-                    "Could not compute commits since tag %s..%s for %s",
-                    tag, branch, repo_name,
-                    exc_info=True,
-                )
-        await session.commit()
+                logger.info("  %s@%s: %d commits since %s", repo_name, branch_name, commits_since, best_tag)
+            except Exception:  # noqa: BLE001
+                logger.warning("  Could not compute commits for %s@%s", repo_name, branch_name, exc_info=True)
 
+        await session.commit()
+        logger.info("Collected releases for %s/%s (%d branches)", self.org, repo_name, count)
         return count
