@@ -96,6 +96,18 @@ class DependencyCollector:
                 continue
 
             deps = pyproject.get("project", {}).get("dependencies", [])
+            if not deps:
+                # Try poetry-style dependencies
+                poetry_deps = pyproject.get("tool", {}).get("poetry", {}).get("dependencies", {})
+                deps = []
+                for pkg, spec in poetry_deps.items():
+                    if pkg.lower() == "python":
+                        continue
+                    if isinstance(spec, str):
+                        deps.append(f"{pkg}{spec}" if spec not in ("*", "") else pkg)
+                    elif isinstance(spec, dict):
+                        ver = spec.get("version", "*")
+                        deps.append(f"{pkg}{ver}" if ver != "*" else pkg)
 
             for dep_line in deps:
                 parsed = parse_requirements_line(dep_line)

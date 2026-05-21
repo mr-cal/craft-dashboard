@@ -91,6 +91,22 @@ async def _collect_github(
                 session, project_name, category, i
             )
 
+            # Always collect dependencies (independent of refresh schedule)
+            dep_collector = DependencyCollector(
+                token=settings.github_token,
+                org="canonical",
+            )
+            try:
+                await dep_collector.collect_dependencies(
+                    project_name, project_id, ["main"], session,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to collect dependencies for %s",
+                    project_name,
+                    exc_info=True,
+                )
+
             # Check refresh schedule
             result = await session.execute(
                 select(RefreshSchedule.next_refresh_at).where(
@@ -101,7 +117,7 @@ async def _collect_github(
             next_refresh = result.scalar_one_or_none()
 
             if not is_due_for_refresh(next_refresh):
-                logger.info("Skipping %s (not due for refresh)", project_name)
+                logger.info("Skipping %s (not due for full refresh)", project_name)
                 continue
 
             logger.info("Collecting GitHub data for %s", project_name)
@@ -115,22 +131,6 @@ async def _collect_github(
                 await generate_snapshot(
                     project_id, session, set(config.maintainers)
                 )
-
-                # Collect dependencies from pyproject.toml
-                dep_collector = DependencyCollector(
-                    token=settings.github_token,
-                    org="canonical",
-                )
-                try:
-                    await dep_collector.collect_dependencies(
-                        project_name, project_id, ["main"], session,
-                    )
-                except Exception:
-                    logger.warning(
-                        "Failed to collect dependencies for %s",
-                        project_name,
-                        exc_info=True,
-                    )
 
                 await update_refresh_schedule(
                     project_id, "github", config.refresh_interval_days, session
