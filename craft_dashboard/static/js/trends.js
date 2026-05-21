@@ -9,8 +9,9 @@ const colors = [
 const response = await fetch("/stats/trends/all-data");
 const { projects, order, snapshot } = await response.json();
 
-// View state: "all" or "external"
-let currentView = "all";
+// Store full data and filtered data
+let allProjects = projects;
+let filteredProjects = projects;
 
 // ============================================================================
 // Utility functions
@@ -120,12 +121,12 @@ function updateOpenIssuesChart() {
   }
   
   const firstProject = selected[0];
-  issuesChart.data.labels = projects[firstProject].dates;
+  issuesChart.data.labels = filteredProjects[firstProject].dates;
   
-  const dataKey = currentView === "all" ? "open_issues" : "open_issues_external";
+  const dataKey = getCurrentView() === "all" ? "open_issues" : "open_issues_external";
   
   issuesChart.data.datasets = selected.map((name) => {
-    const rawData = projects[name][dataKey];
+    const rawData = filteredProjects[name][dataKey];
     const smoothedData = rollingAverage(rawData, 28); // 4-week rolling average
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
     const color = colors[colorIdx % colors.length];
@@ -163,12 +164,12 @@ function updateMedianAgeChart() {
   }
   
   const firstProject = selected[0];
-  medianAgeChart.data.labels = projects[firstProject].dates;
+  medianAgeChart.data.labels = filteredProjects[firstProject].dates;
   
   const dataKey = "median_issue_age"; // We don't have separate external median age yet
   
   medianAgeChart.data.datasets = selected.map((name) => {
-    const rawData = projects[name][dataKey];
+    const rawData = filteredProjects[name][dataKey];
     const smoothedData = rollingAverage(rawData, 28); // 4-week rolling average
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
     const color = colors[colorIdx % colors.length];
@@ -206,12 +207,12 @@ function updateClosedChart() {
   }
   
   const firstProject = selected[0];
-  closedChart.data.labels = projects[firstProject].dates;
+  closedChart.data.labels = filteredProjects[firstProject].dates;
   
-  const dataKey = currentView === "all" ? "closed_issues" : "closed_issues_external";
+  const dataKey = getCurrentView() === "all" ? "closed_issues" : "closed_issues_external";
   
   closedChart.data.datasets = selected.map((name) => {
-    const rawData = projects[name][dataKey].map(v => v * 7); // Scale to per-week
+    const rawData = filteredProjects[name][dataKey].map(v => v * 7); // Scale to per-week
     const smoothedData = rollingAverage(rawData, 30); // 30-day rolling average
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
     const color = colors[colorIdx % colors.length];
@@ -262,8 +263,8 @@ function updateSnapshotCharts() {
   const labels = selected;
   
   // Open Issues/PRs Chart
-  const issueKey = currentView === "all" ? "open_issues" : "nm_open_issues";
-  const prKey = currentView === "all" ? "open_prs" : "nm_open_prs";
+  const issueKey = getCurrentView() === "all" ? "open_issues" : "nm_open_issues";
+  const prKey = getCurrentView() === "all" ? "open_prs" : "nm_open_prs";
   
   snapshotOpenChart.data.labels = labels;
   snapshotOpenChart.data.datasets = [
@@ -284,8 +285,8 @@ function updateSnapshotCharts() {
   ];
   
   // Median Age Chart
-  const issueAgeKey = currentView === "all" ? "median_issue_age" : "nm_median_issue_age";
-  const prAgeKey = currentView === "all" ? "median_pr_age" : "nm_median_pr_age";
+  const issueAgeKey = getCurrentView() === "all" ? "median_issue_age" : "nm_median_issue_age";
+  const prAgeKey = getCurrentView() === "all" ? "median_pr_age" : "nm_median_pr_age";
   
   snapshotAgeChart.data.labels = labels;
   snapshotAgeChart.data.datasets = [
@@ -306,8 +307,8 @@ function updateSnapshotCharts() {
   ];
   
   // Closed Last Year Chart
-  const closedIssueKey = currentView === "all" ? "closed_issues_year" : "nm_closed_issues_year";
-  const closedPrKey = currentView === "all" ? "closed_prs_year" : "nm_closed_prs_year";
+  const closedIssueKey = getCurrentView() === "all" ? "closed_issues_year" : "nm_closed_issues_year";
+  const closedPrKey = getCurrentView() === "all" ? "closed_prs_year" : "nm_closed_prs_year";
   
   snapshotClosedChart.data.labels = labels;
   snapshotClosedChart.data.datasets = [
@@ -339,15 +340,95 @@ function updateSnapshotCharts() {
 }
 
 // ============================================================================
-// View toggle
+// View helpers
 // ============================================================================
 
-function updateView(view) {
-  currentView = view;
-  document.getElementById("view-all").checked = view === "all";
-  document.getElementById("view-external").checked = view === "external";
+function getCurrentView() {
+  const maintainers = document.getElementById("view-maintainers")?.checked ?? true;
+  const contributors = document.getElementById("view-contributors")?.checked ?? true;
+  const bots = document.getElementById("view-bots")?.checked ?? true;
+  // Only "contributors only" maps to external data; everything else uses all data
+  if (contributors && !maintainers && !bots) return "external";
+  return "all";
+}
+
+function onViewChange() {
+  updateOpenIssuesChart();
+  updateClosedChart();
+  updateSnapshotCharts();
+}
+
+// ============================================================================
+// Date filtering
+// ============================================================================
+
+function applyDateFilter() {
+  const startStr = document.getElementById("date-start").value;
+  const endStr = document.getElementById("date-end").value;
+  
+  if (!startStr || !endStr) {
+    alert("Please select both start and end dates");
+    return;
+  }
+  
+  const startDate = new Date(startStr);
+  const endDate = new Date(endStr);
+  
+  if (startDate > endDate) {
+    alert("Start date must be before end date");
+    return;
+  }
+  
+  // Filter each project's dates and data arrays
+  filteredProjects = {};
+  for (const name in allProjects) {
+    const project = allProjects[name];
+    const dates = project.dates;
+    
+    // Find start and end indices
+    let startIdx = dates.findIndex(d => new Date(d) >= startDate);
+    let endIdx = dates.findLastIndex(d => new Date(d) <= endDate);
+    
+    if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) {
+      // No data in range, create empty project
+      filteredProjects[name] = {
+        dates: [],
+        open_issues: [],
+        open_issues_external: [],
+        median_issue_age: [],
+        closed_issues: [],
+        closed_issues_external: [],
+      };
+    } else {
+      // Slice dates and all data arrays
+      filteredProjects[name] = {
+        dates: dates.slice(startIdx, endIdx + 1),
+      };
+      
+      // Slice all data keys
+      for (const key in project) {
+        if (key !== "dates" && Array.isArray(project[key])) {
+          filteredProjects[name][key] = project[key].slice(startIdx, endIdx + 1);
+        }
+      }
+    }
+  }
+  
+  // Re-render all charts with filtered data
+  updateOpenIssuesChart();
+  updateMedianAgeChart();
+  updateClosedChart();
+  updateSnapshotCharts();
+}
+
+function resetDateFilter() {
+  filteredProjects = allProjects;
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById("date-start").value = "2021-01-01";
+  document.getElementById("date-end").value = today;
   
   updateOpenIssuesChart();
+  updateMedianAgeChart();
   updateClosedChart();
   updateSnapshotCharts();
 }
@@ -363,7 +444,7 @@ function populateLineChartCheckboxes(containerId, prefix, onChange) {
   createCheckboxItem(container, {
     id: `${prefix}-all-projects`,
     label: "all-projects",
-    checked: prefix === "open-issues", // Check by default for first chart
+    checked: true, // Check all-projects by default for all charts
     onChange: () => onChange(),
     color: colors[0],
   });
@@ -422,9 +503,15 @@ populateLineChartCheckboxes("median-age-checkboxes", "median-age", updateMedianA
 populateLineChartCheckboxes("closed-checkboxes", "closed", updateClosedChart);
 populateSnapshotCheckboxes();
 
-// View toggle listeners
-document.getElementById("view-all").addEventListener("change", () => updateView("all"));
-document.getElementById("view-external").addEventListener("change", () => updateView("external"));
+// Initialize author group checkboxes
+["view-maintainers", "view-contributors", "view-bots"].forEach(id => {
+  document.getElementById(id)?.addEventListener("change", onViewChange);
+});
+
+// Initialize date range inputs
+const today = new Date().toISOString().slice(0, 10);
+document.getElementById("date-start").value = "2021-01-01";
+document.getElementById("date-end").value = today;
 
 // Initial render
 updateOpenIssuesChart();

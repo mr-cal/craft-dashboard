@@ -14,20 +14,41 @@
   </div>
 </div>
 
-<!-- View Toggle Section -->
+<!-- Author Groups Section -->
 <div class="p-strip is-shallow">
   <div class="row">
     <div class="col-12">
-      <h3 class="p-heading--5">View</h3>
-      <div style="display:flex;gap:1rem;">
+      <h3 class="p-heading--5">Author Groups</h3>
+      <div style="display:flex;gap:0.5rem;flex-direction:column;">
         <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;">
-          <input type="radio" name="view" id="view-all" checked />
-          <span>All issues</span>
+          <input type="checkbox" id="view-maintainers" checked />
+          <span>Maintainers</span>
         </label>
         <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;">
-          <input type="radio" name="view" id="view-external" />
-          <span>Only contributor issues</span>
+          <input type="checkbox" id="view-contributors" checked />
+          <span>Contributors</span>
         </label>
+        <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;">
+          <input type="checkbox" id="view-bots" checked />
+          <span>Bots</span>
+        </label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row"><hr class="p-rule" /></div>
+
+<!-- Date Range Filter -->
+<div class="p-strip is-shallow">
+  <div class="row">
+    <div class="col-12">
+      <h3 class="p-heading--5">Date Range</h3>
+      <div style="display:flex;gap:1rem;align-items:center;">
+        <label>From: <input type="date" id="date-start" /></label>
+        <label>To: <input type="date" id="date-end" /></label>
+        <button class="p-button--neutral is-small" onclick="applyDateFilter()">Apply</button>
+        <button class="p-button--neutral is-small" onclick="resetDateFilter()">Reset</button>
       </div>
     </div>
   </div>
@@ -111,7 +132,7 @@
       <!-- Open Issues/PRs Bar Chart -->
       <div style="margin-bottom:2rem;">
         <h5 class="p-heading--5">Open Issues & PRs</h5>
-        <div style="height:200px;">
+        <div style="position:relative;height:300px;">
           <canvas id="snapshot-open-chart"></canvas>
         </div>
       </div>
@@ -119,7 +140,7 @@
       <!-- Median Age Bar Chart -->
       <div style="margin-bottom:2rem;">
         <h5 class="p-heading--5">Median Age (days)</h5>
-        <div style="height:200px;">
+        <div style="position:relative;height:300px;">
           <canvas id="snapshot-age-chart"></canvas>
         </div>
       </div>
@@ -127,7 +148,7 @@
       <!-- Closed Last Year Bar Chart -->
       <div>
         <h5 class="p-heading--5">Closed in Last Year</h5>
-        <div style="height:200px;">
+        <div style="position:relative;height:300px;">
           <canvas id="snapshot-closed-chart"></canvas>
         </div>
       </div>
