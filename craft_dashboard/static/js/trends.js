@@ -73,7 +73,16 @@ function createLineChart(canvasId, yLabel) {
 }
 
 function createBarChart(canvasId, xLabel) {
-  return new Chart(document.getElementById(canvasId), {
+  const ctx = document.getElementById(canvasId);
+
+  // Wrap canvas in a positioned div (like starcraft-stats)
+  const wrapper = document.createElement("div");
+  wrapper.style.position = "relative";
+  wrapper.style.height = `${CHART_BASE_HEIGHT_PX}px`;
+  ctx.parentNode.insertBefore(wrapper, ctx);
+  wrapper.appendChild(ctx);
+
+  const chart = new Chart(ctx, {
     type: "bar",
     data: { labels: [], datasets: [] },
     options: {
@@ -95,6 +104,8 @@ function createBarChart(canvasId, xLabel) {
       },
     },
   });
+
+  return { chart, wrapper };
 }
 
 // ============================================================================
@@ -357,9 +368,9 @@ function updateSnapshotCharts() {
   // Adjust chart height based on number of bars (like starcraft-stats)
   const numDatasets = snapshotOpenChart.data.datasets.length;
   const height = chartHeight(selected.length, numDatasets);
-  document.getElementById("snapshot-open-wrap").style.height = height + "px";
-  document.getElementById("snapshot-age-wrap").style.height = height + "px";
-  document.getElementById("snapshot-closed-wrap").style.height = height + "px";
+  snapshotOpenWrap.style.height = height + "px";
+  snapshotAgeWrap.style.height = height + "px";
+  snapshotClosedWrap.style.height = height + "px";
   
   snapshotOpenChart.update();
   snapshotAgeChart.update();
@@ -535,9 +546,9 @@ function chartHeight(numBars, numDatasets) {
   return Math.max(1, numBars) * Math.max(1, numDatasets) * BAR_HEIGHT_PX + CHART_BASE_HEIGHT_PX;
 }
 
-const snapshotOpenChart = createBarChart("snapshot-open-chart", "Count");
-const snapshotAgeChart = createBarChart("snapshot-age-chart", "Days");
-const snapshotClosedChart = createBarChart("snapshot-closed-chart", "Count");
+const { chart: snapshotOpenChart, wrapper: snapshotOpenWrap } = createBarChart("snapshot-open-chart", "Count");
+const { chart: snapshotAgeChart, wrapper: snapshotAgeWrap } = createBarChart("snapshot-age-chart", "Days");
+const { chart: snapshotClosedChart, wrapper: snapshotClosedWrap } = createBarChart("snapshot-closed-chart", "Count");
 
 // Populate checkboxes
 populateLineChartCheckboxes("open-issues-checkboxes", "open-issues", updateOpenIssuesChart);

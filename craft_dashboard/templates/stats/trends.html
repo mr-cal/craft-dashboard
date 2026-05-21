@@ -129,35 +129,14 @@
       <div id="snapshot-checkboxes"></div>
     </div>
     <div class="col-9">
-      <!-- Open Issues/PRs Bar Chart -->
-      <div class="row" style="margin-bottom:2rem;">
-        <div class="col-12">
-          <h5 class="p-heading--5">Open Issues & PRs</h5>
-          <div id="snapshot-open-wrap" style="position:relative;">
-            <canvas id="snapshot-open-chart" style="width:100%;"></canvas>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Median Age Bar Chart -->
-      <div class="row" style="margin-bottom:2rem;">
-        <div class="col-12">
-          <h5 class="p-heading--5">Median Age (days)</h5>
-          <div id="snapshot-age-wrap" style="position:relative;">
-            <canvas id="snapshot-age-chart" style="width:100%;"></canvas>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Closed Last Year Bar Chart -->
-      <div class="row">
-        <div class="col-12">
-          <h5 class="p-heading--5">Closed in Last Year</h5>
-          <div id="snapshot-closed-wrap" style="position:relative;">
-            <canvas id="snapshot-closed-chart" style="width:100%;"></canvas>
-          </div>
-        </div>
-      </div>
+      <h5 class="p-heading--5">Open Issues & PRs</h5>
+      <canvas id="snapshot-open-chart" style="width:100%;"></canvas>
+
+      <h5 class="p-heading--5" style="margin-top:2rem;">Median Age (days)</h5>
+      <canvas id="snapshot-age-chart" style="width:100%;"></canvas>
+
+      <h5 class="p-heading--5" style="margin-top:2rem;">Closed in Last Year</h5>
+      <canvas id="snapshot-closed-chart" style="width:100%;"></canvas>
     </div>
   </div>
 </div>
