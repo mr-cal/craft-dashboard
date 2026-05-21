@@ -1,0 +1,16 @@
+<div class="p-tabs">
+  <div class="p-tabs__list" role="tablist">
+    <div class="p-tabs__item" role="presentation">
+      <a class="p-tabs__link {% if request.url.path == '/stats/trends' %}is-active{% endif %}"
+         href="/stats/trends">Trends</a>
+    </div>
+    <div class="p-tabs__item" role="presentation">
+      <a class="p-tabs__link {% if request.url.path == '/stats/releases' %}is-active{% endif %}"
+         href="/stats/releases">Releases</a>
+    </div>
+    <div class="p-tabs__item" role="presentation">
+      <a class="p-tabs__link {% if request.url.path == '/stats/dependencies' %}is-active{% endif %}"
+         href="/stats/dependencies">Dependencies</a>
+    </div>
+  </div>
+</div>

@@ -224,6 +224,10 @@ proxies all traffic on port 80 to it.
 
 Do not use `https://`, port 8000, or `localhost`. None of those work for the VM.
 
+The admin page at `http://$VM_IP/admin` shows LLM triage statistics (how many
+issues have been evaluated, suggested action breakdown) and lists the API
+endpoints for triggering data collection and re-evaluation.
+
 ---
 
 ## 4. Bootstrapping Data (First Time)
