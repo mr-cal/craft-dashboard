@@ -3,40 +3,96 @@
 {% block content %}
 <h2>Dashboard</h2>
 
-<div class="grid">
-  <article>
-    <header>Projects</header>
-    <p style="font-size: 2rem; font-weight: bold;">{{ project_count }}</p>
-  </article>
-  <article>
-    <header>Open Issues</header>
-    <p style="font-size: 2rem; font-weight: bold;">{{ open_issues }}</p>
-  </article>
-  <article>
-    <header>Open PRs</header>
-    <p style="font-size: 2rem; font-weight: bold;">{{ open_prs }}</p>
-  </article>
+<div class="row" style="margin-bottom: 1.5rem;">
+  <div class="col-4">
+    <div class="p-card--highlighted" style="text-align:center;">
+      <p class="p-heading--2">{{ project_count }}</p>
+      <p>Projects</p>
+    </div>
+  </div>
+  <div class="col-4">
+    <div class="p-card--highlighted" style="text-align:center;">
+      <p class="p-heading--2">{{ open_issues }}</p>
+      <p>Open Issues</p>
+    </div>
+  </div>
+  <div class="col-4">
+    <div class="p-card--highlighted" style="text-align:center;">
+      <p class="p-heading--2">{{ open_prs }}</p>
+      <p>Open PRs</p>
+    </div>
+  </div>
 </div>
 
 <h2>Projects</h2>
+
+{% set applications = projects | selectattr("category", "equalto", "application") | list %}
+{% set libraries = projects | selectattr("category", "equalto", "library") | list %}
+{% set other = projects | rejectattr("category", "in", ["application", "library"]) | list %}
+
+{% if applications %}
+<h3>Applications</h3>
 <table>
   <thead>
     <tr>
       <th>Project</th>
-      <th>Category</th>
       <th>Open Issues</th>
       <th>Open PRs</th>
     </tr>
   </thead>
   <tbody>
-    {% for project in projects %}
+    {% for project in applications %}
     <tr>
       <td><a href="/issues?project={{ project.name }}">{{ project.name }}</a></td>
-      <td>{{ project.category }}</td>
       <td>{{ project.open_issues }}</td>
       <td>{{ project.open_prs }}</td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+{% endif %}
+
+{% if libraries %}
+<h3>Libraries</h3>
+<table>
+  <thead>
+    <tr>
+      <th>Project</th>
+      <th>Open Issues</th>
+      <th>Open PRs</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for project in libraries %}
+    <tr>
+      <td><a href="/issues?project={{ project.name }}">{{ project.name }}</a></td>
+      <td>{{ project.open_issues }}</td>
+      <td>{{ project.open_prs }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if other %}
+<h3>Other</h3>
+<table>
+  <thead>
+    <tr>
+      <th>Project</th>
+      <th>Open Issues</th>
+      <th>Open PRs</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for project in other %}
+    <tr>
+      <td><a href="/issues?project={{ project.name }}">{{ project.name }}</a></td>
+      <td>{{ project.open_issues }}</td>
+      <td>{{ project.open_prs }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 {% endblock %}
