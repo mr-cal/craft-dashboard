@@ -210,8 +210,7 @@ class GitHubCollector:
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
         gh_issues = repo.get_issues(state="all")
         
-        total_count = gh_issues.totalCount
-        logger.info("  %s/%s: planning to fetch %d issues%s", self.org, repo_name, total_count,
+        logger.info("  %s/%s: starting issue collection%s", self.org, repo_name,
                     f" (limit: {limit})" if limit else "")
         
         count = 0
@@ -326,7 +325,7 @@ class GitHubCollector:
             
             now = time.monotonic()
             if now - last_progress >= 30:
-                logger.info("  %s/%s: %d/%d issues fetched...", self.org, repo_name, count, total_count)
+                logger.info("  %s/%s: %d issues fetched...", self.org, repo_name, count)
                 last_progress = now
 
         await session.commit()
@@ -381,6 +380,7 @@ class GitHubCollector:
                 set_={
                     "branch": stmt.excluded.branch,
                     "released_at": stmt.excluded.released_at,
+                    "metadata": sa.literal_column("excluded.metadata"),
                 },
             )
             await session.execute(stmt)
@@ -398,7 +398,13 @@ class GitHubCollector:
         # Compute commits since latest tag per branch
         for branch, (tag, _) in latest_per_branch.items():
             try:
-                comparison = repo.compare(tag, branch)
+                # If target_commitish is a commit SHA (40-char hex), fall back to default branch
+                head = branch
+                if len(branch) == 40 and all(c in '0123456789abcdef' for c in branch.lower()):
+                    head = repo.default_branch
+                    logger.debug("  %s: target_commitish %s is a SHA, using default branch %s",
+                                 repo_name, branch[:8], head)
+                comparison = repo.compare(tag, head)
                 commits_since = comparison.ahead_by
                 # Read existing metadata and merge
                 result = await session.execute(
