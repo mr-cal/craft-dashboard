@@ -24,6 +24,7 @@ import click
 # Add project root to path
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
+from craft_dashboard.collectors.dependencies import DependencyCollector
 from craft_dashboard.collectors.github import GitHubCollector
 from craft_dashboard.collectors.launchpad import LaunchpadCollector
 from craft_dashboard.collectors.scheduler import (
@@ -110,6 +111,23 @@ async def _collect_github(
                 await generate_snapshot(
                     project_id, session, set(config.maintainers)
                 )
+
+                # Collect dependencies from pyproject.toml
+                dep_collector = DependencyCollector(
+                    token=settings.github_token,
+                    org="canonical",
+                )
+                try:
+                    await dep_collector.collect_dependencies(
+                        project_name, project_id, ["main"], session,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to collect dependencies for %s",
+                        project_name,
+                        exc_info=True,
+                    )
+
                 await update_refresh_schedule(
                     project_id, "github", config.refresh_interval_days, session
                 )
