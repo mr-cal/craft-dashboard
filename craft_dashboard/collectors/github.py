@@ -3,7 +3,7 @@
 import hashlib
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import sqlalchemy as sa
 from github import Github
@@ -207,11 +207,26 @@ class GitHubCollector:
 
         from craft_dashboard.models.issue import Issue  # noqa: PLC0415
 
+        # Count how many existing issues are due for refresh
+        cutoff = datetime.now(tz=UTC) - timedelta(days=refresh_age_days)
+        due_count_result = await session.execute(
+            sa.select(sa.func.count()).select_from(Issue).where(
+                Issue.project_id == project_id,
+                Issue.source == "github",
+                sa.or_(
+                    Issue.last_fetched_at == None,  # noqa: E711
+                    Issue.last_fetched_at < cutoff,
+                ),
+            )
+        )
+        due_count = due_count_result.scalar_one()
+
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
         gh_issues = repo.get_issues(state="all")
         
-        logger.info("  %s/%s: starting issue collection%s", self.org, repo_name,
-                    f" (limit: {limit})" if limit else "")
+        logger.info("  %s/%s: starting collection (%d issues due for refresh)%s",
+                    self.org, repo_name, due_count,
+                    f", limit: {limit}" if limit else "")
         
         count = 0
         skipped = 0

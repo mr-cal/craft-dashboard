@@ -32,67 +32,73 @@
 
 {% if applications %}
 <h3>Applications</h3>
-<table>
-  <thead>
-    <tr>
-      <th>Project</th>
-      <th>Open Issues</th>
-      <th>Open PRs</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for project in applications %}
-    <tr>
-      <td><a href="/issues?project={{ project.name }}">{{ project.name }}</a></td>
-      <td>{{ project.open_issues }}</td>
-      <td>{{ project.open_prs }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="col-6">
+  <table>
+    <thead>
+      <tr>
+        <th>Project</th>
+        <th>Open Issues</th>
+        <th>Open PRs</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for project in applications %}
+      <tr>
+        <td><a href="/issues?project={{ project.name }}">{{ project.name }}</a></td>
+        <td>{{ project.open_issues }}</td>
+        <td>{{ project.open_prs }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endif %}
 
 {% if libraries %}
 <h3>Libraries</h3>
-<table>
-  <thead>
-    <tr>
-      <th>Project</th>
-      <th>Open Issues</th>
-      <th>Open PRs</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for project in libraries %}
-    <tr>
-      <td><a href="/issues?project={{ project.name }}">{{ project.name }}</a></td>
-      <td>{{ project.open_issues }}</td>
-      <td>{{ project.open_prs }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="col-6">
+  <table>
+    <thead>
+      <tr>
+        <th>Project</th>
+        <th>Open Issues</th>
+        <th>Open PRs</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for project in libraries %}
+      <tr>
+        <td><a href="/issues?project={{ project.name }}">{{ project.name }}</a></td>
+        <td>{{ project.open_issues }}</td>
+        <td>{{ project.open_prs }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endif %}
 
 {% if other %}
 <h3>Other</h3>
-<table>
-  <thead>
-    <tr>
-      <th>Project</th>
-      <th>Open Issues</th>
-      <th>Open PRs</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for project in other %}
-    <tr>
-      <td><a href="/issues?project={{ project.name }}">{{ project.name }}</a></td>
-      <td>{{ project.open_issues }}</td>
-      <td>{{ project.open_prs }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="col-6">
+  <table>
+    <thead>
+      <tr>
+        <th>Project</th>
+        <th>Open Issues</th>
+        <th>Open PRs</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for project in other %}
+      <tr>
+        <td><a href="/issues?project={{ project.name }}">{{ project.name }}</a></td>
+        <td>{{ project.open_issues }}</td>
+        <td>{{ project.open_prs }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endif %}
 {% endblock %}
