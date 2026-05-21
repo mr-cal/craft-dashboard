@@ -57,6 +57,38 @@ async def dependencies_page(
     )
 
 
+@router.get("/dependencies/data")
+async def dependencies_data(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Return dependency data as JSON for the chart."""
+    config = request.app.state.config
+    libs = sorted(config.craft_libraries)
+
+    result = await session.execute(
+        select(
+            Project.name.label("project_name"),
+            Dependency.branch,
+            Dependency.dependency_name,
+            Dependency.version_spec,
+        )
+        .join(Project, Dependency.project_id == Project.id)
+        .where(Project.category == "application")
+        .order_by(Project.name, Dependency.branch, Dependency.dependency_name)
+    )
+
+    apps: dict = {}
+    for row in result:
+        key = f"{row.project_name}/{row.branch}"
+        if key not in apps:
+            apps[key] = {}
+        if row.dependency_name in libs:
+            apps[key][row.dependency_name] = {"version_spec": row.version_spec or "any"}
+
+    return {"libs": libs, "apps": apps}
+
+
 @router.get("/releases", response_class=HTMLResponse)
 async def releases_page(
     request: Request,

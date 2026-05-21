@@ -1,32 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Dependencies - craft-dashboard{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+{% endblock %}
 {% block content %}
 {% include "stats/partials/tabs.html" %}
 <h2>Dependency Usage</h2>
-<p>Which craft libraries are used by which applications, and on which branches.</p>
-
-{% if dependencies %}
-<table>
-  <thead>
-    <tr>
-      <th>Application</th>
-      <th>Branch</th>
-      <th>Dependency</th>
-      <th>Version Spec</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for dep in dependencies %}
-    <tr>
-      <td>{{ dep.project_name }}</td>
-      <td>{{ dep.branch }}</td>
-      <td>{{ dep.dependency_name }}</td>
-      <td><code>{{ dep.version_spec or "any" }}</code></td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p>No dependency data available yet. Run data collection first.</p>
-{% endif %}
+<p>Which craft libraries are used by which applications, and which version.</p>
+<div id="libs-and-apps-table"></div>
+{% endblock %}
+{% block scripts %}
+<script type="module" src="/static/js/deps.js"></script>
 {% endblock %}

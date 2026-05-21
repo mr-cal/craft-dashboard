@@ -20,27 +20,17 @@
   }
 }
 
-.outdated {
-  color: #d00000;
-}
-
-.outdated::before {
-  content: "\2717\a0";
-}
-
 .not-used {
-  color: gray;
+  color: #aaa;
+  font-style: italic;
 }
 
 .app-group-start {
-  overflow: visible;
-  box-shadow: inset 2px 0 0 #666;
+  border-left: 2px solid #e5e5e5;
 }
 
 .app-group-header {
-  overflow: visible;
-  box-shadow: inset 2px 0 0 #666;
-  font-weight: bold;
+  border-left: 2px solid #e5e5e5;
 }
 
 .score-badge {
