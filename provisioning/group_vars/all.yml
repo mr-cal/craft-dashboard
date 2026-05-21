@@ -30,6 +30,7 @@ app_env:
   OPENROUTER_API_KEY: "{{ lookup('env', 'OPENROUTER_API_KEY') }}"
   ADMIN_TOKEN: "{{ lookup('env', 'ADMIN_TOKEN') }}"
   LOG_LEVEL: "{{ lookup('env', 'LOG_LEVEL') | default('INFO', true) }}"
+  REFRESH_AGE_DAYS: "{{ lookup('env', 'REFRESH_AGE_DAYS') | default('7', true) }}"
   LLM_BACKEND: "{{ lookup('env', 'LLM_BACKEND') | default('openrouter', true) }}"
   LOCAL_LLM_URL: "{{ lookup('env', 'LOCAL_LLM_URL') | default('http://localhost:11434/v1', true) }}"
   LOCAL_LLM_API_KEY: "{{ lookup('env', 'LOCAL_LLM_API_KEY') | default('', true) }}"

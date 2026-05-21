@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+import time
 from datetime import UTC, datetime
 
 import sqlalchemy as sa
@@ -185,6 +186,7 @@ class GitHubCollector:
         project_id: int,
         session,  # noqa: ANN001
         limit: int = 0,
+        refresh_age_days: int = 7,
     ) -> int:
         """Collect issues and PRs for a repository.
 
@@ -195,6 +197,7 @@ class GitHubCollector:
             project_id: The database ID of the project.
             session: An async SQLAlchemy session.
             limit: Maximum number of issues to fetch per repo (0 = all).
+            refresh_age_days: Skip issues fetched within this many days.
 
         Returns:
             The number of issues upserted.
@@ -206,7 +209,14 @@ class GitHubCollector:
 
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
         gh_issues = repo.get_issues(state="all")
+        
+        total_count = gh_issues.totalCount
+        logger.info("  %s/%s: planning to fetch %d issues%s", self.org, repo_name, total_count,
+                    f" (limit: {limit})" if limit else "")
+        
         count = 0
+        skipped = 0
+        last_progress = time.monotonic()
 
         for gh_issue in gh_issues:
             if limit > 0 and count >= limit:
@@ -214,6 +224,24 @@ class GitHubCollector:
                 break
 
             issue_type, state = _classify_issue(gh_issue)
+            
+            # Check if this issue was recently fetched
+            existing = await session.execute(
+                sa.select(Issue.last_fetched_at).where(
+                    Issue.project_id == project_id,
+                    Issue.source == "github",
+                    Issue.external_id == str(gh_issue.number),
+                )
+            )
+            last_fetched = existing.scalar_one_or_none()
+            if last_fetched is not None:
+                fetched_tz = last_fetched.replace(tzinfo=UTC) if last_fetched.tzinfo is None else last_fetched
+                age = (datetime.now(tz=UTC) - fetched_tz).days
+                if age < refresh_age_days:
+                    logger.debug("  Skipping %s#%d (fetched %d days ago)", repo_name, gh_issue.number, age)
+                    skipped += 1
+                    continue
+            
             label_names = [label.name for label in gh_issue.labels]
             author = gh_issue.user.login if gh_issue.user else None
 
@@ -295,14 +323,14 @@ class GitHubCollector:
             )
             await session.execute(stmt)
             count += 1
-            if count % 25 == 0:
-                logger.info(
-                    "  %s/%s: %d issues fetched so far...",
-                    self.org, repo_name, count,
-                )
+            
+            now = time.monotonic()
+            if now - last_progress >= 30:
+                logger.info("  %s/%s: %d/%d issues fetched...", self.org, repo_name, count, total_count)
+                last_progress = now
 
         await session.commit()
-        logger.info("Collected %d issues from %s/%s", count, self.org, repo_name)
+        logger.info("Collected %d issues from %s/%s (%d skipped, recently fetched)", count, self.org, repo_name, skipped)
         return count
 
     async def collect_releases(

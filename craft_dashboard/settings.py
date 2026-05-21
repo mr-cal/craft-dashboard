@@ -28,5 +28,8 @@ class Settings(BaseSettings):
     # OpenRouter model settings
     openrouter_summary_model: str = "google/gemini-2.5-flash-lite"
     openrouter_evaluation_model: str = "anthropic/claude-haiku-4.5"
+    
+    # How many days before re-fetching an issue from GitHub
+    refresh_age_days: int = 7
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

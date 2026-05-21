@@ -106,7 +106,11 @@ async def _collect_github(
 
             logger.info("Collecting GitHub data for %s", project_name)
             try:
-                await collector.collect_issues(project_name, project_id, session, limit=limit)
+                await collector.collect_issues(
+                    project_name, project_id, session,
+                    limit=limit,
+                    refresh_age_days=settings.refresh_age_days,
+                )
                 await collector.collect_releases(project_name, project_id, session)
                 await generate_snapshot(
                     project_id, session, set(config.maintainers)
