@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from craft_dashboard.config import load_config
 from craft_dashboard.database import get_engine, get_session_factory
 from craft_dashboard.dependencies import set_session_factory
 from craft_dashboard.routes.admin import router as admin_router
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     session_factory = get_session_factory(engine)
     set_session_factory(session_factory)
     app.state.settings = settings
+    app.state.config = load_config(pathlib.Path(settings.config_file))
     yield
     await engine.dispose()
 
