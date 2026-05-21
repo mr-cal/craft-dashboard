@@ -424,7 +424,7 @@ function applyDateFilter() {
 function resetDateFilter() {
   filteredProjects = allProjects;
   const today = new Date().toISOString().slice(0, 10);
-  document.getElementById("date-start").value = "2021-01-01";
+  document.getElementById("date-start").value = "2020-01-01";
   document.getElementById("date-end").value = today;
   
   updateOpenIssuesChart();
@@ -510,7 +510,7 @@ populateSnapshotCheckboxes();
 
 // Initialize date range inputs
 const today = new Date().toISOString().slice(0, 10);
-document.getElementById("date-start").value = "2021-01-01";
+document.getElementById("date-start").value = "2020-01-01";
 document.getElementById("date-end").value = today;
 
 // Initial render
