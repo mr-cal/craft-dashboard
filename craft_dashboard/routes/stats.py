@@ -207,42 +207,47 @@ async def trends_all_data(
         projects[name]["open_bugs"].append(row.open_bugs)
 
     project_order = list(projects.keys())
-    
-    # Compute all-projects aggregate
+
+    # Compute all-projects aggregate indexed by date string (projects have different ranges)
     if projects:
-        all_dates = projects[project_order[0]]["dates"]
-        all_projects = {
-            "dates": all_dates,
-            "open_issues": [],
-            "open_prs": [],
-            "open_issues_external": [],
-            "open_prs_external": [],
-            "median_issue_age": [],
-            "median_pr_age": [],
-            "closed_issues": [],
-            "closed_prs": [],
-            "closed_issues_external": [],
-            "closed_prs_external": [],
-            "open_bugs": [],
-        }
-        
-        for i in range(len(all_dates)):
-            all_projects["open_issues"].append(sum(p["open_issues"][i] for p in projects.values()))
-            all_projects["open_prs"].append(sum(p["open_prs"][i] for p in projects.values()))
-            all_projects["open_issues_external"].append(sum(p["open_issues_external"][i] for p in projects.values()))
-            all_projects["open_prs_external"].append(sum(p["open_prs_external"][i] for p in projects.values()))
-            all_projects["closed_issues"].append(sum(p["closed_issues"][i] for p in projects.values()))
-            all_projects["closed_prs"].append(sum(p["closed_prs"][i] for p in projects.values()))
-            all_projects["closed_issues_external"].append(sum(p["closed_issues_external"][i] for p in projects.values()))
-            all_projects["closed_prs_external"].append(sum(p["closed_prs_external"][i] for p in projects.values()))
-            all_projects["open_bugs"].append(sum(p["open_bugs"][i] for p in projects.values()))
-            
-            # Average of medians as approximation for aggregate
-            issue_ages = [p["median_issue_age"][i] for p in projects.values() if p["median_issue_age"][i] > 0]
-            pr_ages = [p["median_pr_age"][i] for p in projects.values() if p["median_pr_age"][i] > 0]
+        # Build per-date lookup for each project
+        proj_by_date: dict[str, dict[str, list]] = {}
+        for name, data in projects.items():
+            proj_by_date[name] = {d: i for i, d in enumerate(data["dates"])}
+
+        all_dates_set: set[str] = set()
+        for data in projects.values():
+            all_dates_set.update(data["dates"])
+        all_dates_sorted = sorted(all_dates_set)
+
+        scalar_keys = [
+            "open_issues", "open_prs", "open_issues_external", "open_prs_external",
+            "closed_issues", "closed_prs", "closed_issues_external", "closed_prs_external",
+            "open_bugs",
+        ]
+        all_projects: dict[str, list] = {"dates": all_dates_sorted, **{k: [] for k in scalar_keys},
+                                          "median_issue_age": [], "median_pr_age": []}
+
+        for d in all_dates_sorted:
+            for k in scalar_keys:
+                total = 0
+                for name, data in projects.items():
+                    idx = proj_by_date[name].get(d)
+                    if idx is not None:
+                        total += data[k][idx]
+                all_projects[k].append(total)
+            # Average of medians across projects that have data for this date
+            issue_ages = []
+            pr_ages = []
+            for name, data in projects.items():
+                idx = proj_by_date[name].get(d)
+                if idx is not None and data["median_issue_age"][idx] > 0:
+                    issue_ages.append(data["median_issue_age"][idx])
+                if idx is not None and data["median_pr_age"][idx] > 0:
+                    pr_ages.append(data["median_pr_age"][idx])
             all_projects["median_issue_age"].append(int(sum(issue_ages) / len(issue_ages)) if issue_ages else 0)
             all_projects["median_pr_age"].append(int(sum(pr_ages) / len(pr_ages)) if pr_ages else 0)
-        
+
         projects["all-projects"] = all_projects
     
     # Build snapshot section (latest day data for bar charts)
