@@ -23,6 +23,25 @@
          hx-include=".filter-bar [name]"
          hx-trigger="change" />
 
+  <details class="filter-accordion">
+    <summary>Author Role{% if filter_author_role %} ({{ filter_author_role.split(",")|length }}){% endif %}</summary>
+    <div class="filter-accordion__panel">
+      {% for role in ["maintainer", "contributor", "bot"] %}
+      <label class="filter-checkbox">
+        <input type="checkbox" class="role-checkbox" value="{{ role }}"
+               {% if role in (filter_author_role or "").split(",") %}checked{% endif %} />
+        {{ role|capitalize }}{% if role == "bot" %}s{% endif %}
+      </label>
+      {% endfor %}
+    </div>
+  </details>
+  <input type="hidden" name="author_role" id="role-hidden" value="{{ filter_author_role or '' }}"
+         hx-get="/issues/table"
+         hx-target="#issue-table"
+         hx-swap="outerHTML"
+         hx-include=".filter-bar [name]"
+         hx-trigger="change" />
+
   <select name="type"
           hx-get="/issues/table"
           hx-target="#issue-table"
@@ -34,22 +53,24 @@
     <option value="pull_request" {% if filter_type == "pull_request" %}selected{% endif %}>PRs</option>
   </select>
 
-  <select name="action"
-          hx-get="/issues/table"
-          hx-target="#issue-table"
-          hx-swap="outerHTML"
-          hx-include=".filter-bar [name]"
-          hx-push-url="false">
-    <option value="">All Actions</option>
-    <option value="close_stale">Close (Stale)</option>
-    <option value="close_duplicate">Close (Duplicate)</option>
-    <option value="close_not_a_bug">Close (Not a Bug)</option>
-    <option value="close_outdated">Close (Outdated)</option>
-    <option value="needs_triage">Needs Triage</option>
-    <option value="needs_review">Needs Review</option>
-    <option value="needs_rebase">Needs Rebase</option>
-    <option value="keep_open">Keep Open</option>
-  </select>
+  <details class="filter-accordion">
+    <summary>Actions{% if filter_action %} ({{ filter_action.split(",")|length }}){% endif %}</summary>
+    <div class="filter-accordion__panel">
+      {% for act in ["close_stale", "close_duplicate", "close_not_a_bug", "close_outdated", "needs_triage", "needs_review", "needs_rebase", "keep_open"] %}
+      <label class="filter-checkbox">
+        <input type="checkbox" class="action-checkbox" value="{{ act }}"
+               {% if act in (filter_action or "").split(",") %}checked{% endif %} />
+        {{ act|replace("_", " ")|title }}
+      </label>
+      {% endfor %}
+    </div>
+  </details>
+  <input type="hidden" name="action" id="action-hidden" value="{{ filter_action or '' }}"
+         hx-get="/issues/table"
+         hx-target="#issue-table"
+         hx-swap="outerHTML"
+         hx-include=".filter-bar [name]"
+         hx-trigger="change" />
 
   <input type="hidden" name="sort" value="{{ sort_by or 'staleness' }}" />
 </div>
@@ -64,6 +85,26 @@ document.querySelectorAll('.project-checkbox').forEach(cb => {
     const checked = Array.from(document.querySelectorAll('.project-checkbox:checked'))
       .map(c => c.value).join(',');
     const hidden = document.getElementById('project-hidden');
+    hidden.value = checked;
+    htmx.trigger(hidden, 'change');
+  });
+});
+
+document.querySelectorAll('.role-checkbox').forEach(cb => {
+  cb.addEventListener('change', () => {
+    const checked = Array.from(document.querySelectorAll('.role-checkbox:checked'))
+      .map(c => c.value).join(',');
+    const hidden = document.getElementById('role-hidden');
+    hidden.value = checked;
+    htmx.trigger(hidden, 'change');
+  });
+});
+
+document.querySelectorAll('.action-checkbox').forEach(cb => {
+  cb.addEventListener('change', () => {
+    const checked = Array.from(document.querySelectorAll('.action-checkbox:checked'))
+      .map(c => c.value).join(',');
+    const hidden = document.getElementById('action-hidden');
     hidden.value = checked;
     htmx.trigger(hidden, 'change');
   });

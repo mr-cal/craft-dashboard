@@ -36,6 +36,7 @@ async def _query_issues(
     source: str = "",
     issue_type: str = "",
     action: str = "",
+    author_role: str = "",
     sort_by: str = "staleness",
     page: int = 1,
 ) -> tuple[list[dict], int]:
@@ -67,7 +68,30 @@ async def _query_issues(
     if issue_type:
         query = query.where(Issue.issue_type == issue_type)
     if action:
-        query = query.where(LLMEvaluation.suggested_action == action)
+        action_list = [a.strip() for a in action.split(",") if a.strip()]
+        if len(action_list) == 1:
+            query = query.where(LLMEvaluation.suggested_action == action_list[0])
+        elif action_list:
+            query = query.where(LLMEvaluation.suggested_action.in_(action_list))
+    if author_role:
+        role_list = [r.strip() for r in author_role.split(",") if r.strip()]
+        role_conditions = []
+        for role in role_list:
+            if role == "maintainer":
+                role_conditions.append(
+                    (Issue.author_is_maintainer == True) & ~Issue.author.like("%[bot]")
+                )
+            elif role == "contributor":
+                role_conditions.append(
+                    (Issue.author_is_maintainer == False) & ~Issue.author.like("%[bot]")
+                )
+            elif role == "bot":
+                role_conditions.append(Issue.author.like("%[bot]"))
+        if len(role_conditions) == 1:
+            query = query.where(role_conditions[0])
+        elif role_conditions:
+            from sqlalchemy import or_
+            query = query.where(or_(*role_conditions))
 
     count_query = select(func.count()).select_from(query.subquery())
     total = await session.scalar(count_query) or 0
@@ -134,6 +158,7 @@ async def issue_list(
     source: str = Query("", alias="source"),
     issue_type: str = Query("", alias="type"),
     action: str = Query("", alias="action"),
+    author_role: str = Query("", alias="author_role"),
     sort: str = Query("staleness", alias="sort"),
     page: int = Query(1, ge=1),
 ) -> HTMLResponse:
@@ -146,6 +171,7 @@ async def issue_list(
         source=source,
         issue_type=issue_type,
         action=action,
+        author_role=author_role,
         sort_by=sort,
         page=page,
     )
@@ -165,6 +191,7 @@ async def issue_list(
             "filter_source": source,
             "filter_type": issue_type,
             "filter_action": action,
+            "filter_author_role": author_role,
             "sort_by": sort,
             "page": page,
             "total_pages": total_pages,
@@ -180,6 +207,7 @@ async def issue_table_partial(
     source: str = Query("", alias="source"),
     issue_type: str = Query("", alias="type"),
     action: str = Query("", alias="action"),
+    author_role: str = Query("", alias="author_role"),
     sort: str = Query("staleness", alias="sort"),
     page: int = Query(1, ge=1),
 ) -> HTMLResponse:
@@ -192,6 +220,7 @@ async def issue_table_partial(
         source=source,
         issue_type=issue_type,
         action=action,
+        author_role=author_role,
         sort_by=sort,
         page=page,
     )
@@ -205,6 +234,7 @@ async def issue_table_partial(
             "filter_source": source,
             "filter_type": issue_type,
             "filter_action": action,
+            "filter_author_role": author_role,
             "sort_by": sort,
             "page": page,
             "total_pages": total_pages,

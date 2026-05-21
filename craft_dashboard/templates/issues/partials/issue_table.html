@@ -21,7 +21,7 @@
         {{ sort_header("Issue", "number") }}
         {{ sort_header("Title", "title") }}
         {{ sort_header("Author", "author") }}
-        <th>Age</th>
+        {{ sort_header("Age", "age") }}
         <th>Staleness</th>
         <th>Action</th>
         <th>Summary</th>
@@ -35,7 +35,7 @@
             {{ issue.project_name }}{% if issue.source == "launchpad" %}-lp{% endif %}#{{ issue.external_id }}
           </a>
         </td>
-        <td><a href="{{ issue.url }}" target="_blank" rel="noopener">{{ issue.title|truncate(80) }}</a></td>
+        <td>{{ issue.title|truncate(80) }}</td>
         <td>{{ issue.author or "unknown" }}</td>
         <td>{{ issue.age_days }}d</td>
         <td>
@@ -62,6 +62,6 @@
     </tbody>
   </table>
 
-  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&sort=" ~ (sort_by or "staleness") %}
+  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&author_role=" ~ (filter_author_role or "") ~ "&sort=" ~ (sort_by or "staleness") %}
   {% include "components/pagination.html" %}
 </div>
