@@ -1,27 +1,34 @@
 {% extends "base.html" %}
-{% block title %}Issues — craft-dashboard{% endblock %}
+{% block title %}Issues &amp; PRs - craft-dashboard{% endblock %}
 {% block content %}
-<h1>Issue & PR Triage</h1>
+<h2>Issue &amp; PR Triage</h2>
 
 <div class="filter-bar">
-  <select name="project"
-          hx-get="/issues/table"
-          hx-target="#issue-table"
-          hx-swap="outerHTML"
-          hx-include=".filter-bar [name]"
-          hx-push-url="true">
-    <option value="">All Projects</option>
-    {% for p in project_names %}
-    <option value="{{ p }}" {% if filter_project == p %}selected{% endif %}>{{ p }}</option>
-    {% endfor %}
-  </select>
+  <details class="filter-accordion">
+    <summary>Projects{% if filter_project %} ({{ filter_project.split(",")|length }}){% endif %}</summary>
+    <div class="filter-accordion__panel">
+      {% for p in project_names %}
+      <label class="filter-checkbox">
+        <input type="checkbox" class="project-checkbox" value="{{ p }}"
+               {% if p in (filter_project or "").split(",") %}checked{% endif %} />
+        {{ p }}
+      </label>
+      {% endfor %}
+    </div>
+  </details>
+  <input type="hidden" name="project" id="project-hidden" value="{{ filter_project or '' }}"
+         hx-get="/issues/table"
+         hx-target="#issue-table"
+         hx-swap="outerHTML"
+         hx-include=".filter-bar [name]"
+         hx-trigger="change" />
 
   <select name="type"
           hx-get="/issues/table"
           hx-target="#issue-table"
           hx-swap="outerHTML"
           hx-include=".filter-bar [name]"
-          hx-push-url="true">
+          hx-push-url="false">
     <option value="">All Types</option>
     <option value="issue" {% if filter_type == "issue" %}selected{% endif %}>Issues</option>
     <option value="pull_request" {% if filter_type == "pull_request" %}selected{% endif %}>PRs</option>
@@ -32,7 +39,7 @@
           hx-target="#issue-table"
           hx-swap="outerHTML"
           hx-include=".filter-bar [name]"
-          hx-push-url="true">
+          hx-push-url="false">
     <option value="">All Actions</option>
     <option value="close_stale">Close (Stale)</option>
     <option value="close_duplicate">Close (Duplicate)</option>
@@ -44,17 +51,22 @@
     <option value="keep_open">Keep Open</option>
   </select>
 
-  <select name="sort"
-          hx-get="/issues/table"
-          hx-target="#issue-table"
-          hx-swap="outerHTML"
-          hx-include=".filter-bar [name]"
-          hx-push-url="true">
-    <option value="staleness" {% if sort_by == "staleness" %}selected{% endif %}>Sort: Staleness ↓</option>
-    <option value="age" {% if sort_by == "age" %}selected{% endif %}>Sort: Age ↓</option>
-    <option value="updated" {% if sort_by == "updated" %}selected{% endif %}>Sort: Recently Updated</option>
-  </select>
+  <input type="hidden" name="sort" value="{{ sort_by or 'staleness' }}" />
 </div>
 
 {% include "issues/partials/issue_table.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.project-checkbox').forEach(cb => {
+  cb.addEventListener('change', () => {
+    const checked = Array.from(document.querySelectorAll('.project-checkbox:checked'))
+      .map(c => c.value).join(',');
+    const hidden = document.getElementById('project-hidden');
+    hidden.value = checked;
+    htmx.trigger(hidden, 'change');
+  });
+});
+</script>
 {% endblock %}

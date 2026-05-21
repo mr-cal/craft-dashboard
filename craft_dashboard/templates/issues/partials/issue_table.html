@@ -3,10 +3,24 @@
   <table>
     <thead>
       <tr>
-        <th>Project</th>
-        <th>Type</th>
-        <th>Title</th>
-        <th>Author</th>
+        {% macro sort_header(label, field) %}
+        <th>
+          <a href="#"
+             hx-get="/issues/table"
+             hx-target="#issue-table"
+             hx-swap="outerHTML"
+             hx-include=".filter-bar [name]:not([name='sort'])"
+             hx-vals='{"sort": "{{ ("-" ~ field) if sort_by == field else field }}"}'
+             hx-push-url="false"
+             style="text-decoration:none;color:inherit;cursor:pointer;">
+            {{ label }}
+            {% if sort_by == field %} &#8593;{% elif sort_by == "-" ~ field %} &#8595;{% endif %}
+          </a>
+        </th>
+        {% endmacro %}
+        {{ sort_header("Issue", "number") }}
+        {{ sort_header("Title", "title") }}
+        {{ sort_header("Author", "author") }}
         <th>Age</th>
         <th>Staleness</th>
         <th>Action</th>
@@ -16,8 +30,11 @@
     <tbody>
       {% for issue in issues %}
       <tr>
-        <td>{{ issue.project_name }}</td>
-        <td>{{ "PR" if issue.issue_type == "pull_request" else "Issue" }}</td>
+        <td style="white-space:nowrap;">
+          <a href="{{ issue.url }}" target="_blank" rel="noopener">
+            {{ issue.project_name }}{% if issue.source == "launchpad" %}-lp{% endif %}#{{ issue.external_id }}
+          </a>
+        </td>
         <td><a href="{{ issue.url }}" target="_blank" rel="noopener">{{ issue.title|truncate(80) }}</a></td>
         <td>{{ issue.author or "unknown" }}</td>
         <td>{{ issue.age_days }}d</td>
@@ -27,7 +44,7 @@
           {% set score_name = "Staleness" %}
           {% include "components/score_badge.html" %}
           {% else %}
-          <span class="score-badge" style="background:#ccc;color:#666;">—</span>
+          <span class="score-badge" style="background:#ccc;color:#666;">-</span>
           {% endif %}
         </td>
         <td>
@@ -39,12 +56,12 @@
       </tr>
       {% else %}
       <tr>
-        <td colspan="8">No issues found matching the current filters.</td>
+        <td colspan="7">No issues found matching the current filters.</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 
-  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&source=" ~ (filter_source or "") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&sort=" ~ (sort_by or "staleness") %}
+  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&sort=" ~ (sort_by or "staleness") %}
   {% include "components/pagination.html" %}
 </div>

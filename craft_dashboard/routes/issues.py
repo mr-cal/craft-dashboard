@@ -57,7 +57,11 @@ async def _query_issues(
     )
 
     if project:
-        query = query.where(Project.name == project)
+        project_list = [p.strip() for p in project.split(",") if p.strip()]
+        if len(project_list) == 1:
+            query = query.where(Project.name == project_list[0])
+        elif project_list:
+            query = query.where(Project.name.in_(project_list))
     if source:
         query = query.where(Issue.source == source)
     if issue_type:
@@ -69,11 +73,27 @@ async def _query_issues(
     total = await session.scalar(count_query) or 0
     total_pages = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
 
-    if sort_by == "age":
-        query = query.order_by(Issue.created_at.asc())
-    elif sort_by == "updated":
-        query = query.order_by(Issue.updated_at.desc())
-    else:
+    sort_field = sort_by.lstrip("-")
+    sort_desc = sort_by.startswith("-")
+
+    if sort_field == "age":
+        col = Issue.created_at
+        query = query.order_by(col.asc() if not sort_desc else col.desc())
+    elif sort_field == "updated":
+        col = Issue.updated_at
+        query = query.order_by(col.desc() if not sort_desc else col.asc())
+    elif sort_field == "title":
+        col = Issue.title
+        query = query.order_by(col.asc() if not sort_desc else col.desc())
+    elif sort_field == "author":
+        col = Issue.author
+        query = query.order_by(col.asc() if not sort_desc else col.desc())
+    elif sort_field == "number":
+        if sort_desc:
+            query = query.order_by(Project.name.desc(), Issue.external_id.desc())
+        else:
+            query = query.order_by(Project.name.asc(), Issue.external_id.asc())
+    else:  # staleness (default)
         query = query.order_by(
             func.coalesce(LLMEvaluation.scores["staleness"].as_float(), 0).desc()
         )
@@ -91,6 +111,7 @@ async def _query_issues(
             {
                 "project_name": row.project_name,
                 "source": issue.source,
+                "external_id": issue.external_id,
                 "issue_type": issue.issue_type,
                 "title": issue.title,
                 "author": issue.author,
