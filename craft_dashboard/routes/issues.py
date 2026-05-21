@@ -39,6 +39,7 @@ async def _query_issues(
     author_role: str = "",
     sort_by: str = "staleness",
     page: int = 1,
+    bots: list[str] | None = None,
 ) -> tuple[list[dict], int]:
     """Query issues with filters and return (issues, total_pages)."""
     query = (
@@ -86,7 +87,11 @@ async def _query_issues(
                     (Issue.author_is_maintainer == False) & ~Issue.author.like("%[bot]")
                 )
             elif role == "bot":
-                role_conditions.append(Issue.author.like("%[bot]"))
+                from sqlalchemy import or_
+                bot_conditions = [Issue.author.like("%[bot]")]
+                if bots:
+                    bot_conditions.extend(Issue.author == b for b in bots)
+                role_conditions.append(or_(*bot_conditions))
         if len(role_conditions) == 1:
             query = query.where(role_conditions[0])
         elif role_conditions:
@@ -174,6 +179,7 @@ async def issue_list(
         author_role=author_role,
         sort_by=sort,
         page=page,
+        bots=getattr(request.app.state.config, 'bots', []),
     )
 
     project_result = await session.execute(
@@ -223,6 +229,7 @@ async def issue_table_partial(
         author_role=author_role,
         sort_by=sort,
         page=page,
+        bots=getattr(request.app.state.config, 'bots', []),
     )
 
     return templates.TemplateResponse(

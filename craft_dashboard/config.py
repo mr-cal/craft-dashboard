@@ -15,6 +15,7 @@ class DashboardConfig(BaseModel):
     refresh_interval_days: int = 7
     launchpad_projects: list[str] = Field(default_factory=list)
     maintainers: list[str] = Field(default_factory=list)
+    bots: list[str] = Field(default_factory=list)
     hotfix_min_versions: dict[str, str] = Field(default_factory=dict)
 
 

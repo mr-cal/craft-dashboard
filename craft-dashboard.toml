@@ -46,13 +46,11 @@ maintainers = [
     "alderic-coroir",
     "bepri",
     "cmatsuoka",
-    "Copilot",
     "come-maiz",
     "cjdcordeiro",
     "cjp256",
     "dariuszd21",
     "dboddie",
-    "dependabot[bot]",
     "facundobatista",
     "jahn-junior",
     "kyrofa",
@@ -60,13 +58,18 @@ maintainers = [
     "mattculler",
     "medubelko",
     "mr-cal",
-    "renovate[bot]",
     "sergiusens",
     "smethnani",
     "steinbro",
     "syu-w",
     "tigarmo",
     "upils",
+]
+
+bots = [
+    "Copilot",
+    "dependabot[bot]",
+    "renovate[bot]",
 ]
 
 [hotfix-min-versions]
