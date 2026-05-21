@@ -4,43 +4,35 @@
 <h2>Issue &amp; PR Triage</h2>
 
 <div class="filter-bar">
-  <details class="filter-accordion">
-    <summary>Projects{% if filter_project %} ({{ filter_project.split(",")|length }}){% endif %}</summary>
-    <div class="filter-accordion__panel">
+  <div class="filter-group">
+    <label for="project-select">Projects</label>
+    <select id="project-select" multiple class="filter-multiselect">
       {% for p in project_names %}
-      <label class="filter-checkbox">
-        <input type="checkbox" class="project-checkbox" value="{{ p }}"
-               {% if p in (filter_project or "").split(",") %}checked{% endif %} />
-        {{ p }}
-      </label>
+      <option value="{{ p }}" {% if p in (filter_project or "").split(",") %}selected{% endif %}>{{ p }}</option>
       {% endfor %}
-    </div>
-  </details>
-  <input type="hidden" name="project" id="project-hidden" value="{{ filter_project or '' }}"
-         hx-get="/issues/table"
-         hx-target="#issue-table"
-         hx-swap="outerHTML"
-         hx-include=".filter-bar [name]"
-         hx-trigger="change" />
+    </select>
+    <input type="hidden" name="project" id="project-hidden" value="{{ filter_project or '' }}"
+           hx-get="/issues/table"
+           hx-target="#issue-table"
+           hx-swap="outerHTML"
+           hx-include=".filter-bar [name]"
+           hx-trigger="change" />
+  </div>
 
-  <details class="filter-accordion">
-    <summary>Author Role{% if filter_author_role %} ({{ filter_author_role.split(",")|length }}){% endif %}</summary>
-    <div class="filter-accordion__panel">
+  <div class="filter-group">
+    <label for="role-select">Author Role</label>
+    <select id="role-select" multiple class="filter-multiselect">
       {% for role in ["maintainer", "contributor", "bot"] %}
-      <label class="filter-checkbox">
-        <input type="checkbox" class="role-checkbox" value="{{ role }}"
-               {% if role in (filter_author_role or "").split(",") %}checked{% endif %} />
-        {{ role|capitalize }}{% if role == "bot" %}s{% endif %}
-      </label>
+      <option value="{{ role }}" {% if role in (filter_author_role or "").split(",") %}selected{% endif %}>{{ role|capitalize }}{% if role == "bot" %}s{% endif %}</option>
       {% endfor %}
-    </div>
-  </details>
-  <input type="hidden" name="author_role" id="role-hidden" value="{{ filter_author_role or '' }}"
-         hx-get="/issues/table"
-         hx-target="#issue-table"
-         hx-swap="outerHTML"
-         hx-include=".filter-bar [name]"
-         hx-trigger="change" />
+    </select>
+    <input type="hidden" name="author_role" id="role-hidden" value="{{ filter_author_role or '' }}"
+           hx-get="/issues/table"
+           hx-target="#issue-table"
+           hx-swap="outerHTML"
+           hx-include=".filter-bar [name]"
+           hx-trigger="change" />
+  </div>
 
   <select name="type"
           hx-get="/issues/table"
@@ -53,24 +45,20 @@
     <option value="pull_request" {% if filter_type == "pull_request" %}selected{% endif %}>PRs</option>
   </select>
 
-  <details class="filter-accordion">
-    <summary>Actions{% if filter_action %} ({{ filter_action.split(",")|length }}){% endif %}</summary>
-    <div class="filter-accordion__panel">
+  <div class="filter-group">
+    <label for="action-select">Actions</label>
+    <select id="action-select" multiple class="filter-multiselect">
       {% for act in ["close_stale", "close_duplicate", "close_not_a_bug", "close_outdated", "needs_triage", "needs_review", "needs_rebase", "keep_open"] %}
-      <label class="filter-checkbox">
-        <input type="checkbox" class="action-checkbox" value="{{ act }}"
-               {% if act in (filter_action or "").split(",") %}checked{% endif %} />
-        {{ act|replace("_", " ")|title }}
-      </label>
+      <option value="{{ act }}" {% if act in (filter_action or "").split(",") %}selected{% endif %}>{{ act|replace("_", " ")|title }}</option>
       {% endfor %}
-    </div>
-  </details>
-  <input type="hidden" name="action" id="action-hidden" value="{{ filter_action or '' }}"
-         hx-get="/issues/table"
-         hx-target="#issue-table"
-         hx-swap="outerHTML"
-         hx-include=".filter-bar [name]"
-         hx-trigger="change" />
+    </select>
+    <input type="hidden" name="action" id="action-hidden" value="{{ filter_action or '' }}"
+           hx-get="/issues/table"
+           hx-target="#issue-table"
+           hx-swap="outerHTML"
+           hx-include=".filter-bar [name]"
+           hx-trigger="change" />
+  </div>
 
   <input type="hidden" name="sort" value="{{ sort_by or 'staleness' }}" />
 </div>
@@ -80,34 +68,17 @@
 
 {% block scripts %}
 <script>
-document.querySelectorAll('.project-checkbox').forEach(cb => {
-  cb.addEventListener('change', () => {
-    const checked = Array.from(document.querySelectorAll('.project-checkbox:checked'))
-      .map(c => c.value).join(',');
-    const hidden = document.getElementById('project-hidden');
-    hidden.value = checked;
+function syncMultiSelect(selectId, hiddenId) {
+  const sel = document.getElementById(selectId);
+  const hidden = document.getElementById(hiddenId);
+  sel.addEventListener('change', () => {
+    const vals = Array.from(sel.selectedOptions).map(o => o.value).join(',');
+    hidden.value = vals;
     htmx.trigger(hidden, 'change');
   });
-});
-
-document.querySelectorAll('.role-checkbox').forEach(cb => {
-  cb.addEventListener('change', () => {
-    const checked = Array.from(document.querySelectorAll('.role-checkbox:checked'))
-      .map(c => c.value).join(',');
-    const hidden = document.getElementById('role-hidden');
-    hidden.value = checked;
-    htmx.trigger(hidden, 'change');
-  });
-});
-
-document.querySelectorAll('.action-checkbox').forEach(cb => {
-  cb.addEventListener('change', () => {
-    const checked = Array.from(document.querySelectorAll('.action-checkbox:checked'))
-      .map(c => c.value).join(',');
-    const hidden = document.getElementById('action-hidden');
-    hidden.value = checked;
-    htmx.trigger(hidden, 'change');
-  });
-});
+}
+syncMultiSelect('project-select', 'project-hidden');
+syncMultiSelect('role-select', 'role-hidden');
+syncMultiSelect('action-select', 'action-hidden');
 </script>
 {% endblock %}
