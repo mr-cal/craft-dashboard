@@ -7,3 +7,9 @@
   ansible.builtin.systemd:
     name: craft-dashboard
     state: restarted
+
+- name: Restart collect-data
+  ansible.builtin.systemd:
+    name: collect-data
+    state: restarted
+  failed_when: false

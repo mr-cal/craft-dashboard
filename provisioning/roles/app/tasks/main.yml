@@ -30,7 +30,9 @@
     version: "{{ app_branch }}"
     force: true
   when: app_git.stat.exists
-  notify: Restart craft-dashboard
+  notify:
+    - Restart craft-dashboard
+    - Restart collect-data
 
 - name: Set application directory ownership
   ansible.builtin.file:
@@ -52,7 +54,9 @@
   args:
     chdir: "{{ app_dir }}"
   changed_when: false
-  notify: Restart craft-dashboard
+  notify:
+    - Restart craft-dashboard
+    - Restart collect-data
 
 - name: Run database migrations
   ansible.builtin.shell: |
@@ -71,7 +75,9 @@
     owner: "{{ app_user }}"
     group: "{{ app_group }}"
     mode: "0600"
-  notify: Restart craft-dashboard
+  notify:
+    - Restart craft-dashboard
+    - Restart collect-data
 
 - name: Deploy systemd service
   ansible.builtin.template:
