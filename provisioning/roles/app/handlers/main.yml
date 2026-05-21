@@ -9,7 +9,5 @@
     state: restarted
 
 - name: Restart collect-data
-  ansible.builtin.systemd:
-    name: collect-data
-    state: restarted
+  ansible.builtin.shell: systemctl restart --no-block collect-data
   failed_when: false
