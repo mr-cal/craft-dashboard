@@ -26,6 +26,18 @@ class Snapshot(Base):
     open_prs_external: Mapped[int] = mapped_column(Integer, default=0)
     open_prs_internal: Mapped[int] = mapped_column(Integer, default=0)
     open_bugs: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Median ages (in days)
+    median_issue_age: Mapped[int] = mapped_column(Integer, default=0)
+    median_pr_age: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Closed counts
+    closed_issues: Mapped[int] = mapped_column(Integer, default=0)
+    closed_prs: Mapped[int] = mapped_column(Integer, default=0)
+    closed_issues_external: Mapped[int] = mapped_column(Integer, default=0)
+    closed_issues_internal: Mapped[int] = mapped_column(Integer, default=0)
+    closed_prs_external: Mapped[int] = mapped_column(Integer, default=0)
+    closed_prs_internal: Mapped[int] = mapped_column(Integer, default=0)
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="snapshots")  # noqa: F821

@@ -14,18 +14,38 @@
   </div>
 </div>
 
+<!-- View Toggle Section -->
+<div class="p-strip is-shallow">
+  <div class="row">
+    <div class="col-12">
+      <h3 class="p-heading--5">View</h3>
+      <div style="display:flex;gap:1rem;">
+        <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;">
+          <input type="radio" name="view" id="view-all" checked />
+          <span>All issues</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;">
+          <input type="radio" name="view" id="view-external" />
+          <span>Only contributor issues</span>
+        </label>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="row"><hr class="p-rule" /></div>
 
+<!-- Open Issues Over Time -->
 <div class="p-strip">
   <div class="row">
     <div class="col-12">
-      <h3 class="p-heading--4">Open issues over time</h3>
+      <h3 class="p-heading--4">Open Issues Over Time</h3>
     </div>
   </div>
   <div class="row">
     <div class="col-3">
       <h4 class="p-heading--5">Projects</h4>
-      <div id="issues-checkboxes"></div>
+      <div id="open-issues-checkboxes"></div>
     </div>
     <div class="col-9">
       <canvas id="issues-chart" style="width:100%;height:400px;"></canvas>
@@ -35,38 +55,82 @@
 
 <div class="row"><hr class="p-rule" /></div>
 
+<!-- Median Issue Age Over Time -->
 <div class="p-strip">
   <div class="row">
     <div class="col-12">
-      <h3 class="p-heading--4">Open PRs over time</h3>
+      <h3 class="p-heading--4">Median Issue Age Over Time</h3>
     </div>
   </div>
   <div class="row">
     <div class="col-3">
       <h4 class="p-heading--5">Projects</h4>
-      <div id="prs-checkboxes"></div>
+      <div id="median-age-checkboxes"></div>
     </div>
     <div class="col-9">
-      <canvas id="prs-chart" style="width:100%;height:400px;"></canvas>
+      <canvas id="median-age-chart" style="width:100%;height:400px;"></canvas>
     </div>
   </div>
 </div>
 
 <div class="row"><hr class="p-rule" /></div>
 
+<!-- Issues Closed Per Week -->
 <div class="p-strip">
   <div class="row">
     <div class="col-12">
-      <h3 class="p-heading--4">Open bugs over time</h3>
+      <h3 class="p-heading--4">Issues Closed Per Week</h3>
     </div>
   </div>
   <div class="row">
     <div class="col-3">
       <h4 class="p-heading--5">Projects</h4>
-      <div id="bugs-checkboxes"></div>
+      <div id="closed-checkboxes"></div>
     </div>
     <div class="col-9">
-      <canvas id="bugs-chart" style="width:100%;height:400px;"></canvas>
+      <canvas id="closed-chart" style="width:100%;height:400px;"></canvas>
+    </div>
+  </div>
+</div>
+
+<div class="row"><hr class="p-rule" /></div>
+
+<!-- Project Snapshot (Current State) -->
+<div class="p-strip">
+  <div class="row">
+    <div class="col-12">
+      <h3 class="p-heading--4">Project Snapshot (Current State)</h3>
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-3">
+      <h4 class="p-heading--5">Projects</h4>
+      <div id="snapshot-checkboxes"></div>
+    </div>
+    <div class="col-9">
+      <!-- Open Issues/PRs Bar Chart -->
+      <div style="margin-bottom:2rem;">
+        <h5 class="p-heading--5">Open Issues & PRs</h5>
+        <div style="height:200px;">
+          <canvas id="snapshot-open-chart"></canvas>
+        </div>
+      </div>
+      
+      <!-- Median Age Bar Chart -->
+      <div style="margin-bottom:2rem;">
+        <h5 class="p-heading--5">Median Age (days)</h5>
+        <div style="height:200px;">
+          <canvas id="snapshot-age-chart"></canvas>
+        </div>
+      </div>
+      
+      <!-- Closed Last Year Bar Chart -->
+      <div>
+        <h5 class="p-heading--5">Closed in Last Year</h5>
+        <div style="height:200px;">
+          <canvas id="snapshot-closed-chart"></canvas>
+        </div>
+      </div>
     </div>
   </div>
 </div>

@@ -150,14 +150,26 @@ async def trends_page(
 async def trends_all_data(
     session: AsyncSession = Depends(get_db_session),
 ) -> JSONResponse:
-    """Return snapshot trend data for all projects as JSON for Chart.js."""
+    """Return enriched snapshot trend data for all projects as JSON."""
     result = await session.execute(
         select(
             Project.name.label("project_name"),
             Snapshot.snapshot_date,
             Snapshot.open_issues,
             Snapshot.open_prs,
+            Snapshot.open_issues_external,
+            Snapshot.open_issues_internal,
+            Snapshot.open_prs_external,
+            Snapshot.open_prs_internal,
             Snapshot.open_bugs,
+            Snapshot.median_issue_age,
+            Snapshot.median_pr_age,
+            Snapshot.closed_issues,
+            Snapshot.closed_prs,
+            Snapshot.closed_issues_external,
+            Snapshot.closed_issues_internal,
+            Snapshot.closed_prs_external,
+            Snapshot.closed_prs_internal,
         )
         .join(Project, Snapshot.project_id == Project.id)
         .order_by(Project.display_order, Snapshot.snapshot_date)
@@ -167,14 +179,104 @@ async def trends_all_data(
     for row in result:
         name = row.project_name
         if name not in projects:
-            projects[name] = {"dates": [], "open_issues": [], "open_prs": [], "open_bugs": []}
+            projects[name] = {
+                "dates": [],
+                "open_issues": [],
+                "open_prs": [],
+                "open_issues_external": [],
+                "open_prs_external": [],
+                "median_issue_age": [],
+                "median_pr_age": [],
+                "closed_issues": [],
+                "closed_prs": [],
+                "closed_issues_external": [],
+                "closed_prs_external": [],
+                "open_bugs": [],
+            }
         projects[name]["dates"].append(row.snapshot_date.isoformat())
         projects[name]["open_issues"].append(row.open_issues)
         projects[name]["open_prs"].append(row.open_prs)
+        projects[name]["open_issues_external"].append(row.open_issues_external)
+        projects[name]["open_prs_external"].append(row.open_prs_external)
+        projects[name]["median_issue_age"].append(row.median_issue_age)
+        projects[name]["median_pr_age"].append(row.median_pr_age)
+        projects[name]["closed_issues"].append(row.closed_issues)
+        projects[name]["closed_prs"].append(row.closed_prs)
+        projects[name]["closed_issues_external"].append(row.closed_issues_external)
+        projects[name]["closed_prs_external"].append(row.closed_prs_external)
         projects[name]["open_bugs"].append(row.open_bugs)
 
     project_order = list(projects.keys())
-    return JSONResponse({"projects": projects, "order": project_order})
+    
+    # Compute all-projects aggregate
+    if projects:
+        all_dates = projects[project_order[0]]["dates"]
+        all_projects = {
+            "dates": all_dates,
+            "open_issues": [],
+            "open_prs": [],
+            "open_issues_external": [],
+            "open_prs_external": [],
+            "median_issue_age": [],
+            "median_pr_age": [],
+            "closed_issues": [],
+            "closed_prs": [],
+            "closed_issues_external": [],
+            "closed_prs_external": [],
+            "open_bugs": [],
+        }
+        
+        for i in range(len(all_dates)):
+            all_projects["open_issues"].append(sum(p["open_issues"][i] for p in projects.values()))
+            all_projects["open_prs"].append(sum(p["open_prs"][i] for p in projects.values()))
+            all_projects["open_issues_external"].append(sum(p["open_issues_external"][i] for p in projects.values()))
+            all_projects["open_prs_external"].append(sum(p["open_prs_external"][i] for p in projects.values()))
+            all_projects["closed_issues"].append(sum(p["closed_issues"][i] for p in projects.values()))
+            all_projects["closed_prs"].append(sum(p["closed_prs"][i] for p in projects.values()))
+            all_projects["closed_issues_external"].append(sum(p["closed_issues_external"][i] for p in projects.values()))
+            all_projects["closed_prs_external"].append(sum(p["closed_prs_external"][i] for p in projects.values()))
+            all_projects["open_bugs"].append(sum(p["open_bugs"][i] for p in projects.values()))
+            
+            # Average of medians as approximation for aggregate
+            issue_ages = [p["median_issue_age"][i] for p in projects.values() if p["median_issue_age"][i] > 0]
+            pr_ages = [p["median_pr_age"][i] for p in projects.values() if p["median_pr_age"][i] > 0]
+            all_projects["median_issue_age"].append(int(sum(issue_ages) / len(issue_ages)) if issue_ages else 0)
+            all_projects["median_pr_age"].append(int(sum(pr_ages) / len(pr_ages)) if pr_ages else 0)
+        
+        projects["all-projects"] = all_projects
+    
+    # Build snapshot section (latest day data for bar charts)
+    snapshot: dict[str, dict] = {}
+    for name, data in projects.items():
+        if data["dates"]:
+            idx = -1  # Last day
+            
+            # Compute year-ago index (approximately 365 days back)
+            year_start_idx = max(0, idx - 365)
+            
+            # Sum closed issues/PRs over last year
+            closed_issues_year = sum(data["closed_issues"][year_start_idx:])
+            closed_prs_year = sum(data["closed_prs"][year_start_idx:])
+            nm_closed_issues_year = sum(data["closed_issues_external"][year_start_idx:])
+            nm_closed_prs_year = sum(data["closed_prs_external"][year_start_idx:])
+            
+            snapshot[name] = {
+                "open_issues": data["open_issues"][idx],
+                "open_prs": data["open_prs"][idx],
+                "nm_open_issues": data["open_issues_external"][idx],
+                "nm_open_prs": data["open_prs_external"][idx],
+                "median_issue_age": data["median_issue_age"][idx],
+                "median_pr_age": data["median_pr_age"][idx],
+                # For external median ages, we don't have separate tracking yet
+                "nm_median_issue_age": data["median_issue_age"][idx],  # Approximation
+                "nm_median_pr_age": data["median_pr_age"][idx],  # Approximation
+                "closed_issues_year": closed_issues_year,
+                "closed_prs_year": closed_prs_year,
+                "nm_closed_issues_year": nm_closed_issues_year,
+                "nm_closed_prs_year": nm_closed_prs_year,
+            }
+    
+    return JSONResponse({"projects": projects, "order": project_order, "snapshot": snapshot})
 
 
 async def _get_trend_chart_data(session: AsyncSession, project: str) -> dict:
