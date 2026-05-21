@@ -86,6 +86,7 @@ async def releases_page(
             Release.branch,
             Release.version,
             Release.released_at,
+            Release.metadata_,
         )
         .join(Project, Release.project_id == Project.id)
         .join(
@@ -96,6 +97,7 @@ async def releases_page(
                 Release.released_at == latest_sub.c.max_released_at,
             ),
         )
+        .where(Project.category == "application")
         .order_by(Project.display_order, Release.branch)
     )
 
@@ -105,12 +107,16 @@ async def releases_page(
         if row.released_at:
             released = row.released_at.replace(tzinfo=UTC) if row.released_at.tzinfo is None else row.released_at
             days_ago = (datetime.now(tz=UTC) - released).days
+        commits_since_tag = None
+        if row.metadata_:
+            commits_since_tag = row.metadata_.get("commits_since_tag")
         releases.append({
             "project_name": row.project_name,
             "branch": row.branch,
             "version": row.version,
             "released_at": row.released_at,
             "days_ago": days_ago,
+            "commits_since_tag": commits_since_tag,
         })
 
     return templates.TemplateResponse(

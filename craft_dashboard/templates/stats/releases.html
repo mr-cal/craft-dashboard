@@ -3,14 +3,15 @@
 {% block content %}
 {% include "stats/partials/tabs.html" %}
 <h2>Releases</h2>
-<p>Latest release for each project and branch.</p>
+<p>Latest release for each application and branch, with commits landed since.</p>
 
 <table>
   <thead>
     <tr>
-      <th>Project</th>
+      <th>Application</th>
       <th>Branch</th>
-      <th>Latest Version</th>
+      <th>Latest Tag</th>
+      <th>Commits Since Tag</th>
       <th>Released</th>
       <th>Days Ago</th>
     </tr>
@@ -21,12 +22,13 @@
       <td>{{ rel.project_name }}</td>
       <td>{{ rel.branch or "main" }}</td>
       <td><code>{{ rel.version }}</code></td>
+      <td>{% if rel.commits_since_tag is not none %}{{ rel.commits_since_tag }}{% else %}-{% endif %}</td>
       <td>{{ rel.released_at.strftime("%Y-%m-%d") if rel.released_at else "-" }}</td>
       <td>{{ rel.days_ago if rel.days_ago is not none else "-" }}</td>
     </tr>
     {% else %}
     <tr>
-      <td colspan="5">No release data available yet.</td>
+      <td colspan="6">No release data available yet.</td>
     </tr>
     {% endfor %}
   </tbody>

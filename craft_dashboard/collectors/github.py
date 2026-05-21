@@ -339,7 +339,7 @@ class GitHubCollector:
         project_id: int,
         session,  # noqa: ANN001
     ) -> int:
-        """Collect releases for a repository.
+        """Collect releases for a repository and compute commits since latest tag.
 
         Args:
             repo_name: Repository name (without org prefix).
@@ -356,14 +356,19 @@ class GitHubCollector:
 
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
         count = 0
+        latest_per_branch: dict[str, tuple[str, datetime]] = {}
 
         for gh_release in repo.get_releases():
+            branch = gh_release.target_commitish
+            tag = gh_release.tag_name
+            pub = gh_release.published_at
+
             stmt = insert(Release).values(
                 project_id=project_id,
-                version=gh_release.tag_name,
-                branch=gh_release.target_commitish,
-                released_at=gh_release.published_at.replace(tzinfo=UTC)
-                if gh_release.published_at
+                version=tag,
+                branch=branch,
+                released_at=pub.replace(tzinfo=UTC)
+                if pub
                 else None,
                 is_hotfix=False,
                 metadata_={
@@ -381,6 +386,47 @@ class GitHubCollector:
             await session.execute(stmt)
             count += 1
 
+            # Track latest tag per branch for commits-since-tag
+            if pub:
+                pub_utc = pub.replace(tzinfo=UTC)
+                if branch not in latest_per_branch or pub_utc > latest_per_branch[branch][1]:
+                    latest_per_branch[branch] = (tag, pub_utc)
+
         await session.commit()
         logger.info("Collected %d releases from %s/%s", count, self.org, repo_name)
+
+        # Compute commits since latest tag per branch
+        for branch, (tag, _) in latest_per_branch.items():
+            try:
+                comparison = repo.compare(tag, branch)
+                commits_since = comparison.ahead_by
+                # Read existing metadata and merge
+                result = await session.execute(
+                    sa.select(Release.metadata_).where(
+                        Release.project_id == project_id,
+                        Release.version == tag,
+                    )
+                )
+                existing_meta = result.scalar_one_or_none() or {}
+                existing_meta["commits_since_tag"] = commits_since
+                await session.execute(
+                    sa.update(Release)
+                    .where(
+                        Release.project_id == project_id,
+                        Release.version == tag,
+                    )
+                    .values(metadata_=existing_meta)
+                )
+                logger.info(
+                    "  %s@%s: %d commits since %s",
+                    repo_name, branch, commits_since, tag,
+                )
+            except Exception:
+                logger.warning(
+                    "Could not compute commits since tag %s..%s for %s",
+                    tag, branch, repo_name,
+                    exc_info=True,
+                )
+        await session.commit()
+
         return count
