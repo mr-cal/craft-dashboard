@@ -221,6 +221,10 @@ class GitHubCollector:
         )
         due_count = due_count_result.scalar_one()
 
+        if due_count == 0:
+            logger.info("  %s/%s: no issues due for refresh, skipping", self.org, repo_name)
+            return 0
+
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
         
         # Use 'since' parameter to avoid paginating through all old issues.
