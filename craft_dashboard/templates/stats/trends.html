@@ -1,25 +1,76 @@
 {% extends "base.html" %}
-{% block title %}Trends — craft-dashboard{% endblock %}
+{% block title %}Trends - craft-dashboard{% endblock %}
 {% block head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 {% endblock %}
-{% block content %}
-<h1>Issue & PR Trends</h1>
 
-<div class="filter-bar">
-  <select id="trend-project"
-          name="project"
-          hx-get="/stats/trends/chart"
-          hx-target="#trend-chart-container"
-          hx-swap="innerHTML"
-          hx-trigger="change, load">
-    {% for p in project_names %}
-    <option value="{{ p }}">{{ p }}</option>
-    {% endfor %}
-  </select>
+{% block layout %}
+<div class="p-strip">
+  <div class="row">
+    <div class="col-12">
+      <h2>Issue & PR Trends</h2>
+    </div>
+  </div>
 </div>
 
-<div id="trend-chart-container">
-  <p>Loading chart…</p>
+<div class="row"><hr class="p-rule" /></div>
+
+<div class="p-strip">
+  <div class="row">
+    <div class="col-12">
+      <h3 class="p-heading--4">Open issues over time</h3>
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-3">
+      <h4 class="p-heading--5">Projects</h4>
+      <div id="issues-checkboxes"></div>
+    </div>
+    <div class="col-9">
+      <canvas id="issues-chart" style="width:100%;height:400px;"></canvas>
+    </div>
+  </div>
 </div>
+
+<div class="row"><hr class="p-rule" /></div>
+
+<div class="p-strip">
+  <div class="row">
+    <div class="col-12">
+      <h3 class="p-heading--4">Open PRs over time</h3>
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-3">
+      <h4 class="p-heading--5">Projects</h4>
+      <div id="prs-checkboxes"></div>
+    </div>
+    <div class="col-9">
+      <canvas id="prs-chart" style="width:100%;height:400px;"></canvas>
+    </div>
+  </div>
+</div>
+
+<div class="row"><hr class="p-rule" /></div>
+
+<div class="p-strip">
+  <div class="row">
+    <div class="col-12">
+      <h3 class="p-heading--4">Open bugs over time</h3>
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-3">
+      <h4 class="p-heading--5">Projects</h4>
+      <div id="bugs-checkboxes"></div>
+    </div>
+    <div class="col-9">
+      <canvas id="bugs-chart" style="width:100%;height:400px;"></canvas>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/trends.js"></script>
 {% endblock %}

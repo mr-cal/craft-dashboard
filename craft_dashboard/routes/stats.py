@@ -113,6 +113,37 @@ async def trends_page(
     )
 
 
+@router.get("/trends/all-data", response_class=JSONResponse)
+async def trends_all_data(
+    session: AsyncSession = Depends(get_db_session),
+) -> JSONResponse:
+    """Return snapshot trend data for all projects as JSON for Chart.js."""
+    result = await session.execute(
+        select(
+            Project.name.label("project_name"),
+            Snapshot.snapshot_date,
+            Snapshot.open_issues,
+            Snapshot.open_prs,
+            Snapshot.open_bugs,
+        )
+        .join(Project, Snapshot.project_id == Project.id)
+        .order_by(Project.display_order, Snapshot.snapshot_date)
+    )
+
+    projects: dict[str, dict] = {}
+    for row in result:
+        name = row.project_name
+        if name not in projects:
+            projects[name] = {"dates": [], "open_issues": [], "open_prs": [], "open_bugs": []}
+        projects[name]["dates"].append(row.snapshot_date.isoformat())
+        projects[name]["open_issues"].append(row.open_issues)
+        projects[name]["open_prs"].append(row.open_prs)
+        projects[name]["open_bugs"].append(row.open_bugs)
+
+    project_order = list(projects.keys())
+    return JSONResponse({"projects": projects, "order": project_order})
+
+
 async def _get_trend_chart_data(session: AsyncSession, project: str) -> dict:
     """Fetch snapshot trend data for a project and return Chart.js-compatible dict."""
     result = await session.execute(
