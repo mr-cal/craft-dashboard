@@ -47,8 +47,8 @@
       <div style="display:flex;gap:1rem;align-items:center;">
         <label>From: <input type="date" id="date-start" /></label>
         <label>To: <input type="date" id="date-end" /></label>
-        <button class="p-button--neutral is-small" onclick="applyDateFilter()">Apply</button>
-        <button class="p-button--neutral is-small" onclick="resetDateFilter()">Reset</button>
+        <button class="p-button--neutral is-small" id="btn-date-apply">Apply</button>
+        <button class="p-button--neutral is-small" id="btn-date-reset">Reset</button>
       </div>
     </div>
   </div>
@@ -132,7 +132,7 @@
       <!-- Open Issues/PRs Bar Chart -->
       <div style="margin-bottom:2rem;">
         <h5 class="p-heading--5">Open Issues & PRs</h5>
-        <div style="position:relative;height:300px;width:100%;">
+        <div id="snapshot-open-wrap" style="position:relative;width:100%;">
           <canvas id="snapshot-open-chart"></canvas>
         </div>
       </div>
@@ -140,7 +140,7 @@
       <!-- Median Age Bar Chart -->
       <div style="margin-bottom:2rem;">
         <h5 class="p-heading--5">Median Age (days)</h5>
-        <div style="position:relative;height:300px;width:100%;">
+        <div id="snapshot-age-wrap" style="position:relative;width:100%;">
           <canvas id="snapshot-age-chart"></canvas>
         </div>
       </div>
@@ -148,7 +148,7 @@
       <!-- Closed Last Year Bar Chart -->
       <div>
         <h5 class="p-heading--5">Closed in Last Year</h5>
-        <div style="position:relative;height:300px;width:100%;">
+        <div id="snapshot-closed-wrap" style="position:relative;width:100%;">
           <canvas id="snapshot-closed-chart"></canvas>
         </div>
       </div>

@@ -328,11 +328,12 @@ function updateSnapshotCharts() {
     },
   ];
   
-  // Adjust chart height based on number of bars
-  const height = Math.max(200, selected.length * 60);
-  snapshotOpenChart.canvas.parentElement.style.height = height + "px";
-  snapshotAgeChart.canvas.parentElement.style.height = height + "px";
-  snapshotClosedChart.canvas.parentElement.style.height = height + "px";
+  // Adjust chart height based on number of bars (like starcraft-stats)
+  const numDatasets = snapshotOpenChart.data.datasets.length;
+  const height = chartHeight(selected.length, numDatasets);
+  document.getElementById("snapshot-open-wrap").style.height = height + "px";
+  document.getElementById("snapshot-age-wrap").style.height = height + "px";
+  document.getElementById("snapshot-closed-wrap").style.height = height + "px";
   
   snapshotOpenChart.update();
   snapshotAgeChart.update();
@@ -493,6 +494,13 @@ const issuesChart = createLineChart("issues-chart", "Open Issues (4-week avg)");
 const medianAgeChart = createLineChart("median-age-chart", "Median Age (days, 4-week avg)");
 const closedChart = createLineChart("closed-chart", "Issues Closed per Week (30-day avg)");
 
+const BAR_HEIGHT_PX = 28;
+const CHART_BASE_HEIGHT_PX = 80;
+
+function chartHeight(numBars, numDatasets) {
+  return Math.max(1, numBars) * Math.max(1, numDatasets) * BAR_HEIGHT_PX + CHART_BASE_HEIGHT_PX;
+}
+
 const snapshotOpenChart = createBarChart("snapshot-open-chart", "Count");
 const snapshotAgeChart = createBarChart("snapshot-age-chart", "Days");
 const snapshotClosedChart = createBarChart("snapshot-closed-chart", "Count");
@@ -512,6 +520,10 @@ populateSnapshotCheckboxes();
 const today = new Date().toISOString().slice(0, 10);
 document.getElementById("date-start").value = "2020-01-01";
 document.getElementById("date-end").value = today;
+
+// Wire up date filter buttons (module scope, so we use addEventListener)
+document.getElementById("btn-date-apply").addEventListener("click", applyDateFilter);
+document.getElementById("btn-date-reset").addEventListener("click", resetDateFilter);
 
 // Initial render
 updateOpenIssuesChart();

@@ -5,12 +5,23 @@
 
 <div class="filter-bar">
   <div class="filter-group">
-    <label for="project-select">Projects</label>
-    <select id="project-select" multiple class="filter-multiselect">
-      {% for p in project_names %}
-      <option value="{{ p }}" {% if p in (filter_project or "").split(",") %}selected{% endif %}>{{ p }}</option>
-      {% endfor %}
-    </select>
+    <label>Projects</label>
+    <div class="multiselect" data-name="project" data-hidden="project-hidden">
+      <div class="multiselect__input-wrap" tabindex="0">
+        <span class="multiselect__placeholder">Select projects...</span>
+        <div class="multiselect__chips"></div>
+      </div>
+      <div class="multiselect__dropdown u-hide">
+        <div class="multiselect__options">
+          {% for p in project_names %}
+          <label class="multiselect__option">
+            <input type="checkbox" value="{{ p }}" {% if p in (filter_project or "").split(",") and filter_project %}checked{% endif %} />
+            <span>{{ p }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
     <input type="hidden" name="project" id="project-hidden" value="{{ filter_project or '' }}"
            hx-get="/issues/table"
            hx-target="#issue-table"
@@ -20,12 +31,23 @@
   </div>
 
   <div class="filter-group">
-    <label for="role-select">Author Role</label>
-    <select id="role-select" multiple class="filter-multiselect">
-      {% for role in ["maintainer", "contributor", "bot"] %}
-      <option value="{{ role }}" {% if role in (filter_author_role or "").split(",") %}selected{% endif %}>{{ role|capitalize }}{% if role == "bot" %}s{% endif %}</option>
-      {% endfor %}
-    </select>
+    <label>Author Role</label>
+    <div class="multiselect" data-name="author_role" data-hidden="role-hidden">
+      <div class="multiselect__input-wrap" tabindex="0">
+        <span class="multiselect__placeholder">Select roles...</span>
+        <div class="multiselect__chips"></div>
+      </div>
+      <div class="multiselect__dropdown u-hide">
+        <div class="multiselect__options">
+          {% for role in ["maintainer", "contributor", "bot"] %}
+          <label class="multiselect__option">
+            <input type="checkbox" value="{{ role }}" {% if role in (filter_author_role or "").split(",") and filter_author_role %}checked{% endif %} />
+            <span>{{ role|capitalize }}{% if role == "bot" %}s{% endif %}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
     <input type="hidden" name="author_role" id="role-hidden" value="{{ filter_author_role or '' }}"
            hx-get="/issues/table"
            hx-target="#issue-table"
@@ -34,24 +56,38 @@
            hx-trigger="change" />
   </div>
 
-  <select name="type"
-          hx-get="/issues/table"
-          hx-target="#issue-table"
-          hx-swap="outerHTML"
-          hx-include=".filter-bar [name]"
-          hx-push-url="false">
-    <option value="">All Types</option>
-    <option value="issue" {% if filter_type == "issue" %}selected{% endif %}>Issues</option>
-    <option value="pull_request" {% if filter_type == "pull_request" %}selected{% endif %}>PRs</option>
-  </select>
+  <div class="filter-group">
+    <label>Type</label>
+    <select name="type"
+            hx-get="/issues/table"
+            hx-target="#issue-table"
+            hx-swap="outerHTML"
+            hx-include=".filter-bar [name]"
+            hx-push-url="false">
+      <option value="">All Types</option>
+      <option value="issue" {% if filter_type == "issue" %}selected{% endif %}>Issues</option>
+      <option value="pull_request" {% if filter_type == "pull_request" %}selected{% endif %}>PRs</option>
+    </select>
+  </div>
 
   <div class="filter-group">
-    <label for="action-select">Actions</label>
-    <select id="action-select" multiple class="filter-multiselect">
-      {% for act in ["close_stale", "close_duplicate", "close_not_a_bug", "close_outdated", "needs_triage", "needs_review", "needs_rebase", "keep_open"] %}
-      <option value="{{ act }}" {% if act in (filter_action or "").split(",") %}selected{% endif %}>{{ act|replace("_", " ")|title }}</option>
-      {% endfor %}
-    </select>
+    <label>Actions</label>
+    <div class="multiselect" data-name="action" data-hidden="action-hidden">
+      <div class="multiselect__input-wrap" tabindex="0">
+        <span class="multiselect__placeholder">Select actions...</span>
+        <div class="multiselect__chips"></div>
+      </div>
+      <div class="multiselect__dropdown u-hide">
+        <div class="multiselect__options">
+          {% for act in ["close_stale", "close_duplicate", "close_not_a_bug", "close_outdated", "needs_triage", "needs_review", "needs_rebase", "keep_open"] %}
+          <label class="multiselect__option">
+            <input type="checkbox" value="{{ act }}" {% if act in (filter_action or "").split(",") and filter_action %}checked{% endif %} />
+            <span>{{ act|replace("_", " ")|title }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
     <input type="hidden" name="action" id="action-hidden" value="{{ filter_action or '' }}"
            hx-get="/issues/table"
            hx-target="#issue-table"
@@ -67,18 +103,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
-function syncMultiSelect(selectId, hiddenId) {
-  const sel = document.getElementById(selectId);
-  const hidden = document.getElementById(hiddenId);
-  sel.addEventListener('change', () => {
-    const vals = Array.from(sel.selectedOptions).map(o => o.value).join(',');
-    hidden.value = vals;
-    htmx.trigger(hidden, 'change');
-  });
-}
-syncMultiSelect('project-select', 'project-hidden');
-syncMultiSelect('role-select', 'role-hidden');
-syncMultiSelect('action-select', 'action-hidden');
-</script>
+<script src="/static/js/multiselect.js"></script>
 {% endblock %}

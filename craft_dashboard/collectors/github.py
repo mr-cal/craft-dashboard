@@ -222,10 +222,14 @@ class GitHubCollector:
         due_count = due_count_result.scalar_one()
 
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
-        gh_issues = repo.get_issues(state="all")
         
-        logger.info("  %s/%s: starting collection (%d issues due for refresh)%s",
-                    self.org, repo_name, due_count,
+        # Use 'since' parameter to avoid paginating through all old issues.
+        # Only fetch issues updated after the refresh cutoff, plus a 1-day buffer.
+        since_date = cutoff - timedelta(days=1)
+        gh_issues = repo.get_issues(state="all", sort="updated", direction="desc", since=since_date)
+        
+        logger.info("  %s/%s: starting collection (%d issues due for refresh, fetching updated since %s)%s",
+                    self.org, repo_name, due_count, since_date.strftime("%Y-%m-%d"),
                     f", limit: {limit}" if limit else "")
         
         count = 0
