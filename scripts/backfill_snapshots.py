@@ -29,6 +29,79 @@ from craft_dashboard.models.snapshot import Snapshot
 from craft_dashboard.settings import Settings
 
 
+def _make_age_buckets() -> dict[str, list[int]]:
+    return {
+        "all": [],
+        "issue_all": [],
+        "pr_all": [],
+        "internal": [],
+        "issue_internal": [],
+        "pr_internal": [],
+        "external": [],
+        "issue_external": [],
+        "pr_external": [],
+        "bots": [],
+        "issue_bots": [],
+        "pr_bots": [],
+    }
+
+
+def _record_open_item(
+    issue: Issue,
+    snapshot_date: date,
+    age_buckets: dict[str, list[int]],
+) -> None:
+    created = issue.created_at.date()
+    age = (snapshot_date - created).days
+    is_internal = issue.author_is_maintainer
+    is_bot = issue.author_is_bot
+    type_prefix = "issue" if issue.issue_type == "issue" else "pr"
+
+    age_buckets["all"].append(age)
+    age_buckets[f"{type_prefix}_all"].append(age)
+
+    if is_internal:
+        age_buckets["internal"].append(age)
+        age_buckets[f"{type_prefix}_internal"].append(age)
+    elif not is_bot:
+        age_buckets["external"].append(age)
+        age_buckets[f"{type_prefix}_external"].append(age)
+
+    if is_bot:
+        age_buckets["bots"].append(age)
+        age_buckets[f"{type_prefix}_bots"].append(age)
+
+
+def _median(values: list[int]) -> int:
+    return int(median(values)) if values else 0
+
+
+def _count_author_groups(items: list[Issue]) -> tuple[int, int, int]:
+    external = sum(
+        1 for item in items if not item.author_is_maintainer and not item.author_is_bot
+    )
+    internal = sum(1 for item in items if item.author_is_maintainer)
+    bots = sum(1 for item in items if item.author_is_bot)
+    return external, internal, bots
+
+
+def _compute_median_fields(age_buckets: dict[str, list[int]]) -> dict[str, int]:
+    return {
+        "median_issue_age": _median(age_buckets["issue_all"]),
+        "median_pr_age": _median(age_buckets["pr_all"]),
+        "nm_median_issue_age": _median(age_buckets["issue_external"]),
+        "nm_median_pr_age": _median(age_buckets["pr_external"]),
+        "median_issue_age_internal": _median(age_buckets["issue_internal"]),
+        "median_pr_age_internal": _median(age_buckets["pr_internal"]),
+        "median_issue_age_bots": _median(age_buckets["issue_bots"]),
+        "median_pr_age_bots": _median(age_buckets["pr_bots"]),
+        "median_age": _median(age_buckets["all"]),
+        "nm_median_age": _median(age_buckets["external"]),
+        "median_age_internal": _median(age_buckets["internal"]),
+        "median_age_bots": _median(age_buckets["bots"]),
+    }
+
+
 def compute_snapshot_for_date(
     issues: list[Issue],
     snapshot_date: date,
@@ -43,9 +116,11 @@ def compute_snapshot_for_date(
         Dictionary with all snapshot metrics
 
     """
-    # Filter issues that were open on snapshot_date
-    open_issues_on_date = []
-    open_prs_on_date = []
+    open_issues_on_date: list[Issue] = []
+    open_prs_on_date: list[Issue] = []
+    closed_issues_on_date: list[Issue] = []
+    closed_prs_on_date: list[Issue] = []
+    age_buckets = _make_age_buckets()
 
     for issue in issues:
         if issue.created_at is None:
@@ -54,64 +129,35 @@ def compute_snapshot_for_date(
         created = issue.created_at.date()
         closed = issue.closed_at.date() if issue.closed_at else None
 
-        # Issue is open on snapshot_date if:
-        # - created_at <= snapshot_date
-        # - AND (closed_at > snapshot_date OR closed_at IS NULL)
-        if created <= snapshot_date:
-            if closed is None or closed > snapshot_date:
-                if issue.issue_type == "issue":
-                    open_issues_on_date.append(issue)
-                elif issue.issue_type == "pull_request":
-                    open_prs_on_date.append(issue)
+        if created <= snapshot_date and (closed is None or closed > snapshot_date):
+            if issue.issue_type == "issue":
+                open_issues_on_date.append(issue)
+            elif issue.issue_type == "pull_request":
+                open_prs_on_date.append(issue)
+            _record_open_item(issue, snapshot_date, age_buckets)
 
-    # Count by maintainer status
-    open_issues_external = sum(
-        1 for i in open_issues_on_date if not i.author_is_maintainer
-    )
-    open_issues_internal = sum(1 for i in open_issues_on_date if i.author_is_maintainer)
-    open_prs_external = sum(1 for i in open_prs_on_date if not i.author_is_maintainer)
-    open_prs_internal = sum(1 for i in open_prs_on_date if i.author_is_maintainer)
-
-    # Compute median ages
-    issue_ages = [
-        (snapshot_date - i.created_at.date()).days for i in open_issues_on_date
-    ]
-    pr_ages = [(snapshot_date - i.created_at.date()).days for i in open_prs_on_date]
-
-    median_issue_age = int(median(issue_ages)) if issue_ages else 0
-    median_pr_age = int(median(pr_ages)) if pr_ages else 0
-
-    # Count issues closed on this date
-    closed_issues_on_date = []
-    closed_prs_on_date = []
-
-    for issue in issues:
-        if issue.closed_at is None:
-            continue
-        closed = issue.closed_at.date()
         if closed == snapshot_date:
             if issue.issue_type == "issue":
                 closed_issues_on_date.append(issue)
             elif issue.issue_type == "pull_request":
                 closed_prs_on_date.append(issue)
 
-    closed_issues_external = sum(
-        1 for i in closed_issues_on_date if not i.author_is_maintainer
+    open_issues_external, open_issues_internal, open_issues_bots = _count_author_groups(
+        open_issues_on_date
     )
-    closed_issues_internal = sum(
-        1 for i in closed_issues_on_date if i.author_is_maintainer
+    open_prs_external, open_prs_internal, open_prs_bots = _count_author_groups(
+        open_prs_on_date
     )
-    closed_prs_external = sum(
-        1 for i in closed_prs_on_date if not i.author_is_maintainer
+    closed_issues_external, closed_issues_internal, closed_issues_bots = (
+        _count_author_groups(closed_issues_on_date)
     )
-    closed_prs_internal = sum(1 for i in closed_prs_on_date if i.author_is_maintainer)
-
-    # Count bugs (issues with "bug" label)
+    closed_prs_external, closed_prs_internal, closed_prs_bots = _count_author_groups(
+        closed_prs_on_date
+    )
     open_bugs = sum(
         1
-        for i in open_issues_on_date
-        if isinstance(i.labels, dict)
-        and "bug" in [l.lower() for l in i.labels.get("labels", [])]
+        for issue in open_issues_on_date
+        if isinstance(issue.labels, list) and "bug" in issue.labels
     )
 
     return {
@@ -119,17 +165,20 @@ def compute_snapshot_for_date(
         "open_prs": len(open_prs_on_date),
         "open_issues_external": open_issues_external,
         "open_issues_internal": open_issues_internal,
+        "open_issues_bots": open_issues_bots,
         "open_prs_external": open_prs_external,
         "open_prs_internal": open_prs_internal,
+        "open_prs_bots": open_prs_bots,
         "open_bugs": open_bugs,
-        "median_issue_age": median_issue_age,
-        "median_pr_age": median_pr_age,
+        **_compute_median_fields(age_buckets),
         "closed_issues": len(closed_issues_on_date),
         "closed_prs": len(closed_prs_on_date),
         "closed_issues_external": closed_issues_external,
         "closed_issues_internal": closed_issues_internal,
+        "closed_issues_bots": closed_issues_bots,
         "closed_prs_external": closed_prs_external,
         "closed_prs_internal": closed_prs_internal,
+        "closed_prs_bots": closed_prs_bots,
     }
 
 
@@ -191,17 +240,31 @@ def backfill_project(session: Session, project: Project) -> None:
                 "open_prs": stmt.excluded.open_prs,
                 "open_issues_external": stmt.excluded.open_issues_external,
                 "open_issues_internal": stmt.excluded.open_issues_internal,
+                "open_issues_bots": stmt.excluded.open_issues_bots,
                 "open_prs_external": stmt.excluded.open_prs_external,
                 "open_prs_internal": stmt.excluded.open_prs_internal,
+                "open_prs_bots": stmt.excluded.open_prs_bots,
                 "open_bugs": stmt.excluded.open_bugs,
                 "median_issue_age": stmt.excluded.median_issue_age,
                 "median_pr_age": stmt.excluded.median_pr_age,
+                "nm_median_issue_age": stmt.excluded.nm_median_issue_age,
+                "nm_median_pr_age": stmt.excluded.nm_median_pr_age,
+                "median_issue_age_internal": stmt.excluded.median_issue_age_internal,
+                "median_pr_age_internal": stmt.excluded.median_pr_age_internal,
+                "median_issue_age_bots": stmt.excluded.median_issue_age_bots,
+                "median_pr_age_bots": stmt.excluded.median_pr_age_bots,
+                "median_age": stmt.excluded.median_age,
+                "nm_median_age": stmt.excluded.nm_median_age,
+                "median_age_internal": stmt.excluded.median_age_internal,
+                "median_age_bots": stmt.excluded.median_age_bots,
                 "closed_issues": stmt.excluded.closed_issues,
                 "closed_prs": stmt.excluded.closed_prs,
                 "closed_issues_external": stmt.excluded.closed_issues_external,
                 "closed_issues_internal": stmt.excluded.closed_issues_internal,
+                "closed_issues_bots": stmt.excluded.closed_issues_bots,
                 "closed_prs_external": stmt.excluded.closed_prs_external,
                 "closed_prs_internal": stmt.excluded.closed_prs_internal,
+                "closed_prs_bots": stmt.excluded.closed_prs_bots,
             },
         )
         session.execute(stmt)
@@ -211,7 +274,7 @@ def backfill_project(session: Session, project: Project) -> None:
 
 
 def main() -> None:
-    """Main entry point."""
+    """Run the backfill script."""
     # Change to app directory so Settings finds the .env file.
     import os  # noqa: PLC0415
 
