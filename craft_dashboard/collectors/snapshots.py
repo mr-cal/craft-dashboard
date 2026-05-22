@@ -230,10 +230,16 @@ async def generate_snapshot(
 
     """
     from sqlalchemy import select  # noqa: PLC0415 — deferred to avoid circular import
-    from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415 — deferred to avoid circular import
+    from sqlalchemy.dialects.postgresql import (
+        insert,
+    )
 
-    from craft_dashboard.models.issue import Issue  # noqa: PLC0415 — deferred to avoid circular import
-    from craft_dashboard.models.snapshot import Snapshot  # noqa: PLC0415 — deferred to avoid circular import
+    from craft_dashboard.models.issue import (
+        Issue,
+    )
+    from craft_dashboard.models.snapshot import (
+        Snapshot,
+    )
 
     result = await session.execute(
         select(

@@ -81,7 +81,9 @@ class LaunchpadCollector:
 
         """
         if self._lp is None:
-            from launchpadlib.launchpad import Launchpad  # noqa: PLC0415 — deferred to avoid circular import
+            from launchpadlib.launchpad import (
+                Launchpad,
+            )
 
             self._lp = Launchpad.login_anonymously(
                 "craft-dashboard", "production", version="devel"
@@ -105,10 +107,17 @@ class LaunchpadCollector:
             The number of bugs upserted.
 
         """
-        from sqlalchemy import func, select  # noqa: PLC0415 — deferred to avoid circular import
-        from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415 — deferred to avoid circular import
+        from sqlalchemy import (  # noqa: PLC0415 — deferred to avoid circular import
+            func,
+            select,
+        )
+        from sqlalchemy.dialects.postgresql import (
+            insert,
+        )
 
-        from craft_dashboard.models.issue import Issue  # noqa: PLC0415 — deferred to avoid circular import
+        from craft_dashboard.models.issue import (
+            Issue,
+        )
 
         lp = self._get_launchpad()
         project = lp.projects[lp_project_name]

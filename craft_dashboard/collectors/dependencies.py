@@ -199,9 +199,13 @@ class DependencyCollector:
             The number of dependencies upserted.
 
         """
-        from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415 — deferred to avoid circular import
+        from sqlalchemy.dialects.postgresql import (
+            insert,
+        )
 
-        from craft_dashboard.models.dependency import Dependency  # noqa: PLC0415 — deferred to avoid circular import
+        from craft_dashboard.models.dependency import (
+            Dependency,
+        )
 
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
         count = 0

@@ -77,9 +77,13 @@ async def update_refresh_schedule(
         session: An async SQLAlchemy session.
 
     """
-    from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415 — deferred to avoid circular import
+    from sqlalchemy.dialects.postgresql import (
+        insert,
+    )
 
-    from craft_dashboard.models.refresh_schedule import RefreshSchedule  # noqa: PLC0415 — deferred to avoid circular import
+    from craft_dashboard.models.refresh_schedule import (
+        RefreshSchedule,
+    )
 
     now = datetime.now(tz=UTC)
 
@@ -127,7 +131,9 @@ async def record_refresh_error(
     """
     from sqlalchemy import update  # noqa: PLC0415 — deferred to avoid circular import
 
-    from craft_dashboard.models.refresh_schedule import RefreshSchedule  # noqa: PLC0415 — deferred to avoid circular import
+    from craft_dashboard.models.refresh_schedule import (
+        RefreshSchedule,
+    )
 
     # Increment failures and record error
     stmt = (
@@ -145,7 +151,9 @@ async def record_refresh_error(
 
     # If no row existed yet, insert one
     if result.rowcount == 0:
-        from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415 — deferred to avoid circular import
+        from sqlalchemy.dialects.postgresql import (
+            insert,
+        )
 
         stmt = insert(RefreshSchedule).values(
             project_id=project_id,

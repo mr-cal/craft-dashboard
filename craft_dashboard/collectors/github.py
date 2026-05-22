@@ -276,9 +276,13 @@ class GitHubCollector:
             The number of issues upserted.
 
         """
-        from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415 — deferred to avoid circular import
+        from sqlalchemy.dialects.postgresql import (
+            insert,
+        )
 
-        from craft_dashboard.models.issue import Issue  # noqa: PLC0415 — deferred to avoid circular import
+        from craft_dashboard.models.issue import (
+            Issue,
+        )
 
         # Count how many existing issues are due for refresh
         cutoff = datetime.now(tz=UTC) - timedelta(days=refresh_age_days)
@@ -463,9 +467,13 @@ class GitHubCollector:
         """
         import re  # noqa: PLC0415 — deferred import
 
-        from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415 — deferred to avoid circular import
+        from sqlalchemy.dialects.postgresql import (
+            insert,
+        )
 
-        from craft_dashboard.models.release import Release  # noqa: PLC0415 — deferred to avoid circular import
+        from craft_dashboard.models.release import (
+            Release,
+        )
 
         hotfix_re = re.compile(r"^hotfix/(\d+)\.(\d+)$")
 
