@@ -68,6 +68,41 @@
   become_user: "{{ app_user }}"
   changed_when: false
 
+- name: Reset refresh schedules to trigger full data collection
+  ansible.builtin.shell: |
+    {{ app_venv }}/bin/python -c "
+    from sqlalchemy import create_engine, text
+    url = '{{ app_env.DATABASE_URL }}'.replace('+asyncpg', '')
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        conn.execute(text('DELETE FROM refresh_schedules'))
+        conn.commit()
+    print('Refresh schedules reset')
+    "
+  args:
+    chdir: "{{ app_dir }}"
+  become: true
+  become_user: "{{ app_user }}"
+  changed_when: false
+  failed_when: false
+
+- name: Run snapshot backfill in background (one-time)
+  ansible.builtin.shell: |
+    if [ ! -f {{ app_dir }}/.backfill_v2_done ]; then
+      nohup {{ app_venv }}/bin/python scripts/backfill_snapshots.py \
+        > /tmp/backfill.log 2>&1 &
+      echo "Backfill started in background (PID $!)"
+      touch {{ app_dir }}/.backfill_v2_done
+    else
+      echo "Backfill already completed, skipping"
+    fi
+  args:
+    chdir: "{{ app_dir }}"
+  environment: "{{ app_env }}"
+  become: true
+  become_user: "{{ app_user }}"
+  changed_when: false
+
 - name: Deploy environment file
   ansible.builtin.template:
     src: env.j2
