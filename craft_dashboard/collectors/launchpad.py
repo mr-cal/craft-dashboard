@@ -8,6 +8,9 @@ if TYPE_CHECKING:
     from launchpadlib.launchpad import Launchpad
 
 import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from craft_dashboard.collectors import ISSUE_UPSERT_FIELDS
 
 __all__ = ["LaunchpadCollector"]
 
@@ -90,7 +93,7 @@ class LaunchpadCollector:
         self,
         lp_project_name: str,
         project_id: int,
-        session,  # noqa: ANN001
+        session: AsyncSession,
     ) -> int:
         """Collect bugs for a Launchpad project.
 
@@ -169,17 +172,11 @@ class LaunchpadCollector:
             stmt = stmt.on_conflict_do_update(
                 index_elements=["project_id", "source", "external_id"],
                 set_={
-                    "title": stmt.excluded.title,
-                    "body": stmt.excluded.body,
-                    "state": stmt.excluded.state,
-                    "author": stmt.excluded.author,
-                    "author_is_maintainer": stmt.excluded.author_is_maintainer,
-                    "author_is_bot": stmt.excluded.author_is_bot,
-                    "labels": stmt.excluded.labels,
-                    "updated_at": stmt.excluded.updated_at,
-                    "closed_at": stmt.excluded.closed_at,
-                    "last_fetched_at": stmt.excluded.last_fetched_at,
-                    "metadata": sa.literal_column("excluded.metadata"),
+                    field: getattr(stmt.excluded, field)
+                    for field in ISSUE_UPSERT_FIELDS
+                }
+                | {
+                    "metadata": stmt.excluded.metadata_,
                 },
             )
             await session.execute(stmt)

@@ -3,6 +3,8 @@
 import logging
 from datetime import UTC, date, datetime, timedelta
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 __all__ = ["compute_snapshot_counts", "generate_snapshot"]
 
 logger = logging.getLogger(__name__)
@@ -27,11 +29,7 @@ def _increment_counts(
         counts[f"{prefix}_{type_key}_bots"] += 1
 
 
-def _normalize_datetime(value: datetime | None, fallback: datetime) -> datetime:
-    """Return a timezone-aware datetime, defaulting missing values to fallback."""
-    if value is None:
-        return fallback
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
+from craft_dashboard.utils import normalize_datetime as _normalize_datetime
 
 
 def _starcraft_get_median_date(dates: list[datetime]) -> datetime:
@@ -216,7 +214,7 @@ def compute_snapshot_counts(
 
 async def generate_snapshot(
     project_id: int,
-    session,  # noqa: ANN001
+    session: AsyncSession,
     maintainers: set[str],
     bots: set[str] | None = None,
 ) -> None:

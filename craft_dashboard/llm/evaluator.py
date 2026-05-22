@@ -97,7 +97,7 @@ def _compute_content_hash(
     comments_repr = ""
     if comments:
         comments_repr = "|" + ";".join(
-            f"{c.get('author','')}:{c.get('body','')[:100]}"
+            f"{c.get('author', '')}:{c.get('body', '')[:100]}"
             for c in sorted(comments, key=lambda c: c.get("created_at") or "")
         )
     content = f"{title}|{body or ''}|{state}|{','.join(sorted(labels))}{comments_repr}"
@@ -124,6 +124,80 @@ class IssueEvaluator:
         self.client = client
         self.summary_model = summary_model
         self.evaluation_model = evaluation_model
+
+    async def _summarize(
+        self,
+        *,
+        title: str,
+        body: str | None,
+        issue_type: str,
+        labels: list[str],
+        comments: list[dict] | None = None,
+    ) -> tuple[str, int]:
+        """Generate a summary using the cheap model.
+
+        Returns:
+            Tuple of (summary text, tokens used).
+
+        """
+        summary_messages = build_summary_prompt(
+            title=title,
+            body=body,
+            issue_type=issue_type,
+            labels=labels,
+            comments=comments,
+        )
+        response = await self.client.chat(
+            model=self.summary_model,
+            messages=summary_messages,
+            max_tokens=256,
+        )
+        return response.content, response.total_tokens
+
+    async def _score(  # noqa: PLR0913
+        self,
+        *,
+        title: str,
+        body: str | None,
+        issue_type: str,
+        labels: list[str],
+        age_days: int,
+        last_activity_days: int,
+        author: str,
+        is_maintainer: bool,
+        comment_count: int,
+        comments: list[dict] | None = None,
+        pr_details: dict | None = None,
+    ) -> tuple[dict | None, int]:
+        """Score the issue using the more capable model.
+
+        Returns:
+            Tuple of (parsed evaluation dict or None, tokens used).
+
+        """
+        eval_messages = build_evaluation_prompt(
+            title=title,
+            body=body,
+            issue_type=issue_type,
+            labels=labels,
+            age_days=age_days,
+            last_activity_days=last_activity_days,
+            author=author,
+            is_maintainer=is_maintainer,
+            comment_count=comment_count,
+            comments=comments,
+            pr_details=pr_details,
+        )
+        response = await self.client.chat(
+            model=self.evaluation_model,
+            messages=eval_messages,
+            max_tokens=512,
+            response_format={"type": "json_object"},
+        )
+        parsed = _parse_evaluation_response(response.content)
+        if parsed is None:
+            logger.warning("Could not parse evaluation for: %s", title)
+        return parsed, response.total_tokens
 
     async def evaluate_issue(  # noqa: PLR0913
         self,
@@ -170,26 +244,15 @@ class IssueEvaluator:
             logger.debug("Skipping evaluation (content unchanged): %s", title)
             return None
 
-        total_tokens = 0
-
-        # Step 1: Summarize (cheap model)
-        summary_messages = build_summary_prompt(
+        summary, summary_tokens = await self._summarize(
             title=title,
             body=body,
             issue_type=issue_type,
             labels=label_names,
             comments=comments,
         )
-        summary_response = await self.client.chat(
-            model=self.summary_model,
-            messages=summary_messages,
-            max_tokens=256,
-        )
-        summary = summary_response.content
-        total_tokens += summary_response.total_tokens
 
-        # Step 2: Evaluate and score (more capable model)
-        eval_messages = build_evaluation_prompt(
+        parsed, eval_tokens = await self._score(
             title=title,
             body=body,
             issue_type=issue_type,
@@ -202,31 +265,16 @@ class IssueEvaluator:
             comments=comments,
             pr_details=pr_details,
         )
-        eval_response = await self.client.chat(
-            model=self.evaluation_model,
-            messages=eval_messages,
-            max_tokens=512,
-            response_format={"type": "json_object"},
-        )
-        total_tokens += eval_response.total_tokens
 
-        parsed = _parse_evaluation_response(eval_response.content)
-        if parsed is None:
-            logger.warning("Could not parse evaluation for: %s", title)
-            return {
-                "summary": summary,
-                "scores": {},
-                "suggested_action": None,
-                "suggested_action_reason": None,
-                "tokens_used": total_tokens,
-                "issue_data_hash": current_hash,
-            }
+        total_tokens = summary_tokens + eval_tokens
 
         return {
             "summary": summary,
-            "scores": parsed.get("scores", {}),
-            "suggested_action": parsed.get("suggested_action"),
-            "suggested_action_reason": parsed.get("suggested_action_reason"),
+            "scores": parsed.get("scores", {}) if parsed else {},
+            "suggested_action": parsed.get("suggested_action") if parsed else None,
+            "suggested_action_reason": parsed.get("suggested_action_reason")
+            if parsed
+            else None,
             "tokens_used": total_tokens,
             "issue_data_hash": current_hash,
         }

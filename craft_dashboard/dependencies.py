@@ -1,22 +1,23 @@
 """FastAPI dependency injection helpers."""
 
+import contextvars
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-# This will be set during app startup
-_session_factory: async_sessionmaker[AsyncSession] | None = None
+_session_factory_var: contextvars.ContextVar[
+    async_sessionmaker[AsyncSession] | None
+] = contextvars.ContextVar("_session_factory", default=None)
 
 
 def set_session_factory(factory: async_sessionmaker[AsyncSession]) -> None:
-    """Set the global session factory (called during app startup).
+    """Set the session factory (called during app startup).
 
     Args:
         factory: The async session factory to use.
 
     """
-    global _session_factory  # noqa: PLW0603
-    _session_factory = factory
+    _session_factory_var.set(factory)
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
@@ -29,11 +30,12 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         RuntimeError: If the session factory has not been initialized.
 
     """
-    if _session_factory is None:
+    factory = _session_factory_var.get()
+    if factory is None:
         msg = (
             "Database session factory not initialized. Call set_session_factory first."
         )
         raise RuntimeError(msg)
 
-    async with _session_factory() as session:
+    async with factory() as session:
         yield session

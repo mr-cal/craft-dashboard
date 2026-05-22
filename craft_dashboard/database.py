@@ -8,11 +8,17 @@ from sqlalchemy.ext.asyncio import (
 )
 
 
-def get_engine(database_url: str) -> AsyncEngine:
+def get_engine(
+    database_url: str,
+    pool_size: int = 5,
+    max_overflow: int = 10,
+) -> AsyncEngine:
     """Create an async SQLAlchemy engine.
 
     Args:
         database_url: PostgreSQL connection URL with asyncpg driver.
+        pool_size: Number of persistent connections in the pool.
+        max_overflow: Number of connections allowed beyond pool_size.
 
     Returns:
         An AsyncEngine instance.
@@ -20,8 +26,8 @@ def get_engine(database_url: str) -> AsyncEngine:
     """
     return create_async_engine(
         database_url,
-        pool_size=5,
-        max_overflow=10,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
         pool_pre_ping=True,
         echo=False,
     )

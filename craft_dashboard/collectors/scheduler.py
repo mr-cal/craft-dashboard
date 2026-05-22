@@ -3,6 +3,8 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 __all__ = [
     "is_due_for_refresh",
     "distribute_refresh_dates",
@@ -62,7 +64,7 @@ async def update_refresh_schedule(
     project_id: int,
     source: str,
     interval_days: int,
-    session,  # noqa: ANN001
+    session: AsyncSession,
 ) -> None:
     """Mark a project as successfully refreshed and schedule the next refresh.
 
@@ -112,7 +114,7 @@ async def record_refresh_error(
     project_id: int,
     source: str,
     error: str,
-    session,  # noqa: ANN001
+    session: AsyncSession,
 ) -> None:
     """Record a collection failure and increment the consecutive failure counter.
 

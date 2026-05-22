@@ -14,6 +14,44 @@ from craft_dashboard.models.snapshot import Snapshot
 
 router = APIRouter(prefix="/stats")
 
+_SCALAR_KEYS = [
+    "open_issues",
+    "open_prs",
+    "open_issues_external",
+    "open_prs_external",
+    "open_issues_bots",
+    "open_prs_bots",
+    "open",
+    "open_external",
+    "open_internal",
+    "open_bots",
+    "closed_issues",
+    "closed_prs",
+    "closed_issues_external",
+    "closed_prs_external",
+    "closed_issues_bots",
+    "closed_prs_bots",
+    "closed",
+    "closed_external",
+    "closed_internal",
+    "closed_bots",
+    "open_bugs",
+]
+_MEDIAN_AGE_KEYS = [
+    "median_issue_age",
+    "median_pr_age",
+    "nm_median_issue_age",
+    "nm_median_pr_age",
+    "median_issue_age_internal",
+    "median_pr_age_internal",
+    "median_issue_age_bots",
+    "median_pr_age_bots",
+    "median_age",
+    "nm_median_age",
+    "median_age_internal",
+    "median_age_bots",
+]
+
 
 @router.get("", response_class=RedirectResponse)
 async def stats_index() -> RedirectResponse:
@@ -191,58 +229,21 @@ def _build_all_projects_aggregate(projects: dict[str, dict]) -> dict[str, list]:
         all_dates_set.update(data["dates"])
     all_dates_sorted = sorted(all_dates_set)
 
-    scalar_keys = [
-        "open_issues",
-        "open_prs",
-        "open_issues_external",
-        "open_prs_external",
-        "open_issues_bots",
-        "open_prs_bots",
-        "open",
-        "open_external",
-        "open_internal",
-        "open_bots",
-        "closed_issues",
-        "closed_prs",
-        "closed_issues_external",
-        "closed_prs_external",
-        "closed_issues_bots",
-        "closed_prs_bots",
-        "closed",
-        "closed_external",
-        "closed_internal",
-        "closed_bots",
-        "open_bugs",
-    ]
-    median_age_keys = [
-        "median_issue_age",
-        "median_pr_age",
-        "nm_median_issue_age",
-        "nm_median_pr_age",
-        "median_issue_age_internal",
-        "median_pr_age_internal",
-        "median_issue_age_bots",
-        "median_pr_age_bots",
-        "median_age",
-        "nm_median_age",
-        "median_age_internal",
-        "median_age_bots",
-    ]
     all_projects: dict[str, list] = {
         "dates": all_dates_sorted,
-        **{k: [] for k in scalar_keys},
-        **{k: [] for k in median_age_keys},
+        **{k: [] for k in _SCALAR_KEYS},
+        **{k: [] for k in _MEDIAN_AGE_KEYS},
     }
 
     for d in all_dates_sorted:
-        for k in scalar_keys:
+        for k in _SCALAR_KEYS:
             total = 0
             for name, data in projects.items():
                 idx = proj_by_date[name].get(d)
                 if idx is not None:
                     total += data[k][idx]
             all_projects[k].append(total)
-        for mk in median_age_keys:
+        for mk in _MEDIAN_AGE_KEYS:
             ages = []
             for name, data in projects.items():
                 idx = proj_by_date[name].get(d)

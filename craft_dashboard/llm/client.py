@@ -80,6 +80,19 @@ class OpenRouterClient:
         """
         self.api_key = api_key
         self.base_url = base_url
+        self._http: httpx.AsyncClient | None = None
+
+    @property
+    def http(self) -> httpx.AsyncClient:
+        """Return a persistent HTTP client, creating one if needed."""
+        if self._http is None or self._http.is_closed:
+            self._http = httpx.AsyncClient(timeout=60.0)
+        return self._http
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        if self._http is not None and not self._http.is_closed:
+            await self._http.aclose()
 
     @retry(
         retry=retry_if_exception(_is_retriable),
@@ -126,26 +139,24 @@ class OpenRouterClient:
         if response_format:
             payload["response_format"] = response_format
 
-        async with httpx.AsyncClient() as http:
-            response = await http.post(
-                f"{self.base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://github.com/mr-cal/craft-dashboard",
-                    "X-Title": "craft-dashboard",
-                },
-                json=payload,
-                timeout=60.0,
+        response = await self.http.post(
+            f"{self.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/mr-cal/craft-dashboard",
+                "X-Title": "craft-dashboard",
+            },
+            json=payload,
+        )
+
+        if response.status_code == HTTP_PAYMENT_REQUIRED:
+            raise QuotaExhaustedError(
+                "OpenRouter daily quota exhausted. "
+                "Evaluation will resume tomorrow after reset."
             )
 
-            if response.status_code == HTTP_PAYMENT_REQUIRED:
-                raise QuotaExhaustedError(
-                    "OpenRouter daily quota exhausted. "
-                    "Evaluation will resume tomorrow after reset."
-                )
-
-            response.raise_for_status()
+        response.raise_for_status()
 
         data = response.json()
         result = OpenRouterResponse.from_api_response(data)
@@ -179,6 +190,19 @@ class LocalLLMClient:
         """
         self.base_url = base_url
         self.api_key = api_key
+        self._http: httpx.AsyncClient | None = None
+
+    @property
+    def http(self) -> httpx.AsyncClient:
+        """Return a persistent HTTP client, creating one if needed."""
+        if self._http is None or self._http.is_closed:
+            self._http = httpx.AsyncClient(timeout=120.0)
+        return self._http
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        if self._http is not None and not self._http.is_closed:
+            await self._http.aclose()
 
     @retry(
         retry=retry_if_exception(
@@ -222,17 +246,15 @@ class LocalLLMClient:
         if response_format:
             payload["response_format"] = response_format
 
-        async with httpx.AsyncClient() as http:
-            headers: dict[str, str] = {"Content-Type": "application/json"}
-            if self.api_key:
-                headers["Authorization"] = f"Bearer {self.api_key}"
-            response = await http.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=120.0,  # Local models can be slow
-            )
-            response.raise_for_status()
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        response = await self.http.post(
+            f"{self.base_url}/chat/completions",
+            headers=headers,
+            json=payload,
+        )
+        response.raise_for_status()
 
         data = response.json()
         result = OpenRouterResponse.from_api_response(data)
@@ -260,7 +282,9 @@ def create_llm_client(settings: "Settings") -> "OpenRouterClient | LocalLLMClien
 
     """
     if settings.llm_backend == "local":
-        return LocalLLMClient(base_url=settings.local_llm_url, api_key=settings.local_llm_api_key)
+        return LocalLLMClient(
+            base_url=settings.local_llm_url, api_key=settings.local_llm_api_key
+        )
     if settings.llm_backend == "openrouter":
         return OpenRouterClient(api_key=settings.openrouter_api_key)
     raise ValueError(
