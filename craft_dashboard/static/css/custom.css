@@ -213,3 +213,12 @@
 .sort-arrow {
   margin-left: 0.25rem;
 }
+
+.htmx-indicator {
+  display: none;
+}
+
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+  display: inline-block;
+}

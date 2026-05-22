@@ -27,6 +27,7 @@
            hx-target="#issue-table"
            hx-swap="outerHTML"
            hx-include=".filter-bar [name]"
+           hx-indicator="#loading-indicator"
            hx-trigger="change" />
   </div>
 
@@ -53,6 +54,7 @@
            hx-target="#issue-table"
            hx-swap="outerHTML"
            hx-include=".filter-bar [name]"
+           hx-indicator="#loading-indicator"
            hx-trigger="change" />
   </div>
 
@@ -93,10 +95,15 @@
            hx-target="#issue-table"
            hx-swap="outerHTML"
            hx-include=".filter-bar [name]"
+           hx-indicator="#loading-indicator"
            hx-trigger="change" />
   </div>
 
   <input type="hidden" name="sort" value="{{ sort_by or 'staleness' }}" />
+</div>
+
+<div id="loading-indicator" class="htmx-indicator" style="text-align:center;padding:1rem;">
+  <i class="p-icon--spinner u-animation--spin"></i> Loading...
 </div>
 
 {% include "issues/partials/issue_table.html" %}

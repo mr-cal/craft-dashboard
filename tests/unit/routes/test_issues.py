@@ -44,3 +44,17 @@ class TestIssueList:
 
         assert response.status_code == 200
         assert "hx-get" in response.text or "filter" in response.text.lower()
+
+    def test_issues_page_includes_htmx_loading_indicator(self) -> None:
+        """Issues page includes an HTMX loading indicator for table refreshes."""
+        app = create_app()
+        app.dependency_overrides[get_db_session] = _override_issue_db_session
+
+        with patch.object(issues_routes, "_query_issues", return_value=([], 1)):
+            with TestClient(app) as client:
+                response = client.get("/issues")
+
+        assert response.status_code == 200
+        assert 'id="loading-indicator"' in response.text
+        assert "Loading..." in response.text
+        assert response.text.count('hx-indicator="#loading-indicator"') == 3
