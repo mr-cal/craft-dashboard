@@ -60,6 +60,33 @@ class TestDashboardIndex:
             assert "text/html" in response.headers["content-type"]
             assert "Dashboard" in response.text
 
+    def test_index_includes_landmarks_and_stat_cards(self) -> None:
+        """GET / includes page landmarks and summary stat cards."""
+        app = create_app()
+        app.router.lifespan_context = _noop_lifespan
+
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = []
+        mock_session.scalar.side_effect = [3, 7, 4]
+
+        async def fake_session():
+            yield mock_session
+
+        app.dependency_overrides[get_db_session] = fake_session
+
+        with TestClient(app) as client:
+            response = client.get("/")
+
+        assert response.status_code == 200
+        assert 'role="banner"' in response.text
+        assert 'aria-label="Mobile menu"' in response.text
+        assert 'role="main"' in response.text
+        assert 'role="contentinfo"' in response.text
+        assert response.text.count('class="p-card--highlighted"') == 3
+        assert "Projects" in response.text
+        assert "Open Issues" in response.text
+        assert "Open PRs" in response.text
+
 
 class TestDashboardIndexWithData:
     """DB-backed tests for the dashboard index route."""

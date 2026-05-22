@@ -1,27 +1,20 @@
 {% extends "base.html" %}
+{% macro stat_card(value, label) %}
+<div class="col-4">
+  <div class="p-card--highlighted" style="text-align:center;">
+    <p class="p-heading--2">{{ value }}</p>
+    <p>{{ label }}</p>
+  </div>
+</div>
+{% endmacro %}
 {% block title %}Dashboard - craft-dashboard{% endblock %}
 {% block content %}
 <h2>Dashboard</h2>
 
 <div class="row" style="margin-bottom: 1.5rem;">
-  <div class="col-4">
-    <div class="p-card--highlighted" style="text-align:center;">
-      <p class="p-heading--2">{{ project_count }}</p>
-      <p>Projects</p>
-    </div>
-  </div>
-  <div class="col-4">
-    <div class="p-card--highlighted" style="text-align:center;">
-      <p class="p-heading--2">{{ open_issues }}</p>
-      <p>Open Issues</p>
-    </div>
-  </div>
-  <div class="col-4">
-    <div class="p-card--highlighted" style="text-align:center;">
-      <p class="p-heading--2">{{ open_prs }}</p>
-      <p>Open PRs</p>
-    </div>
-  </div>
+  {{ stat_card(project_count, "Projects") }}
+  {{ stat_card(open_issues, "Open Issues") }}
+  {{ stat_card(open_prs, "Open PRs") }}
 </div>
 
 {% set applications = projects | selectattr("category", "equalto", "application") | list %}
