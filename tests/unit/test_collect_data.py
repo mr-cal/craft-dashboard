@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy.dialects import postgresql as pg_dialect
 
 MODULE_PATH = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "collect_data.py"
 SPEC = importlib.util.spec_from_file_location("collect_data_script", MODULE_PATH)
@@ -25,6 +26,10 @@ class _FakeResult:
     def scalar_one_or_none(self) -> int | None:
         return self._value
 
+    def scalar_one(self) -> int:
+        assert self._value is not None
+        return self._value
+
 
 class _FakeSession:
     def __init__(self, result_value: int | None) -> None:
@@ -34,6 +39,21 @@ class _FakeSession:
         return _FakeResult(self._result_value)
 
 
+class _RecordingSession:
+    """Fake session that records executed statements."""
+
+    def __init__(self, project_id: int = 1) -> None:
+        self._project_id = project_id
+        self.executed_statements: list = []
+
+    async def execute(self, stmt: object) -> _FakeResult:
+        self.executed_statements.append(stmt)
+        return _FakeResult(self._project_id)
+
+    async def commit(self) -> None:
+        pass
+
+
 def _make_session_factory(result_value: int | None = None):
     @asynccontextmanager
     async def _session() -> AsyncIterator[_FakeSession]:
@@ -41,6 +61,33 @@ def _make_session_factory(result_value: int | None = None):
 
     return _session
 
+
+class TestGetOrCreateProject:
+    @pytest.mark.asyncio
+    async def test_returns_project_id(self) -> None:
+        session = _RecordingSession(project_id=42)
+
+        result = await collect_data._get_or_create_project(
+            session, "snapcraft", "application", 0
+        )
+
+        assert result == 42
+
+    @pytest.mark.asyncio
+    async def test_uses_on_conflict_do_update(self) -> None:
+        """Verify the upsert updates category and display_order on conflict."""
+        session = _RecordingSession(project_id=7)
+
+        await collect_data._get_or_create_project(
+            session, "snapcraft", "application", 0
+        )
+
+        upsert_stmt = session.executed_statements[0]
+        compiled = str(upsert_stmt.compile(dialect=pg_dialect.dialect()))
+        assert "ON CONFLICT" in compiled
+        assert "DO UPDATE SET" in compiled
+        assert "category" in compiled
+        assert "display_order" in compiled
 
 class TestCollectGithubLogging:
     @pytest.mark.asyncio
@@ -105,6 +152,7 @@ class TestCollectLaunchpadLogging:
             launchpad_projects=["snapcraft"],
             craft_projects=[],
             maintainers=["alice"],
+            launchpad_maintainers=["alice"],
         )
         lp_collector = MagicMock()
         lp_collector.collect_bugs = AsyncMock(return_value=150)
@@ -112,7 +160,7 @@ class TestCollectLaunchpadLogging:
         monkeypatch.setattr(
             collect_data,
             "LaunchpadCollector",
-            lambda projects: lp_collector,
+            lambda projects, launchpad_maintainers: lp_collector,
         )
         monkeypatch.setattr(collect_data, "_get_or_create_project", AsyncMock(return_value=202))
         monkeypatch.setattr(collect_data, "generate_snapshot", AsyncMock())

@@ -90,7 +90,13 @@ async def _get_or_create_project(
         category=category,
         display_order=order,
     )
-    stmt = stmt.on_conflict_do_nothing(index_elements=["name"])
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["name"],
+        set_={
+            "category": stmt.excluded.category,
+            "display_order": stmt.excluded.display_order,
+        },
+    )
     await session.execute(stmt)
     await session.commit()
 
@@ -135,6 +141,7 @@ async def _collect_github(
             dep_collector = DependencyCollector(
                 token=settings.github_token,
                 org="canonical",
+                craft_libraries=config.craft_libraries,
             )
             try:
                 dep_started_at = time.monotonic()
@@ -242,7 +249,10 @@ async def _collect_launchpad(
     Creates a separate project entry like "snapcraft (launchpad)" for each
     Launchpad project so it appears as a distinct series in trends charts.
     """
-    collector = LaunchpadCollector(projects=config.launchpad_projects)
+    collector = LaunchpadCollector(
+        projects=config.launchpad_projects,
+        launchpad_maintainers=config.launchpad_maintainers,
+    )
     stats = CollectionStats()
 
     last_order = len(config.craft_projects)
@@ -271,7 +281,7 @@ async def _collect_launchpad(
 
             snapshot_started_at = time.monotonic()
             await generate_snapshot(
-                project_id, session, set(config.maintainers)
+                project_id, session, set(config.launchpad_maintainers)
             )
             logger.info(
                 "  Generated snapshot for %s in %s",
