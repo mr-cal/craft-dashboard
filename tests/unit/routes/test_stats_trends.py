@@ -15,6 +15,7 @@ from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.snapshot import Snapshot
+from craft_dashboard.routes.stats import _build_snapshot_dict
 
 if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"  # type: ignore[attr-defined]
@@ -105,6 +106,13 @@ def _project(name: str, display_order: int) -> Project:
 
 def _snapshot(project_id: int, snapshot_date: date, **overrides: int) -> Snapshot:
     return Snapshot(project_id=project_id, snapshot_date=snapshot_date, **overrides)
+
+
+def _trend_series(**overrides: list[int] | list[str]) -> dict[str, list[int] | list[str]]:
+    data = {key: [0] for key in _TIME_SERIES_KEYS if key != "dates"}
+    data["dates"] = ["2024-05-20"]
+    data.update(overrides)
+    return data
 
 
 class TestTrendsAllDataEmpty:
@@ -423,6 +431,119 @@ class TestTrendsClosedYearBug:
 
         assert response.status_code == 200
         assert response.json()["snapshot"]["year-bug"]["closed_issues_year"] == 365
+
+
+class TestBuildSnapshotDict:
+    def test_build_snapshot_dict_uses_latest_values_and_aggregate_snapshot(self) -> None:
+        projects = {
+            "alpha": _trend_series(
+                dates=["2024-05-20", "2024-05-21"],
+                open_issues=[1, 3],
+                open_prs=[2, 4],
+                open_issues_external=[5, 7],
+                open_prs_external=[6, 8],
+                open_issues_bots=[0, 1],
+                open_prs_bots=[1, 2],
+                median_issue_age=[10, 30],
+                median_pr_age=[20, 40],
+                nm_median_issue_age=[11, 31],
+                nm_median_pr_age=[21, 41],
+                median_issue_age_internal=[12, 32],
+                median_pr_age_internal=[22, 42],
+                median_issue_age_bots=[13, 33],
+                median_pr_age_bots=[23, 43],
+                closed_issues=[9, 10],
+                closed_prs=[11, 12],
+                closed_issues_external=[13, 14],
+                closed_prs_external=[15, 16],
+            ),
+            "beta": _trend_series(
+                open_issues=[4],
+                open_prs=[5],
+                open_issues_external=[6],
+                open_prs_external=[7],
+                open_issues_bots=[2],
+                open_prs_bots=[3],
+                median_issue_age=[50],
+                median_pr_age=[60],
+                nm_median_issue_age=[51],
+                nm_median_pr_age=[61],
+                median_issue_age_internal=[52],
+                median_pr_age_internal=[62],
+                median_issue_age_bots=[53],
+                median_pr_age_bots=[63],
+                closed_issues=[20],
+                closed_prs=[21],
+                closed_issues_external=[22],
+                closed_prs_external=[23],
+            ),
+            "all-projects": _trend_series(open_issues=[999]),
+        }
+
+        snapshot = _build_snapshot_dict(projects)
+
+        assert snapshot == {
+            "alpha": {
+                "open_issues": 3,
+                "open_prs": 4,
+                "nm_open_issues": 7,
+                "nm_open_prs": 8,
+                "bots_open_issues": 1,
+                "bots_open_prs": 2,
+                "median_issue_age": 30,
+                "median_pr_age": 40,
+                "nm_median_issue_age": 31,
+                "nm_median_pr_age": 41,
+                "median_issue_age_internal": 32,
+                "median_pr_age_internal": 42,
+                "median_issue_age_bots": 33,
+                "median_pr_age_bots": 43,
+                "closed_issues_year": 19,
+                "closed_prs_year": 23,
+                "nm_closed_issues_year": 27,
+                "nm_closed_prs_year": 31,
+            },
+            "beta": {
+                "open_issues": 4,
+                "open_prs": 5,
+                "nm_open_issues": 6,
+                "nm_open_prs": 7,
+                "bots_open_issues": 2,
+                "bots_open_prs": 3,
+                "median_issue_age": 50,
+                "median_pr_age": 60,
+                "nm_median_issue_age": 51,
+                "nm_median_pr_age": 61,
+                "median_issue_age_internal": 52,
+                "median_pr_age_internal": 62,
+                "median_issue_age_bots": 53,
+                "median_pr_age_bots": 63,
+                "closed_issues_year": 20,
+                "closed_prs_year": 21,
+                "nm_closed_issues_year": 22,
+                "nm_closed_prs_year": 23,
+            },
+            "all-projects": {
+                "open_issues": 7,
+                "open_prs": 9,
+                "nm_open_issues": 13,
+                "nm_open_prs": 15,
+                "bots_open_issues": 3,
+                "bots_open_prs": 5,
+                "median_issue_age": 40,
+                "median_pr_age": 50,
+                "nm_median_issue_age": 41,
+                "nm_median_pr_age": 51,
+                "median_issue_age_internal": 42,
+                "median_pr_age_internal": 52,
+                "median_issue_age_bots": 43,
+                "median_pr_age_bots": 53,
+                "closed_issues_year": 39,
+                "closed_prs_year": 44,
+                "nm_closed_issues_year": 49,
+                "nm_closed_prs_year": 54,
+            },
+        }
 
 
 class TestTrendsPerKeyMedianDenominator:

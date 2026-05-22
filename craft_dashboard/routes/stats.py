@@ -176,6 +176,78 @@ async def trends_page(
     )
 
 
+def _build_snapshot_dict(projects: dict[str, dict]) -> dict[str, dict]:
+    """Build latest snapshot values for each project and the all-projects rollup."""
+    snapshot: dict[str, dict] = {}
+    for name, data in projects.items():
+        if name == "all-projects" or not data["dates"]:
+            continue
+        idx = -1  # Last day
+
+        # Compute year-ago index (approximately 365 days back)
+        n = len(data["dates"])
+        year_start_idx = max(0, n - 365)
+
+        # Sum closed issues/PRs over last year
+        closed_issues_year = sum(data["closed_issues"][year_start_idx:])
+        closed_prs_year = sum(data["closed_prs"][year_start_idx:])
+        nm_closed_issues_year = sum(data["closed_issues_external"][year_start_idx:])
+        nm_closed_prs_year = sum(data["closed_prs_external"][year_start_idx:])
+
+        snapshot[name] = {
+            "open_issues": data["open_issues"][idx],
+            "open_prs": data["open_prs"][idx],
+            "nm_open_issues": data["open_issues_external"][idx],
+            "nm_open_prs": data["open_prs_external"][idx],
+            "bots_open_issues": data["open_issues_bots"][idx],
+            "bots_open_prs": data["open_prs_bots"][idx],
+            "median_issue_age": data["median_issue_age"][idx],
+            "median_pr_age": data["median_pr_age"][idx],
+            "nm_median_issue_age": data["nm_median_issue_age"][idx],
+            "nm_median_pr_age": data["nm_median_pr_age"][idx],
+            "median_issue_age_internal": data["median_issue_age_internal"][idx],
+            "median_pr_age_internal": data["median_pr_age_internal"][idx],
+            "median_issue_age_bots": data["median_issue_age_bots"][idx],
+            "median_pr_age_bots": data["median_pr_age_bots"][idx],
+            "closed_issues_year": closed_issues_year,
+            "closed_prs_year": closed_prs_year,
+            "nm_closed_issues_year": nm_closed_issues_year,
+            "nm_closed_prs_year": nm_closed_prs_year,
+        }
+
+    scalar_snap_keys = [
+        "open_issues", "open_prs", "nm_open_issues", "nm_open_prs",
+        "bots_open_issues", "bots_open_prs",
+        "closed_issues_year", "closed_prs_year",
+        "nm_closed_issues_year", "nm_closed_prs_year",
+    ]
+    median_snap_keys = [
+        "median_issue_age", "median_pr_age",
+        "nm_median_issue_age", "nm_median_pr_age",
+        "median_issue_age_internal", "median_pr_age_internal",
+        "median_issue_age_bots", "median_pr_age_bots",
+    ]
+    ap_snap: dict[str, int] = {k: 0 for k in scalar_snap_keys}
+    ap_snap.update({k: 0 for k in median_snap_keys})
+    median_counts: dict[str, int] = {k: 0 for k in median_snap_keys}
+
+    for proj_snap in snapshot.values():
+        for k in scalar_snap_keys:
+            ap_snap[k] += proj_snap.get(k, 0)
+        for mk in median_snap_keys:
+            val = proj_snap.get(mk, 0)
+            if val > 0:
+                ap_snap[mk] += val
+                median_counts[mk] += 1
+
+    for mk in median_snap_keys:
+        if median_counts[mk] > 0:
+            ap_snap[mk] = ap_snap[mk] // median_counts[mk]
+
+    snapshot["all-projects"] = ap_snap
+    return snapshot
+
+
 @router.get("/trends/all-data", response_class=JSONResponse)
 async def trends_all_data(
     session: AsyncSession = Depends(get_db_session),
@@ -315,79 +387,7 @@ async def trends_all_data(
 
         projects["all-projects"] = all_projects
     
-    # Build snapshot section (latest day data for bar charts)
-    snapshot: dict[str, dict] = {}
-    for name, data in projects.items():
-        if name == "all-projects" or not data["dates"]:
-            continue
-        idx = -1  # Last day
-
-        # Compute year-ago index (approximately 365 days back)
-        n = len(data["dates"])
-        year_start_idx = max(0, n - 365)
-
-        # Sum closed issues/PRs over last year
-        closed_issues_year = sum(data["closed_issues"][year_start_idx:])
-        closed_prs_year = sum(data["closed_prs"][year_start_idx:])
-        nm_closed_issues_year = sum(data["closed_issues_external"][year_start_idx:])
-        nm_closed_prs_year = sum(data["closed_prs_external"][year_start_idx:])
-
-        snapshot[name] = {
-            "open_issues": data["open_issues"][idx],
-            "open_prs": data["open_prs"][idx],
-            "nm_open_issues": data["open_issues_external"][idx],
-            "nm_open_prs": data["open_prs_external"][idx],
-            "bots_open_issues": data["open_issues_bots"][idx],
-            "bots_open_prs": data["open_prs_bots"][idx],
-            "median_issue_age": data["median_issue_age"][idx],
-            "median_pr_age": data["median_pr_age"][idx],
-            "nm_median_issue_age": data["nm_median_issue_age"][idx],
-            "nm_median_pr_age": data["nm_median_pr_age"][idx],
-            "median_issue_age_internal": data["median_issue_age_internal"][idx],
-            "median_pr_age_internal": data["median_pr_age_internal"][idx],
-            "median_issue_age_bots": data["median_issue_age_bots"][idx],
-            "median_pr_age_bots": data["median_pr_age_bots"][idx],
-            "closed_issues_year": closed_issues_year,
-            "closed_prs_year": closed_prs_year,
-            "nm_closed_issues_year": nm_closed_issues_year,
-            "nm_closed_prs_year": nm_closed_prs_year,
-        }
-
-    # For all-projects snapshot: sum each project's individual latest values.
-    # Using the time-aligned aggregate's last entry would be wrong because the
-    # latest date may only have data from projects that ran most recently.
-    scalar_snap_keys = [
-        "open_issues", "open_prs", "nm_open_issues", "nm_open_prs",
-        "bots_open_issues", "bots_open_prs",
-        "closed_issues_year", "closed_prs_year",
-        "nm_closed_issues_year", "nm_closed_prs_year",
-    ]
-    median_snap_keys = [
-        "median_issue_age", "median_pr_age",
-        "nm_median_issue_age", "nm_median_pr_age",
-        "median_issue_age_internal", "median_pr_age_internal",
-        "median_issue_age_bots", "median_pr_age_bots",
-    ]
-    ap_snap: dict[str, int] = {k: 0 for k in scalar_snap_keys}
-    ap_snap.update({k: 0 for k in median_snap_keys})
-    # Track per-key denominators so each median is averaged only over
-    # projects that actually have a non-zero value for that specific key.
-    median_counts: dict[str, int] = {k: 0 for k in median_snap_keys}
-
-    for name, proj_snap in snapshot.items():
-        for k in scalar_snap_keys:
-            ap_snap[k] += proj_snap.get(k, 0)
-        for mk in median_snap_keys:
-            val = proj_snap.get(mk, 0)
-            if val > 0:
-                ap_snap[mk] += val
-                median_counts[mk] += 1
-
-    for mk in median_snap_keys:
-        if median_counts[mk] > 0:
-            ap_snap[mk] = ap_snap[mk] // median_counts[mk]
-
-    snapshot["all-projects"] = ap_snap
+    snapshot = _build_snapshot_dict(projects)
 
     return JSONResponse({"projects": projects, "order": project_order, "snapshot": snapshot})
 
