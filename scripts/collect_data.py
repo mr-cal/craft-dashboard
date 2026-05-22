@@ -227,6 +227,28 @@ async def _collect_github(
                     exc_info=True,
                 )
 
+            if project_name in config.craft_applications:
+                try:
+                    releases_started_at = time.monotonic()
+                    release_count = await collector.collect_releases(
+                        project_name,
+                        project_id,
+                        session,
+                        hotfix_min_version=config.hotfix_min_versions.get(project_name),
+                    )
+                    logger.info(
+                        "  canonical/%s: releases collected (%d branches) in %s",
+                        project_name,
+                        release_count,
+                        _format_duration(time.monotonic() - releases_started_at),
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to collect releases for %s",
+                        project_name,
+                        exc_info=True,
+                    )
+
             # Check refresh schedule
             result = await session.execute(
                 select(RefreshSchedule.next_refresh_at).where(
@@ -260,20 +282,6 @@ async def _collect_github(
                     project_name,
                     _format_duration(time.monotonic() - issues_started_at),
                     issues_collected,
-                )
-
-                releases_started_at = time.monotonic()
-                release_count = await collector.collect_releases(
-                    project_name,
-                    project_id,
-                    session,
-                    hotfix_min_version=config.hotfix_min_versions.get(project_name),
-                )
-                logger.info(
-                    "  canonical/%s: releases collected (%d branches) in %s",
-                    project_name,
-                    release_count,
-                    _format_duration(time.monotonic() - releases_started_at),
                 )
 
                 snapshot_started_at = time.monotonic()
