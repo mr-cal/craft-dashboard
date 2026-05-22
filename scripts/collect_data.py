@@ -172,12 +172,15 @@ async def _collect_github(
         maintainers=config.maintainers,
     )
     stats = CollectionStats()
+    bots = set(getattr(config, "bots", []))
 
     project_list = projects if projects else config.craft_projects
     for i, project_name in enumerate(project_list):
         async with session_factory() as session:
-            category = "application" if project_name in config.craft_applications else (
-                "library" if project_name in config.craft_libraries else "other"
+            category = (
+                "application"
+                if project_name in config.craft_applications
+                else ("library" if project_name in config.craft_libraries else "other")
             )
             project_id = await _get_or_create_project(
                 session, project_name, category, i
@@ -186,7 +189,9 @@ async def _collect_github(
             project_started_at = time.monotonic()
             elapsed = ""
             if run_started_at is not None:
-                elapsed = f" (elapsed: {_format_duration(time.monotonic() - run_started_at)})"
+                elapsed = (
+                    f" (elapsed: {_format_duration(time.monotonic() - run_started_at)})"
+                )
 
             logger.info("Collecting GitHub data for %s%s", project_name, elapsed)
 
@@ -199,10 +204,15 @@ async def _collect_github(
             try:
                 dep_started_at = time.monotonic()
                 branches = _get_dep_branches(
-                    dep_collector, project_name, config.hotfix_min_versions.get(project_name)
+                    dep_collector,
+                    project_name,
+                    config.hotfix_min_versions.get(project_name),
                 )
                 dependency_count = await dep_collector.collect_dependencies(
-                    project_name, project_id, branches, session,
+                    project_name,
+                    project_id,
+                    branches,
+                    session,
                 )
                 logger.info(
                     "  canonical/%s: dependencies collected (%d dependencies) in %s",
@@ -238,7 +248,9 @@ async def _collect_github(
             try:
                 issues_started_at = time.monotonic()
                 issues_collected = await collector.collect_issues(
-                    project_name, project_id, session,
+                    project_name,
+                    project_id,
+                    session,
                     limit=limit,
                     refresh_age_days=settings.refresh_age_days,
                 )
@@ -252,7 +264,9 @@ async def _collect_github(
 
                 releases_started_at = time.monotonic()
                 release_count = await collector.collect_releases(
-                    project_name, project_id, session,
+                    project_name,
+                    project_id,
+                    session,
                     hotfix_min_version=config.hotfix_min_versions.get(project_name),
                 )
                 logger.info(
@@ -264,7 +278,10 @@ async def _collect_github(
 
                 snapshot_started_at = time.monotonic()
                 await generate_snapshot(
-                    project_id, session, set(config.maintainers)
+                    project_id,
+                    session,
+                    set(config.maintainers),
+                    bots=bots,
                 )
                 logger.info(
                     "  Generated snapshot for %s in %s",
@@ -310,9 +327,12 @@ async def _collect_launchpad(
         launchpad_maintainers=config.launchpad_maintainers,
     )
     stats = CollectionStats()
+    bots = set(getattr(config, "bots", []))
 
     last_order = len(config.craft_projects)
-    lp_list = [p for p in config.launchpad_projects if projects is None or p in projects]
+    lp_list = [
+        p for p in config.launchpad_projects if projects is None or p in projects
+    ]
     for i, lp_name in enumerate(lp_list):
         async with session_factory() as session:
             lp_project_name = f"{lp_name} (launchpad)"
@@ -322,7 +342,9 @@ async def _collect_launchpad(
             stats.projects_processed.add(lp_name)
             elapsed = ""
             if run_started_at is not None:
-                elapsed = f" (elapsed: {_format_duration(time.monotonic() - run_started_at)})"
+                elapsed = (
+                    f" (elapsed: {_format_duration(time.monotonic() - run_started_at)})"
+                )
 
             logger.info("Collecting Launchpad data for %s%s", lp_name, elapsed)
             bugs_started_at = time.monotonic()
@@ -337,7 +359,10 @@ async def _collect_launchpad(
 
             snapshot_started_at = time.monotonic()
             await generate_snapshot(
-                project_id, session, set(config.launchpad_maintainers)
+                project_id,
+                session,
+                set(config.launchpad_maintainers),
+                bots=bots,
             )
             logger.info(
                 "  Generated snapshot for %s in %s",
@@ -357,7 +382,11 @@ async def _main(
     """Run data collection."""
     settings = Settings()
 
-    log_level = logging.DEBUG if verbose else getattr(logging, settings.log_level.upper(), logging.INFO)
+    log_level = (
+        logging.DEBUG
+        if verbose
+        else getattr(logging, settings.log_level.upper(), logging.INFO)
+    )
     logging.getLogger().setLevel(log_level)
 
     config = load_config(pathlib.Path(settings.config_file))
@@ -424,7 +453,8 @@ async def _main(
     help="Only collect data for these projects (repeatable). Default: all configured projects.",
 )
 @click.option(
-    "--verbose", "-v",
+    "--verbose",
+    "-v",
     is_flag=True,
     default=False,
     help="Enable debug logging (individual issues, API calls). Overrides LOG_LEVEL.",

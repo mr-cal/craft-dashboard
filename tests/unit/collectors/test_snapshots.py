@@ -2,7 +2,10 @@
 
 from datetime import UTC, date, datetime, timedelta
 
-from craft_dashboard.collectors.snapshots import _increment_counts, compute_snapshot_counts
+from craft_dashboard.collectors.snapshots import (
+    _increment_counts,
+    compute_snapshot_counts,
+)
 
 _TODAY = date(2024, 6, 1)
 
@@ -17,9 +20,9 @@ def _issue(
     author_is_bot=False,
     reference_date=_TODAY,
 ):
-    created_at = datetime.combine(reference_date, datetime.min.time(), tzinfo=UTC) - timedelta(
-        days=created_days_ago
-    )
+    created_at = datetime.combine(
+        reference_date, datetime.min.time(), tzinfo=UTC
+    ) - timedelta(days=created_days_ago)
     closed_at = None
     if closed_days_ago is not None:
         closed_at = datetime.combine(
@@ -190,7 +193,9 @@ class TestComputeSnapshotCounts:
         # Issue closed on 2024-05-31 (= yesterday relative to _TODAY)
         issues = [_issue("closed", closed_days_ago=0, reference_date=yesterday)]
 
-        result_today = compute_snapshot_counts(issues=issues, maintainers=set(), today=_TODAY)
+        result_today = compute_snapshot_counts(
+            issues=issues, maintainers=set(), today=_TODAY
+        )
         result_yesterday = compute_snapshot_counts(
             issues=issues, maintainers=set(), today=yesterday
         )
@@ -222,11 +227,83 @@ class TestComputeSnapshotCounts:
         assert result["open_issues_bots"] == 1
         assert result["open_issues"] == 2
 
+    def test_bots_parameter_flags_configured_bot_accounts(self) -> None:
+        """Configured bot accounts are counted as bots without author_is_bot."""
+        issues = [
+            _issue("open", author="Copilot", author_is_bot=False),
+            _issue("open", author="human-user", author_is_bot=False),
+        ]
+
+        result = compute_snapshot_counts(
+            issues=issues,
+            maintainers=set(),
+            today=_TODAY,
+            bots={"Copilot", "dependabot[bot]", "renovate[bot]"},
+        )
+
+        assert result["open_issues_bots"] == 1
+        assert result["open_issues_external"] == 1
+
+    def test_copilot_in_bots_parameter_is_treated_as_bot(self) -> None:
+        """Copilot is treated as a bot when listed in configured bots."""
+        issues = [
+            _issue(
+                "open", issue_type="pull_request", author="Copilot", created_days_ago=8
+            ),
+        ]
+
+        result = compute_snapshot_counts(
+            issues=issues,
+            maintainers=set(),
+            today=_TODAY,
+            bots={"Copilot"},
+        )
+
+        assert result["open_prs_bots"] == 1
+        assert result["open_prs_external"] == 0
+        assert result["median_pr_age_bots"] == 8
+
+    def test_bots_parameter_works_alongside_author_is_bot_field(self) -> None:
+        """Configured bots and stored author_is_bot values are both honored."""
+        issues = [
+            _issue("open", author="Copilot", author_is_bot=False, created_days_ago=10),
+            _issue(
+                "open",
+                author="dependabot[bot]",
+                author_is_bot=True,
+                created_days_ago=20,
+            ),
+            _issue(
+                "open", author="human-user", author_is_bot=False, created_days_ago=30
+            ),
+        ]
+
+        result = compute_snapshot_counts(
+            issues=issues,
+            maintainers=set(),
+            today=_TODAY,
+            bots={"Copilot"},
+        )
+
+        assert result["open_issues_bots"] == 2
+        assert result["open_issues_external"] == 1
+        assert result["median_issue_age_bots"] == 15
+
     def test_bot_open_pr_counted_in_bots(self) -> None:
         """Open PR from a bot author is counted in open_prs_bots."""
         issues = [
-            _issue("open", issue_type="pull_request", author="dependabot[bot]", author_is_bot=True),
-            _issue("open", issue_type="pull_request", author="human-user", author_is_bot=False),
+            _issue(
+                "open",
+                issue_type="pull_request",
+                author="dependabot[bot]",
+                author_is_bot=True,
+            ),
+            _issue(
+                "open",
+                issue_type="pull_request",
+                author="human-user",
+                author_is_bot=False,
+            ),
         ]
 
         result = compute_snapshot_counts(issues=issues, maintainers=set(), today=_TODAY)
@@ -248,13 +325,27 @@ class TestComputeSnapshotCounts:
     def test_lp_style_issues_have_zero_bots(self) -> None:
         """LP-style issues (no author_is_bot field) default to 0 bots."""
         lp_issues = [
-            {"issue_type": "issue", "state": "open", "author": "lp-user", "labels": [],
-             "created_at": None, "closed_at": None},
-            {"issue_type": "issue", "state": "open", "author": "another-lp-user", "labels": [],
-             "created_at": None, "closed_at": None},
+            {
+                "issue_type": "issue",
+                "state": "open",
+                "author": "lp-user",
+                "labels": [],
+                "created_at": None,
+                "closed_at": None,
+            },
+            {
+                "issue_type": "issue",
+                "state": "open",
+                "author": "another-lp-user",
+                "labels": [],
+                "created_at": None,
+                "closed_at": None,
+            },
         ]
 
-        result = compute_snapshot_counts(issues=lp_issues, maintainers=set(), today=_TODAY)
+        result = compute_snapshot_counts(
+            issues=lp_issues, maintainers=set(), today=_TODAY
+        )
 
         assert result["open_issues_bots"] == 0
         assert result["open_issues"] == 2
@@ -273,7 +364,9 @@ class TestComputeSnapshotCounts:
     def test_bot_closed_issue_counted_in_closed_bots(self) -> None:
         """Issue closed today by a bot is counted in closed_issues_bots."""
         issues = [
-            _issue("closed", author="renovate[bot]", author_is_bot=True, closed_days_ago=0),
+            _issue(
+                "closed", author="renovate[bot]", author_is_bot=True, closed_days_ago=0
+            ),
             _issue("closed", author="human", author_is_bot=False, closed_days_ago=0),
         ]
 
@@ -282,20 +375,33 @@ class TestComputeSnapshotCounts:
         assert result["closed_issues_bots"] == 1
         assert result["closed_issues"] == 2
 
-
     def test_median_age_internal_external_bots(self) -> None:
         """Verify per-group median ages are computed separately."""
         maintainers = {"alice"}
         issues = [
-            _issue("open", author="alice", author_is_bot=False, created_days_ago=10),   # internal
-            _issue("open", author="alice", author_is_bot=False, created_days_ago=30),   # internal
-            _issue("open", author="bob", author_is_bot=False, created_days_ago=50),     # external
-            _issue("open", author="carol", author_is_bot=False, created_days_ago=70),   # external
-            _issue("open", author="bot1", author_is_bot=True, created_days_ago=5),      # bot
-            _issue("open", author="bot2", author_is_bot=True, created_days_ago=15),     # bot
+            _issue(
+                "open", author="alice", author_is_bot=False, created_days_ago=10
+            ),  # internal
+            _issue(
+                "open", author="alice", author_is_bot=False, created_days_ago=30
+            ),  # internal
+            _issue(
+                "open", author="bob", author_is_bot=False, created_days_ago=50
+            ),  # external
+            _issue(
+                "open", author="carol", author_is_bot=False, created_days_ago=70
+            ),  # external
+            _issue(
+                "open", author="bot1", author_is_bot=True, created_days_ago=5
+            ),  # bot
+            _issue(
+                "open", author="bot2", author_is_bot=True, created_days_ago=15
+            ),  # bot
         ]
 
-        result = compute_snapshot_counts(issues=issues, maintainers=maintainers, today=_TODAY)
+        result = compute_snapshot_counts(
+            issues=issues, maintainers=maintainers, today=_TODAY
+        )
 
         # All ages: 10, 30, 50, 70, 5, 15 -> median of sorted [5,10,15,30,50,70] = (15+30)/2 = 22
         assert result["median_issue_age"] == 22
@@ -321,12 +427,30 @@ class TestComputeSnapshotCounts:
         """Verify per-group median ages work for PRs too."""
         maintainers = {"maintainer1"}
         issues = [
-            _issue("open", issue_type="pull_request", author="maintainer1", created_days_ago=20),
-            _issue("open", issue_type="pull_request", author="external1", created_days_ago=40),
-            _issue("open", issue_type="pull_request", author="bot1", author_is_bot=True, created_days_ago=8),
+            _issue(
+                "open",
+                issue_type="pull_request",
+                author="maintainer1",
+                created_days_ago=20,
+            ),
+            _issue(
+                "open",
+                issue_type="pull_request",
+                author="external1",
+                created_days_ago=40,
+            ),
+            _issue(
+                "open",
+                issue_type="pull_request",
+                author="bot1",
+                author_is_bot=True,
+                created_days_ago=8,
+            ),
         ]
 
-        result = compute_snapshot_counts(issues=issues, maintainers=maintainers, today=_TODAY)
+        result = compute_snapshot_counts(
+            issues=issues, maintainers=maintainers, today=_TODAY
+        )
 
         assert result["median_pr_age_internal"] == 20
         assert result["nm_median_pr_age"] == 40
@@ -336,12 +460,17 @@ class TestComputeSnapshotCounts:
 class TestSnapshotNaiveClosedAt:
     def test_naive_closed_at_counted_correctly(self) -> None:
         today = date(2024, 6, 1)
-        issues = [{
-            "issue_type": "issue", "state": "closed", "author": "user",
-            "author_is_bot": False, "labels": [],
-            "created_at": datetime(2024, 1, 1, tzinfo=UTC),
-            "closed_at": datetime(2024, 6, 1),
-        }]
+        issues = [
+            {
+                "issue_type": "issue",
+                "state": "closed",
+                "author": "user",
+                "author_is_bot": False,
+                "labels": [],
+                "created_at": datetime(2024, 1, 1, tzinfo=UTC),
+                "closed_at": datetime(2024, 6, 1),
+            }
+        ]
 
         result = compute_snapshot_counts(issues, maintainers=set(), today=today)
 
@@ -349,12 +478,17 @@ class TestSnapshotNaiveClosedAt:
 
     def test_naive_closed_at_is_normalized_before_date_check(self) -> None:
         today = date(2024, 6, 1)
-        issues = [{
-            "issue_type": "issue", "state": "closed", "author": "user",
-            "author_is_bot": False, "labels": [],
-            "created_at": datetime(2024, 1, 1, tzinfo=UTC),
-            "closed_at": _NaiveClosedAtDateTime(2024, 6, 1),
-        }]
+        issues = [
+            {
+                "issue_type": "issue",
+                "state": "closed",
+                "author": "user",
+                "author_is_bot": False,
+                "labels": [],
+                "created_at": datetime(2024, 1, 1, tzinfo=UTC),
+                "closed_at": _NaiveClosedAtDateTime(2024, 6, 1),
+            }
+        ]
 
         result = compute_snapshot_counts(issues, maintainers=set(), today=today)
 
@@ -374,9 +508,23 @@ class TestIncrementCounts:
             "closed_prs_bots": 0,
         }
 
-        _increment_counts(counts, issue_type="issue", is_internal=True, is_bot=False, prefix="open")
-        _increment_counts(counts, issue_type="pull_request", is_internal=False, is_bot=False, prefix="closed")
-        _increment_counts(counts, issue_type="pull_request", is_internal=False, is_bot=True, prefix="closed")
+        _increment_counts(
+            counts, issue_type="issue", is_internal=True, is_bot=False, prefix="open"
+        )
+        _increment_counts(
+            counts,
+            issue_type="pull_request",
+            is_internal=False,
+            is_bot=False,
+            prefix="closed",
+        )
+        _increment_counts(
+            counts,
+            issue_type="pull_request",
+            is_internal=False,
+            is_bot=True,
+            prefix="closed",
+        )
 
         assert counts == {
             "open_issues": 1,
@@ -393,8 +541,15 @@ class TestIncrementCounts:
         maintainers = {"maintainer"}
         issues = [
             _issue("open", author="external", author_is_bot=False),
-            _issue("open", issue_type="pull_request", author="maintainer", author_is_bot=False),
-            _issue("closed", author="maintainer", author_is_bot=False, closed_days_ago=0),
+            _issue(
+                "open",
+                issue_type="pull_request",
+                author="maintainer",
+                author_is_bot=False,
+            ),
+            _issue(
+                "closed", author="maintainer", author_is_bot=False, closed_days_ago=0
+            ),
             _issue(
                 "merged",
                 issue_type="pull_request",
@@ -404,7 +559,9 @@ class TestIncrementCounts:
             ),
         ]
 
-        result = compute_snapshot_counts(issues=issues, maintainers=maintainers, today=_TODAY)
+        result = compute_snapshot_counts(
+            issues=issues, maintainers=maintainers, today=_TODAY
+        )
 
         assert result["open_issues"] == 1
         assert result["open_issues_external"] == 1

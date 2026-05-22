@@ -31,6 +31,7 @@ def compute_snapshot_counts(
     issues: list[dict],
     maintainers: set[str],
     today: date | None = None,
+    bots: set[str] | None = None,
 ) -> dict[str, int]:
     """Compute snapshot counts from a list of issue dicts.
 
@@ -39,6 +40,7 @@ def compute_snapshot_counts(
                 created_at, closed_at.
         maintainers: Set of maintainer usernames.
         today: Reference date for age calculations (defaults to today).
+        bots: Optional set of configured bot usernames.
 
     Returns:
         Dict with snapshot count fields.
@@ -87,14 +89,20 @@ def compute_snapshot_counts(
 
     for issue in issues:
         is_internal = issue.get("author") in maintainers
-        is_bot = issue.get("author_is_bot", False)
+        is_bot = issue.get("author_is_bot", False) or (
+            bots is not None and issue.get("author", "") in bots
+        )
         created_at = issue.get("created_at")
         closed_at = issue.get("closed_at")
 
         if issue["state"] in ("open",):
             age_days = 0
             if created_at:
-                ca = created_at.replace(tzinfo=UTC) if created_at.tzinfo is None else created_at
+                ca = (
+                    created_at.replace(tzinfo=UTC)
+                    if created_at.tzinfo is None
+                    else created_at
+                )
                 age_days = max(0, (today_dt - ca).days)
 
             _increment_counts(
@@ -126,7 +134,11 @@ def compute_snapshot_counts(
         elif issue["state"] in ("closed", "merged"):
             # Count issues closed exactly on this snapshot day
             if closed_at:
-                ca_closed = closed_at.replace(tzinfo=UTC) if closed_at.tzinfo is None else closed_at
+                ca_closed = (
+                    closed_at.replace(tzinfo=UTC)
+                    if closed_at.tzinfo is None
+                    else closed_at
+                )
                 if ca_closed.date() == today:
                     _increment_counts(
                         counts,
@@ -141,7 +153,9 @@ def compute_snapshot_counts(
     if open_pr_ages:
         counts["median_pr_age"] = int(statistics.median(open_pr_ages))
     if open_issue_ages_internal:
-        counts["median_issue_age_internal"] = int(statistics.median(open_issue_ages_internal))
+        counts["median_issue_age_internal"] = int(
+            statistics.median(open_issue_ages_internal)
+        )
     if open_pr_ages_internal:
         counts["median_pr_age_internal"] = int(statistics.median(open_pr_ages_internal))
     if open_issue_ages_external:
@@ -160,6 +174,7 @@ async def generate_snapshot(
     project_id: int,
     session,  # noqa: ANN001
     maintainers: set[str],
+    bots: set[str] | None = None,
 ) -> None:
     """Generate a daily snapshot for a project.
 
@@ -169,6 +184,7 @@ async def generate_snapshot(
         project_id: The database ID of the project.
         session: An async SQLAlchemy session.
         maintainers: Set of maintainer usernames.
+        bots: Optional set of configured bot usernames.
 
     """
     from sqlalchemy import select  # noqa: PLC0415
@@ -202,7 +218,7 @@ async def generate_snapshot(
         for row in result
     ]
 
-    counts = compute_snapshot_counts(issues, maintainers)
+    counts = compute_snapshot_counts(issues, maintainers, bots=bots)
     today_val = date.today()
 
     stmt = insert(Snapshot).values(
