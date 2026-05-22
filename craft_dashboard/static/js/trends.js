@@ -1,3 +1,4 @@
+try {
 // Color palette for projects
 const colors = [
   "#E95420", "#0E8420", "#0066CC", "#772953", "#AEA79F",
@@ -7,6 +8,7 @@ const colors = [
 
 // Fetch data
 const response = await fetch("/stats/trends/all-data");
+if (!response.ok) throw new Error(`HTTP ${response.status}`);
 const { projects, order, snapshot } = await response.json();
 
 // Store full data and filtered data
@@ -630,3 +632,13 @@ applyDateFilter();
 
 // Initial render (applyDateFilter already calls these, but ensure snapshot charts are updated)
 updateSnapshotCharts();
+} catch (error) {
+  console.error("Failed to load trend data:", error);
+  document.querySelectorAll(".trends-section canvas").forEach(c => {
+    const ctx = c.getContext("2d");
+    ctx.font = "14px sans-serif";
+    ctx.fillStyle = "#666";
+    ctx.textAlign = "center";
+    ctx.fillText("Failed to load data", c.width / 2, c.height / 2);
+  });
+}
