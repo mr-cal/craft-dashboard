@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -394,6 +394,35 @@ class TestTrendsSnapshotClosedYear:
         assert snapshot["closer"]["nm_closed_prs_year"] == 12
         assert snapshot["all-projects"]["closed_issues_year"] == 6
         assert snapshot["all-projects"]["closed_prs_year"] == 15
+
+
+class TestTrendsClosedYearBug:
+    @pytest.fixture
+    async def seeded(self, test_db_session: AsyncSession) -> None:
+        project = _project("year-bug", 10)
+        test_db_session.add(project)
+        await test_db_session.flush()
+
+        start_day = date(2023, 1, 1)
+        test_db_session.add_all(
+            [
+                _snapshot(
+                    project.id,
+                    start_day + timedelta(days=offset),
+                    closed_issues=1,
+                )
+                for offset in range(400)
+            ]
+        )
+        await test_db_session.commit()
+
+    def test_snapshot_closed_issues_year_uses_last_365_entries(
+        self, test_client: TestClient, seeded: None
+    ) -> None:
+        response = test_client.get("/stats/trends/all-data")
+
+        assert response.status_code == 200
+        assert response.json()["snapshot"]["year-bug"]["closed_issues_year"] == 365
 
 
 class TestTrendsPerKeyMedianDenominator:

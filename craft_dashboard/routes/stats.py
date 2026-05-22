@@ -322,7 +322,8 @@ async def trends_all_data(
         idx = -1  # Last day
 
         # Compute year-ago index (approximately 365 days back)
-        year_start_idx = max(0, idx - 365)
+        n = len(data["dates"])
+        year_start_idx = max(0, n - 365)
 
         # Sum closed issues/PRs over last year
         closed_issues_year = sum(data["closed_issues"][year_start_idx:])
