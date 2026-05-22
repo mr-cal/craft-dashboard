@@ -66,6 +66,12 @@ maintainers = [
     "upils",
 ]
 
+launchpad-maintainers = [
+    "~sergiusens",
+    "elopio",
+    "kyrofa",
+]
+
 bots = [
     "Copilot",
     "dependabot[bot]",
