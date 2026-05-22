@@ -2,6 +2,7 @@
 
 import ast
 from pathlib import Path
+from typing import Any, get_args, get_origin
 
 from craft_dashboard.models.release import Release
 
@@ -61,3 +62,10 @@ class TestReleaseModel:
 
         assert isinstance(nullable_kw, ast.Constant)
         assert nullable_kw.value is False
+
+    def test_metadata_annotation_is_specific(self) -> None:
+        """Release metadata should use a specific dict annotation."""
+        metadata_type = get_args(Release.__annotations__["metadata_"])[0]
+
+        assert get_origin(metadata_type) is dict
+        assert get_args(metadata_type) == (str, Any)

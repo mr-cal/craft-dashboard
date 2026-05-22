@@ -1,6 +1,7 @@
 """Issue and Pull Request model."""
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -49,8 +50,8 @@ class Issue(Base):
         DateTime(timezone=True), nullable=True
     )
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
-    comments: Mapped[list] = mapped_column(JSONB, nullable=True, default=list)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, default=dict)
+    comments: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=True, default=list)
     last_fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

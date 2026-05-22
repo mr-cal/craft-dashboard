@@ -1,6 +1,7 @@
 """Release model for tracking project versions."""
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
@@ -25,7 +26,7 @@ class Release(Base):
         DateTime(timezone=True), nullable=True
     )
     is_hotfix: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, default=dict)
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="releases")  # noqa: F821

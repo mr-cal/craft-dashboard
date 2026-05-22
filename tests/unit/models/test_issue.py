@@ -3,7 +3,7 @@
 import ast
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import get_args
+from typing import Any, get_args, get_origin
 
 from craft_dashboard.models.issue import Issue
 
@@ -101,3 +101,13 @@ class TestIssueModel:
 
             assert isinstance(nullable_kw, ast.Constant)
             assert nullable_kw.value is False
+
+    def test_json_annotations_are_specific(self) -> None:
+        """Issue JSONB fields should use specific typed annotations."""
+        metadata_type = get_args(Issue.__annotations__["metadata_"])[0]
+        comments_type = get_args(Issue.__annotations__["comments"])[0]
+
+        assert get_origin(metadata_type) is dict
+        assert get_args(metadata_type) == (str, Any)
+        assert get_origin(comments_type) is list
+        assert get_args(get_args(comments_type)[0]) == (str, Any)
