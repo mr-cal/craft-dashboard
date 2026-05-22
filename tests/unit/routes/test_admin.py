@@ -1,5 +1,6 @@
 """Tests for admin routes."""
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -18,6 +19,14 @@ class _EmptyResult:
 
     def __iter__(self):
         return iter(())
+
+
+class _ScalarResult:
+    def __init__(self, items) -> None:
+        self._items = items
+
+    def scalars(self):
+        return self._items
 
 
 class _AdminSession:
@@ -41,6 +50,14 @@ class _HealthFailureSession(_AdminSession):
             msg = "database password leaked"
             raise RuntimeError(msg)
         return await super().execute(query)
+
+
+class _DistributeSession(_AdminSession):
+    def __init__(self, schedules) -> None:
+        self._schedules = schedules
+
+    async def execute(self, _query):
+        return _ScalarResult(self._schedules)
 
 
 async def _override_admin_db_session():
@@ -129,6 +146,20 @@ class TestAdminRefreshWithAuth:
         assert response.status_code == 202
         assert response.json()["status"] == "refresh_queued"
 
+    def test_refresh_logs_when_queued(self, caplog) -> None:
+        """POST /admin/refresh emits an audit log when work is queued."""
+        app = _create_admin_app()
+
+        with caplog.at_level(logging.INFO, logger="craft_dashboard.routes.admin"):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/admin/refresh",
+                    headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
+                )
+
+        assert response.status_code == 202
+        assert "Admin: refresh queued" in caplog.text
+
     def test_re_evaluate_requires_auth(self) -> None:
         """POST /admin/re-evaluate returns 401 without token."""
         app = _create_admin_app()
@@ -150,6 +181,20 @@ class TestAdminRefreshWithAuth:
 
         assert response.status_code == 202
         assert response.json()["status"] == "evaluation_queued"
+
+    def test_re_evaluate_logs_when_queued(self, caplog) -> None:
+        """POST /admin/re-evaluate emits an audit log when work is queued."""
+        app = _create_admin_app()
+
+        with caplog.at_level(logging.INFO, logger="craft_dashboard.routes.admin"):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/admin/re-evaluate",
+                    headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
+                )
+
+        assert response.status_code == 202
+        assert "Admin: re-evaluation queued" in caplog.text
 
 
 class TestAdminDistribute:
@@ -176,6 +221,25 @@ class TestAdminDistribute:
 
         assert response.status_code == 200
         assert response.json()["count"] == 0
+
+    def test_distribute_logs_schedule_summary(self, caplog) -> None:
+        """POST /admin/distribute logs how many schedules were redistributed."""
+        schedules = [SimpleNamespace(next_refresh_at=None), SimpleNamespace(next_refresh_at=None)]
+
+        async def _override_distribute_session():
+            yield _DistributeSession(schedules)
+
+        app = _create_admin_app(session_override=_override_distribute_session)
+
+        with caplog.at_level(logging.INFO, logger="craft_dashboard.routes.admin"):
+            with TestClient(app) as client:
+                response = client.post(
+                    "/admin/distribute",
+                    headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
+                )
+
+        assert response.status_code == 200
+        assert "Admin: distributed 2 schedules over 7 days" in caplog.text
 
 
 class TestAdminLogs:

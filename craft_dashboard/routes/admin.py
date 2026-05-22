@@ -79,6 +79,7 @@ async def trigger_refresh(
     """
     admin_token = _get_admin_token(request)
     verify_admin_token(authorization, admin_token)
+    logger.info("Admin: refresh queued")
 
     return JSONResponse(
         {"status": "refresh_queued", "message": "Data refresh has been queued."},
@@ -98,6 +99,7 @@ async def trigger_re_evaluation(
     """
     admin_token = _get_admin_token(request)
     verify_admin_token(authorization, admin_token)
+    logger.info("Admin: re-evaluation queued")
 
     return JSONResponse(
         {
@@ -144,6 +146,11 @@ async def distribute_refresh_schedule(
         schedule.next_refresh_at = now + timedelta(days=day_offset)
 
     await session.commit()
+    logger.info(
+        "Admin: distributed %d schedules over %d days",
+        total_schedules,
+        refresh_age_days,
+    )
 
     return JSONResponse(
         {
