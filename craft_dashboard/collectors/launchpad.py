@@ -103,13 +103,34 @@ class LaunchpadCollector:
             The number of bugs upserted.
 
         """
+        from sqlalchemy import func, select  # noqa: PLC0415
         from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415
 
         from craft_dashboard.models.issue import Issue  # noqa: PLC0415
 
         lp = self._get_launchpad()
         project = lp.projects[lp_project_name]
-        bug_tasks = project.searchTasks(status=list(_OPEN_STATUSES | _CLOSED_STATUSES))
+
+        # Incremental fetch: only retrieve bugs modified since last collection.
+        # On the first run (no prior data) we fetch everything.
+        last_fetched = await session.scalar(
+            select(func.max(Issue.last_fetched_at))
+            .where(Issue.project_id == project_id)
+            .where(Issue.source == "launchpad")
+        )
+
+        search_kwargs: dict = {"status": list(_OPEN_STATUSES | _CLOSED_STATUSES)}
+        if last_fetched is not None:
+            search_kwargs["modified_since"] = last_fetched
+            logger.info(
+                "Incremental Launchpad fetch for %s since %s",
+                lp_project_name,
+                last_fetched,
+            )
+        else:
+            logger.info("Full Launchpad fetch for %s (first run)", lp_project_name)
+
+        bug_tasks = project.searchTasks(**search_kwargs)
         count = 0
 
         for task in bug_tasks:

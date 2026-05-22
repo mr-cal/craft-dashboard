@@ -258,3 +258,66 @@ class TestCollectBugsAuthorExtraction:
         await collector.collect_bugs("snapcraft", 1, AsyncMock())
         assert captured["author"] is None
         assert captured["author_is_maintainer"] is False
+
+
+class TestCollectBugsIncremental:
+    """Tests for incremental Launchpad bug fetching using modified_since."""
+
+    def _make_mock_task(self) -> MagicMock:
+        mock_bug = MagicMock()
+        mock_bug.id = 999
+        mock_bug.title = "Incremental bug"
+        mock_bug.description = ""
+        mock_bug.tags = []
+        mock_bug.date_created = datetime(2024, 1, 1, tzinfo=UTC)
+        mock_bug.date_last_updated = datetime(2024, 6, 1, tzinfo=UTC)
+        mock_bug.web_link = "https://bugs.launchpad.net/bugs/999"
+        mock_task = MagicMock()
+        mock_task.bug = mock_bug
+        mock_task.status = "New"
+        mock_task.owner_link = None
+        mock_task.importance = "Low"
+        mock_task.date_closed = None
+        return mock_task
+
+    async def test_first_run_fetches_all_no_modified_since(self, mocker) -> None:
+        """On first run (no prior data), searchTasks is called WITHOUT modified_since."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        mock_project = MagicMock()
+        mock_project.searchTasks.return_value = [self._make_mock_task()]
+        mock_lp = MagicMock()
+        mock_lp.projects.__getitem__.return_value = mock_project
+        mocker.patch.object(collector, "_get_launchpad", return_value=mock_lp)
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = None  # No prior data
+
+        mocker.patch("sqlalchemy.dialects.postgresql.insert", return_value=MagicMock())
+
+        await collector.collect_bugs("snapcraft", 1, mock_session)
+
+        call_kwargs = mock_project.searchTasks.call_args.kwargs
+        assert "modified_since" not in call_kwargs, (
+            "First run should not pass modified_since"
+        )
+
+    async def test_subsequent_run_passes_modified_since(self, mocker) -> None:
+        """On subsequent runs, searchTasks is called WITH modified_since=last_fetched."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        mock_project = MagicMock()
+        mock_project.searchTasks.return_value = []
+        mock_lp = MagicMock()
+        mock_lp.projects.__getitem__.return_value = mock_project
+        mocker.patch.object(collector, "_get_launchpad", return_value=mock_lp)
+
+        last_fetched = datetime(2024, 5, 1, 12, 0, 0, tzinfo=UTC)
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = last_fetched
+
+        await collector.collect_bugs("snapcraft", 1, mock_session)
+
+        call_kwargs = mock_project.searchTasks.call_args.kwargs
+        assert "modified_since" in call_kwargs, (
+            "Subsequent run should pass modified_since"
+        )
+        assert call_kwargs["modified_since"] == last_fetched
