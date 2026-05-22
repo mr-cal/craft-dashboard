@@ -15,7 +15,10 @@ from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.snapshot import Snapshot
-from craft_dashboard.routes.stats import _build_snapshot_dict
+from craft_dashboard.routes.stats import (
+    _build_all_projects_aggregate,
+    _build_snapshot_dict,
+)
 
 if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"  # type: ignore[attr-defined]
@@ -431,6 +434,87 @@ class TestTrendsClosedYearBug:
 
         assert response.status_code == 200
         assert response.json()["snapshot"]["year-bug"]["closed_issues_year"] == 365
+
+
+class TestBuildAllProjectsAggregate:
+    def test_build_all_projects_aggregate_sums_scalars_and_averages_medians(
+        self,
+    ) -> None:
+        projects = {
+            "alpha": _trend_series(
+                dates=["2024-05-20", "2024-05-21"],
+                open_issues=[1, 2],
+                open_prs=[3, 4],
+                open_issues_external=[5, 6],
+                open_prs_external=[7, 8],
+                open_issues_bots=[1, 0],
+                open_prs_bots=[0, 1],
+                median_issue_age=[10, 20],
+                median_pr_age=[30, 40],
+                nm_median_issue_age=[11, 21],
+                nm_median_pr_age=[31, 41],
+                median_issue_age_internal=[12, 22],
+                median_pr_age_internal=[32, 42],
+                median_issue_age_bots=[0, 23],
+                median_pr_age_bots=[33, 43],
+                closed_issues=[9, 10],
+                closed_prs=[11, 12],
+                closed_issues_external=[13, 14],
+                closed_prs_external=[15, 16],
+                closed_issues_bots=[1, 2],
+                closed_prs_bots=[3, 4],
+                open_bugs=[5, 6],
+            ),
+            "beta": _trend_series(
+                dates=["2024-05-21", "2024-05-22"],
+                open_issues=[7, 8],
+                open_prs=[9, 10],
+                open_issues_external=[11, 12],
+                open_prs_external=[13, 14],
+                open_issues_bots=[2, 3],
+                open_prs_bots=[4, 5],
+                median_issue_age=[50, 60],
+                median_pr_age=[70, 80],
+                nm_median_issue_age=[51, 61],
+                nm_median_pr_age=[71, 81],
+                median_issue_age_internal=[52, 62],
+                median_pr_age_internal=[72, 82],
+                median_issue_age_bots=[53, 63],
+                median_pr_age_bots=[73, 83],
+                closed_issues=[17, 18],
+                closed_prs=[19, 20],
+                closed_issues_external=[21, 22],
+                closed_prs_external=[23, 24],
+                closed_issues_bots=[5, 6],
+                closed_prs_bots=[7, 8],
+                open_bugs=[9, 10],
+            ),
+        }
+
+        assert _build_all_projects_aggregate(projects) == {
+            "dates": ["2024-05-20", "2024-05-21", "2024-05-22"],
+            "open_issues": [1, 9, 8],
+            "open_prs": [3, 13, 10],
+            "open_issues_external": [5, 17, 12],
+            "open_prs_external": [7, 21, 14],
+            "open_issues_bots": [1, 2, 3],
+            "open_prs_bots": [0, 5, 5],
+            "closed_issues": [9, 27, 18],
+            "closed_prs": [11, 31, 20],
+            "closed_issues_external": [13, 35, 22],
+            "closed_prs_external": [15, 39, 24],
+            "closed_issues_bots": [1, 7, 6],
+            "closed_prs_bots": [3, 11, 8],
+            "open_bugs": [5, 15, 10],
+            "median_issue_age": [10, 35, 60],
+            "median_pr_age": [30, 55, 80],
+            "nm_median_issue_age": [11, 36, 61],
+            "nm_median_pr_age": [31, 56, 81],
+            "median_issue_age_internal": [12, 37, 62],
+            "median_pr_age_internal": [32, 57, 82],
+            "median_issue_age_bots": [0, 38, 63],
+            "median_pr_age_bots": [33, 58, 83],
+        }
 
 
 class TestBuildSnapshotDict:

@@ -176,6 +176,55 @@ async def trends_page(
     )
 
 
+def _build_all_projects_aggregate(projects: dict[str, dict]) -> dict[str, list]:
+    """Build the all-projects time-aligned aggregate."""
+    proj_by_date: dict[str, dict[str, int]] = {}
+    for name, data in projects.items():
+        proj_by_date[name] = {d: i for i, d in enumerate(data["dates"])}
+
+    all_dates_set: set[str] = set()
+    for data in projects.values():
+        all_dates_set.update(data["dates"])
+    all_dates_sorted = sorted(all_dates_set)
+
+    scalar_keys = [
+        "open_issues", "open_prs", "open_issues_external", "open_prs_external",
+        "open_issues_bots", "open_prs_bots",
+        "closed_issues", "closed_prs", "closed_issues_external", "closed_prs_external",
+        "closed_issues_bots", "closed_prs_bots",
+        "open_bugs",
+    ]
+    median_age_keys = [
+        "median_issue_age", "median_pr_age",
+        "nm_median_issue_age", "nm_median_pr_age",
+        "median_issue_age_internal", "median_pr_age_internal",
+        "median_issue_age_bots", "median_pr_age_bots",
+    ]
+    all_projects: dict[str, list] = {
+        "dates": all_dates_sorted,
+        **{k: [] for k in scalar_keys},
+        **{k: [] for k in median_age_keys},
+    }
+
+    for d in all_dates_sorted:
+        for k in scalar_keys:
+            total = 0
+            for name, data in projects.items():
+                idx = proj_by_date[name].get(d)
+                if idx is not None:
+                    total += data[k][idx]
+            all_projects[k].append(total)
+        for mk in median_age_keys:
+            ages = []
+            for name, data in projects.items():
+                idx = proj_by_date[name].get(d)
+                if idx is not None and data[mk][idx] > 0:
+                    ages.append(data[mk][idx])
+            all_projects[mk].append(int(sum(ages) / len(ages)) if ages else 0)
+
+    return all_projects
+
+
 def _build_snapshot_dict(projects: dict[str, dict]) -> dict[str, dict]:
     """Build latest snapshot values for each project and the all-projects rollup."""
     snapshot: dict[str, dict] = {}
@@ -340,52 +389,8 @@ async def trends_all_data(
 
     project_order = list(projects.keys())
 
-    # Compute all-projects aggregate indexed by date string (projects have different ranges)
     if projects:
-        # Build per-date lookup for each project
-        proj_by_date: dict[str, dict[str, list]] = {}
-        for name, data in projects.items():
-            proj_by_date[name] = {d: i for i, d in enumerate(data["dates"])}
-
-        all_dates_set: set[str] = set()
-        for data in projects.values():
-            all_dates_set.update(data["dates"])
-        all_dates_sorted = sorted(all_dates_set)
-
-        scalar_keys = [
-            "open_issues", "open_prs", "open_issues_external", "open_prs_external",
-            "open_issues_bots", "open_prs_bots",
-            "closed_issues", "closed_prs", "closed_issues_external", "closed_prs_external",
-            "closed_issues_bots", "closed_prs_bots",
-            "open_bugs",
-        ]
-        median_age_keys = [
-            "median_issue_age", "median_pr_age",
-            "nm_median_issue_age", "nm_median_pr_age",
-            "median_issue_age_internal", "median_pr_age_internal",
-            "median_issue_age_bots", "median_pr_age_bots",
-        ]
-        all_projects: dict[str, list] = {"dates": all_dates_sorted, **{k: [] for k in scalar_keys},
-                                          **{k: [] for k in median_age_keys}}
-
-        for d in all_dates_sorted:
-            for k in scalar_keys:
-                total = 0
-                for name, data in projects.items():
-                    idx = proj_by_date[name].get(d)
-                    if idx is not None:
-                        total += data[k][idx]
-                all_projects[k].append(total)
-            # Average of medians across projects that have data for this date
-            for mk in median_age_keys:
-                ages = []
-                for name, data in projects.items():
-                    idx = proj_by_date[name].get(d)
-                    if idx is not None and data[mk][idx] > 0:
-                        ages.append(data[mk][idx])
-                all_projects[mk].append(int(sum(ages) / len(ages)) if ages else 0)
-
-        projects["all-projects"] = all_projects
+        projects["all-projects"] = _build_all_projects_aggregate(projects)
     
     snapshot = _build_snapshot_dict(projects)
 
