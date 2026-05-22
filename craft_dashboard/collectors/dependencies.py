@@ -1,5 +1,6 @@
 """Dependency collector for tracking project dependencies across branches."""
 
+import asyncio
 import logging
 import re
 import tomllib
@@ -7,10 +8,13 @@ import urllib.request
 from datetime import UTC, datetime
 from typing import Any
 
+import github
 from github import Github
 from packaging.version import Version
 
 logger = logging.getLogger(__name__)
+
+_PYPI_CACHE: dict[str, list[str]] = {}
 
 _REQUIREMENT_RE = re.compile(
     r"^([A-Za-z0-9_.-]+)"  # package name
@@ -69,7 +73,7 @@ def _normalise_lib_name(name: str) -> str:
     return name.lower().replace("_", "-").replace(".", "-")
 
 
-def get_pypi_versions(name: str) -> list[str]:
+async def get_pypi_versions(name: str) -> list[str]:
     """Fetch all non-prerelease versions of a package from PyPI.
 
     Args:
@@ -79,16 +83,24 @@ def get_pypi_versions(name: str) -> list[str]:
         A list of version strings (non-prerelease), or an empty list on error.
 
     """
-    url = f"https://pypi.org/pypi/{name}/json"
-    try:
-        with urllib.request.urlopen(url, timeout=10) as resp:  # noqa: S310
-            import json  # noqa: PLC0415
-            data: dict[str, Any] = json.loads(resp.read())
-        releases = data.get("releases", {})
-        return [v for v in releases if not Version(v).is_prerelease]
-    except Exception:  # noqa: BLE001
-        logger.warning("Could not fetch PyPI versions for %s", name)
-        return []
+    if name in _PYPI_CACHE:
+        return _PYPI_CACHE[name]
+
+    def _fetch() -> list[str]:
+        url = f"https://pypi.org/pypi/{name}/json"
+        try:
+            with urllib.request.urlopen(url, timeout=10) as resp:  # noqa: S310
+                import json  # noqa: PLC0415
+                data: dict[str, Any] = json.loads(resp.read())
+            releases = data.get("releases", {})
+            return [v for v in releases if not Version(v).is_prerelease]
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not fetch PyPI versions for %s", name)
+            return []
+
+    result = await asyncio.to_thread(_fetch)
+    _PYPI_CACHE[name] = result
+    return result
 
 
 def get_latest_for_branch(
@@ -139,17 +151,13 @@ class DependencyCollector:
                 from ``uv.lock``.  If ``None``, no version resolution is attempted.
 
         """
-        self.gh = Github(token)
+        self.gh = Github(auth=github.Auth.Token(token))
         self.org = org
         self.craft_libraries: list[str] = craft_libraries or []
-        # Cache PyPI version lists per package name for the lifetime of this collector.
-        self._pypi_cache: dict[str, list[str]] = {}
 
-    def _get_pypi_versions_cached(self, name: str) -> list[str]:
-        """Return PyPI versions, using an in-memory cache."""
-        if name not in self._pypi_cache:
-            self._pypi_cache[name] = get_pypi_versions(name)
-        return self._pypi_cache[name]
+    async def _get_pypi_versions_cached(self, name: str) -> list[str]:
+        """Return PyPI versions, using the module-level cache."""
+        return await get_pypi_versions(name)
 
     async def collect_dependencies(
         self,
@@ -237,7 +245,7 @@ class DependencyCollector:
                         try:
                             ver = Version(installed_version)
                             series = f"{ver.major}.{ver.minor}"
-                            all_versions = self._get_pypi_versions_cached(dep_name)
+                            all_versions = await self._get_pypi_versions_cached(dep_name)
                             if all_versions:
                                 latest_version = get_latest_for_branch(
                                     branch, all_versions, installed_version
