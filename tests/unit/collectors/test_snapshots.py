@@ -36,6 +36,14 @@ def _issue(
     }
 
 
+class _NaiveClosedAtDateTime(datetime):
+    def date(self):
+        if self.tzinfo is None:
+            msg = "closed_at should be normalized before reading its date"
+            raise AssertionError(msg)
+        return super().date()
+
+
 class TestComputeSnapshotCounts:
     """Tests for compute_snapshot_counts."""
 
@@ -274,6 +282,7 @@ class TestComputeSnapshotCounts:
         assert result["closed_issues_bots"] == 1
         assert result["closed_issues"] == 2
 
+
     def test_median_age_internal_external_bots(self) -> None:
         """Verify per-group median ages are computed separately."""
         maintainers = {"alice"}
@@ -322,3 +331,31 @@ class TestComputeSnapshotCounts:
         assert result["median_pr_age_internal"] == 20
         assert result["nm_median_pr_age"] == 40
         assert result["median_pr_age_bots"] == 8
+
+
+class TestSnapshotNaiveClosedAt:
+    def test_naive_closed_at_counted_correctly(self) -> None:
+        today = date(2024, 6, 1)
+        issues = [{
+            "issue_type": "issue", "state": "closed", "author": "user",
+            "author_is_bot": False, "labels": [],
+            "created_at": datetime(2024, 1, 1, tzinfo=UTC),
+            "closed_at": datetime(2024, 6, 1),
+        }]
+
+        result = compute_snapshot_counts(issues, maintainers=set(), today=today)
+
+        assert result["closed_issues"] == 1
+
+    def test_naive_closed_at_is_normalized_before_date_check(self) -> None:
+        today = date(2024, 6, 1)
+        issues = [{
+            "issue_type": "issue", "state": "closed", "author": "user",
+            "author_is_bot": False, "labels": [],
+            "created_at": datetime(2024, 1, 1, tzinfo=UTC),
+            "closed_at": _NaiveClosedAtDateTime(2024, 6, 1),
+        }]
+
+        result = compute_snapshot_counts(issues, maintainers=set(), today=today)
+
+        assert result["closed_issues"] == 1

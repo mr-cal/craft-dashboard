@@ -107,7 +107,8 @@ def compute_snapshot_counts(
         elif issue["state"] in ("closed", "merged"):
             # Count issues closed exactly on this snapshot day
             if closed_at:
-                if closed_at.date() == today:
+                ca_closed = closed_at.replace(tzinfo=UTC) if closed_at.tzinfo is None else closed_at
+                if ca_closed.date() == today:
                     if issue["issue_type"] == "issue":
                         counts["closed_issues"] += 1
                         if is_internal:
