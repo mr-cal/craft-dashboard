@@ -41,8 +41,10 @@ async def _migrate_projects(session, config) -> dict[str, int]:
     name_to_id = {}
 
     for i, name in enumerate(config.craft_projects):
-        category = "application" if name in config.craft_applications else (
-            "library" if name in config.craft_libraries else "other"
+        category = (
+            "application"
+            if name in config.craft_applications
+            else ("library" if name in config.craft_libraries else "other")
         )
         lp_name = name if name in config.launchpad_projects else None
 

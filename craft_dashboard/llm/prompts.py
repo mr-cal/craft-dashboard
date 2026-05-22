@@ -58,7 +58,9 @@ def _format_comments(comments: list[dict]) -> str:
     for c in comments:
         date = (c.get("created_at") or "")[:10]
         ctype = " [review]" if c.get("type") == "review_comment" else ""
-        lines.append(f"- @{c.get('author', 'unknown')}{ctype} ({date}): {c.get('body') or '(no comment)'}")
+        lines.append(
+            f"- @{c.get('author', 'unknown')}{ctype} ({date}): {c.get('body') or '(no comment)'}"
+        )
     return "\n".join(lines)
 
 
@@ -172,7 +174,9 @@ def build_evaluation_prompt(  # noqa: PLR0913
     system_content = _EVALUATION_SYSTEM + extra_scores
 
     comments_text = _format_comments(comments or [])
-    pr_details_text = _format_pr_details(pr_details or {}) if issue_type == "pull_request" else ""
+    pr_details_text = (
+        _format_pr_details(pr_details or {}) if issue_type == "pull_request" else ""
+    )
 
     user_content = (
         f"Type: {type_label}\n"
