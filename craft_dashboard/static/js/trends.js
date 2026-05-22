@@ -73,7 +73,17 @@ function createLineChart(canvasId, yLabel) {
       elements: { point: { radius: 0 } },
       plugins: { 
         legend: { display: false }, 
-        tooltip: { mode: "index", intersect: false } 
+        tooltip: {
+          mode: "index",
+          intersect: false,
+          callbacks: {
+            label: function(context) {
+              const val = context.parsed.y;
+              const rounded = val === null ? null : Math.round(val);
+              return `${context.dataset.label}: ${rounded}`;
+            }
+          }
+        }
       },
       scales: {
         x: { display: true, title: { display: true, text: "Date" } },
