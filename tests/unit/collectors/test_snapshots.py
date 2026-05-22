@@ -17,6 +17,7 @@ def _issue(
     closed_days_ago=None,
     author="user1",
     labels=None,
+    *,
     author_is_bot=False,
     reference_date=_TODAY,
 ):
@@ -489,6 +490,116 @@ class TestComputeSnapshotCounts:
         assert result["median_age_internal"] == 20
         assert result["nm_median_age"] == 20
         assert result["median_age_bots"] == 40
+
+    def test_median_age_combines_issues_and_prs(self) -> None:
+        """Combined median_age should follow starcraft-stats across issues and PRs."""
+        issues = [
+            {
+                **_issue("open", author="external-user", created_days_ago=0),
+                "created_at": datetime(2024, 5, 31, 23, tzinfo=UTC),
+            },
+            {
+                **_issue(
+                    "open",
+                    issue_type="pull_request",
+                    author="maintainer",
+                    created_days_ago=1,
+                ),
+                "created_at": datetime(2024, 5, 30, 1, tzinfo=UTC),
+            },
+        ]
+
+        result = compute_snapshot_counts(
+            issues=issues,
+            maintainers={"maintainer"},
+            today=_TODAY,
+        )
+
+        assert result["median_issue_age"] == 0
+        assert result["median_pr_age"] == 1
+        assert result["median_age"] == 1
+
+    def test_median_age_per_group_with_mixed_items(self) -> None:
+        """Combined per-group median ages should include both issues and PRs."""
+        issues = [
+            _issue("open", author="external-a", created_days_ago=30),
+            _issue(
+                "open",
+                issue_type="pull_request",
+                author="external-b",
+                created_days_ago=10,
+            ),
+            _issue("open", author="maintainer", created_days_ago=40),
+            _issue(
+                "open",
+                issue_type="pull_request",
+                author="maintainer",
+                created_days_ago=20,
+            ),
+            _issue("open", author="bot-a", author_is_bot=True, created_days_ago=8),
+            _issue(
+                "open",
+                issue_type="pull_request",
+                author="bot-b",
+                author_is_bot=True,
+                created_days_ago=2,
+            ),
+        ]
+
+        result = compute_snapshot_counts(
+            issues=issues,
+            maintainers={"maintainer"},
+            today=_TODAY,
+        )
+
+        assert result["median_age"] == 15
+        assert result["nm_median_age"] == 20
+        assert result["median_age_internal"] == 30
+        assert result["median_age_bots"] == 5
+
+    def test_closed_combines_issues_and_prs(self) -> None:
+        """Closed counts should combine issue and PR closures on the snapshot day."""
+        issues = [
+            _issue("closed", author="external-user", closed_days_ago=0),
+            _issue(
+                "merged",
+                issue_type="pull_request",
+                author="maintainer",
+                closed_days_ago=0,
+            ),
+            _issue("closed", author="external-user", closed_days_ago=1),
+            _issue(
+                "merged",
+                issue_type="pull_request",
+                author="maintainer",
+                closed_days_ago=2,
+            ),
+        ]
+
+        result = compute_snapshot_counts(
+            issues=issues,
+            maintainers={"maintainer"},
+            today=_TODAY,
+        )
+
+        assert result["closed_issues"] == 1
+        assert result["closed_prs"] == 1
+        assert result["closed_issues"] + result["closed_prs"] == 2
+
+    def test_all_combined_fields_present(self) -> None:
+        """Combined trend fields should always be present in the result payload."""
+        result = compute_snapshot_counts(issues=[], maintainers=set(), today=_TODAY)
+
+        assert {
+            "median_age",
+            "nm_median_age",
+            "median_age_internal",
+            "median_age_bots",
+            "open_issues_bots",
+            "open_prs_bots",
+            "closed_issues_bots",
+            "closed_prs_bots",
+        } <= result.keys()
 
 
 class TestSnapshotNaiveClosedAt:

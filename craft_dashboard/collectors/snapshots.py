@@ -1,8 +1,7 @@
 """Snapshot generator for daily issue/PR count tracking."""
 
 import logging
-import statistics
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 __all__ = ["compute_snapshot_counts", "generate_snapshot"]
 
@@ -12,6 +11,7 @@ logger = logging.getLogger(__name__)
 def _increment_counts(
     counts: dict[str, int],
     issue_type: str,
+    *,
     is_internal: bool,
     is_bot: bool,
     prefix: str,
@@ -25,6 +25,64 @@ def _increment_counts(
         counts[f"{prefix}_{type_key}_external"] += 1
     if is_bot:
         counts[f"{prefix}_{type_key}_bots"] += 1
+
+
+def _normalize_datetime(value: datetime | None, fallback: datetime) -> datetime:
+    """Return a timezone-aware datetime, defaulting missing values to fallback."""
+    if value is None:
+        return fallback
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
+
+
+def _starcraft_get_median_date(dates: list[datetime]) -> datetime:
+    """Replicate starcraft-stats median-date behavior exactly."""
+    sorted_dates = sorted(dates)
+    n = len(sorted_dates)
+    if n % 2 == 0:
+        reference = datetime(year=2000, month=1, day=1, tzinfo=UTC)
+        mid1 = sorted_dates[n // 2 - 1]
+        mid2 = sorted_dates[n // 2]
+        return reference + sum((d - reference for d in [mid1, mid2]), timedelta()) / 2
+    return sorted_dates[n // 2]
+
+
+def _starcraft_get_median_age(
+    dates: list[datetime], reference_date: datetime
+) -> int | None:
+    """Replicate starcraft-stats median-age behavior exactly."""
+    if dates:
+        return (reference_date - _starcraft_get_median_date(dates)).days
+    return None
+
+
+def _record_open_item(
+    issue: dict,
+    created_dt: datetime,
+    counts: dict[str, int],
+    date_buckets: dict[str, list[datetime]],
+    *,
+    is_internal: bool,
+    is_bot: bool,
+) -> None:
+    """Record open-item dates for overall, per-type, and per-group medians."""
+    type_prefix = "issue" if issue["issue_type"] == "issue" else "pr"
+
+    date_buckets["all"].append(created_dt)
+    date_buckets[f"{type_prefix}_all"].append(created_dt)
+
+    if is_internal:
+        date_buckets["internal"].append(created_dt)
+        date_buckets[f"{type_prefix}_internal"].append(created_dt)
+    elif not is_bot:
+        date_buckets["external"].append(created_dt)
+        date_buckets[f"{type_prefix}_external"].append(created_dt)
+
+    if is_bot:
+        date_buckets["bots"].append(created_dt)
+        date_buckets[f"{type_prefix}_bots"].append(created_dt)
+
+    if type_prefix == "issue" and "bug" in issue.get("labels", []):
+        counts["open_bugs"] += 1
 
 
 def compute_snapshot_counts(
@@ -82,18 +140,20 @@ def compute_snapshot_counts(
         "closed_prs_bots": 0,
     }
 
-    open_ages: list[int] = []
-    open_issue_ages: list[int] = []
-    open_pr_ages: list[int] = []
-    open_ages_internal: list[int] = []
-    open_issue_ages_internal: list[int] = []
-    open_pr_ages_internal: list[int] = []
-    open_ages_external: list[int] = []
-    open_issue_ages_external: list[int] = []
-    open_pr_ages_external: list[int] = []
-    open_ages_bots: list[int] = []
-    open_issue_ages_bots: list[int] = []
-    open_pr_ages_bots: list[int] = []
+    date_buckets: dict[str, list[datetime]] = {
+        "all": [],
+        "issue_all": [],
+        "pr_all": [],
+        "internal": [],
+        "issue_internal": [],
+        "pr_internal": [],
+        "external": [],
+        "issue_external": [],
+        "pr_external": [],
+        "bots": [],
+        "issue_bots": [],
+        "pr_bots": [],
+    }
 
     for issue in issues:
         is_internal = issue.get("author") in maintainers
@@ -104,14 +164,7 @@ def compute_snapshot_counts(
         closed_at = issue.get("closed_at")
 
         if issue["state"] in ("open",):
-            age_days = 0
-            if created_at:
-                ca = (
-                    created_at.replace(tzinfo=UTC)
-                    if created_at.tzinfo is None
-                    else created_at
-                )
-                age_days = max(0, (today_dt - ca).days)
+            created_dt = _normalize_datetime(created_at, today_dt)
 
             _increment_counts(
                 counts,
@@ -120,75 +173,43 @@ def compute_snapshot_counts(
                 is_bot=is_bot,
                 prefix="open",
             )
-            open_ages.append(age_days)
-            if is_internal:
-                open_ages_internal.append(age_days)
-            elif not is_bot:
-                open_ages_external.append(age_days)
-            if is_bot:
-                open_ages_bots.append(age_days)
-            if issue["issue_type"] == "issue":
-                open_issue_ages.append(age_days)
-                if is_internal:
-                    open_issue_ages_internal.append(age_days)
-                elif not is_bot:
-                    open_issue_ages_external.append(age_days)
-                if is_bot:
-                    open_issue_ages_bots.append(age_days)
-                if "bug" in issue.get("labels", []):
-                    counts["open_bugs"] += 1
-            elif issue["issue_type"] == "pull_request":
-                open_pr_ages.append(age_days)
-                if is_internal:
-                    open_pr_ages_internal.append(age_days)
-                elif not is_bot:
-                    open_pr_ages_external.append(age_days)
-                if is_bot:
-                    open_pr_ages_bots.append(age_days)
+            _record_open_item(
+                issue,
+                created_dt,
+                counts,
+                date_buckets,
+                is_internal=is_internal,
+                is_bot=is_bot,
+            )
 
         elif issue["state"] in ("closed", "merged"):
             # Count issues closed exactly on this snapshot day
-            if closed_at:
-                ca_closed = (
-                    closed_at.replace(tzinfo=UTC)
-                    if closed_at.tzinfo is None
-                    else closed_at
+            if _normalize_datetime(closed_at, today_dt).date() == today:
+                _increment_counts(
+                    counts,
+                    issue_type=issue["issue_type"],
+                    is_internal=is_internal,
+                    is_bot=is_bot,
+                    prefix="closed",
                 )
-                if ca_closed.date() == today:
-                    _increment_counts(
-                        counts,
-                        issue_type=issue["issue_type"],
-                        is_internal=is_internal,
-                        is_bot=is_bot,
-                        prefix="closed",
-                    )
 
-    if open_issue_ages:
-        counts["median_issue_age"] = int(statistics.median(open_issue_ages))
-    if open_pr_ages:
-        counts["median_pr_age"] = int(statistics.median(open_pr_ages))
-    if open_ages:
-        counts["median_age"] = int(statistics.median(open_ages))
-    if open_issue_ages_internal:
-        counts["median_issue_age_internal"] = int(
-            statistics.median(open_issue_ages_internal)
-        )
-    if open_pr_ages_internal:
-        counts["median_pr_age_internal"] = int(statistics.median(open_pr_ages_internal))
-    if open_ages_internal:
-        counts["median_age_internal"] = int(statistics.median(open_ages_internal))
-    if open_issue_ages_external:
-        counts["nm_median_issue_age"] = int(statistics.median(open_issue_ages_external))
-    if open_pr_ages_external:
-        counts["nm_median_pr_age"] = int(statistics.median(open_pr_ages_external))
-    if open_ages_external:
-        counts["nm_median_age"] = int(statistics.median(open_ages_external))
-    if open_issue_ages_bots:
-        counts["median_issue_age_bots"] = int(statistics.median(open_issue_ages_bots))
-    if open_pr_ages_bots:
-        counts["median_pr_age_bots"] = int(statistics.median(open_pr_ages_bots))
-    if open_ages_bots:
-        counts["median_age_bots"] = int(statistics.median(open_ages_bots))
+    median_sources = {
+        "median_issue_age": date_buckets["issue_all"],
+        "median_pr_age": date_buckets["pr_all"],
+        "median_age": date_buckets["all"],
+        "median_issue_age_internal": date_buckets["issue_internal"],
+        "median_pr_age_internal": date_buckets["pr_internal"],
+        "median_age_internal": date_buckets["internal"],
+        "nm_median_issue_age": date_buckets["issue_external"],
+        "nm_median_pr_age": date_buckets["pr_external"],
+        "nm_median_age": date_buckets["external"],
+        "median_issue_age_bots": date_buckets["issue_bots"],
+        "median_pr_age_bots": date_buckets["pr_bots"],
+        "median_age_bots": date_buckets["bots"],
+    }
+    for field, dates in median_sources.items():
+        if (median_age := _starcraft_get_median_age(dates, today_dt)) is not None:
+            counts[field] = median_age
 
     return counts
 
