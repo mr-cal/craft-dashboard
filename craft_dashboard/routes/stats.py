@@ -34,6 +34,7 @@ async def dependencies_page(
             Dependency.dependency_name,
             Dependency.branch,
             Dependency.version_spec,
+            Dependency.installed_version,
             Project.name.label("project_name"),
         )
         .join(Project, Dependency.project_id == Project.id)
@@ -46,6 +47,7 @@ async def dependencies_page(
             "branch": row.branch,
             "dependency_name": row.dependency_name,
             "version_spec": row.version_spec,
+            "installed_version": row.installed_version,
         }
         for row in result
     ]
@@ -72,6 +74,10 @@ async def dependencies_data(
             Dependency.branch,
             Dependency.dependency_name,
             Dependency.version_spec,
+            Dependency.installed_version,
+            Dependency.latest_version,
+            Dependency.series,
+            Dependency.is_outdated,
         )
         .join(Project, Dependency.project_id == Project.id)
         .where(Project.category == "application")
@@ -84,7 +90,17 @@ async def dependencies_data(
         if key not in apps:
             apps[key] = {}
         if row.dependency_name in libs:
-            apps[key][row.dependency_name] = {"version_spec": row.version_spec or "any"}
+            if row.installed_version is not None:
+                apps[key][row.dependency_name] = {
+                    "version": row.installed_version,
+                    "latest": row.latest_version,
+                    "series": row.series,
+                    "outdated": row.is_outdated,
+                }
+            else:
+                apps[key][row.dependency_name] = {
+                    "version_spec": row.version_spec or "any"
+                }
 
     return {"libs": libs, "apps": apps}
 

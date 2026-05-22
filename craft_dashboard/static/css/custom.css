@@ -25,6 +25,11 @@
   font-style: italic;
 }
 
+.outdated {
+  color: #c7162b;
+  font-weight: 600;
+}
+
 .app-group-start {
   border-left: 2px solid #e5e5e5;
 }

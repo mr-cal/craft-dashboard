@@ -62,7 +62,17 @@ for (const lib of deps.libs) {
       td.className = i === 0 && appIndex > 0 ? "u-align--right app-group-start" : "u-align--right";
       const depInfo = deps.apps[key]?.[lib];
       if (depInfo) {
-        td.textContent = depInfo.version_spec;
+        if (depInfo.version !== undefined) {
+          if (depInfo.outdated) {
+            td.classList.add("outdated");
+            td.innerHTML = depInfo.version + "<br><small>(" + depInfo.latest + ")</small>";
+          } else {
+            td.textContent = depInfo.version;
+          }
+        } else {
+          // Fallback: show version_spec for projects without uv.lock data
+          td.textContent = depInfo.version_spec;
+        }
       } else {
         td.textContent = "not used";
         td.classList.add("not-used");

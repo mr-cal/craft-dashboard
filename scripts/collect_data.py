@@ -104,6 +104,59 @@ async def _get_or_create_project(
     return result.scalar_one()
 
 
+def _get_dep_branches(
+    dep_collector: "DependencyCollector",
+    project_name: str,
+    hotfix_min_version: str | None,
+) -> list[str]:
+    """Return the list of branches to collect dependencies for.
+
+    Always includes ``"main"``.  Also discovers ``hotfix/*`` branches and keeps
+    only the latest one per major version, subject to ``hotfix_min_version``.
+
+    Args:
+        dep_collector: A DependencyCollector instance (holds the GitHub client).
+        project_name: Repository name within the configured org.
+        hotfix_min_version: Minimum version string for hotfix branches (e.g.
+            ``"3.0.0"``).  Hotfix branches whose base version is older than
+            this are excluded.  Pass ``None`` to include all hotfix branches.
+
+    Returns:
+        Sorted list of branch names starting with ``"main"``.
+
+    """
+    from packaging.version import Version  # noqa: PLC0415
+
+    branches = ["main"]
+    try:
+        repo = dep_collector.gh.get_repo(f"{dep_collector.org}/{project_name}")
+        all_branches = [b.name for b in repo.get_branches()]
+        hotfix_branches = [b for b in all_branches if b.startswith("hotfix/")]
+
+        # Keep the latest hotfix branch per major version.
+        latest_per_major: dict[int, tuple[Version, str]] = {}
+        for branch_name in hotfix_branches:
+            ver_str = branch_name.split("/", 1)[1]
+            try:
+                ver = Version(ver_str)
+            except Exception:  # noqa: BLE001
+                continue
+            if hotfix_min_version:
+                try:
+                    if ver < Version(hotfix_min_version):
+                        continue
+                except Exception:  # noqa: BLE001
+                    pass
+            major = ver.major
+            if major not in latest_per_major or ver > latest_per_major[major][0]:
+                latest_per_major[major] = (ver, branch_name)
+
+        branches += sorted(b for _, b in latest_per_major.values())
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not list branches for %s", project_name, exc_info=True)
+    return branches
+
+
 async def _collect_github(
     settings: Settings,
     config: object,
@@ -145,8 +198,11 @@ async def _collect_github(
             )
             try:
                 dep_started_at = time.monotonic()
+                branches = _get_dep_branches(
+                    dep_collector, project_name, config.hotfix_min_versions.get(project_name)
+                )
                 dependency_count = await dep_collector.collect_dependencies(
-                    project_name, project_id, ["main"], session,
+                    project_name, project_id, branches, session,
                 )
                 logger.info(
                     "  canonical/%s: dependencies collected (%d dependencies) in %s",

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from craft_dashboard.models.base import Base
@@ -27,6 +27,10 @@ class Dependency(Base):
         server_default=func.now(),
         nullable=False,
     )
+    installed_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    latest_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    series: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    is_outdated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="dependencies")  # noqa: F821

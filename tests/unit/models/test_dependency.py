@@ -21,6 +21,10 @@ class TestDependencyModel:
             "version_spec",
             "source_file",
             "fetched_at",
+            "installed_version",
+            "latest_version",
+            "series",
+            "is_outdated",
         }
         assert expected.issubset(column_names)
 
