@@ -18,6 +18,7 @@ ExecStart={{ app_venv }}/bin/gunicorn \
     "craft_dashboard.app:create_app()"
 Restart=always
 RestartSec=5
+TimeoutStopSec=60
 
 [Install]
 WantedBy=multi-user.target

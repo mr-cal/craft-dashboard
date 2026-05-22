@@ -85,3 +85,20 @@
     owner: "{{ app_user }}"
     group: "{{ app_group }}"
     mode: "0755"
+
+- name: Ensure journald config directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    mode: "0755"
+
+- name: Configure journald retention limits
+  ansible.builtin.copy:
+    content: |
+      [Journal]
+      SystemMaxUse=1G
+      MaxRetentionSec=7days
+      Compress=yes
+    dest: /etc/systemd/journald.conf.d/craft-dashboard.conf
+    mode: "0644"
+  notify: restart journald

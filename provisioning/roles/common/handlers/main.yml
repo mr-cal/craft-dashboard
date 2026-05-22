@@ -1,2 +1,5 @@
 ---
-# No handlers needed for common role currently
+- name: restart journald
+  ansible.builtin.systemd:
+    name: systemd-journald
+    state: restarted
