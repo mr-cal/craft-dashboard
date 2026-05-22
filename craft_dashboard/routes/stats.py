@@ -366,31 +366,22 @@ async def trends_all_data(
     ]
     ap_snap: dict[str, int] = {k: 0 for k in scalar_snap_keys}
     ap_snap.update({k: 0 for k in median_snap_keys})
-    n_projects_with_issue_median = 0
-    n_projects_with_pr_median = 0
+    # Track per-key denominators so each median is averaged only over
+    # projects that actually have a non-zero value for that specific key.
+    median_counts: dict[str, int] = {k: 0 for k in median_snap_keys}
 
     for name, proj_snap in snapshot.items():
         for k in scalar_snap_keys:
             ap_snap[k] += proj_snap.get(k, 0)
-        if proj_snap.get("median_issue_age", 0) > 0:
-            n_projects_with_issue_median += 1
-            for mk in ["median_issue_age", "nm_median_issue_age",
-                       "median_issue_age_internal", "median_issue_age_bots"]:
-                ap_snap[mk] += proj_snap.get(mk, 0)
-        if proj_snap.get("median_pr_age", 0) > 0:
-            n_projects_with_pr_median += 1
-            for mk in ["median_pr_age", "nm_median_pr_age",
-                       "median_pr_age_internal", "median_pr_age_bots"]:
-                ap_snap[mk] += proj_snap.get(mk, 0)
+        for mk in median_snap_keys:
+            val = proj_snap.get(mk, 0)
+            if val > 0:
+                ap_snap[mk] += val
+                median_counts[mk] += 1
 
-    if n_projects_with_issue_median > 0:
-        for mk in ["median_issue_age", "nm_median_issue_age",
-                   "median_issue_age_internal", "median_issue_age_bots"]:
-            ap_snap[mk] = ap_snap[mk] // n_projects_with_issue_median
-    if n_projects_with_pr_median > 0:
-        for mk in ["median_pr_age", "nm_median_pr_age",
-                   "median_pr_age_internal", "median_pr_age_bots"]:
-            ap_snap[mk] = ap_snap[mk] // n_projects_with_pr_median
+    for mk in median_snap_keys:
+        if median_counts[mk] > 0:
+            ap_snap[mk] = ap_snap[mk] // median_counts[mk]
 
     snapshot["all-projects"] = ap_snap
 
