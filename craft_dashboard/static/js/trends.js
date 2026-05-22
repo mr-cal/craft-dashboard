@@ -264,7 +264,7 @@ function updateClosedChart() {
   
   closedChart.data.datasets = selected.map((name) => {
     const rawData = (filteredProjects[name][dataKey] || filteredProjects[name]["closed_issues"]).map(v => v * 7); // Scale to per-week
-    const smoothedData = rollingAverage(rawData, 30); // 30-day rolling average
+    const smoothedData = rollingAverage(rawData, 28); // 4-week rolling average
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
     const color = colors[colorIdx % colors.length];
     
@@ -565,7 +565,7 @@ function populateSnapshotCheckboxes() {
 
 const issuesChart = createLineChart("issues-chart", "Open Issues (4-week avg)");
 const medianAgeChart = createLineChart("median-age-chart", "Median Age (days, 4-week avg)");
-const closedChart = createLineChart("closed-chart", "Issues Closed per Week (30-day avg)");
+const closedChart = createLineChart("closed-chart", "Issues Closed per Week (4-week avg)");
 
 const BAR_HEIGHT_PX = 28;
 const CHART_BASE_HEIGHT_PX = 80;
