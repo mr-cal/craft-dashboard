@@ -31,6 +31,18 @@ class _AdminSession:
         return None
 
 
+class _HealthFailureSession(_AdminSession):
+    def __init__(self) -> None:
+        self._health_check_seen = False
+
+    async def execute(self, query):
+        if not self._health_check_seen and str(query) == "SELECT 1":
+            self._health_check_seen = True
+            msg = "database password leaked"
+            raise RuntimeError(msg)
+        return await super().execute(query)
+
+
 async def _override_admin_db_session():
     yield _AdminSession()
 
@@ -40,11 +52,11 @@ async def _noop_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
 
-def _create_admin_app():
+def _create_admin_app(session_override=_override_admin_db_session):
     app = create_app()
     app.router.lifespan_context = _noop_lifespan
     app.state.settings = SimpleNamespace(admin_token=_ADMIN_TOKEN, refresh_age_days=7)
-    app.dependency_overrides[get_db_session] = _override_admin_db_session
+    app.dependency_overrides[get_db_session] = session_override
     return app
 
 
@@ -80,6 +92,25 @@ class TestAdminRoutes:
             response = client.get("/admin/health")
 
         assert response.status_code == 401
+
+    def test_admin_health_hides_database_error_details(self) -> None:
+        """GET /admin/health returns a sanitized database error."""
+
+        async def _override_failing_session():
+            yield _HealthFailureSession()
+
+        app = _create_admin_app(session_override=_override_failing_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/admin/health",
+                headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "degraded"
+        assert response.json()["database"] == "error"
+        assert "database password leaked" not in response.text
 
 
 class TestAdminRefreshWithAuth:

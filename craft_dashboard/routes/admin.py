@@ -1,5 +1,7 @@
 """Admin routes for triggering refreshes and re-evaluations."""
 
+import logging
+
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
@@ -8,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.auth import verify_admin_token
 from craft_dashboard.dependencies import get_db_session
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin")
 
@@ -167,8 +171,9 @@ async def admin_health(
     try:
         await session.execute(text("SELECT 1"))
         db_status = "ok"
-    except Exception as exc:
-        db_status = f"error: {exc}"
+    except Exception:
+        logger.exception("Health check: database connection failed")
+        db_status = "error"
 
     result = await session.execute(
         select(RefreshSchedule)
