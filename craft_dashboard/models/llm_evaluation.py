@@ -1,8 +1,9 @@
 """LLM evaluation model for issue/PR scoring."""
 
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,7 +24,7 @@ class LLMEvaluation(Base):
             "ix_llm_evaluations_latest_issue",
             "issue_id",
             unique=True,
-            postgresql_where="latest = true",
+            postgresql_where=text("latest = true"),
         ),
     )
 
@@ -37,7 +38,7 @@ class LLMEvaluation(Base):
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     suggested_action: Mapped[str | None] = mapped_column(String(50), nullable=True)
     suggested_action_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    scores: Mapped[dict] = mapped_column(JSONB, default=dict)
+    scores: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
     evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

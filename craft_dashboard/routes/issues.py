@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.dependencies import get_db_session
@@ -27,6 +27,31 @@ def _compute_age_days(created_at: datetime | None) -> int:
         created_at.replace(tzinfo=UTC) if created_at.tzinfo is None else created_at
     )
     return (now - created).days
+
+
+def _apply_author_role_filter(query, author_role: str):  # noqa: ANN001
+    """Apply author role filtering to the query."""
+    if not author_role:
+        return query
+
+    role_list = [r.strip() for r in author_role.split(",") if r.strip()]
+    role_conditions = []
+    for role in role_list:
+        if role == "maintainer":
+            role_conditions.append(
+                (Issue.author_is_maintainer.is_(True)) & (Issue.author_is_bot.is_(False))
+            )
+        elif role == "contributor":
+            role_conditions.append(
+                (Issue.author_is_maintainer.is_(False)) & (Issue.author_is_bot.is_(False))
+            )
+        elif role == "bot":
+            role_conditions.append(Issue.author_is_bot.is_(True))
+    if len(role_conditions) == 1:
+        query = query.where(role_conditions[0])
+    elif role_conditions:
+        query = query.where(or_(*role_conditions))
+    return query
 
 
 async def _query_issues(
@@ -74,27 +99,7 @@ async def _query_issues(
             query = query.where(LLMEvaluation.suggested_action == action_list[0])
         elif action_list:
             query = query.where(LLMEvaluation.suggested_action.in_(action_list))
-    if author_role:
-        role_list = [r.strip() for r in author_role.split(",") if r.strip()]
-        role_conditions = []
-        for role in role_list:
-            if role == "maintainer":
-                role_conditions.append(
-                    (Issue.author_is_maintainer.is_(True))
-                    & (Issue.author_is_bot.is_(False))
-                )
-            elif role == "contributor":
-                role_conditions.append(
-                    (Issue.author_is_maintainer.is_(False))
-                    & (Issue.author_is_bot.is_(False))
-                )
-            elif role == "bot":
-                role_conditions.append(Issue.author_is_bot.is_(True))
-        if len(role_conditions) == 1:
-            query = query.where(role_conditions[0])
-        elif role_conditions:
-            from sqlalchemy import or_
-            query = query.where(or_(*role_conditions))
+    query = _apply_author_role_filter(query, author_role)
 
     count_query = select(func.count()).select_from(query.subquery())
     total = await session.scalar(count_query) or 0
@@ -177,7 +182,7 @@ async def issue_list(
         author_role=author_role,
         sort_by=sort,
         page=page,
-        bots=getattr(request.app.state.config, 'bots', []),
+        bots=getattr(request.app.state.config, "bots", []),
     )
 
     project_result = await session.execute(
@@ -227,7 +232,7 @@ async def issue_table_partial(
         author_role=author_role,
         sort_by=sort,
         page=page,
-        bots=getattr(request.app.state.config, 'bots', []),
+        bots=getattr(request.app.state.config, "bots", []),
     )
 
     return templates.TemplateResponse(

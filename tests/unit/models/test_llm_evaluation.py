@@ -1,5 +1,8 @@
 """Tests for the LLMEvaluation model."""
 
+import ast
+from pathlib import Path
+
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 
 
@@ -43,3 +46,33 @@ class TestLLMEvaluationModel:
         col = LLMEvaluation.__table__.columns["issue_id"]
         fk_targets = [fk.target_fullname for fk in col.foreign_keys]
         assert "issues.id" in fk_targets
+
+    def test_partial_index_uses_text_expression(self) -> None:
+        """The partial unique index should use text() not a raw string."""
+        module_path = Path(__file__).resolve().parents[3] / "craft_dashboard/models/llm_evaluation.py"
+        tree = ast.parse(module_path.read_text())
+
+        llm_evaluation = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "LLMEvaluation"
+        )
+        table_args_assign = next(
+            node
+            for node in llm_evaluation.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "__table_args__"
+                for target in node.targets
+            )
+        )
+        index_call = table_args_assign.value.elts[0]
+        postgresql_where = next(
+            keyword.value
+            for keyword in index_call.keywords
+            if keyword.arg == "postgresql_where"
+        )
+
+        assert isinstance(postgresql_where, ast.Call)
+        assert isinstance(postgresql_where.func, ast.Name)
+        assert postgresql_where.func.id == "text"
