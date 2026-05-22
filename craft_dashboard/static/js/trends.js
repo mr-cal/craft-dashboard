@@ -1,10 +1,14 @@
 try {
 // Color palette for projects
-const colors = [
-  "#E95420", "#0E8420", "#0066CC", "#772953", "#AEA79F",
-  "#333333", "#007AA6", "#C7162B", "#F99B11", "#38B44A",
-  "#5E2750", "#77216F", "#335280",
-];
+const CHART_COLORS = {
+  palette: [
+    "#E95420", "#0E8420", "#0066CC", "#772953", "#AEA79F",
+    "#333333", "#007AA6", "#C7162B", "#F99B11", "#38B44A",
+    "#5E2750", "#77216F", "#335280",
+  ],
+  issues: "#0066CC",
+  prs: "#E95420",
+};
 
 // Fetch data
 const response = await fetch("/stats/trends/all-data");
@@ -175,7 +179,7 @@ function updateOpenIssuesChart() {
     const rawData = filteredProjects[name][dataKey] || filteredProjects[name]["open_issues"];
     const smoothedData = rollingAverage(rawData, 28); // 4-week rolling average
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
-    const color = colors[colorIdx % colors.length];
+    const color = CHART_COLORS.palette[colorIdx % CHART_COLORS.palette.length];
     
     return {
       label: name,
@@ -230,7 +234,7 @@ function updateMedianAgeChart() {
     const rawData = filteredProjects[name][dataKey];
     const smoothedData = rollingAverageNullable(rawData, 28); // 4-week rolling average, skips zeros
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
-    const color = colors[colorIdx % colors.length];
+    const color = CHART_COLORS.palette[colorIdx % CHART_COLORS.palette.length];
     
     return {
       label: name,
@@ -280,7 +284,7 @@ function updateClosedChart() {
     const rawData = (filteredProjects[name][dataKey] || filteredProjects[name]["closed_issues"]).map(v => v * 7); // Scale to per-week
     const smoothedData = rollingAverage(rawData, 28); // 4-week rolling average
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
-    const color = colors[colorIdx % colors.length];
+    const color = CHART_COLORS.palette[colorIdx % CHART_COLORS.palette.length];
     
     return {
       label: name,
@@ -350,15 +354,15 @@ function updateSnapshotCharts() {
     {
       label: "Issues",
       data: selected.map(name => snapshot[name][issueKey]),
-      backgroundColor: "#0066CC",
-      borderColor: "#0066CC",
+      backgroundColor: CHART_COLORS.issues,
+      borderColor: CHART_COLORS.issues,
       borderWidth: 1,
     },
     {
       label: "PRs",
       data: selected.map(name => snapshot[name][prKey]),
-      backgroundColor: "#E95420",
-      borderColor: "#E95420",
+      backgroundColor: CHART_COLORS.prs,
+      borderColor: CHART_COLORS.prs,
       borderWidth: 1,
     },
   ];
@@ -378,15 +382,15 @@ function updateSnapshotCharts() {
     {
       label: "Issue Age",
       data: selected.map(name => snapshot[name][issueAgeKey]),
-      backgroundColor: "#0066CC",
-      borderColor: "#0066CC",
+      backgroundColor: CHART_COLORS.issues,
+      borderColor: CHART_COLORS.issues,
       borderWidth: 1,
     },
     {
       label: "PR Age",
       data: selected.map(name => snapshot[name][prAgeKey]),
-      backgroundColor: "#E95420",
-      borderColor: "#E95420",
+      backgroundColor: CHART_COLORS.prs,
+      borderColor: CHART_COLORS.prs,
       borderWidth: 1,
     },
   ];
@@ -400,15 +404,15 @@ function updateSnapshotCharts() {
     {
       label: "Issues",
       data: selected.map(name => snapshot[name][closedIssueKey]),
-      backgroundColor: "#0066CC",
-      borderColor: "#0066CC",
+      backgroundColor: CHART_COLORS.issues,
+      borderColor: CHART_COLORS.issues,
       borderWidth: 1,
     },
     {
       label: "PRs",
       data: selected.map(name => snapshot[name][closedPrKey]),
-      backgroundColor: "#E95420",
-      borderColor: "#E95420",
+      backgroundColor: CHART_COLORS.prs,
+      borderColor: CHART_COLORS.prs,
       borderWidth: 1,
     },
   ];
@@ -549,7 +553,7 @@ function populateLineChartCheckboxes(containerId, prefix, onChange) {
     label: "all-projects",
     checked: true, // Check all-projects by default for all charts
     onChange: () => onChange(),
-    color: colors[0],
+    color: CHART_COLORS.palette[0],
   });
   
   // Add individual projects
@@ -559,7 +563,7 @@ function populateLineChartCheckboxes(containerId, prefix, onChange) {
       label: name,
       checked: false,
       onChange: () => onChange(),
-      color: colors[i % colors.length],
+      color: CHART_COLORS.palette[i % CHART_COLORS.palette.length],
     });
   });
 }
@@ -573,7 +577,7 @@ function populateSnapshotCheckboxes() {
     label: "all-projects",
     checked: true, // Checked by default
     onChange: () => updateSnapshotCharts(),
-    color: colors[0],
+    color: CHART_COLORS.palette[0],
   });
   
   // Add individual projects
@@ -583,7 +587,7 @@ function populateSnapshotCheckboxes() {
       label: name,
       checked: false,
       onChange: () => updateSnapshotCharts(),
-      color: colors[i % colors.length],
+      color: CHART_COLORS.palette[i % CHART_COLORS.palette.length],
     });
   });
 }
