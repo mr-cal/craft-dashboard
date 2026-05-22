@@ -1,6 +1,7 @@
 """Admin routes for triggering refreshes and re-evaluations."""
 
 import logging
+from datetime import UTC
 
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
@@ -152,7 +153,7 @@ async def distribute_refresh_schedule(
 
     Requires admin authentication via Bearer token.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from craft_dashboard.models.refresh_schedule import RefreshSchedule
 
@@ -171,7 +172,7 @@ async def distribute_refresh_schedule(
             {"status": "success", "message": "No schedules to distribute.", "count": 0}
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     total_schedules = len(schedules)
 
     for idx, schedule in enumerate(schedules):

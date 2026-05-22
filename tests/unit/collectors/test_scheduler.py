@@ -3,15 +3,14 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
-from sqlalchemy import select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-
 from craft_dashboard.collectors.scheduler import (
     distribute_refresh_dates,
     is_due_for_refresh,
     record_refresh_error,
 )
 from craft_dashboard.models.refresh_schedule import RefreshSchedule
+from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 
 class TestIsDueForRefresh:

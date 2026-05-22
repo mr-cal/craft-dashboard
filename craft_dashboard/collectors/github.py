@@ -7,10 +7,10 @@ from datetime import UTC, datetime, timedelta
 
 import github
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 import urllib3
 from github import Github, GithubException
 from github.Issue import Issue as GHIssue
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.collectors import ISSUE_UPSERT_FIELDS
 
@@ -460,6 +460,7 @@ class GitHubCollector:
 
         Returns:
             Number of branch+release rows upserted.
+
         """
         import re  # noqa: PLC0415
 

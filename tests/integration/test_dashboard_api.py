@@ -5,17 +5,16 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from craft_dashboard.app import create_app
 from craft_dashboard.config import DashboardConfig
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
+from sqlalchemy.ext.asyncio import AsyncSession
 
 if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"

@@ -11,7 +11,7 @@ For each project, for each day from the earliest issue's created_at to today:
 """
 
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from statistics import median
 from typing import Any
@@ -23,7 +23,6 @@ from sqlalchemy.orm import Session
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from craft_dashboard.models.base import Base
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.snapshot import Snapshot
@@ -42,6 +41,7 @@ def compute_snapshot_for_date(
 
     Returns:
         Dictionary with all snapshot metrics
+
     """
     # Filter issues that were open on snapshot_date
     open_issues_on_date = []
@@ -139,6 +139,7 @@ def backfill_project(session: Session, project: Project) -> None:
     Args:
         session: Database session
         project: Project to backfill
+
     """
     print(f"Backfilling {project.name}...")
 

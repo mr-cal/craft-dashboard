@@ -3,17 +3,15 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
-from sqlalchemy import select
-from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
-
 from craft_dashboard.models.issue import Issue
-from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.routes.issues import (
     _apply_author_role_filter,
     _compute_age_days,
     _query_issues,
 )
+from sqlalchemy import select
+from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 
 if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"

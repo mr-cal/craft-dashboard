@@ -160,9 +160,12 @@ async def _evaluate_issues(
         async with session_factory() as session:
             # Mark previous evaluation(s) for this issue as not latest
             from sqlalchemy import update as sa_update
+
             await session.execute(
                 sa_update(LLMEvaluation)
-                .where(LLMEvaluation.issue_id == issue.id, LLMEvaluation.latest.is_(True))
+                .where(
+                    LLMEvaluation.issue_id == issue.id, LLMEvaluation.latest.is_(True)
+                )
                 .values(latest=False)
             )
             # Insert new evaluation with latest=True
@@ -194,11 +197,17 @@ async def _evaluate_issues(
     return stats
 
 
-async def _main(project: str, limit: int, backend: str, open_only: bool, verbose: bool) -> None:
+async def _main(
+    project: str, limit: int, backend: str, open_only: bool, verbose: bool
+) -> None:
     """Run LLM evaluation."""
     settings = Settings()
 
-    log_level = logging.DEBUG if verbose else getattr(logging, settings.log_level.upper(), logging.INFO)
+    log_level = (
+        logging.DEBUG
+        if verbose
+        else getattr(logging, settings.log_level.upper(), logging.INFO)
+    )
     logging.getLogger().setLevel(log_level)
 
     # Allow CLI flag to override settings
@@ -244,7 +253,8 @@ async def _main(project: str, limit: int, backend: str, open_only: bool, verbose
             project_filter=project,
             limit=limit,
             open_only=open_only,
-        )        logger.info(
+        )
+        logger.info(
             "Evaluation complete: %d evaluated, %d skipped, %d errors, %d total tokens",
             stats["evaluated"],
             stats["skipped"],
@@ -271,12 +281,15 @@ async def _main(project: str, limit: int, backend: str, open_only: bool, verbose
     help="Only evaluate open issues (used for daily cron; default evaluates all).",
 )
 @click.option(
-    "--verbose", "-v",
+    "--verbose",
+    "-v",
     is_flag=True,
     default=False,
     help="Enable debug logging (LLM prompts, token counts). Overrides LOG_LEVEL.",
 )
-def main(project: str, limit: int, backend: str, open_only: bool, verbose: bool) -> None:
+def main(
+    project: str, limit: int, backend: str, open_only: bool, verbose: bool
+) -> None:
     """Run LLM evaluation on issues and PRs.
 
     By default evaluates all issues (open and closed). Use --open-only

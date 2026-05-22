@@ -87,7 +87,7 @@ class TestLocalLLMClient:
         """LocalLLMClient stores an optional API key."""
         client = LocalLLMClient(api_key="my-bearer-token")
 
-        assert client.api_key == "my-bearer-token"  # noqa: S105
+        assert client.api_key == "my-bearer-token"
 
     def test_init_default_no_api_key(self) -> None:
         """LocalLLMClient defaults to no API key."""
@@ -127,7 +127,7 @@ class TestCreateLLMClient:
         client = create_llm_client(Settings())
 
         assert isinstance(client, LocalLLMClient)
-        assert client.api_key == "my-secret-token"  # noqa: S105
+        assert client.api_key == "my-secret-token"
 
 
 class TestOpenRouterResponse:

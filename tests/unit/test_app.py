@@ -5,11 +5,10 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from craft_dashboard.app import create_app, lifespan
 from craft_dashboard.settings import Settings
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 @asynccontextmanager

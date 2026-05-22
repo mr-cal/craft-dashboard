@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from launchpadlib.launchpad import Launchpad
 
-import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.collectors import ISSUE_UPSERT_FIELDS

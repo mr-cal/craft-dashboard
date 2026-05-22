@@ -1,9 +1,9 @@
 """Tests for the issue evaluator."""
 
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from craft_dashboard.llm.evaluator import (
     IssueEvaluator,
     _needs_reevaluation,

@@ -4,14 +4,13 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 import urllib3
-from github import GithubException, UnknownObjectException
-
 from craft_dashboard.collectors.dependencies import (
     DependencyCollector,
     get_latest_for_branch,
     parse_requirements_line,
     parse_uv_lock,
 )
+from github import GithubException, UnknownObjectException
 
 
 class TestParseRequirementsLine:
@@ -237,7 +236,7 @@ class TestDependencyCollector:
     def test_init_with_craft_libraries(self) -> None:
         """DependencyCollector stores craft_libraries."""
         libs = ["craft-application", "craft-cli"]
-        collector = DependencyCollector(  # noqa: S106
+        collector = DependencyCollector(
             token="ghp_test", org="canonical", craft_libraries=libs
         )
 
@@ -405,9 +404,9 @@ class TestCollectDependenciesExceptionHandling:
 class TestGetPyPIVersionsAsync:
     async def test_pypi_timeout_returns_empty(self) -> None:
         """Network timeout returns empty list."""
-        import httpx
         from unittest.mock import AsyncMock
 
+        import httpx
         from craft_dashboard.collectors.dependencies import (
             _PYPI_CACHE,
             get_pypi_versions,

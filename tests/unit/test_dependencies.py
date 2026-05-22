@@ -3,8 +3,8 @@
 import inspect
 
 import pytest
-
-from craft_dashboard.dependencies import _session_factory_var, get_db_session
+from craft_dashboard import dependencies
+from craft_dashboard.dependencies import get_db_session
 
 
 class TestGetDbSession:
@@ -18,16 +18,17 @@ class TestGetDbSession:
 class TestGetDbSessionError:
     async def test_raises_when_not_initialized(self) -> None:
         """get_db_session raises RuntimeError when factory is not set."""
-        token = _session_factory_var.set(None)
+        original_factory = dependencies._session_factory
         try:
+            dependencies._session_factory = None
             gen = get_db_session()
             with pytest.raises(RuntimeError, match="not initialized"):
                 await gen.__anext__()
         finally:
-            _session_factory_var.reset(token)
+            dependencies._session_factory = original_factory
 
 
-class TestContextVarIsolation:
+class TestModuleLevelVariable:
     def test_set_and_get_factory(self) -> None:
         """set_session_factory stores value retrievable by get_db_session."""
         from unittest.mock import MagicMock
@@ -35,9 +36,10 @@ class TestContextVarIsolation:
         from craft_dashboard.dependencies import set_session_factory
 
         mock_factory = MagicMock()
-        token = _session_factory_var.set(None)
+        original_factory = dependencies._session_factory
         try:
+            dependencies._session_factory = None
             set_session_factory(mock_factory)
-            assert _session_factory_var.get() is mock_factory
+            assert dependencies._session_factory is mock_factory
         finally:
-            _session_factory_var.reset(token)
+            dependencies._session_factory = original_factory

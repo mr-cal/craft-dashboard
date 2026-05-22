@@ -10,11 +10,10 @@ Environment variables:
 
 import asyncio
 import csv
-import json
 import logging
 import pathlib
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 
 import click
 
@@ -33,10 +32,9 @@ logger = logging.getLogger(__name__)
 
 async def _migrate_projects(session, config) -> dict[str, int]:
     """Create project records and return name-to-id mapping."""
+    from craft_dashboard.models.project import Project
     from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import insert
-
-    from craft_dashboard.models.project import Project
 
     name_to_id = {}
 
@@ -72,9 +70,8 @@ async def _migrate_snapshots(
     name_to_id: dict[str, int],
 ) -> int:
     """Migrate snapshot data from per-project CSV files."""
-    from sqlalchemy.dialects.postgresql import insert
-
     from craft_dashboard.models.snapshot import Snapshot
+    from sqlalchemy.dialects.postgresql import insert
 
     count = 0
 

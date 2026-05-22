@@ -5,8 +5,6 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 import urllib3
-from github import GithubException
-
 from craft_dashboard.collectors.github import (
     GitHubCollector,
     _classify_issue,
@@ -14,6 +12,7 @@ from craft_dashboard.collectors.github import (
     _fetch_issue_comments,
     _fetch_pr_details,
 )
+from github import GithubException
 
 
 class TestClassifyIssue:
