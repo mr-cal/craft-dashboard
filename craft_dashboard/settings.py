@@ -1,5 +1,7 @@
 """Application settings loaded from environment variables."""
 
+from typing import Literal
+
 from pydantic_settings import BaseSettings
 
 
@@ -17,7 +19,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # LLM backend: "openrouter" (production) or "local" (local LLM server)
-    llm_backend: str = "openrouter"
+    llm_backend: Literal["openrouter", "local"] = "openrouter"
 
     # Local LLM settings (any OpenAI-compatible server)
     local_llm_url: str = "http://localhost:11434/v1"

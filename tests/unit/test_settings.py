@@ -1,5 +1,8 @@
 """Tests for application settings."""
 
+import pytest
+from pydantic import ValidationError
+
 from craft_dashboard.settings import Settings
 
 
@@ -58,3 +61,18 @@ class TestSettings:
         assert settings.local_llm_url == "http://192.168.1.10:11434/v1"
         assert settings.local_llm_summary_model == "qwen2.5"
         assert settings.local_llm_api_key == "my-bearer-token"  # noqa: S105
+
+    def test_llm_backend_rejects_invalid(self, monkeypatch) -> None:
+        """Invalid LLM backends should be rejected."""
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+
+        with pytest.raises(ValidationError):
+            Settings(llm_backend="invalid_backend")
+
+    def test_llm_backend_accepts_valid(self, monkeypatch) -> None:
+        """Known LLM backends should validate."""
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+
+        settings = Settings(llm_backend="local")
+
+        assert settings.llm_backend == "local"
