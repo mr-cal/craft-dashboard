@@ -17,6 +17,15 @@ class TestMapLpStatus:
         for status in ["New", "Confirmed", "Triaged", "In Progress", "Incomplete"]:
             assert _map_lp_status(status) == "open"
 
+    def test_all_open_statuses_comprehensive(self) -> None:
+        """All documented open statuses map correctly."""
+        for status in [
+            "Opinion",
+            "Incomplete (with response)",
+            "Incomplete (without response)",
+        ]:
+            assert _map_lp_status(status) == "open"
+
     def test_closed_statuses(self) -> None:
         """Various Launchpad closed statuses map to 'closed'."""
         for status in [
@@ -32,6 +41,10 @@ class TestMapLpStatus:
         """Unknown statuses default to 'open'."""
         assert _map_lp_status("SomeUnknownStatus") == "open"
 
+    def test_empty_string_defaults_to_open(self) -> None:
+        """Empty string defaults to open."""
+        assert _map_lp_status("") == "open"
+
 
 class TestLaunchpadCollector:
     """Tests for LaunchpadCollector."""
@@ -41,6 +54,13 @@ class TestLaunchpadCollector:
         collector = LaunchpadCollector(projects=["snapcraft"])
 
         assert collector.projects == ["snapcraft"]
+
+    def test_init_no_args(self) -> None:
+        """LaunchpadCollector with no args has empty defaults."""
+        collector = LaunchpadCollector()
+
+        assert collector.projects == []
+        assert collector._maintainers == set()
 
     def test_init_with_launchpad_maintainers(self) -> None:
         """LaunchpadCollector stores launchpad_maintainers as a set."""
@@ -91,6 +111,7 @@ class TestCollectBugs:
 
     def _make_insert_patch(self, captured: dict):
         """Return a fake insert function that captures values() kwargs."""
+
         def fake_insert(table):
             chain = MagicMock()
             chain.on_conflict_do_update.return_value = MagicMock()
@@ -147,4 +168,93 @@ class TestCollectBugs:
         count = await collector.collect_bugs("snapcraft", 1, AsyncMock())
 
         assert count == 1
+        assert captured["author_is_maintainer"] is False
+
+
+class TestCollectBugsAuthorExtraction:
+    """Tests for author extraction from owner_link."""
+
+    def _make_mock_task(self, owner_link):
+        mock_bug = MagicMock()
+        mock_bug.id = 456
+        mock_bug.title = "Another bug"
+        mock_bug.description = ""
+        mock_bug.tags = ["ui"]
+        mock_bug.date_created = datetime(2024, 6, 1, tzinfo=UTC)
+        mock_bug.date_last_updated = datetime(2024, 6, 2, tzinfo=UTC)
+        mock_bug.web_link = "https://bugs.launchpad.net/bugs/456"
+        mock_task = MagicMock()
+        mock_task.bug = mock_bug
+        mock_task.status = "Confirmed"
+        mock_task.owner_link = owner_link
+        mock_task.importance = "Medium"
+        mock_task.date_closed = None
+        return mock_task
+
+    def _make_mock_lp(self, tasks):
+        mock_project = MagicMock()
+        mock_project.searchTasks.return_value = tasks
+        mock_lp = MagicMock()
+        mock_lp.projects.__getitem__.return_value = mock_project
+        return mock_lp
+
+    def _make_insert_patch(self, captured):
+        def fake_insert(table):
+            chain = MagicMock()
+            chain.on_conflict_do_update.return_value = MagicMock()
+
+            def capture_values(**kw):
+                captured.update(kw)
+                return chain
+
+            stmt = MagicMock()
+            stmt.values = capture_values
+            return stmt
+
+        return fake_insert
+
+    async def test_author_extracted_from_url(self, mocker) -> None:
+        """Author username is extracted from the last segment of owner_link."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        mock_task = self._make_mock_task("https://api.launchpad.net/1.0/~john-doe")
+        mocker.patch.object(
+            collector, "_get_launchpad", return_value=self._make_mock_lp([mock_task])
+        )
+        captured = {}
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._make_insert_patch(captured),
+        )
+        await collector.collect_bugs("snapcraft", 1, AsyncMock())
+        assert captured["author"] == "~john-doe"
+
+    async def test_author_is_bot_always_false(self, mocker) -> None:
+        """Launchpad issues always have author_is_bot=False."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        mock_task = self._make_mock_task("https://api.launchpad.net/1.0/~someone")
+        mocker.patch.object(
+            collector, "_get_launchpad", return_value=self._make_mock_lp([mock_task])
+        )
+        captured = {}
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._make_insert_patch(captured),
+        )
+        await collector.collect_bugs("snapcraft", 1, AsyncMock())
+        assert captured["author_is_bot"] is False
+
+    async def test_none_owner_link(self, mocker) -> None:
+        """None owner_link results in None author."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        mock_task = self._make_mock_task(None)
+        mocker.patch.object(
+            collector, "_get_launchpad", return_value=self._make_mock_lp([mock_task])
+        )
+        captured = {}
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._make_insert_patch(captured),
+        )
+        await collector.collect_bugs("snapcraft", 1, AsyncMock())
+        assert captured["author"] is None
         assert captured["author_is_maintainer"] is False

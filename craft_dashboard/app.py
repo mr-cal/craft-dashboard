@@ -26,12 +26,14 @@ _STATIC_DIR = _PACKAGE_DIR / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown."""
-    settings = Settings()
+    settings = getattr(app.state, "settings", Settings())
     engine = get_engine(settings.database_url)
     session_factory = get_session_factory(engine)
     set_session_factory(session_factory)
     app.state.settings = settings
-    app.state.config = load_config(pathlib.Path(settings.config_file))
+    app.state.config = getattr(
+        app.state, "config", load_config(pathlib.Path(settings.config_file))
+    )
     yield
     await engine.dispose()
 
@@ -51,6 +53,7 @@ def create_app() -> FastAPI:
         debug=settings.debug,
     )
 
+    app.state.settings = settings
     app.state.templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 

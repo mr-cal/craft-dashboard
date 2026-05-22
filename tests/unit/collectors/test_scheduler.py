@@ -25,6 +25,16 @@ class TestIsDueForRefresh:
         future = datetime.now(tz=UTC) + timedelta(hours=1)
         assert is_due_for_refresh(next_refresh_at=future) is False
 
+    def test_exactly_now_is_due(self) -> None:
+        """A refresh time of exactly now is due."""
+        now = datetime.now(tz=UTC)
+        assert is_due_for_refresh(next_refresh_at=now) is True
+
+    def test_one_second_future_not_due(self) -> None:
+        """One second in the future is not due."""
+        future = datetime.now(tz=UTC) + timedelta(seconds=1)
+        assert is_due_for_refresh(next_refresh_at=future) is False
+
 
 class TestDistributeRefreshDates:
     """Tests for distribute_refresh_dates."""
@@ -55,3 +65,18 @@ class TestDistributeRefreshDates:
 
         assert len(result) == 1
         assert result[0][0] == 42
+
+    def test_two_projects_spacing(self) -> None:
+        """Two projects should be approximately half the interval apart."""
+        result = distribute_refresh_dates([1, 2], interval_days=2)
+        assert len(result) == 2
+        gap = (result[1][1] - result[0][1]).total_seconds()
+        assert 86300 < gap < 86500
+
+    def test_many_projects(self) -> None:
+        """Many projects all get unique times."""
+        ids = list(range(1, 21))
+        result = distribute_refresh_dates(ids, interval_days=7)
+        assert len(result) == 20
+        times = [dt for _, dt in result]
+        assert len(set(times)) == 20

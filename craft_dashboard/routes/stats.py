@@ -86,21 +86,23 @@ async def dependencies_data(
 
     apps: dict = {}
     for row in result:
+        if row.dependency_name not in libs:
+            continue
+
         key = f"{row.project_name}/{row.branch}"
         if key not in apps:
             apps[key] = {}
-        if row.dependency_name in libs:
-            if row.installed_version is not None:
-                apps[key][row.dependency_name] = {
-                    "version": row.installed_version,
-                    "latest": row.latest_version,
-                    "series": row.series,
-                    "outdated": row.is_outdated,
-                }
-            else:
-                apps[key][row.dependency_name] = {
-                    "version_spec": row.version_spec or "any"
-                }
+        if row.installed_version is not None:
+            apps[key][row.dependency_name] = {
+                "version": row.installed_version,
+                "latest": row.latest_version,
+                "series": row.series,
+                "outdated": row.is_outdated,
+            }
+        else:
+            apps[key][row.dependency_name] = {
+                "version_spec": row.version_spec or "any"
+            }
 
     return {"libs": libs, "apps": apps}
 

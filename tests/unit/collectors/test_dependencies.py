@@ -52,6 +52,27 @@ class TestParseRequirementsLine:
         assert result is None
 
 
+class TestParseRequirementsLineEdgeCases:
+    def test_dash_prefix_ignored(self) -> None:
+        """Lines starting with - are ignored (pip options)."""
+        assert parse_requirements_line("-e git+https://...") is None
+        assert parse_requirements_line("--index-url https://...") is None
+
+    def test_complex_version_spec(self) -> None:
+        """Complex version specs with multiple constraints."""
+        name, spec = parse_requirements_line("foo>=1.0,<2.0")
+
+        assert name == "foo"
+        assert spec == ">=1.0,<2.0"
+
+    def test_whitespace_handling(self) -> None:
+        """Leading/trailing whitespace is stripped."""
+        name, spec = parse_requirements_line("  requests>=2.0  ")
+
+        assert name == "requests"
+        assert spec == ">=2.0"
+
+
 class TestParseUvLock:
     """Tests for parse_uv_lock."""
 
@@ -88,6 +109,24 @@ source = { registry = "https://pypi.org/simple" }
         # craft_cli → craft-cli
         assert packages["craft-cli"] == "2.9.0"
 
+    def test_package_with_dots_in_name(self) -> None:
+        """Dots in package names are normalised to dashes."""
+        content = '[[package]]\nname = "my.package"\nversion = "1.0.0"\n'
+        result = parse_uv_lock(content)
+
+        assert "my-package" in result
+
+    def test_multiple_packages(self) -> None:
+        """Multiple packages are all extracted."""
+        content = (
+            '[[package]]\nname = "foo"\nversion = "1.0"\n\n'
+            '[[package]]\nname = "bar"\nversion = "2.0"\n'
+        )
+        result = parse_uv_lock(content)
+
+        assert result["foo"] == "1.0"
+        assert result["bar"] == "2.0"
+
     def test_empty_lock(self) -> None:
         """An empty (but valid) lock file returns an empty dict."""
         packages = parse_uv_lock("version = 1\n")
@@ -117,6 +156,18 @@ class TestGetLatestForBranch:
         latest = get_latest_for_branch("hotfix/3.2", self._VERSIONS, "3.2.0")
 
         assert latest == "3.2.0"
+
+    def test_hotfix_no_series_match_returns_global(self) -> None:
+        """Hotfix branch with no matching series falls back to global latest."""
+        latest = get_latest_for_branch("hotfix/2.0", ["3.0.0", "4.0.0"], "2.0.0")
+
+        assert latest == "4.0.0"
+
+    def test_single_version(self) -> None:
+        """Single version is returned for main."""
+        latest = get_latest_for_branch("main", ["1.0.0"], "1.0.0")
+
+        assert latest == "1.0.0"
 
     def test_empty_versions_returns_installed(self) -> None:
         """If no versions are available, the installed version is returned."""
