@@ -207,16 +207,22 @@ function updateMedianAgeChart() {
     return;
   }
   
-  const firstProject = selected[0];
-  medianAgeChart.data.labels = filteredProjects[firstProject].dates;
-  
-  const dataKey = getDataKey("median_issue_age");
-  if (dataKey === null) {
+  const view = getCurrentView();
+  if (view === "none") {
     medianAgeChart.data.labels = [];
     medianAgeChart.data.datasets = [];
     medianAgeChart.update();
     return;
   }
+  
+  const firstProject = selected[0];
+  medianAgeChart.data.labels = filteredProjects[firstProject].dates;
+  
+  // Map view to the correct data key
+  const dataKey = view === "internal" ? "median_issue_age_internal"
+                : view === "external" ? "nm_median_issue_age"
+                : view === "bots" ? "median_issue_age_bots"
+                : "median_issue_age";
   
   medianAgeChart.data.datasets = selected.map((name) => {
     const rawData = filteredProjects[name][dataKey];
