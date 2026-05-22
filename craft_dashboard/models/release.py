@@ -24,7 +24,7 @@ class Release(Base):
     released_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    is_hotfix: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_hotfix: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
 
     # Relationships

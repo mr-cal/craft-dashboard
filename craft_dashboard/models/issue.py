@@ -34,8 +34,10 @@ class Issue(Base):
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     state: Mapped[str] = mapped_column(String(20), nullable=False)
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    author_is_maintainer: Mapped[bool] = mapped_column(Boolean, default=False)
-    author_is_bot: Mapped[bool] = mapped_column(Boolean, default=False)
+    author_is_maintainer: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    author_is_bot: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     labels: Mapped[list] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

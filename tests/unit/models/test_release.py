@@ -1,5 +1,8 @@
 """Tests for the Release model."""
 
+import ast
+from pathlib import Path
+
 from craft_dashboard.models.release import Release
 
 
@@ -34,3 +37,27 @@ class TestReleaseModel:
             and {col.name for col in c.columns} == {"project_id", "branch"}
         ]
         assert len(unique_constraints) == 1
+
+    def test_is_hotfix_explicitly_set_not_nullable(self) -> None:
+        """Release.is_hotfix should explicitly set nullable=False."""
+        module_path = Path(__file__).resolve().parents[3] / "craft_dashboard/models/release.py"
+        tree = ast.parse(module_path.read_text())
+        release_class = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "Release"
+        )
+        field = next(
+            node
+            for node in release_class.body
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "is_hotfix"
+        )
+        nullable_kw = next(
+            (kw.value for kw in field.value.keywords if kw.arg == "nullable"),
+            None,
+        )
+
+        assert isinstance(nullable_kw, ast.Constant)
+        assert nullable_kw.value is False

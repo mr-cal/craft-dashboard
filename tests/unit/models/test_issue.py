@@ -1,6 +1,8 @@
 """Tests for the Issue model."""
 
+import ast
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import get_args
 
 from craft_dashboard.models.issue import Issue
@@ -75,3 +77,27 @@ class TestIssueModel:
         )
 
         assert isinstance(issue.labels, list)
+
+    def test_boolean_columns_explicitly_set_not_nullable(self) -> None:
+        """Boolean columns should explicitly set nullable=False."""
+        module_path = Path(__file__).resolve().parents[3] / "craft_dashboard/models/issue.py"
+        tree = ast.parse(module_path.read_text())
+        issue_class = next(
+            node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Issue"
+        )
+
+        for field_name in ("author_is_maintainer", "author_is_bot"):
+            field = next(
+                node
+                for node in issue_class.body
+                if isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == field_name
+            )
+            nullable_kw = next(
+                (kw.value for kw in field.value.keywords if kw.arg == "nullable"),
+                None,
+            )
+
+            assert isinstance(nullable_kw, ast.Constant)
+            assert nullable_kw.value is False
