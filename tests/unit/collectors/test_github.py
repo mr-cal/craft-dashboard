@@ -1,7 +1,10 @@
 """Tests for the GitHub data collector."""
 
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from github import GithubException
 
 from craft_dashboard.collectors.github import (
     GitHubCollector,
@@ -166,6 +169,135 @@ class TestFetchIssueComments:
         result = _fetch_issue_comments(gh_issue)
 
         assert result == []
+
+
+class TestCollectIssuesExceptionHandling:
+    """Tests for collect_issues() exception handling."""
+
+    @staticmethod
+    def _make_issue(*, is_pr: bool = False) -> MagicMock:
+        label = MagicMock()
+        label.name = "bug"
+
+        user = MagicMock()
+        user.login = "alice"
+
+        gh_issue = MagicMock()
+        gh_issue.number = 123
+        gh_issue.title = "Test issue"
+        gh_issue.body = "Body"
+        gh_issue.state = "open"
+        gh_issue.user = user
+        gh_issue.labels = [label]
+        gh_issue.created_at = datetime(2024, 1, 1, tzinfo=UTC)
+        gh_issue.updated_at = datetime(2024, 1, 2, tzinfo=UTC)
+        gh_issue.closed_at = None
+        gh_issue.html_url = "https://github.com/canonical/repo/issues/123"
+        gh_issue.pull_request = MagicMock() if is_pr else None
+        return gh_issue
+
+    @staticmethod
+    def _make_session() -> AsyncMock:
+        due_count_result = MagicMock()
+        due_count_result.scalar_one.return_value = 1
+
+        existing_result = MagicMock()
+        existing_result.scalar_one_or_none.return_value = None
+
+        session = AsyncMock()
+        session.execute = AsyncMock(side_effect=[due_count_result, existing_result, None])
+        session.commit = AsyncMock()
+        return session
+
+    @staticmethod
+    def _fake_insert(_table) -> MagicMock:
+        stmt = MagicMock()
+        stmt.excluded = MagicMock()
+        stmt.values.return_value = stmt
+        stmt.on_conflict_do_update.return_value = stmt
+        return stmt
+
+    async def test_collect_issues_catches_github_exception_fetching_comments(self, mocker) -> None:
+        collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
+        gh_issue = self._make_issue()
+        repo = MagicMock()
+        repo.get_issues.return_value = [gh_issue]
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value = repo
+        session = self._make_session()
+
+        mocker.patch(
+            "craft_dashboard.collectors.github._fetch_issue_comments",
+            side_effect=GithubException(500, {"message": "boom"}),
+        )
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._fake_insert,
+        )
+
+        count = await collector.collect_issues("repo", 1, session)
+
+        assert count == 1
+        session.commit.assert_awaited_once()
+
+    async def test_collect_issues_propagates_non_github_exception_fetching_comments(self, mocker) -> None:
+        collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
+        gh_issue = self._make_issue()
+        repo = MagicMock()
+        repo.get_issues.return_value = [gh_issue]
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value = repo
+        session = self._make_session()
+
+        mocker.patch(
+            "craft_dashboard.collectors.github._fetch_issue_comments",
+            side_effect=RuntimeError("boom"),
+        )
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._fake_insert,
+        )
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await collector.collect_issues("repo", 1, session)
+
+    async def test_collect_issues_catches_github_exception_fetching_pr_details(self, mocker) -> None:
+        collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
+        gh_issue = self._make_issue(is_pr=True)
+        repo = MagicMock()
+        repo.get_issues.return_value = [gh_issue]
+        repo.get_pull.side_effect = GithubException(500, {"message": "boom"})
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value = repo
+        session = self._make_session()
+
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._fake_insert,
+        )
+
+        count = await collector.collect_issues("repo", 1, session)
+
+        assert count == 1
+        session.commit.assert_awaited_once()
+
+    async def test_collect_issues_propagates_non_github_exception_fetching_pr_details(self, mocker) -> None:
+        collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
+        gh_issue = self._make_issue(is_pr=True)
+        repo = MagicMock()
+        repo.get_issues.return_value = [gh_issue]
+        repo.get_pull.side_effect = RuntimeError("boom")
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value = repo
+        session = self._make_session()
+
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._fake_insert,
+        )
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await collector.collect_issues("repo", 1, session)
 
 
 class TestFetchPRDetails:

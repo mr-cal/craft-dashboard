@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import github
 import sqlalchemy as sa
-from github import Github
+from github import Github, GithubException
 from github.Issue import Issue as GHIssue
 
 logger = logging.getLogger(__name__)
@@ -277,7 +277,7 @@ class GitHubCollector:
             comments: list = []
             try:
                 comments = _fetch_issue_comments(gh_issue)
-            except Exception:
+            except GithubException:
                 logger.warning(
                     "Failed to fetch comments for %s#%d",
                     repo_name,
@@ -295,7 +295,7 @@ class GitHubCollector:
                 try:
                     gh_pr = repo.get_pull(gh_issue.number)
                     extra_metadata = _fetch_pr_details(gh_pr)
-                except Exception:
+                except GithubException:
                     logger.warning(
                         "Failed to fetch PR details for %s#%d",
                         repo_name,
