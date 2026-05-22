@@ -421,7 +421,7 @@ class GitHubCollector:
                     for field in ISSUE_UPSERT_FIELDS
                 }
                 | {
-                    "metadata": stmt.excluded.metadata_,
+                    "metadata": stmt.excluded.metadata,
                     "comments": stmt.excluded.comments,
                 },
             )
@@ -584,7 +584,7 @@ class GitHubCollector:
                     "version": stmt.excluded.version,
                     "released_at": stmt.excluded.released_at,
                     "is_hotfix": stmt.excluded.is_hotfix,
-                    "metadata": stmt.excluded.metadata_,
+                    "metadata": stmt.excluded.metadata,
                 },
             )
             await session.execute(stmt)
