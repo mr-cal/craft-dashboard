@@ -42,6 +42,7 @@ def _make_issue(
     issue_type: str = "issue",
     state: str = "open",
     author: str = "user",
+    *,
     is_bot: bool = False,
     labels: list[str] | None = None,
     age_days: int = 30,

@@ -7,6 +7,7 @@ were present, because the query filtered on Project.category == "application"
 but the test data used a different category value.
 """
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -121,8 +122,6 @@ class TestReleasesPage:
                 )
             )
             await test_db_session.commit()
-
-        import asyncio  # noqa: PLC0415
 
         asyncio.get_event_loop().run_until_complete(_seed())
 

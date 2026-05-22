@@ -131,7 +131,7 @@ def _trend_series(
     return data
 
 
-class TestBuildAllProjectsAggregate:
+class TestBuildAllProjectsAggregateUnit:
     def test_empty_projects_returns_empty(self) -> None:
         """Empty projects dict produces empty aggregate."""
         result = _build_all_projects_aggregate({})

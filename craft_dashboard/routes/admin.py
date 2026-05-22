@@ -252,7 +252,7 @@ async def admin_logs(
     authorization: str = Header(default=""),
 ) -> PlainTextResponse:
     """Return recent service logs. Requires admin auth."""
-    import subprocess  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415 — intentional blocking call to journalctl for bounded log retrieval
 
     admin_token = _get_admin_token(request)
     verify_admin_token(authorization, admin_token)
@@ -261,7 +261,7 @@ async def admin_logs(
         units = []
         for unit in _LOG_SERVICE_UNITS:
             units.extend(["-u", unit])
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: ASYNC221 — intentional blocking call to journalctl for bounded log retrieval
             [
                 "journalctl",
                 *units,

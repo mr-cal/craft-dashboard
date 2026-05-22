@@ -29,7 +29,7 @@ class Release(Base):
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, default=dict)
 
     # Relationships
-    project: Mapped["Project"] = relationship(back_populates="releases")  # noqa: F821
+    project: Mapped["Project"] = relationship(back_populates="releases")  # noqa: F821 — SQLAlchemy forward reference for relationship
 
     def __repr__(self) -> str:
         """Return a string representation."""

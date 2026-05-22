@@ -123,7 +123,7 @@ def create_app() -> FastAPI:
         try:
             await session.execute(text("SELECT 1"))
             return HealthResponse(status="ok", database="ok")
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — health check must not crash on any DB error
             return JSONResponse(
                 {"status": "degraded", "database": "error"},
                 status_code=503,

@@ -60,14 +60,14 @@ class Issue(Base):
     )
 
     # Relationships
-    project: Mapped["Project"] = relationship(back_populates="issues")  # noqa: F821
-    evaluations: Mapped[list["LLMEvaluation"]] = relationship(  # noqa: F821
+    project: Mapped["Project"] = relationship(back_populates="issues")  # noqa: F821 — SQLAlchemy forward reference for relationship
+    evaluations: Mapped[list["LLMEvaluation"]] = relationship(  # noqa: F821 — SQLAlchemy forward reference for relationship
         back_populates="issue",
         order_by="LLMEvaluation.evaluated_at.desc()",
     )
 
     @property
-    def latest_evaluation(self) -> "LLMEvaluation | None":  # noqa: F821
+    def latest_evaluation(self) -> "LLMEvaluation | None":  # noqa: F821 — SQLAlchemy forward reference for relationship
         """Return the most recent LLM evaluation, or None."""
         return next((e for e in self.evaluations if e.latest), None)
 

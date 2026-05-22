@@ -1,10 +1,11 @@
 """Tests for FastAPI dependency injection helpers."""
 
 import inspect
+from unittest.mock import MagicMock
 
 import pytest
 from craft_dashboard import dependencies
-from craft_dashboard.dependencies import get_db_session
+from craft_dashboard.dependencies import get_db_session, set_session_factory
 
 
 class TestGetDbSession:
@@ -31,10 +32,6 @@ class TestGetDbSessionError:
 class TestModuleLevelVariable:
     def test_set_and_get_factory(self) -> None:
         """set_session_factory stores value retrievable by get_db_session."""
-        from unittest.mock import MagicMock
-
-        from craft_dashboard.dependencies import set_session_factory
-
         mock_factory = MagicMock()
         original_factory = dependencies._session_factory
         try:

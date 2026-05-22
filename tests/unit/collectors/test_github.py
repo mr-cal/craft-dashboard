@@ -14,6 +14,8 @@ from craft_dashboard.collectors.github import (
 )
 from github import GithubException
 
+_TEST_TOKEN = "ghp_test"  # noqa: S105 — test-only dummy token, not a real secret
+
 
 class TestClassifyIssue:
     """Tests for _classify_issue helper."""
@@ -90,14 +92,14 @@ class TestGitHubCollector:
 
     def test_init(self) -> None:
         """GitHubCollector initializes with a token and org."""
-        collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
 
         assert collector.org == "canonical"
 
     def test_init_configures_timeout_and_retry(self) -> None:
         """GitHubCollector configures PyGithub timeout and retries."""
         with patch("craft_dashboard.collectors.github.Github") as mock_github:
-            GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
+            GitHubCollector(token=_TEST_TOKEN, org="canonical")
 
         mock_github.assert_called_once_with(auth=ANY, timeout=30, retry=ANY)
         retry = mock_github.call_args.kwargs["retry"]
@@ -106,10 +108,10 @@ class TestGitHubCollector:
         assert retry.backoff_factor == 1
         assert set(retry.status_forcelist) == {429, 500, 502, 503, 504}
 
-    def test_is_maintainer(self) -> None:
+    def test_is_maintainer_checks_list(self) -> None:
         """is_maintainer checks against the maintainer list."""
         collector = GitHubCollector(
-            token="ghp_test",
+            token=_TEST_TOKEN,
             org="canonical",
             maintainers=["mr-cal", "lengau"],
         )
@@ -119,7 +121,7 @@ class TestGitHubCollector:
 
     def test_is_maintainer_empty_list(self) -> None:
         """is_maintainer returns False when no maintainers configured."""
-        collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
 
         assert collector.is_maintainer("anyone") is False
 
@@ -234,7 +236,7 @@ class TestCollectIssuesExceptionHandling:
     async def test_collect_issues_catches_github_exception_fetching_comments(
         self, mocker
     ) -> None:
-        collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
         gh_issue = self._make_issue()
         repo = MagicMock()
         repo.get_issues.return_value = [gh_issue]
@@ -259,7 +261,7 @@ class TestCollectIssuesExceptionHandling:
     async def test_collect_issues_propagates_non_github_exception_fetching_comments(
         self, mocker
     ) -> None:
-        collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
         gh_issue = self._make_issue()
         repo = MagicMock()
         repo.get_issues.return_value = [gh_issue]
@@ -282,7 +284,7 @@ class TestCollectIssuesExceptionHandling:
     async def test_collect_issues_catches_github_exception_fetching_pr_details(
         self, mocker
     ) -> None:
-        collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
         gh_issue = self._make_issue(is_pr=True)
         repo = MagicMock()
         repo.get_issues.return_value = [gh_issue]
@@ -304,7 +306,7 @@ class TestCollectIssuesExceptionHandling:
     async def test_collect_issues_propagates_non_github_exception_fetching_pr_details(
         self, mocker
     ) -> None:
-        collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
         gh_issue = self._make_issue(is_pr=True)
         repo = MagicMock()
         repo.get_issues.return_value = [gh_issue]

@@ -229,11 +229,11 @@ async def generate_snapshot(
         bots: Optional set of configured bot usernames.
 
     """
-    from sqlalchemy import select  # noqa: PLC0415
-    from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415
+    from sqlalchemy import select  # noqa: PLC0415 — deferred to avoid circular import
+    from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415 — deferred to avoid circular import
 
-    from craft_dashboard.models.issue import Issue  # noqa: PLC0415
-    from craft_dashboard.models.snapshot import Snapshot  # noqa: PLC0415
+    from craft_dashboard.models.issue import Issue  # noqa: PLC0415 — deferred to avoid circular import
+    from craft_dashboard.models.snapshot import Snapshot  # noqa: PLC0415 — deferred to avoid circular import
 
     result = await session.execute(
         select(

@@ -41,7 +41,7 @@ class Dependency(Base):
     is_outdated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # Relationships
-    project: Mapped["Project"] = relationship(back_populates="dependencies")  # noqa: F821
+    project: Mapped["Project"] = relationship(back_populates="dependencies")  # noqa: F821 — SQLAlchemy forward reference for relationship
 
     def __repr__(self) -> str:
         """Return a string representation."""

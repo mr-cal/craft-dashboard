@@ -1,5 +1,6 @@
 """Unit tests for stats dependency and release routes."""
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -146,8 +147,6 @@ class TestDependenciesData:
             test_db_session.add(_dependency(project.id))
             await test_db_session.commit()
 
-        import asyncio  # noqa: PLC0415
-
         asyncio.get_event_loop().run_until_complete(_seed())
 
         response = test_client.get("/stats/dependencies/data")
@@ -178,8 +177,6 @@ class TestDependenciesData:
             )
             await test_db_session.commit()
 
-        import asyncio  # noqa: PLC0415
-
         asyncio.get_event_loop().run_until_complete(_seed())
 
         response = test_client.get("/stats/dependencies/data")
@@ -202,8 +199,6 @@ class TestDependenciesData:
             await test_db_session.flush()
             test_db_session.add(_dependency(project.id, dependency_name="requests"))
             await test_db_session.commit()
-
-        import asyncio  # noqa: PLC0415
 
         asyncio.get_event_loop().run_until_complete(_seed())
 
@@ -298,8 +293,6 @@ class TestReleasesPage:
             test_db_session.add(_release(project.id, version="8.3.1"))
             await test_db_session.commit()
 
-        import asyncio  # noqa: PLC0415
-
         asyncio.get_event_loop().run_until_complete(_seed())
 
         response = test_client.get("/stats/releases")
@@ -318,8 +311,6 @@ class TestReleasesPage:
                 _release(project.id, metadata_={"commits_since_tag": 15})
             )
             await test_db_session.commit()
-
-        import asyncio  # noqa: PLC0415
 
         asyncio.get_event_loop().run_until_complete(_seed())
 

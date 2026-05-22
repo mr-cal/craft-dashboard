@@ -1,7 +1,10 @@
 """OpenRouter HTTP client for LLM API calls."""
 
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import httpx
 from tenacity import (
@@ -10,6 +13,9 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
 )
+
+if TYPE_CHECKING:
+    from craft_dashboard.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +38,7 @@ class OpenRouterResponse:
     completion_tokens: int
 
     @classmethod
-    def from_api_response(cls, data: dict) -> "OpenRouterResponse":
+    def from_api_response(cls, data: dict) -> OpenRouterResponse:
         """Parse an OpenRouter API response dict.
 
         Args:
@@ -268,7 +274,7 @@ class LocalLLMClient:
         return result
 
 
-def create_llm_client(settings: "Settings") -> "OpenRouterClient | LocalLLMClient":  # noqa: F821
+def create_llm_client(settings: Settings) -> OpenRouterClient | LocalLLMClient:
     """Create the appropriate LLM client based on settings.llm_backend.
 
     Args:

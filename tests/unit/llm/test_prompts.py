@@ -1,6 +1,7 @@
 """Tests for LLM prompt templates."""
 
 from craft_dashboard.llm.prompts import (
+    _format_comments,
     build_evaluation_prompt,
     build_summary_prompt,
 )
@@ -244,8 +245,6 @@ class TestFormatCommentsEdgeCases:
 
     def test_missing_author_key(self) -> None:
         """Missing 'author' key falls back to 'unknown'."""
-        from craft_dashboard.llm.prompts import _format_comments
-
         comments = [
             {
                 "body": "hello",
@@ -260,8 +259,6 @@ class TestFormatCommentsEdgeCases:
 
     def test_missing_body_key(self) -> None:
         """Missing 'body' key falls back to '(no comment)'."""
-        from craft_dashboard.llm.prompts import _format_comments
-
         comments = [
             {
                 "author": "alice",
@@ -276,8 +273,6 @@ class TestFormatCommentsEdgeCases:
 
     def test_none_body(self) -> None:
         """None body falls back to '(no comment)'."""
-        from craft_dashboard.llm.prompts import _format_comments
-
         comments = [
             {
                 "author": "alice",
@@ -292,8 +287,6 @@ class TestFormatCommentsEdgeCases:
 
     def test_none_created_at(self) -> None:
         """None created_at produces empty date field without crash."""
-        from craft_dashboard.llm.prompts import _format_comments
-
         comments = [
             {"author": "alice", "body": "hi", "created_at": None, "type": "comment"}
         ]

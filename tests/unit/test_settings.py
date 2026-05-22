@@ -4,6 +4,10 @@ import pytest
 from craft_dashboard.settings import Settings
 from pydantic import ValidationError
 
+_EXPECTED_GITHUB_TOKEN = "ghp_test123"  # noqa: S105 — expected value in test fixture
+_EXPECTED_ADMIN_TOKEN = "admin-secret"  # noqa: S105 — expected value in test fixture
+_EXPECTED_LOCAL_LLM_API_KEY = "my-bearer-token"
+
 
 class TestSettings:
     """Tests for Settings."""
@@ -22,17 +26,17 @@ class TestSettings:
     def test_settings_from_env(self, monkeypatch) -> None:
         """Settings load from environment variables."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://db:5432/dashboard")
-        monkeypatch.setenv("GITHUB_TOKEN", "ghp_test123")
+        monkeypatch.setenv("GITHUB_TOKEN", _EXPECTED_GITHUB_TOKEN)
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test123")
-        monkeypatch.setenv("ADMIN_TOKEN", "admin-secret")
+        monkeypatch.setenv("ADMIN_TOKEN", _EXPECTED_ADMIN_TOKEN)
         monkeypatch.setenv("DEBUG", "true")
 
         settings = Settings()
 
         assert settings.database_url == "postgresql+asyncpg://db:5432/dashboard"
-        assert settings.github_token == "ghp_test123"  # noqa: S105
+        assert settings.github_token == _EXPECTED_GITHUB_TOKEN
         assert settings.openrouter_api_key == "sk-or-test123"
-        assert settings.admin_token == "admin-secret"  # noqa: S105
+        assert settings.admin_token == _EXPECTED_ADMIN_TOKEN
         assert settings.debug is True
 
     def test_default_llm_backend(self, monkeypatch) -> None:
@@ -52,14 +56,14 @@ class TestSettings:
         monkeypatch.setenv("LLM_BACKEND", "local")
         monkeypatch.setenv("LOCAL_LLM_URL", "http://192.168.1.10:11434/v1")
         monkeypatch.setenv("LOCAL_LLM_SUMMARY_MODEL", "qwen2.5")
-        monkeypatch.setenv("LOCAL_LLM_API_KEY", "my-bearer-token")
+        monkeypatch.setenv("LOCAL_LLM_API_KEY", _EXPECTED_LOCAL_LLM_API_KEY)
 
         settings = Settings()
 
         assert settings.llm_backend == "local"
         assert settings.local_llm_url == "http://192.168.1.10:11434/v1"
         assert settings.local_llm_summary_model == "qwen2.5"
-        assert settings.local_llm_api_key == "my-bearer-token"
+        assert settings.local_llm_api_key == _EXPECTED_LOCAL_LLM_API_KEY
 
     def test_llm_backend_rejects_invalid(self, monkeypatch) -> None:
         """Invalid LLM backends should be rejected."""
@@ -96,8 +100,8 @@ class TestSettings:
     ) -> None:
         """Configured admin and GitHub tokens produce no warnings."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-        monkeypatch.setenv("ADMIN_TOKEN", "admin-secret")
-        monkeypatch.setenv("GITHUB_TOKEN", "ghp_test123")
+        monkeypatch.setenv("ADMIN_TOKEN", _EXPECTED_ADMIN_TOKEN)
+        monkeypatch.setenv("GITHUB_TOKEN", _EXPECTED_GITHUB_TOKEN)
 
         settings = Settings()
 

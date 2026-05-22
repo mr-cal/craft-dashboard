@@ -20,10 +20,10 @@ class Project(TimestampMixin, Base):
     display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # Relationships
-    issues: Mapped[list["Issue"]] = relationship(back_populates="project")  # noqa: F821
-    snapshots: Mapped[list["Snapshot"]] = relationship(back_populates="project")  # noqa: F821
-    releases: Mapped[list["Release"]] = relationship(back_populates="project")  # noqa: F821
-    dependencies: Mapped[list["Dependency"]] = relationship(back_populates="project")  # noqa: F821
+    issues: Mapped[list["Issue"]] = relationship(back_populates="project")  # noqa: F821 — SQLAlchemy forward reference for relationship
+    snapshots: Mapped[list["Snapshot"]] = relationship(back_populates="project")  # noqa: F821 — SQLAlchemy forward reference for relationship
+    releases: Mapped[list["Release"]] = relationship(back_populates="project")  # noqa: F821 — SQLAlchemy forward reference for relationship
+    dependencies: Mapped[list["Dependency"]] = relationship(back_populates="project")  # noqa: F821 — SQLAlchemy forward reference for relationship
 
     def __repr__(self) -> str:
         """Return a string representation."""

@@ -10,6 +10,7 @@ import sqlalchemy as sa
 import urllib3
 from github import Github, GithubException
 from github.Issue import Issue as GHIssue
+from github.PullRequest import PullRequest as GHPullRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.collectors import ISSUE_UPSERT_FIELDS
@@ -62,7 +63,7 @@ def _compute_issue_hash(
     return hashlib.sha256(content.encode()).hexdigest()
 
 
-def _fetch_issue_comments(gh_issue) -> list[dict]:  # noqa: ANN001
+def _fetch_issue_comments(gh_issue: GHIssue) -> list[dict]:
     """Fetch the last 10 comments from a GitHub issue.
 
     Args:
@@ -75,20 +76,18 @@ def _fetch_issue_comments(gh_issue) -> list[dict]:  # noqa: ANN001
     comments = list(gh_issue.get_comments())
     # Keep only the last 10
     recent = comments[-10:]
-    result = []
-    for c in recent:
-        result.append(
-            {
-                "author": c.user.login if c.user else "unknown",
-                "body": (c.body or "")[:1000],
-                "created_at": c.created_at.isoformat() if c.created_at else None,
-                "type": "comment",
-            }
-        )
-    return result
+    return [
+        {
+            "author": c.user.login if c.user else "unknown",
+            "body": (c.body or "")[:1000],
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "type": "comment",
+        }
+        for c in recent
+    ]
 
 
-def _fetch_pr_details(gh_pr) -> dict:  # noqa: ANN001
+def _fetch_pr_details(gh_pr: GHPullRequest) -> dict:
     """Fetch PR-specific data: reviews, CI checks, and diff stats.
 
     Review status is determined by taking the latest review per reviewer
@@ -277,9 +276,9 @@ class GitHubCollector:
             The number of issues upserted.
 
         """
-        from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415
+        from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415 — deferred to avoid circular import
 
-        from craft_dashboard.models.issue import Issue  # noqa: PLC0415
+        from craft_dashboard.models.issue import Issue  # noqa: PLC0415 — deferred to avoid circular import
 
         # Count how many existing issues are due for refresh
         cutoff = datetime.now(tz=UTC) - timedelta(days=refresh_age_days)
@@ -290,7 +289,7 @@ class GitHubCollector:
                 Issue.project_id == project_id,
                 Issue.source == "github",
                 sa.or_(
-                    Issue.last_fetched_at == None,  # noqa: E711
+                    Issue.last_fetched_at == None,  # noqa: E711 — SQLAlchemy requires == for IS NULL SQL generation
                     Issue.last_fetched_at < cutoff,
                 ),
             )
@@ -462,13 +461,13 @@ class GitHubCollector:
             Number of branch+release rows upserted.
 
         """
-        import re  # noqa: PLC0415
+        import re  # noqa: PLC0415 — deferred import
 
-        from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415
+        from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415 — deferred to avoid circular import
 
-        from craft_dashboard.models.release import Release  # noqa: PLC0415
+        from craft_dashboard.models.release import Release  # noqa: PLC0415 — deferred to avoid circular import
 
-        HOTFIX_RE = re.compile(r"^hotfix/(\d+)\.(\d+)$")
+        hotfix_re = re.compile(r"^hotfix/(\d+)\.(\d+)$")
 
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
 
@@ -501,7 +500,7 @@ class GitHubCollector:
 
         # List hotfix/* branches from GitHub
         for branch in repo.get_branches():
-            m = HOTFIX_RE.match(branch.name)
+            m = hotfix_re.match(branch.name)
             if m:
                 major, minor = int(m.group(1)), int(m.group(2))
                 if (major, minor) >= (min_major, min_minor):
@@ -534,7 +533,7 @@ class GitHubCollector:
                         best_tag = tag
             else:
                 # hotfix/X.Y → latest X.Y.* tag
-                m = HOTFIX_RE.match(branch_name)
+                m = hotfix_re.match(branch_name)
                 if not m:
                     continue
                 hf_major, hf_minor = int(m.group(1)), int(m.group(2))
@@ -609,7 +608,7 @@ class GitHubCollector:
                     commits_since,
                     best_tag,
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001 — individual release errors should not abort collection
                 logger.warning(
                     "  Could not compute commits for %s@%s",
                     repo_name,

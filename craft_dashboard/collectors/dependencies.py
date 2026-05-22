@@ -102,7 +102,7 @@ async def get_pypi_versions(name: str) -> list[str]:
             data: dict[str, Any] = response.json()
         releases = data.get("releases", {})
         result = [v for v in releases if not Version(v).is_prerelease]
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — gracefully handle any PyPI response error
         logger.warning("Could not fetch PyPI versions for %s", name)
         result = []
 
@@ -199,9 +199,9 @@ class DependencyCollector:
             The number of dependencies upserted.
 
         """
-        from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415
+        from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415 — deferred to avoid circular import
 
-        from craft_dashboard.models.dependency import Dependency  # noqa: PLC0415
+        from craft_dashboard.models.dependency import Dependency  # noqa: PLC0415 — deferred to avoid circular import
 
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
         count = 0

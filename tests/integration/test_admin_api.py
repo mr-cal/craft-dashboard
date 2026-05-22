@@ -1,5 +1,6 @@
 """Integration tests for admin API endpoints with real DB."""
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -13,6 +14,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+_TEST_ADMIN_TOKEN = "test-admin-token"  # noqa: S105 — test-only dummy token
+
 
 @asynccontextmanager
 async def _noop_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -25,8 +28,8 @@ def app_with_db(test_db_session: AsyncSession) -> tuple[FastAPI, str]:
     app.router.lifespan_context = _noop_lifespan
     app.state.config = DashboardConfig()
     app.state.settings = Settings()
-    app.state.settings.admin_token = "test-admin-token"
-    token = "test-admin-token"
+    app.state.settings.admin_token = _TEST_ADMIN_TOKEN
+    token = _TEST_ADMIN_TOKEN
 
     async def _override() -> AsyncGenerator[AsyncSession, None]:
         yield test_db_session
@@ -59,8 +62,6 @@ class TestAdminPageIntegration:
                 )
             )
             await test_db_session.commit()
-
-        import asyncio  # noqa: PLC0415
 
         asyncio.get_event_loop().run_until_complete(_seed())
 

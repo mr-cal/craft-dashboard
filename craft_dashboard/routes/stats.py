@@ -156,7 +156,7 @@ async def releases_page(
     """Render the releases table showing the latest release per project+branch."""
     templates: Jinja2Templates = request.app.state.templates
 
-    from datetime import UTC, datetime  # noqa: PLC0415
+    from datetime import UTC, datetime  # noqa: PLC0415 — deferred import
 
     result = await session.execute(
         select(
@@ -539,7 +539,7 @@ async def trends_chart_partial(
     Embeds chart data as inline JS so Chart.js can render without a second request.
     """
     templates: Jinja2Templates = request.app.state.templates
-    import json  # noqa: PLC0415
+    import json  # noqa: PLC0415 — deferred import
 
     chart_data = await _get_trend_chart_data(session, project)
 

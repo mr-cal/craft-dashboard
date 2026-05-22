@@ -2,15 +2,22 @@
 
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 import urllib3
 from craft_dashboard.collectors.dependencies import (
+    _PYPI_CACHE,
     DependencyCollector,
     get_latest_for_branch,
+    get_pypi_versions,
     parse_requirements_line,
     parse_uv_lock,
 )
 from github import GithubException, UnknownObjectException
+from packaging.version import Version
+
+_TEST_TOKEN = "ghp_test"  # noqa: S105 — test-only dummy token, not a real secret
+_TEST_ADMIN_TOKEN = "admin-secret"  # noqa: S105 — test-only dummy token, not a real secret
 
 
 class TestParseRequirementsLine:
@@ -193,8 +200,6 @@ class TestIsOutdatedLogic:
 
     def test_outdated_when_behind(self) -> None:
         """is_outdated is True when installed < latest in series."""
-        from packaging.version import Version  # noqa: PLC0415
-
         installed = "3.1.4"
         latest = get_latest_for_branch("hotfix/3.1", ["3.1.4", "3.1.5"], installed)
         is_outdated = Version(latest) > Version(installed)
@@ -203,8 +208,6 @@ class TestIsOutdatedLogic:
 
     def test_not_outdated_when_current(self) -> None:
         """is_outdated is False when installed == latest."""
-        from packaging.version import Version  # noqa: PLC0415
-
         installed = "3.1.5"
         latest = get_latest_for_branch("hotfix/3.1", ["3.1.4", "3.1.5"], installed)
         is_outdated = Version(latest) > Version(installed)
@@ -217,14 +220,14 @@ class TestDependencyCollector:
 
     def test_init(self) -> None:
         """DependencyCollector initializes with a token and org."""
-        collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
+        collector = DependencyCollector(token=_TEST_TOKEN, org="canonical")
 
         assert collector.org == "canonical"
 
     def test_init_configures_timeout_and_retry(self) -> None:
         """DependencyCollector configures PyGithub timeout and retries."""
         with patch("craft_dashboard.collectors.dependencies.Github") as mock_github:
-            DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
+            DependencyCollector(token=_TEST_TOKEN, org="canonical")
 
         mock_github.assert_called_once_with(auth=ANY, timeout=30, retry=ANY)
         retry = mock_github.call_args.kwargs["retry"]
@@ -237,14 +240,14 @@ class TestDependencyCollector:
         """DependencyCollector stores craft_libraries."""
         libs = ["craft-application", "craft-cli"]
         collector = DependencyCollector(
-            token="ghp_test", org="canonical", craft_libraries=libs
+            token=_TEST_TOKEN, org="canonical", craft_libraries=libs
         )
 
         assert collector.craft_libraries == libs
 
     def test_init_default_craft_libraries(self) -> None:
         """craft_libraries defaults to an empty list."""
-        collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
+        collector = DependencyCollector(token=_TEST_TOKEN, org="canonical")
 
         assert collector.craft_libraries == []
 
@@ -295,7 +298,7 @@ class TestCollectDependenciesExceptionHandling:
     async def test_collect_dependencies_catches_missing_uv_lock(
         self, mocker, exc
     ) -> None:
-        collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
+        collector = DependencyCollector(token=_TEST_TOKEN, org="canonical")
 
         def get_contents(path: str, ref: str):
             if path == "uv.lock":
@@ -321,7 +324,7 @@ class TestCollectDependenciesExceptionHandling:
     async def test_collect_dependencies_propagates_non_github_exception_fetching_uv_lock(
         self, mocker
     ) -> None:
-        collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
+        collector = DependencyCollector(token=_TEST_TOKEN, org="canonical")
 
         def get_contents(path: str, ref: str):
             if path == "uv.lock":
@@ -352,7 +355,7 @@ class TestCollectDependenciesExceptionHandling:
     async def test_collect_dependencies_catches_missing_pyproject(
         self, mocker, exc
     ) -> None:
-        collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
+        collector = DependencyCollector(token=_TEST_TOKEN, org="canonical")
 
         def get_contents(path: str, ref: str):
             if path == "uv.lock":
@@ -379,7 +382,7 @@ class TestCollectDependenciesExceptionHandling:
     async def test_collect_dependencies_propagates_non_github_exception_fetching_pyproject(
         self, mocker
     ) -> None:
-        collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
+        collector = DependencyCollector(token=_TEST_TOKEN, org="canonical")
 
         def get_contents(path: str, ref: str):
             if path == "uv.lock":
@@ -404,14 +407,6 @@ class TestCollectDependenciesExceptionHandling:
 class TestGetPyPIVersionsAsync:
     async def test_pypi_timeout_returns_empty(self) -> None:
         """Network timeout returns empty list."""
-        from unittest.mock import AsyncMock
-
-        import httpx
-        from craft_dashboard.collectors.dependencies import (
-            _PYPI_CACHE,
-            get_pypi_versions,
-        )
-
         _PYPI_CACHE.pop("test-pkg-timeout", None)
 
         with patch("httpx.AsyncClient") as mock_cls:
@@ -427,13 +422,6 @@ class TestGetPyPIVersionsAsync:
 
     async def test_pypi_filters_prerelease_versions(self) -> None:
         """Pre-release versions are filtered from PyPI releases."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        from craft_dashboard.collectors.dependencies import (
-            _PYPI_CACHE,
-            get_pypi_versions,
-        )
-
         _PYPI_CACHE.pop("test-pkg-versions", None)
 
         response = MagicMock()

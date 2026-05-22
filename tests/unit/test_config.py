@@ -2,6 +2,7 @@
 
 import pathlib
 import textwrap
+import tomllib
 
 import pytest
 from craft_dashboard.config import load_config
@@ -66,5 +67,5 @@ class TestDashboardConfig:
         config_file = tmp_path / "bad.toml"
         config_file.write_text("this is not valid toml [[[")
 
-        with pytest.raises(Exception):
+        with pytest.raises(tomllib.TOMLDecodeError):
             load_config(config_file)

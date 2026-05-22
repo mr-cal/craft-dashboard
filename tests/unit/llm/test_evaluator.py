@@ -4,8 +4,10 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from craft_dashboard.llm.client import OpenRouterResponse
 from craft_dashboard.llm.evaluator import (
     IssueEvaluator,
+    _compute_content_hash,
     _needs_reevaluation,
     _parse_evaluation_response,
 )
@@ -96,8 +98,6 @@ class TestComputeContentHash:
 
     def test_new_comment_triggers_reevaluation(self) -> None:
         """Adding a new comment changes the content hash."""
-        from craft_dashboard.llm.evaluator import _compute_content_hash
-
         hash_no_comments = _compute_content_hash(
             "title", "body", "open", ["bug"], comments=[]
         )
@@ -120,8 +120,6 @@ class TestComputeContentHash:
 
     def test_same_comments_same_hash(self) -> None:
         """Same comments produce same hash."""
-        from craft_dashboard.llm.evaluator import _compute_content_hash
-
         comments = [
             {
                 "author": "alice",
@@ -137,8 +135,6 @@ class TestComputeContentHash:
 
     def test_comments_default_empty(self) -> None:
         """Hash is stable when comments kwarg is omitted."""
-        from craft_dashboard.llm.evaluator import _compute_content_hash
-
         h1 = _compute_content_hash("t", "b", "open", [])
         h2 = _compute_content_hash("t", "b", "open", [], comments=None)
 
@@ -146,8 +142,6 @@ class TestComputeContentHash:
 
     def test_comment_order_does_not_affect_hash(self) -> None:
         """Same comments in different order produce same hash."""
-        from craft_dashboard.llm.evaluator import _compute_content_hash
-
         comments_a = [
             {
                 "author": "alice",
@@ -176,8 +170,6 @@ class TestEvaluateIssueWithComments:
     @pytest.mark.asyncio
     async def test_evaluate_passes_comments_to_prompt(self) -> None:
         """Comments from call are forwarded to the prompt builders."""
-        from craft_dashboard.llm.client import OpenRouterResponse
-
         mock_summary_response = OpenRouterResponse(
             content="A bug report.",
             total_tokens=15,

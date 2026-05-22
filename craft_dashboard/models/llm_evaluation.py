@@ -59,7 +59,7 @@ class LLMEvaluation(Base):
     latest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     # Relationships
-    issue: Mapped["Issue"] = relationship(back_populates="evaluations")  # noqa: F821
+    issue: Mapped["Issue"] = relationship(back_populates="evaluations")  # noqa: F821 — SQLAlchemy forward reference for relationship
 
     def __repr__(self) -> str:
         """Return a string representation."""

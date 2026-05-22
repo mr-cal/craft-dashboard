@@ -68,7 +68,7 @@ class Snapshot(Base):
         return self.nm_median_pr_age
 
     # Relationships
-    project: Mapped["Project"] = relationship(back_populates="snapshots")  # noqa: F821
+    project: Mapped["Project"] = relationship(back_populates="snapshots")  # noqa: F821 — SQLAlchemy forward reference for relationship
 
     def __repr__(self) -> str:
         """Return a string representation."""

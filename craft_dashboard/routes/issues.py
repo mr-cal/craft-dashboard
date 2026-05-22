@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import Select
 
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.issue import Issue
@@ -48,7 +49,7 @@ def _compute_age_days(created_at: datetime | None) -> int:
     return (now - created).days
 
 
-def _apply_author_role_filter(query, author_role: str):  # noqa: ANN001
+def _apply_author_role_filter(query: Select, author_role: str) -> Select:
     """Apply author role filtering to the query."""
     if not author_role:
         return query
@@ -85,7 +86,7 @@ async def _query_issues(
     author_role: str = "",
     sort_by: str = "staleness",
     page: int = 1,
-    bots: list[str] | None = None,
+    bots: list[str] | None = None,  # noqa: ARG001 — reserved for future bot filtering feature
     search: str = "",
     items_per_page: int = DEFAULT_PER_PAGE,
 ) -> tuple[list[dict], int]:
