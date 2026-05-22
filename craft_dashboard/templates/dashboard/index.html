@@ -29,12 +29,12 @@
 {% set other = projects | rejectattr("category", "in", ["application", "library"]) | list %}
 
 {% macro project_table(items) %}
-<table>
+<table data-sortable>
   <thead>
     <tr>
-      <th>Project</th>
-      <th>Open Issues</th>
-      <th>Open PRs</th>
+      <th style="cursor: pointer;">Project</th>
+      <th style="cursor: pointer;">Open Issues</th>
+      <th style="cursor: pointer;">Open PRs</th>
     </tr>
   </thead>
   <tbody>
@@ -83,4 +83,7 @@
   </div>
 </div>
 {% endif %}
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/table-sort.js"></script>
 {% endblock %}
