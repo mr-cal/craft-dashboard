@@ -12,6 +12,13 @@ import github
 from github import Github, GithubException, UnknownObjectException
 from packaging.version import Version
 
+__all__ = [
+    "DependencyCollector",
+    "parse_requirements_line",
+    "parse_uv_lock",
+    "get_latest_for_branch",
+]
+
 logger = logging.getLogger(__name__)
 
 _PYPI_CACHE: dict[str, list[str]] = {}

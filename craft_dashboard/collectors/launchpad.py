@@ -9,6 +9,8 @@ if TYPE_CHECKING:
 
 import sqlalchemy as sa
 
+__all__ = ["LaunchpadCollector"]
+
 logger = logging.getLogger(__name__)
 
 _OPEN_STATUSES = frozenset(

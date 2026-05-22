@@ -10,6 +10,8 @@ import sqlalchemy as sa
 from github import Github, GithubException
 from github.Issue import Issue as GHIssue
 
+__all__ = ["GitHubCollector"]
+
 logger = logging.getLogger(__name__)
 
 
