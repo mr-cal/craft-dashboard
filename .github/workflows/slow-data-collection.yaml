@@ -27,7 +27,6 @@ jobs:
         with:
           activate-environment: true
           enable-cache: true
-          cache-suffix: ${{ steps.runner-info.outputs.cache-hash }}
           ignore-nothing-to-cache: true
       - name: install project
         run: |
