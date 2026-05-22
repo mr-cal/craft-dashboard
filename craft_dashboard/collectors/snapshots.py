@@ -7,6 +7,24 @@ from datetime import UTC, date, datetime
 logger = logging.getLogger(__name__)
 
 
+def _increment_counts(
+    counts: dict[str, int],
+    issue_type: str,
+    is_internal: bool,
+    is_bot: bool,
+    prefix: str,
+) -> None:
+    """Increment open/closed counts based on author role."""
+    type_key = "issues" if issue_type == "issue" else "prs"
+    counts[f"{prefix}_{type_key}"] += 1
+    if is_internal:
+        counts[f"{prefix}_{type_key}_internal"] += 1
+    elif not is_bot:
+        counts[f"{prefix}_{type_key}_external"] += 1
+    if is_bot:
+        counts[f"{prefix}_{type_key}_bots"] += 1
+
+
 def compute_snapshot_counts(
     issues: list[dict],
     maintainers: set[str],
@@ -77,31 +95,30 @@ def compute_snapshot_counts(
                 ca = created_at.replace(tzinfo=UTC) if created_at.tzinfo is None else created_at
                 age_days = max(0, (today_dt - ca).days)
 
+            _increment_counts(
+                counts,
+                issue_type=issue["issue_type"],
+                is_internal=is_internal,
+                is_bot=is_bot,
+                prefix="open",
+            )
             if issue["issue_type"] == "issue":
-                counts["open_issues"] += 1
                 open_issue_ages.append(age_days)
                 if is_internal:
-                    counts["open_issues_internal"] += 1
                     open_issue_ages_internal.append(age_days)
                 elif not is_bot:
-                    counts["open_issues_external"] += 1
                     open_issue_ages_external.append(age_days)
                 if is_bot:
-                    counts["open_issues_bots"] += 1
                     open_issue_ages_bots.append(age_days)
                 if "bug" in issue.get("labels", []):
                     counts["open_bugs"] += 1
             elif issue["issue_type"] == "pull_request":
-                counts["open_prs"] += 1
                 open_pr_ages.append(age_days)
                 if is_internal:
-                    counts["open_prs_internal"] += 1
                     open_pr_ages_internal.append(age_days)
                 elif not is_bot:
-                    counts["open_prs_external"] += 1
                     open_pr_ages_external.append(age_days)
                 if is_bot:
-                    counts["open_prs_bots"] += 1
                     open_pr_ages_bots.append(age_days)
 
         elif issue["state"] in ("closed", "merged"):
@@ -109,22 +126,13 @@ def compute_snapshot_counts(
             if closed_at:
                 ca_closed = closed_at.replace(tzinfo=UTC) if closed_at.tzinfo is None else closed_at
                 if ca_closed.date() == today:
-                    if issue["issue_type"] == "issue":
-                        counts["closed_issues"] += 1
-                        if is_internal:
-                            counts["closed_issues_internal"] += 1
-                        elif not is_bot:
-                            counts["closed_issues_external"] += 1
-                        if is_bot:
-                            counts["closed_issues_bots"] += 1
-                    elif issue["issue_type"] == "pull_request":
-                        counts["closed_prs"] += 1
-                        if is_internal:
-                            counts["closed_prs_internal"] += 1
-                        elif not is_bot:
-                            counts["closed_prs_external"] += 1
-                        if is_bot:
-                            counts["closed_prs_bots"] += 1
+                    _increment_counts(
+                        counts,
+                        issue_type=issue["issue_type"],
+                        is_internal=is_internal,
+                        is_bot=is_bot,
+                        prefix="closed",
+                    )
 
     if open_issue_ages:
         counts["median_issue_age"] = int(statistics.median(open_issue_ages))

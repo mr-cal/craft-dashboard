@@ -2,7 +2,7 @@
 
 from datetime import UTC, date, datetime, timedelta
 
-from craft_dashboard.collectors.snapshots import compute_snapshot_counts
+from craft_dashboard.collectors.snapshots import _increment_counts, compute_snapshot_counts
 
 _TODAY = date(2024, 6, 1)
 
@@ -359,3 +359,59 @@ class TestSnapshotNaiveClosedAt:
         result = compute_snapshot_counts(issues, maintainers=set(), today=today)
 
         assert result["closed_issues"] == 1
+
+
+class TestIncrementCounts:
+    def test_counts_internal_external_and_bot_roles(self) -> None:
+        counts = {
+            "open_issues": 0,
+            "open_issues_internal": 0,
+            "open_issues_external": 0,
+            "open_issues_bots": 0,
+            "closed_prs": 0,
+            "closed_prs_internal": 0,
+            "closed_prs_external": 0,
+            "closed_prs_bots": 0,
+        }
+
+        _increment_counts(counts, issue_type="issue", is_internal=True, is_bot=False, prefix="open")
+        _increment_counts(counts, issue_type="pull_request", is_internal=False, is_bot=False, prefix="closed")
+        _increment_counts(counts, issue_type="pull_request", is_internal=False, is_bot=True, prefix="closed")
+
+        assert counts == {
+            "open_issues": 1,
+            "open_issues_internal": 1,
+            "open_issues_external": 0,
+            "open_issues_bots": 0,
+            "closed_prs": 2,
+            "closed_prs_internal": 0,
+            "closed_prs_external": 1,
+            "closed_prs_bots": 1,
+        }
+
+    def test_compute_snapshot_counts_with_mixed_open_and_closed_items(self) -> None:
+        maintainers = {"maintainer"}
+        issues = [
+            _issue("open", author="external", author_is_bot=False),
+            _issue("open", issue_type="pull_request", author="maintainer", author_is_bot=False),
+            _issue("closed", author="maintainer", author_is_bot=False, closed_days_ago=0),
+            _issue(
+                "merged",
+                issue_type="pull_request",
+                author="renovate[bot]",
+                author_is_bot=True,
+                closed_days_ago=0,
+            ),
+        ]
+
+        result = compute_snapshot_counts(issues=issues, maintainers=maintainers, today=_TODAY)
+
+        assert result["open_issues"] == 1
+        assert result["open_issues_external"] == 1
+        assert result["open_prs"] == 1
+        assert result["open_prs_internal"] == 1
+        assert result["closed_issues"] == 1
+        assert result["closed_issues_internal"] == 1
+        assert result["closed_prs"] == 1
+        assert result["closed_prs_bots"] == 1
+        assert result["closed_prs_external"] == 0
