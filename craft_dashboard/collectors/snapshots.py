@@ -2,7 +2,7 @@
 
 import logging
 import statistics
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,6 @@ def compute_snapshot_counts(
     if today is None:
         today = date.today()
     today_dt = datetime.combine(today, datetime.min.time(), tzinfo=UTC)
-    one_day_ago = today_dt - timedelta(days=1)
 
     counts: dict[str, int] = {
         "open_issues": 0,
@@ -79,10 +78,9 @@ def compute_snapshot_counts(
                     counts["open_prs_external"] += 1
 
         elif issue["state"] in ("closed", "merged"):
-            # Count issues closed on this snapshot day
+            # Count issues closed exactly on this snapshot day
             if closed_at:
-                ca = closed_at.replace(tzinfo=UTC) if closed_at.tzinfo is None else closed_at
-                if ca >= one_day_ago:
+                if closed_at.date() == today:
                     if issue["issue_type"] == "issue":
                         counts["closed_issues"] += 1
                         if is_internal:

@@ -28,6 +28,23 @@ function rollingAverage(data, windowSize) {
   return result;
 }
 
+// Like rollingAverage but treats null/zero values as missing (skips them).
+// Returns null when all values in the window are null/zero, so Chart.js can
+// span across gaps with spanGaps: true instead of dropping to zero.
+function rollingAverageNullable(data, windowSize) {
+  const result = [];
+  for (let i = 0; i < data.length; i++) {
+    const start = Math.max(0, i - windowSize + 1);
+    const window = data.slice(start, i + 1).filter(v => v !== null && v !== 0);
+    if (window.length === 0) {
+      result.push(null);
+    } else {
+      result.push(window.reduce((sum, val) => sum + val, 0) / window.length);
+    }
+  }
+  return result;
+}
+
 function createCheckboxItem(container, { id, label, checked, onChange, color }) {
   const labelEl = document.createElement("label");
   labelEl.style.cssText = "display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin-bottom:0.3rem;";
@@ -187,7 +204,7 @@ function updateMedianAgeChart() {
   
   medianAgeChart.data.datasets = selected.map((name) => {
     const rawData = filteredProjects[name][dataKey];
-    const smoothedData = rollingAverage(rawData, 28); // 4-week rolling average
+    const smoothedData = rollingAverageNullable(rawData, 28); // 4-week rolling average, skips zeros
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
     const color = colors[colorIdx % colors.length];
     
@@ -199,6 +216,7 @@ function updateMedianAgeChart() {
       borderWidth: 2,
       fill: false,
       tension: 0.1,
+      spanGaps: true,
     };
   });
   
