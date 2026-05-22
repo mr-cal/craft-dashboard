@@ -13,6 +13,7 @@ class Project(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    # Valid categories: "application", "library"
     category: Mapped[str] = mapped_column(String(50), nullable=False)
     github_org: Mapped[str] = mapped_column(String(255), default="canonical")
     launchpad_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
