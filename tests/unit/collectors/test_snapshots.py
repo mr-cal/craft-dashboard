@@ -245,6 +245,17 @@ class TestComputeSnapshotCounts:
         assert result["open_issues_bots"] == 0
         assert result["open_issues"] == 2
 
+    def test_bot_open_issue_not_in_external(self) -> None:
+        """Bot-authored open issue increments only open_issues_bots, not open_issues_external."""
+        issues = [
+            _issue("open", author="renovate[bot]", author_is_bot=True),
+        ]
+
+        result = compute_snapshot_counts(issues=issues, maintainers=set(), today=_TODAY)
+
+        assert result["open_issues_bots"] == 1
+        assert result["open_issues_external"] == 0
+
     def test_bot_closed_issue_counted_in_closed_bots(self) -> None:
         """Issue closed today by a bot is counted in closed_issues_bots."""
         issues = [

@@ -70,7 +70,7 @@ def compute_snapshot_counts(
                 open_issue_ages.append(age_days)
                 if is_internal:
                     counts["open_issues_internal"] += 1
-                else:
+                elif not is_bot:
                     counts["open_issues_external"] += 1
                 if is_bot:
                     counts["open_issues_bots"] += 1
@@ -81,7 +81,7 @@ def compute_snapshot_counts(
                 open_pr_ages.append(age_days)
                 if is_internal:
                     counts["open_prs_internal"] += 1
-                else:
+                elif not is_bot:
                     counts["open_prs_external"] += 1
                 if is_bot:
                     counts["open_prs_bots"] += 1
@@ -94,7 +94,7 @@ def compute_snapshot_counts(
                         counts["closed_issues"] += 1
                         if is_internal:
                             counts["closed_issues_internal"] += 1
-                        else:
+                        elif not is_bot:
                             counts["closed_issues_external"] += 1
                         if is_bot:
                             counts["closed_issues_bots"] += 1
@@ -102,7 +102,7 @@ def compute_snapshot_counts(
                         counts["closed_prs"] += 1
                         if is_internal:
                             counts["closed_prs_internal"] += 1
-                        else:
+                        elif not is_bot:
                             counts["closed_prs_external"] += 1
                         if is_bot:
                             counts["closed_prs_bots"] += 1

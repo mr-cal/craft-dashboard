@@ -417,9 +417,11 @@ function getCurrentView() {
   if (!maintainers && !contributors && !bots) return "none";
   if (maintainers && contributors && bots) return "all";
   if (maintainers && !contributors && !bots) return "internal";
-  if (!maintainers && !contributors && bots) return "bots";
   if (!maintainers && contributors && !bots) return "external";
-  // Mixed cases - show all
+  if (!maintainers && !contributors && bots) return "bots";
+  // Mixed cases: approximate with closest available series
+  if (!maintainers && contributors && bots) return "external";  // non-maintainer (contributors + bots)
+  // maintainers + contributors or maintainers + bots → show all (best approximation)
   return "all";
 }
 
