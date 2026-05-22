@@ -182,7 +182,6 @@ async def issue_list(
         author_role=author_role,
         sort_by=sort,
         page=page,
-        bots=getattr(request.app.state.config, "bots", []),
     )
 
     project_result = await session.execute(
@@ -232,7 +231,6 @@ async def issue_table_partial(
         author_role=author_role,
         sort_by=sort,
         page=page,
-        bots=getattr(request.app.state.config, "bots", []),
     )
 
     return templates.TemplateResponse(

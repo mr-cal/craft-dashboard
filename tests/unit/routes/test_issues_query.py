@@ -3,24 +3,20 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
+from sqlalchemy import select
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
-from craft_dashboard.routes.issues import _compute_age_days, _query_issues
+from craft_dashboard.routes.issues import (
+    _apply_author_role_filter,
+    _compute_age_days,
+    _query_issues,
+)
 
 if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"
-
-# Patch PostgreSQL-specific partial index for SQLite compatibility
-_idx = next(
-    (i for i in LLMEvaluation.__table__.indexes if i.name == "ix_llm_evaluations_latest_issue"),
-    None,
-)
-if _idx is not None:
-    _idx.dialect_options.pop("postgresql", None)
-
 
 class FrozenDateTime(datetime):
     """Frozen datetime for deterministic age calculations."""
@@ -479,7 +475,6 @@ class TestQueryIssuesAuthorRole:
             test_db_session,
             author_role="bot",
             sort_by="title",
-            bots=["renovate[bot]"],
         )
 
         assert len(issues) == 1
@@ -531,6 +526,29 @@ class TestQueryIssuesAuthorRoleColumn:
         )
 
         assert [issue["author"] for issue in issues] == ["bob"]
+
+
+class TestApplyAuthorRoleFilter:
+    async def test_combines_maintainer_and_bot_filters_using_columns(self, test_db_session) -> None:
+        await _seed_author_role_column_issues(test_db_session)
+
+        query = _apply_author_role_filter(
+            select(Issue.author),
+            "maintainer,bot",
+        ).order_by(Issue.author)
+
+        authors = list((await test_db_session.execute(query)).scalars())
+
+        assert authors == ["alice", "dependabot"]
+
+    async def test_empty_author_role_leaves_query_unfiltered(self, test_db_session) -> None:
+        await _seed_author_role_column_issues(test_db_session)
+
+        query = _apply_author_role_filter(select(Issue.author), "").order_by(Issue.author)
+
+        authors = list((await test_db_session.execute(query)).scalars())
+
+        assert authors == ["alice", "bob", "dependabot"]
 
 
 class TestQueryIssuesSort:
