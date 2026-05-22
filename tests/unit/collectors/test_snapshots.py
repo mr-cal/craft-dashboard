@@ -55,6 +55,12 @@ class TestComputeSnapshotCounts:
             "open_bugs": 0,
             "median_issue_age": 0,
             "median_pr_age": 0,
+            "nm_median_issue_age": 0,
+            "nm_median_pr_age": 0,
+            "median_issue_age_internal": 0,
+            "median_pr_age_internal": 0,
+            "median_issue_age_bots": 0,
+            "median_pr_age_bots": 0,
             "closed_issues": 0,
             "closed_prs": 0,
             "closed_issues_external": 0,
@@ -267,3 +273,52 @@ class TestComputeSnapshotCounts:
 
         assert result["closed_issues_bots"] == 1
         assert result["closed_issues"] == 2
+
+    def test_median_age_internal_external_bots(self) -> None:
+        """Verify per-group median ages are computed separately."""
+        maintainers = {"alice"}
+        issues = [
+            _issue("open", author="alice", author_is_bot=False, created_days_ago=10),   # internal
+            _issue("open", author="alice", author_is_bot=False, created_days_ago=30),   # internal
+            _issue("open", author="bob", author_is_bot=False, created_days_ago=50),     # external
+            _issue("open", author="carol", author_is_bot=False, created_days_ago=70),   # external
+            _issue("open", author="bot1", author_is_bot=True, created_days_ago=5),      # bot
+            _issue("open", author="bot2", author_is_bot=True, created_days_ago=15),     # bot
+        ]
+
+        result = compute_snapshot_counts(issues=issues, maintainers=maintainers, today=_TODAY)
+
+        # All ages: 10, 30, 50, 70, 5, 15 -> median of sorted [5,10,15,30,50,70] = (15+30)/2 = 22
+        assert result["median_issue_age"] == 22
+        # Internal: 10, 30 -> median = 20
+        assert result["median_issue_age_internal"] == 20
+        # External (non-maintainer, non-bot): 50, 70 -> median = 60
+        assert result["nm_median_issue_age"] == 60
+        # Bots: 5, 15 -> median = 10
+        assert result["median_issue_age_bots"] == 10
+
+    def test_median_age_no_bots_zero(self) -> None:
+        """When there are no bot issues, median_issue_age_bots should be 0."""
+        issues = [
+            _issue("open", author="alice", author_is_bot=False, created_days_ago=10),
+            _issue("open", author="bob", author_is_bot=False, created_days_ago=20),
+        ]
+
+        result = compute_snapshot_counts(issues=issues, maintainers=set(), today=_TODAY)
+
+        assert result["median_issue_age_bots"] == 0
+
+    def test_median_age_per_group_prs(self) -> None:
+        """Verify per-group median ages work for PRs too."""
+        maintainers = {"maintainer1"}
+        issues = [
+            _issue("open", issue_type="pull_request", author="maintainer1", created_days_ago=20),
+            _issue("open", issue_type="pull_request", author="external1", created_days_ago=40),
+            _issue("open", issue_type="pull_request", author="bot1", author_is_bot=True, created_days_ago=8),
+        ]
+
+        result = compute_snapshot_counts(issues=issues, maintainers=maintainers, today=_TODAY)
+
+        assert result["median_pr_age_internal"] == 20
+        assert result["nm_median_pr_age"] == 40
+        assert result["median_pr_age_bots"] == 8

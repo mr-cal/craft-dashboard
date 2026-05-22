@@ -210,7 +210,13 @@ function updateMedianAgeChart() {
   const firstProject = selected[0];
   medianAgeChart.data.labels = filteredProjects[firstProject].dates;
   
-  const dataKey = "median_issue_age"; // We don't have separate external median age yet
+  const dataKey = getDataKey("median_issue_age");
+  if (dataKey === null) {
+    medianAgeChart.data.labels = [];
+    medianAgeChart.data.datasets = [];
+    medianAgeChart.update();
+    return;
+  }
   
   medianAgeChart.data.datasets = selected.map((name) => {
     const rawData = filteredProjects[name][dataKey];
@@ -350,8 +356,14 @@ function updateSnapshotCharts() {
   ];
   
   // Median Age Chart
-  const issueAgeKey = view === "external" ? "nm_median_issue_age" : "median_issue_age";
-  const prAgeKey = view === "external" ? "nm_median_pr_age" : "median_pr_age";
+  const issueAgeKey = view === "external" ? "nm_median_issue_age"
+    : view === "internal" ? "median_issue_age_internal"
+    : view === "bots" ? "median_issue_age_bots"
+    : "median_issue_age";
+  const prAgeKey = view === "external" ? "nm_median_pr_age"
+    : view === "internal" ? "median_pr_age_internal"
+    : view === "bots" ? "median_pr_age_bots"
+    : "median_pr_age";
   
   snapshotAgeChart.data.labels = labels;
   snapshotAgeChart.data.datasets = [
@@ -478,9 +490,14 @@ function applyDateFilter() {
         dates: [],
         open_issues: [],
         open_issues_external: [],
+        open_issues_bots: [],
         median_issue_age: [],
+        median_issue_age_internal: [],
+        nm_median_issue_age: [],
+        median_issue_age_bots: [],
         closed_issues: [],
         closed_issues_external: [],
+        closed_issues_bots: [],
       };
     } else {
       // Slice dates and all data arrays

@@ -193,6 +193,12 @@ async def trends_all_data(
             Snapshot.open_bugs,
             Snapshot.median_issue_age,
             Snapshot.median_pr_age,
+            Snapshot.nm_median_issue_age,
+            Snapshot.nm_median_pr_age,
+            Snapshot.median_issue_age_internal,
+            Snapshot.median_pr_age_internal,
+            Snapshot.median_issue_age_bots,
+            Snapshot.median_pr_age_bots,
             Snapshot.closed_issues,
             Snapshot.closed_prs,
             Snapshot.closed_issues_external,
@@ -220,6 +226,12 @@ async def trends_all_data(
                 "open_prs_bots": [],
                 "median_issue_age": [],
                 "median_pr_age": [],
+                "nm_median_issue_age": [],
+                "nm_median_pr_age": [],
+                "median_issue_age_internal": [],
+                "median_pr_age_internal": [],
+                "median_issue_age_bots": [],
+                "median_pr_age_bots": [],
                 "closed_issues": [],
                 "closed_prs": [],
                 "closed_issues_external": [],
@@ -237,6 +249,12 @@ async def trends_all_data(
         projects[name]["open_prs_bots"].append(row.open_prs_bots)
         projects[name]["median_issue_age"].append(row.median_issue_age)
         projects[name]["median_pr_age"].append(row.median_pr_age)
+        projects[name]["nm_median_issue_age"].append(row.nm_median_issue_age)
+        projects[name]["nm_median_pr_age"].append(row.nm_median_pr_age)
+        projects[name]["median_issue_age_internal"].append(row.median_issue_age_internal)
+        projects[name]["median_pr_age_internal"].append(row.median_pr_age_internal)
+        projects[name]["median_issue_age_bots"].append(row.median_issue_age_bots)
+        projects[name]["median_pr_age_bots"].append(row.median_pr_age_bots)
         projects[name]["closed_issues"].append(row.closed_issues)
         projects[name]["closed_prs"].append(row.closed_prs)
         projects[name]["closed_issues_external"].append(row.closed_issues_external)
@@ -266,8 +284,14 @@ async def trends_all_data(
             "closed_issues_bots", "closed_prs_bots",
             "open_bugs",
         ]
+        median_age_keys = [
+            "median_issue_age", "median_pr_age",
+            "nm_median_issue_age", "nm_median_pr_age",
+            "median_issue_age_internal", "median_pr_age_internal",
+            "median_issue_age_bots", "median_pr_age_bots",
+        ]
         all_projects: dict[str, list] = {"dates": all_dates_sorted, **{k: [] for k in scalar_keys},
-                                          "median_issue_age": [], "median_pr_age": []}
+                                          **{k: [] for k in median_age_keys}}
 
         for d in all_dates_sorted:
             for k in scalar_keys:
@@ -278,16 +302,13 @@ async def trends_all_data(
                         total += data[k][idx]
                 all_projects[k].append(total)
             # Average of medians across projects that have data for this date
-            issue_ages = []
-            pr_ages = []
-            for name, data in projects.items():
-                idx = proj_by_date[name].get(d)
-                if idx is not None and data["median_issue_age"][idx] > 0:
-                    issue_ages.append(data["median_issue_age"][idx])
-                if idx is not None and data["median_pr_age"][idx] > 0:
-                    pr_ages.append(data["median_pr_age"][idx])
-            all_projects["median_issue_age"].append(int(sum(issue_ages) / len(issue_ages)) if issue_ages else 0)
-            all_projects["median_pr_age"].append(int(sum(pr_ages) / len(pr_ages)) if pr_ages else 0)
+            for mk in median_age_keys:
+                ages = []
+                for name, data in projects.items():
+                    idx = proj_by_date[name].get(d)
+                    if idx is not None and data[mk][idx] > 0:
+                        ages.append(data[mk][idx])
+                all_projects[mk].append(int(sum(ages) / len(ages)) if ages else 0)
 
         projects["all-projects"] = all_projects
     
@@ -316,9 +337,12 @@ async def trends_all_data(
             "bots_open_prs": data["open_prs_bots"][idx],
             "median_issue_age": data["median_issue_age"][idx],
             "median_pr_age": data["median_pr_age"][idx],
-            # For external median ages, we don't have separate tracking yet
-            "nm_median_issue_age": data["median_issue_age"][idx],  # Approximation
-            "nm_median_pr_age": data["median_pr_age"][idx],  # Approximation
+            "nm_median_issue_age": data["nm_median_issue_age"][idx],
+            "nm_median_pr_age": data["nm_median_pr_age"][idx],
+            "median_issue_age_internal": data["median_issue_age_internal"][idx],
+            "median_pr_age_internal": data["median_pr_age_internal"][idx],
+            "median_issue_age_bots": data["median_issue_age_bots"][idx],
+            "median_pr_age_bots": data["median_pr_age_bots"][idx],
             "closed_issues_year": closed_issues_year,
             "closed_prs_year": closed_prs_year,
             "nm_closed_issues_year": nm_closed_issues_year,
@@ -334,9 +358,14 @@ async def trends_all_data(
         "closed_issues_year", "closed_prs_year",
         "nm_closed_issues_year", "nm_closed_prs_year",
     ]
+    median_snap_keys = [
+        "median_issue_age", "median_pr_age",
+        "nm_median_issue_age", "nm_median_pr_age",
+        "median_issue_age_internal", "median_pr_age_internal",
+        "median_issue_age_bots", "median_pr_age_bots",
+    ]
     ap_snap: dict[str, int] = {k: 0 for k in scalar_snap_keys}
-    ap_snap.update({"median_issue_age": 0, "median_pr_age": 0,
-                    "nm_median_issue_age": 0, "nm_median_pr_age": 0})
+    ap_snap.update({k: 0 for k in median_snap_keys})
     n_projects_with_issue_median = 0
     n_projects_with_pr_median = 0
 
@@ -344,20 +373,24 @@ async def trends_all_data(
         for k in scalar_snap_keys:
             ap_snap[k] += proj_snap.get(k, 0)
         if proj_snap.get("median_issue_age", 0) > 0:
-            ap_snap["median_issue_age"] += proj_snap["median_issue_age"]
-            ap_snap["nm_median_issue_age"] += proj_snap.get("nm_median_issue_age", 0)
             n_projects_with_issue_median += 1
+            for mk in ["median_issue_age", "nm_median_issue_age",
+                       "median_issue_age_internal", "median_issue_age_bots"]:
+                ap_snap[mk] += proj_snap.get(mk, 0)
         if proj_snap.get("median_pr_age", 0) > 0:
-            ap_snap["median_pr_age"] += proj_snap["median_pr_age"]
-            ap_snap["nm_median_pr_age"] += proj_snap.get("nm_median_pr_age", 0)
             n_projects_with_pr_median += 1
+            for mk in ["median_pr_age", "nm_median_pr_age",
+                       "median_pr_age_internal", "median_pr_age_bots"]:
+                ap_snap[mk] += proj_snap.get(mk, 0)
 
     if n_projects_with_issue_median > 0:
-        ap_snap["median_issue_age"] = ap_snap["median_issue_age"] // n_projects_with_issue_median
-        ap_snap["nm_median_issue_age"] = ap_snap["nm_median_issue_age"] // n_projects_with_issue_median
+        for mk in ["median_issue_age", "nm_median_issue_age",
+                   "median_issue_age_internal", "median_issue_age_bots"]:
+            ap_snap[mk] = ap_snap[mk] // n_projects_with_issue_median
     if n_projects_with_pr_median > 0:
-        ap_snap["median_pr_age"] = ap_snap["median_pr_age"] // n_projects_with_pr_median
-        ap_snap["nm_median_pr_age"] = ap_snap["nm_median_pr_age"] // n_projects_with_pr_median
+        for mk in ["median_pr_age", "nm_median_pr_age",
+                   "median_pr_age_internal", "median_pr_age_bots"]:
+            ap_snap[mk] = ap_snap[mk] // n_projects_with_pr_median
 
     snapshot["all-projects"] = ap_snap
 

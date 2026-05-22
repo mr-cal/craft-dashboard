@@ -30,6 +30,12 @@ class Snapshot(Base):
     # Median ages (in days)
     median_issue_age: Mapped[int] = mapped_column(Integer, default=0)
     median_pr_age: Mapped[int] = mapped_column(Integer, default=0)
+    nm_median_issue_age: Mapped[int] = mapped_column(Integer, default=0)
+    nm_median_pr_age: Mapped[int] = mapped_column(Integer, default=0)
+    median_issue_age_internal: Mapped[int] = mapped_column(Integer, default=0)
+    median_pr_age_internal: Mapped[int] = mapped_column(Integer, default=0)
+    median_issue_age_bots: Mapped[int] = mapped_column(Integer, default=0)
+    median_pr_age_bots: Mapped[int] = mapped_column(Integer, default=0)
     
     # Closed counts
     closed_issues: Mapped[int] = mapped_column(Integer, default=0)
