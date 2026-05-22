@@ -51,6 +51,16 @@ class Snapshot(Base):
     closed_issues_bots: Mapped[int] = mapped_column(Integer, default=0)
     closed_prs_bots: Mapped[int] = mapped_column(Integer, default=0)
 
+    @property
+    def median_issue_age_external(self) -> int:
+        """Alias for nm_median_issue_age (non-maintainer = external)."""
+        return self.nm_median_issue_age
+
+    @property
+    def median_pr_age_external(self) -> int:
+        """Alias for nm_median_pr_age (non-maintainer = external)."""
+        return self.nm_median_pr_age
+
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="snapshots")  # noqa: F821
 

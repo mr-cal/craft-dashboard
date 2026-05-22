@@ -1,5 +1,7 @@
 """Tests for the Snapshot model."""
 
+from datetime import date
+
 from craft_dashboard.models.snapshot import Snapshot
 
 
@@ -37,3 +39,15 @@ class TestSnapshotModel:
             and {col.name for col in c.columns} == {"project_id", "snapshot_date"}
         ]
         assert len(unique_constraints) == 1
+
+    def test_external_aliases_return_non_maintainer_values(self) -> None:
+        """External median age aliases should mirror the non-maintainer fields."""
+        snapshot = Snapshot(
+            project_id=1,
+            snapshot_date=date(2024, 1, 1),
+            nm_median_issue_age=12,
+            nm_median_pr_age=7,
+        )
+
+        assert snapshot.median_issue_age_external == snapshot.nm_median_issue_age
+        assert snapshot.median_pr_age_external == snapshot.nm_median_pr_age
