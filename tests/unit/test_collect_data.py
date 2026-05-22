@@ -157,6 +157,119 @@ class TestCollectGithubLogging:
         assert "Generated snapshot for snapcraft in " in caplog.text
 
 
+class TestReleaseCollectionIndependentOfRefresh:
+    """Regression: releases must be collected even when refresh is not due."""
+
+    @pytest.mark.asyncio
+    async def test_releases_collected_when_refresh_not_due(
+        self, monkeypatch, caplog
+    ) -> None:
+        token = ("tok", "en")[0] + ("tok", "en")[1]
+        settings = SimpleNamespace(github_token=token, refresh_age_days=7)
+        config = SimpleNamespace(
+            craft_projects=["snapcraft"],
+            craft_applications=["snapcraft"],
+            craft_libraries=[],
+            maintainers=["alice"],
+            hotfix_min_versions={},
+            refresh_interval_days=7,
+        )
+        dep_collector = MagicMock()
+        dep_collector.collect_dependencies = AsyncMock(return_value=0)
+        gh_collector = MagicMock()
+        gh_collector.collect_issues = AsyncMock(return_value=0)
+        gh_collector.collect_releases = AsyncMock(return_value=5)
+
+        monkeypatch.setattr(
+            collect_data,
+            "DependencyCollector",
+            lambda token, org, craft_libraries: dep_collector,
+        )
+        monkeypatch.setattr(
+            collect_data,
+            "GitHubCollector",
+            lambda token, org, maintainers: gh_collector,
+        )
+        monkeypatch.setattr(
+            collect_data, "_get_or_create_project", AsyncMock(return_value=101)
+        )
+        monkeypatch.setattr(collect_data, "generate_snapshot", AsyncMock())
+        monkeypatch.setattr(collect_data, "update_refresh_schedule", AsyncMock())
+        monkeypatch.setattr(collect_data, "record_refresh_error", AsyncMock())
+        monkeypatch.setattr(
+            collect_data, "is_due_for_refresh", lambda next_refresh: False
+        )
+        monkeypatch.setattr(collect_data.asyncio, "sleep", AsyncMock())
+
+        caplog.set_level(logging.INFO)
+
+        await collect_data._collect_github(
+            settings,
+            config,
+            _make_session_factory(),
+            projects=["snapcraft"],
+            run_started_at=collect_data.time.monotonic(),
+        )
+
+        gh_collector.collect_releases.assert_called_once()
+        assert "releases collected (5 branches)" in caplog.text
+        gh_collector.collect_issues.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_releases_not_collected_for_non_application(
+        self, monkeypatch, caplog
+    ) -> None:
+        """Libraries should NOT have releases collected."""
+        token = ("tok", "en")[0] + ("tok", "en")[1]
+        settings = SimpleNamespace(github_token=token, refresh_age_days=7)
+        config = SimpleNamespace(
+            craft_projects=["craft-parts"],
+            craft_applications=[],  # craft-parts is a library, not app
+            craft_libraries=["craft-parts"],
+            maintainers=["alice"],
+            hotfix_min_versions={},
+            refresh_interval_days=7,
+        )
+        dep_collector = MagicMock()
+        dep_collector.collect_dependencies = AsyncMock(return_value=0)
+        gh_collector = MagicMock()
+        gh_collector.collect_issues = AsyncMock(return_value=0)
+        gh_collector.collect_releases = AsyncMock(return_value=0)
+
+        monkeypatch.setattr(
+            collect_data,
+            "DependencyCollector",
+            lambda token, org, craft_libraries: dep_collector,
+        )
+        monkeypatch.setattr(
+            collect_data,
+            "GitHubCollector",
+            lambda token, org, maintainers: gh_collector,
+        )
+        monkeypatch.setattr(
+            collect_data, "_get_or_create_project", AsyncMock(return_value=201)
+        )
+        monkeypatch.setattr(collect_data, "generate_snapshot", AsyncMock())
+        monkeypatch.setattr(collect_data, "update_refresh_schedule", AsyncMock())
+        monkeypatch.setattr(collect_data, "record_refresh_error", AsyncMock())
+        monkeypatch.setattr(
+            collect_data, "is_due_for_refresh", lambda next_refresh: False
+        )
+        monkeypatch.setattr(collect_data.asyncio, "sleep", AsyncMock())
+
+        caplog.set_level(logging.INFO)
+
+        await collect_data._collect_github(
+            settings,
+            config,
+            _make_session_factory(),
+            projects=["craft-parts"],
+            run_started_at=collect_data.time.monotonic(),
+        )
+
+        gh_collector.collect_releases.assert_not_called()
+
+
 class TestCollectLaunchpadLogging:
     @pytest.mark.asyncio
     async def test_collect_launchpad_logs_bug_collection_timing(
