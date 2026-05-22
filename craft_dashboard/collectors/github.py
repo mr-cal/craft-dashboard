@@ -5,6 +5,7 @@ import logging
 import time
 from datetime import UTC, datetime, timedelta
 
+import github
 import sqlalchemy as sa
 from github import Github
 from github.Issue import Issue as GHIssue
@@ -164,7 +165,7 @@ class GitHubCollector:
             maintainers: List of GitHub usernames considered maintainers.
 
         """
-        self.gh = Github(token)
+        self.gh = Github(auth=github.Auth.Token(token))
         self.org = org
         self.maintainers = set(maintainers or [])
 
