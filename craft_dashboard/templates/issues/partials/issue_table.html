@@ -56,12 +56,15 @@
       </tr>
       {% else %}
       <tr>
-        <td colspan="7">No issues found matching the current filters.</td>
+        <td colspan="7">
+          No issues found matching the current filters.
+          <a href="/issues">Clear all filters</a> to see all issues.
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 
-  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&author_role=" ~ (filter_author_role or "") ~ "&sort=" ~ (sort_by or "staleness") %}
+  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&author_role=" ~ (filter_author_role or "") ~ "&sort=" ~ (sort_by or "staleness") ~ "&search=" ~ (filter_search or "") ~ "&per_page=" ~ (per_page or 50) %}
   {% include "components/pagination.html" %}
 </div>

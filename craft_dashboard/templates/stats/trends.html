@@ -10,6 +10,9 @@
     <div class="col-12">
       {% include "stats/partials/tabs.html" %}
       <h2>Issue & PR Trends</h2>
+      <div id="trends-loading" style="text-align:center;padding:2rem;">
+        <i class="p-icon--spinner u-animation--spin"></i> Loading trend data...
+      </div>
     </div>
   </div>
 </div>
@@ -69,7 +72,7 @@
       <div id="open-issues-checkboxes"></div>
     </div>
     <div class="col-9">
-      <canvas id="issues-chart" style="width:100%;height:400px;"></canvas>
+      <canvas id="issues-chart" role="img" aria-label="Line chart showing open issues over time for selected projects" style="width:100%;height:400px;"></canvas>
     </div>
   </div>
 </div>
@@ -89,7 +92,7 @@
       <div id="median-age-checkboxes"></div>
     </div>
     <div class="col-9">
-      <canvas id="median-age-chart" style="width:100%;height:400px;"></canvas>
+      <canvas id="median-age-chart" role="img" aria-label="Line chart showing median issue age over time for selected projects" style="width:100%;height:400px;"></canvas>
     </div>
   </div>
 </div>
@@ -109,7 +112,7 @@
       <div id="closed-checkboxes"></div>
     </div>
     <div class="col-9">
-      <canvas id="closed-chart" style="width:100%;height:400px;"></canvas>
+      <canvas id="closed-chart" role="img" aria-label="Bar chart showing issues closed per week for selected projects" style="width:100%;height:400px;"></canvas>
     </div>
   </div>
 </div>
@@ -130,13 +133,13 @@
     </div>
     <div class="col-9">
       <h5 class="p-heading--5">Open Issues & PRs</h5>
-      <canvas id="snapshot-open-chart" style="width:100%;"></canvas>
+      <canvas id="snapshot-open-chart" role="img" aria-label="Bar chart showing current open issues and PRs per project" style="width:100%;"></canvas>
 
       <h5 class="p-heading--5" style="margin-top:2rem;">Median Age (days)</h5>
-      <canvas id="snapshot-age-chart" style="width:100%;"></canvas>
+      <canvas id="snapshot-age-chart" role="img" aria-label="Bar chart showing median issue and PR age in days per project" style="width:100%;"></canvas>
 
       <h5 class="p-heading--5" style="margin-top:2rem;">Closed in Last Year</h5>
-      <canvas id="snapshot-closed-chart" style="width:100%;"></canvas>
+      <canvas id="snapshot-closed-chart" role="img" aria-label="Bar chart showing issues and PRs closed in the last year per project" style="width:100%;"></canvas>
     </div>
   </div>
 </div>

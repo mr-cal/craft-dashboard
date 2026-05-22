@@ -108,14 +108,17 @@ async function callEndpoint(endpoint, btnId, statusId, successMsg) {
 }
 
 function triggerRefresh() {
+  if (!confirm('Refresh all project data? This may take several minutes.')) return;
   callEndpoint('/admin/refresh', 'refresh-btn', 'refresh-status', 'Refresh queued');
 }
 
 function triggerEvaluate() {
+  if (!confirm('Re-evaluate all open issues with LLM? This will consume API credits.')) return;
   callEndpoint('/admin/re-evaluate', 'evaluate-btn', 'evaluate-status', 'Evaluation queued');
 }
 
 function triggerDistribute() {
+  if (!confirm('Redistribute refresh schedule across all projects?')) return;
   callEndpoint('/admin/distribute', 'distribute-btn', 'distribute-status', 'Schedule redistributed');
 }
 
