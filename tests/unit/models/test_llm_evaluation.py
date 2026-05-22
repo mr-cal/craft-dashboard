@@ -49,7 +49,10 @@ class TestLLMEvaluationModel:
 
     def test_partial_index_uses_text_expression(self) -> None:
         """The partial unique index should use text() not a raw string."""
-        module_path = Path(__file__).resolve().parents[3] / "craft_dashboard/models/llm_evaluation.py"
+        module_path = (
+            Path(__file__).resolve().parents[3]
+            / "craft_dashboard/models/llm_evaluation.py"
+        )
         tree = ast.parse(module_path.read_text())
 
         llm_evaluation = next(

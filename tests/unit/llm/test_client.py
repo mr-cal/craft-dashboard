@@ -51,6 +51,23 @@ class TestQuotaExhaustedError:
                 )
 
 
+class TestPersistentHttpClient:
+    def test_http_property_creates_client(self) -> None:
+        """The http property creates a client on first access."""
+        client = OpenRouterClient(api_key="test")
+        assert client._http is None
+        http = client.http
+        assert http is not None
+        assert not http.is_closed
+
+    async def test_close_closes_client(self) -> None:
+        """close() closes the underlying HTTP client."""
+        client = OpenRouterClient(api_key="test")
+        _ = client.http
+        await client.close()
+        assert client._http.is_closed
+
+
 class TestLocalLLMClient:
     """Tests for LocalLLMClient."""
 

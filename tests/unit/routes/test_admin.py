@@ -4,11 +4,15 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
+import pytest
 from craft_dashboard.app import create_app
 from craft_dashboard.dependencies import get_db_session
+from craft_dashboard.routes.admin import _verify_origin
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.exceptions import HTTPException
 
 _ADMIN_TOKEN = "test-token-123"
 
@@ -224,7 +228,10 @@ class TestAdminDistribute:
 
     def test_distribute_logs_schedule_summary(self, caplog) -> None:
         """POST /admin/distribute logs how many schedules were redistributed."""
-        schedules = [SimpleNamespace(next_refresh_at=None), SimpleNamespace(next_refresh_at=None)]
+        schedules = [
+            SimpleNamespace(next_refresh_at=None),
+            SimpleNamespace(next_refresh_at=None),
+        ]
 
         async def _override_distribute_session():
             yield _DistributeSession(schedules)
@@ -266,6 +273,38 @@ class TestAdminLogs:
 
         assert response.status_code == 200
         assert "text/plain" in response.headers["content-type"]
+
+
+class TestVerifyOrigin:
+    def test_same_origin_passes(self) -> None:
+        """Requests from the same origin pass."""
+        request = MagicMock()
+        request.headers = {
+            "origin": "https://dashboard.example.com",
+            "host": "dashboard.example.com",
+        }
+        _verify_origin(request)
+
+    def test_cross_origin_rejected(self) -> None:
+        """Cross-origin requests are rejected."""
+        request = MagicMock()
+        request.headers = {
+            "origin": "https://evil.com",
+            "host": "dashboard.example.com",
+        }
+        with pytest.raises(HTTPException) as exc_info:
+            _verify_origin(request)
+        assert exc_info.value.status_code == 403
+
+    def test_no_origin_header_passes(self) -> None:
+        """API clients without Origin header pass."""
+        request = MagicMock()
+        headers = MagicMock()
+        headers.get = lambda key, default="": {"host": "dashboard.example.com"}.get(
+            key, default
+        )
+        request.headers = headers
+        _verify_origin(request)
 
 
 class TestAdminPage:

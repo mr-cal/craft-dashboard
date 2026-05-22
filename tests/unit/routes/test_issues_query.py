@@ -18,6 +18,7 @@ from craft_dashboard.routes.issues import (
 if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"
 
+
 class FrozenDateTime(datetime):
     """Frozen datetime for deterministic age calculations."""
 
@@ -32,8 +33,12 @@ class FrozenDateTime(datetime):
 
 
 async def _seed_projects_and_issues(session) -> None:
-    snapcraft = Project(name="snapcraft", category="app", github_org="canonical", display_order=1)
-    charmcraft = Project(name="charmcraft", category="app", github_org="canonical", display_order=2)
+    snapcraft = Project(
+        name="snapcraft", category="app", github_org="canonical", display_order=1
+    )
+    charmcraft = Project(
+        name="charmcraft", category="app", github_org="canonical", display_order=2
+    )
     session.add_all([snapcraft, charmcraft])
     await session.flush()
 
@@ -126,7 +131,9 @@ async def _seed_projects_and_issues(session) -> None:
 
 
 async def _seed_author_role_issues(session) -> None:
-    project = Project(name="snapcraft", category="app", github_org="canonical", display_order=1)
+    project = Project(
+        name="snapcraft", category="app", github_org="canonical", display_order=1
+    )
     session.add(project)
     await session.flush()
 
@@ -199,7 +206,9 @@ async def _seed_author_role_issues(session) -> None:
 
 
 async def _seed_author_role_column_issues(session) -> None:
-    project = Project(name="snapcraft", category="app", github_org="canonical", display_order=1)
+    project = Project(
+        name="snapcraft", category="app", github_org="canonical", display_order=1
+    )
     session.add(project)
     await session.flush()
 
@@ -272,7 +281,9 @@ async def _seed_author_role_column_issues(session) -> None:
 
 
 async def _seed_sorted_issues(session) -> None:
-    project = Project(name="snapcraft", category="app", github_org="canonical", display_order=1)
+    project = Project(
+        name="snapcraft", category="app", github_org="canonical", display_order=1
+    )
     session.add(project)
     await session.flush()
 
@@ -325,7 +336,9 @@ async def _seed_sorted_issues(session) -> None:
 
 
 async def _seed_issue_types(session) -> None:
-    project = Project(name="snapcraft", category="app", github_org="canonical", display_order=1)
+    project = Project(
+        name="snapcraft", category="app", github_org="canonical", display_order=1
+    )
     session.add(project)
     await session.flush()
 
@@ -407,7 +420,9 @@ class TestQueryIssuesFilters:
         assert len(issues) == 4
         assert total_pages == 1
 
-    async def test_project_filter_returns_matching_project(self, test_db_session) -> None:
+    async def test_project_filter_returns_matching_project(
+        self, test_db_session
+    ) -> None:
         await _seed_projects_and_issues(test_db_session)
 
         issues, _ = await _query_issues(
@@ -417,7 +432,9 @@ class TestQueryIssuesFilters:
         assert len(issues) == 3
         assert {issue["project_name"] for issue in issues} == {"snapcraft"}
 
-    async def test_multiple_projects_filter_returns_all_matches(self, test_db_session) -> None:
+    async def test_multiple_projects_filter_returns_all_matches(
+        self, test_db_session
+    ) -> None:
         await _seed_projects_and_issues(test_db_session)
 
         issues, _ = await _query_issues(
@@ -436,7 +453,9 @@ class TestQueryIssuesFilters:
         assert len(issues) == 4
         assert {issue["source"] for issue in issues} == {"github"}
 
-    async def test_pagination_returns_single_page_of_results(self, test_db_session) -> None:
+    async def test_pagination_returns_single_page_of_results(
+        self, test_db_session
+    ) -> None:
         await _seed_projects_and_issues(test_db_session)
 
         issues, total_pages = await _query_issues(
@@ -448,7 +467,9 @@ class TestQueryIssuesFilters:
 
 
 class TestQueryIssuesAuthorRole:
-    async def test_maintainer_filter_returns_only_maintainer(self, test_db_session) -> None:
+    async def test_maintainer_filter_returns_only_maintainer(
+        self, test_db_session
+    ) -> None:
         await _seed_author_role_issues(test_db_session)
 
         issues, _ = await _query_issues(
@@ -458,7 +479,9 @@ class TestQueryIssuesAuthorRole:
         assert len(issues) == 1
         assert [issue["author"] for issue in issues] == ["alice"]
 
-    async def test_contributor_filter_returns_only_contributor(self, test_db_session) -> None:
+    async def test_contributor_filter_returns_only_contributor(
+        self, test_db_session
+    ) -> None:
         await _seed_author_role_issues(test_db_session)
 
         issues, _ = await _query_issues(
@@ -480,7 +503,9 @@ class TestQueryIssuesAuthorRole:
         assert len(issues) == 1
         assert [issue["author"] for issue in issues] == ["renovate[bot]"]
 
-    async def test_multiple_author_roles_return_combined_matches(self, test_db_session) -> None:
+    async def test_multiple_author_roles_return_combined_matches(
+        self, test_db_session
+    ) -> None:
         await _seed_author_role_issues(test_db_session)
 
         issues, _ = await _query_issues(
@@ -494,7 +519,9 @@ class TestQueryIssuesAuthorRole:
 
 
 class TestQueryIssuesAuthorRoleColumn:
-    async def test_bot_filter_matches_author_is_bot_without_suffix(self, test_db_session) -> None:
+    async def test_bot_filter_matches_author_is_bot_without_suffix(
+        self, test_db_session
+    ) -> None:
         await _seed_author_role_column_issues(test_db_session)
 
         issues, _ = await _query_issues(
@@ -505,7 +532,9 @@ class TestQueryIssuesAuthorRoleColumn:
 
         assert [issue["author"] for issue in issues] == ["dependabot"]
 
-    async def test_bot_filter_excludes_non_bot_maintainer(self, test_db_session) -> None:
+    async def test_bot_filter_excludes_non_bot_maintainer(
+        self, test_db_session
+    ) -> None:
         await _seed_author_role_column_issues(test_db_session)
 
         issues, _ = await _query_issues(
@@ -516,7 +545,9 @@ class TestQueryIssuesAuthorRoleColumn:
 
         assert "alice" not in {issue["author"] for issue in issues}
 
-    async def test_contributor_filter_matches_non_bot_contributor(self, test_db_session) -> None:
+    async def test_contributor_filter_matches_non_bot_contributor(
+        self, test_db_session
+    ) -> None:
         await _seed_author_role_column_issues(test_db_session)
 
         issues, _ = await _query_issues(
@@ -529,7 +560,9 @@ class TestQueryIssuesAuthorRoleColumn:
 
 
 class TestApplyAuthorRoleFilter:
-    async def test_combines_maintainer_and_bot_filters_using_columns(self, test_db_session) -> None:
+    async def test_combines_maintainer_and_bot_filters_using_columns(
+        self, test_db_session
+    ) -> None:
         await _seed_author_role_column_issues(test_db_session)
 
         query = _apply_author_role_filter(
@@ -541,14 +574,86 @@ class TestApplyAuthorRoleFilter:
 
         assert authors == ["alice", "dependabot"]
 
-    async def test_empty_author_role_leaves_query_unfiltered(self, test_db_session) -> None:
+    async def test_empty_author_role_leaves_query_unfiltered(
+        self, test_db_session
+    ) -> None:
         await _seed_author_role_column_issues(test_db_session)
 
-        query = _apply_author_role_filter(select(Issue.author), "").order_by(Issue.author)
+        query = _apply_author_role_filter(select(Issue.author), "").order_by(
+            Issue.author
+        )
 
         authors = list((await test_db_session.execute(query)).scalars())
 
         assert authors == ["alice", "bob", "dependabot"]
+
+
+class TestQueryIssuesSearch:
+    async def test_search_by_title(self, test_db_session) -> None:
+        """Search filter matches issues by title."""
+        await _seed_projects_and_issues(test_db_session)
+
+        issues, _ = await _query_issues(
+            test_db_session, search="Alpha", sort_by="title"
+        )
+
+        assert len(issues) == 1
+        assert issues[0]["title"] == "Alpha bug"
+
+    async def test_search_by_external_id(self, test_db_session) -> None:
+        """Search filter matches issues by external_id."""
+        await _seed_projects_and_issues(test_db_session)
+
+        issues, _ = await _query_issues(test_db_session, search="1", sort_by="title")
+
+        assert len(issues) == 1
+        assert issues[0]["external_id"] == "1"
+
+    async def test_search_no_match(self, test_db_session) -> None:
+        """Search filter with no matching term returns empty."""
+        await _seed_projects_and_issues(test_db_session)
+
+        issues, _ = await _query_issues(
+            test_db_session, search="nonexistent-xyz", sort_by="title"
+        )
+
+        assert len(issues) == 0
+
+
+class TestQueryIssuesPerPage:
+    async def test_items_per_page_limits_results(self, test_db_session) -> None:
+        """items_per_page parameter limits the number of returned issues."""
+        await _seed_projects_and_issues(test_db_session)
+
+        issues, total_pages = await _query_issues(
+            test_db_session, items_per_page=2, sort_by="title"
+        )
+
+        assert len(issues) == 2
+        assert total_pages == 2
+
+    async def test_items_per_page_pagination(self, test_db_session) -> None:
+        """Page 2 with items_per_page=2 returns remaining issues."""
+        await _seed_projects_and_issues(test_db_session)
+
+        issues, total_pages = await _query_issues(
+            test_db_session, items_per_page=2, page=2, sort_by="title"
+        )
+
+        assert len(issues) == 2
+        assert total_pages == 2
+
+
+class TestQueryIssuesSortValidation:
+    async def test_invalid_sort_field_defaults_to_staleness(
+        self, test_db_session
+    ) -> None:
+        """An invalid sort field falls back to staleness sort."""
+        await _seed_projects_and_issues(test_db_session)
+
+        issues, _ = await _query_issues(test_db_session, sort_by="invalid_field")
+
+        assert len(issues) == 4
 
 
 class TestQueryIssuesSort:
@@ -559,7 +664,9 @@ class TestQueryIssuesSort:
 
         assert [issue["title"] for issue in issues] == ["Alpha title", "Zulu title"]
 
-    async def test_reverse_title_sort_returns_reverse_alphabetical_order(self, test_db_session) -> None:
+    async def test_reverse_title_sort_returns_reverse_alphabetical_order(
+        self, test_db_session
+    ) -> None:
         await _seed_sorted_issues(test_db_session)
 
         issues, _ = await _query_issues(test_db_session, sort_by="-title")
@@ -585,7 +692,9 @@ class TestQueryIssuesIssueType:
         assert len(issues) == 1
         assert [issue["issue_type"] for issue in issues] == ["issue"]
 
-    async def test_issue_type_pull_request_filters_to_prs(self, test_db_session) -> None:
+    async def test_issue_type_pull_request_filters_to_prs(
+        self, test_db_session
+    ) -> None:
         await _seed_issue_types(test_db_session)
 
         issues, _ = await _query_issues(

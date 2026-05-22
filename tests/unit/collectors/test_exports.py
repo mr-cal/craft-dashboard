@@ -1,6 +1,12 @@
 """Tests for collector module exports."""
 
-from craft_dashboard.collectors import dependencies, github, launchpad, scheduler, snapshots
+from craft_dashboard.collectors import (
+    dependencies,
+    github,
+    launchpad,
+    scheduler,
+    snapshots,
+)
 
 
 def test_github_exports() -> None:

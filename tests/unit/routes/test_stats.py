@@ -50,7 +50,7 @@ class TestStatsRoutes:
         assert response.status_code == 200
 
     def test_trends_page(self) -> None:
-        """GET /stats/trends returns HTML."""
+        """GET /stats/trends returns accessible HTML with loading state."""
         app = create_app()
         app.dependency_overrides[get_db_session] = _override_trend_stats_db_session
 
@@ -58,6 +58,35 @@ class TestStatsRoutes:
             response = client.get("/stats/trends")
 
         assert response.status_code == 200
+        assert (
+            '<link rel="icon" type="image/x-icon" href="/static/favicon.ico" />'
+            in response.text
+        )
+        assert 'id="trends-loading"' in response.text
+        assert (
+            'aria-label="Line chart showing open issues over time for selected projects"'
+            in response.text
+        )
+        assert (
+            'aria-label="Line chart showing median issue age over time for selected projects"'
+            in response.text
+        )
+        assert (
+            'aria-label="Bar chart showing issues closed per week for selected projects"'
+            in response.text
+        )
+        assert (
+            'aria-label="Bar chart showing current open issues and PRs per project"'
+            in response.text
+        )
+        assert (
+            'aria-label="Bar chart showing median issue and PR age in days per project"'
+            in response.text
+        )
+        assert (
+            'aria-label="Bar chart showing issues and PRs closed in the last year per project"'
+            in response.text
+        )
 
     def test_stats_index_redirects(self) -> None:
         """GET /stats redirects to /stats/dependencies."""

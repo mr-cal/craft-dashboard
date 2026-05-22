@@ -119,8 +119,12 @@ class TestAllProjectsSnapshotSumsLatest:
     @pytest.fixture
     async def seeded(self, test_db_session: AsyncSession) -> None:
         """Two projects with snapshots on different dates."""
-        p1 = Project(name="project-alpha", category="application", github_org="canonical")
-        p2 = Project(name="project-beta", category="application", github_org="canonical")
+        p1 = Project(
+            name="project-alpha", category="application", github_org="canonical"
+        )
+        p2 = Project(
+            name="project-beta", category="application", github_org="canonical"
+        )
         test_db_session.add_all([p1, p2])
         await test_db_session.flush()
 
@@ -207,7 +211,9 @@ class TestMedianAgePerGroupInAPIResponse:
     @pytest.fixture
     async def seeded(self, test_db_session: AsyncSession) -> None:
         """One project with a snapshot that has per-group median ages set."""
-        p = Project(name="median-project", category="application", github_org="canonical")
+        p = Project(
+            name="median-project", category="application", github_org="canonical"
+        )
         test_db_session.add(p)
         await test_db_session.flush()
 
@@ -247,7 +253,9 @@ class TestMedianAgePerGroupInAPIResponse:
             # contributor: age 20
             _open_issue(20, author="bob", reference_date=today),
             # bot: age 5
-            _open_issue(5, author="renovate[bot]", author_is_bot=True, reference_date=today),
+            _open_issue(
+                5, author="renovate[bot]", author_is_bot=True, reference_date=today
+            ),
         ]
         result = compute_snapshot_counts(issues, maintainers={"alice"}, today=today)
 
@@ -268,7 +276,9 @@ class TestRollingAverageLabels:
     @pytest.fixture
     async def seeded(self, test_db_session: AsyncSession) -> None:
         """Minimal project so the trends page renders without errors."""
-        p = Project(name="rolling-project", category="application", github_org="canonical")
+        p = Project(
+            name="rolling-project", category="application", github_org="canonical"
+        )
         test_db_session.add(p)
         await test_db_session.commit()
 
@@ -326,16 +336,30 @@ class TestAllProjectsSnapshotAveragesMedianAges:
     @pytest.fixture
     async def seeded(self, test_db_session: AsyncSession) -> None:
         """Two projects with different median_issue_age values on the same date."""
-        p1 = Project(name="age-project-a", category="application", github_org="canonical")
-        p2 = Project(name="age-project-b", category="application", github_org="canonical")
+        p1 = Project(
+            name="age-project-a", category="application", github_org="canonical"
+        )
+        p2 = Project(
+            name="age-project-b", category="application", github_org="canonical"
+        )
         test_db_session.add_all([p1, p2])
         await test_db_session.flush()
 
         test_db_session.add(
-            Snapshot(project_id=p1.id, snapshot_date=_DATE_A, open_issues=1, median_issue_age=100)
+            Snapshot(
+                project_id=p1.id,
+                snapshot_date=_DATE_A,
+                open_issues=1,
+                median_issue_age=100,
+            )
         )
         test_db_session.add(
-            Snapshot(project_id=p2.id, snapshot_date=_DATE_A, open_issues=1, median_issue_age=200)
+            Snapshot(
+                project_id=p2.id,
+                snapshot_date=_DATE_A,
+                open_issues=1,
+                median_issue_age=200,
+            )
         )
         await test_db_session.commit()
 
@@ -362,7 +386,9 @@ class TestAllProjectsSnapshotAveragesMedianAges:
 class TestBotDetectionBySuffix:
     """Bug 8: Authors with '[bot]' suffix in their name must be flagged as bots."""
 
-    @pytest.mark.parametrize("author", ["renovate[bot]", "dependabot[bot]", "app/github-actions[bot]"])
+    @pytest.mark.parametrize(
+        "author", ["renovate[bot]", "dependabot[bot]", "app/github-actions[bot]"]
+    )
     def test_bot_author_flagged(self, author: str) -> None:
         """Bot-authored issue (author_is_bot=True) lands in open_issues_bots."""
         issues = [_open_issue(author=author, author_is_bot=True)]

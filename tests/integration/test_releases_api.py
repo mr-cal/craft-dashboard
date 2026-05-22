@@ -123,6 +123,7 @@ class TestReleasesPage:
             await test_db_session.commit()
 
         import asyncio  # noqa: PLC0415
+
         asyncio.get_event_loop().run_until_complete(_seed())
 
         response = test_client.get("/stats/releases")

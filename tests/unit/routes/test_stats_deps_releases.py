@@ -269,7 +269,10 @@ class TestDependenciesData:
         compiled = str(
             session.statement.compile(compile_kwargs={"literal_binds": True})
         )
-        assert "dependencies.dependency_name IN ('craft-parts', 'craft-providers')" in compiled
+        assert (
+            "dependencies.dependency_name IN ('craft-parts', 'craft-providers')"
+            in compiled
+        )
         assert response == {
             "libs": ["craft-parts", "craft-providers"],
             "apps": {

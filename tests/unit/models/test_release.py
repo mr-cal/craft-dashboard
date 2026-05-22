@@ -41,7 +41,9 @@ class TestReleaseModel:
 
     def test_is_hotfix_explicitly_set_not_nullable(self) -> None:
         """Release.is_hotfix should explicitly set nullable=False."""
-        module_path = Path(__file__).resolve().parents[3] / "craft_dashboard/models/release.py"
+        module_path = (
+            Path(__file__).resolve().parents[3] / "craft_dashboard/models/release.py"
+        )
         tree = ast.parse(module_path.read_text())
         release_class = next(
             node

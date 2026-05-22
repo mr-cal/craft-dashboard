@@ -55,7 +55,9 @@ async def test_db_engine() -> AsyncGenerator[AsyncEngine, None]:
 
 
 @pytest.fixture
-async def test_db_session(test_db_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
+async def test_db_session(
+    test_db_engine: AsyncEngine,
+) -> AsyncGenerator[AsyncSession, None]:
     """AsyncSession backed by the in-memory SQLite engine."""
     factory = async_sessionmaker(
         test_db_engine, class_=AsyncSession, expire_on_commit=False

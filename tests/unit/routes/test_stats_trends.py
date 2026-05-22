@@ -131,6 +131,14 @@ def _trend_series(
     return data
 
 
+class TestBuildAllProjectsAggregate:
+    def test_empty_projects_returns_empty(self) -> None:
+        """Empty projects dict produces empty aggregate."""
+        result = _build_all_projects_aggregate({})
+        assert result["dates"] == []
+        assert result["open_issues"] == []
+
+
 class TestTrendsAllDataEmpty:
     def test_empty_db_returns_expected_payload(self, test_client: TestClient) -> None:
         response = test_client.get("/stats/trends/all-data")

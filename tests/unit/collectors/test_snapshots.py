@@ -249,6 +249,29 @@ class TestComputeSnapshotCounts:
         assert result["open_issues_bots"] == 1
         assert result["open_issues_external"] == 1
 
+    def test_bot_detection_from_config_bots_set(self) -> None:
+        """Bot detection works when author is in config bots set."""
+        issues = [
+            {
+                "issue_type": "issue",
+                "state": "open",
+                "author": "renovate",
+                "author_is_bot": False,
+                "labels": [],
+                "created_at": datetime(2025, 1, 1, tzinfo=UTC),
+                "closed_at": None,
+            }
+        ]
+        counts = compute_snapshot_counts(issues, set(), bots={"renovate"})
+        assert counts["open_issues_bots"] == 1
+
+    def test_median_age_empty_returns_zero(self) -> None:
+        """With no open issues, median ages should be 0."""
+        counts = compute_snapshot_counts([], set())
+        assert counts["median_issue_age"] == 0
+        assert counts["median_pr_age"] == 0
+        assert counts["median_age"] == 0
+
     def test_copilot_in_bots_parameter_is_treated_as_bot(self) -> None:
         """Copilot is treated as a bot when listed in configured bots."""
         issues = [

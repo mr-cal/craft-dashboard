@@ -1,8 +1,9 @@
 """Tests for the dependency collector."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
+import urllib3
 from github import GithubException, UnknownObjectException
 
 from craft_dashboard.collectors.dependencies import (
@@ -221,6 +222,18 @@ class TestDependencyCollector:
 
         assert collector.org == "canonical"
 
+    def test_init_configures_timeout_and_retry(self) -> None:
+        """DependencyCollector configures PyGithub timeout and retries."""
+        with patch("craft_dashboard.collectors.dependencies.Github") as mock_github:
+            DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
+
+        mock_github.assert_called_once_with(auth=ANY, timeout=30, retry=ANY)
+        retry = mock_github.call_args.kwargs["retry"]
+        assert isinstance(retry, urllib3.Retry)
+        assert retry.total == 3
+        assert retry.backoff_factor == 1
+        assert set(retry.status_forcelist) == {429, 500, 502, 503, 504}
+
     def test_init_with_craft_libraries(self) -> None:
         """DependencyCollector stores craft_libraries."""
         libs = ["craft-application", "craft-cli"]
@@ -270,7 +283,7 @@ class TestCollectDependenciesExceptionHandling:
     @staticmethod
     def _pyproject_contents() -> MagicMock:
         return TestCollectDependenciesExceptionHandling._make_contents(
-            "[project]\ndependencies = [\"requests>=2.0\"]\n"
+            '[project]\ndependencies = ["requests>=2.0"]\n'
         )
 
     @pytest.mark.parametrize(
@@ -280,7 +293,9 @@ class TestCollectDependenciesExceptionHandling:
             UnknownObjectException(404, {"message": "missing"}),
         ],
     )
-    async def test_collect_dependencies_catches_missing_uv_lock(self, mocker, exc) -> None:
+    async def test_collect_dependencies_catches_missing_uv_lock(
+        self, mocker, exc
+    ) -> None:
         collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
 
         def get_contents(path: str, ref: str):
@@ -304,7 +319,9 @@ class TestCollectDependenciesExceptionHandling:
         assert count == 1
         session.commit.assert_awaited_once()
 
-    async def test_collect_dependencies_propagates_non_github_exception_fetching_uv_lock(self, mocker) -> None:
+    async def test_collect_dependencies_propagates_non_github_exception_fetching_uv_lock(
+        self, mocker
+    ) -> None:
         collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
 
         def get_contents(path: str, ref: str):
@@ -333,7 +350,9 @@ class TestCollectDependenciesExceptionHandling:
             UnknownObjectException(404, {"message": "missing"}),
         ],
     )
-    async def test_collect_dependencies_catches_missing_pyproject(self, mocker, exc) -> None:
+    async def test_collect_dependencies_catches_missing_pyproject(
+        self, mocker, exc
+    ) -> None:
         collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
 
         def get_contents(path: str, ref: str):
@@ -358,7 +377,9 @@ class TestCollectDependenciesExceptionHandling:
         session.execute.assert_not_awaited()
         session.commit.assert_awaited_once()
 
-    async def test_collect_dependencies_propagates_non_github_exception_fetching_pyproject(self, mocker) -> None:
+    async def test_collect_dependencies_propagates_non_github_exception_fetching_pyproject(
+        self, mocker
+    ) -> None:
         collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
 
         def get_contents(path: str, ref: str):
@@ -380,3 +401,59 @@ class TestCollectDependenciesExceptionHandling:
         with pytest.raises(RuntimeError, match="boom"):
             await collector.collect_dependencies("repo", 1, ["main"], session)
 
+
+class TestGetPyPIVersionsAsync:
+    async def test_pypi_timeout_returns_empty(self) -> None:
+        """Network timeout returns empty list."""
+        import httpx
+        from unittest.mock import AsyncMock
+
+        from craft_dashboard.collectors.dependencies import (
+            _PYPI_CACHE,
+            get_pypi_versions,
+        )
+
+        _PYPI_CACHE.pop("test-pkg-timeout", None)
+
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.get.side_effect = httpx.TimeoutException("timeout")
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_cls.return_value = mock_client
+
+            result = await get_pypi_versions("test-pkg-timeout")
+
+        assert result == []
+
+    async def test_pypi_filters_prerelease_versions(self) -> None:
+        """Pre-release versions are filtered from PyPI releases."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from craft_dashboard.collectors.dependencies import (
+            _PYPI_CACHE,
+            get_pypi_versions,
+        )
+
+        _PYPI_CACHE.pop("test-pkg-versions", None)
+
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "releases": {
+                "1.0.0": {},
+                "1.0.1": {},
+                "1.1.0rc1": {},
+            }
+        }
+
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.get.return_value = response
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_cls.return_value = mock_client
+
+            result = await get_pypi_versions("test-pkg-versions")
+
+        assert result == ["1.0.0", "1.0.1"]

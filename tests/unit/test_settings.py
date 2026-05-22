@@ -76,3 +76,51 @@ class TestSettings:
         settings = Settings(llm_backend="local")
 
         assert settings.llm_backend == "local"
+
+    def test_validate_required_secrets_returns_warnings_for_missing_tokens(
+        self, monkeypatch
+    ) -> None:
+        """Missing admin and GitHub tokens return startup warnings."""
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+        monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+        settings = Settings()
+
+        assert settings.validate_required_secrets() == [
+            "ADMIN_TOKEN is not set. Admin endpoints will reject all requests.",
+            "GITHUB_TOKEN is not set. Data collection will fail.",
+        ]
+
+    def test_validate_required_secrets_returns_empty_list_when_tokens_present(
+        self, monkeypatch
+    ) -> None:
+        """Configured admin and GitHub tokens produce no warnings."""
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+        monkeypatch.setenv("ADMIN_TOKEN", "admin-secret")
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_test123")
+
+        settings = Settings()
+
+        assert settings.validate_required_secrets() == []
+
+
+class TestValidateRequiredSecrets:
+    def test_no_warnings_when_all_set(self, monkeypatch) -> None:
+        """No warnings when all secrets are set."""
+        monkeypatch.setenv("ADMIN_TOKEN", "secret")
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+        settings = Settings()
+        assert settings.validate_required_secrets() == []
+
+    def test_warnings_when_empty(self, monkeypatch) -> None:
+        """Warnings for empty admin token and github token."""
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+        monkeypatch.setenv("ADMIN_TOKEN", "")
+        monkeypatch.setenv("GITHUB_TOKEN", "")
+        settings = Settings()
+        warnings = settings.validate_required_secrets()
+        assert len(warnings) == 2
+        assert any("ADMIN_TOKEN" in warning for warning in warnings)
+        assert any("GITHUB_TOKEN" in warning for warning in warnings)

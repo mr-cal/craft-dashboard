@@ -11,7 +11,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.dialects import postgresql as pg_dialect
 
-MODULE_PATH = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "collect_data.py"
+MODULE_PATH = (
+    pathlib.Path(__file__).resolve().parents[2] / "scripts" / "collect_data.py"
+)
 SPEC = importlib.util.spec_from_file_location("collect_data_script", MODULE_PATH)
 assert SPEC is not None
 assert SPEC.loader is not None
@@ -89,6 +91,7 @@ class TestGetOrCreateProject:
         assert "category" in compiled
         assert "display_order" in compiled
 
+
 class TestCollectGithubLogging:
     @pytest.mark.asyncio
     async def test_collect_github_logs_timed_phase_completion(
@@ -110,17 +113,25 @@ class TestCollectGithubLogging:
         gh_collector.collect_issues = AsyncMock(return_value=4)
         gh_collector.collect_releases = AsyncMock(return_value=3)
 
-        monkeypatch.setattr(collect_data, "DependencyCollector", lambda token, org, craft_libraries: dep_collector)
+        monkeypatch.setattr(
+            collect_data,
+            "DependencyCollector",
+            lambda token, org, craft_libraries: dep_collector,
+        )
         monkeypatch.setattr(
             collect_data,
             "GitHubCollector",
             lambda token, org, maintainers: gh_collector,
         )
-        monkeypatch.setattr(collect_data, "_get_or_create_project", AsyncMock(return_value=101))
+        monkeypatch.setattr(
+            collect_data, "_get_or_create_project", AsyncMock(return_value=101)
+        )
         monkeypatch.setattr(collect_data, "generate_snapshot", AsyncMock())
         monkeypatch.setattr(collect_data, "update_refresh_schedule", AsyncMock())
         monkeypatch.setattr(collect_data, "record_refresh_error", AsyncMock())
-        monkeypatch.setattr(collect_data, "is_due_for_refresh", lambda next_refresh: True)
+        monkeypatch.setattr(
+            collect_data, "is_due_for_refresh", lambda next_refresh: True
+        )
         monkeypatch.setattr(collect_data.asyncio, "sleep", AsyncMock())
 
         caplog.set_level(logging.INFO)
@@ -136,7 +147,10 @@ class TestCollectGithubLogging:
         assert result.projects_processed == {"snapcraft"}
         assert result.issues_collected == 4
         assert "Collecting GitHub data for snapcraft (elapsed:" in caplog.text
-        assert "canonical/snapcraft: dependencies collected (7 dependencies) in " in caplog.text
+        assert (
+            "canonical/snapcraft: dependencies collected (7 dependencies) in "
+            in caplog.text
+        )
         assert "canonical/snapcraft: issues collection completed in " in caplog.text
         assert "(4 issues collected)" in caplog.text
         assert "canonical/snapcraft: releases collected (3 branches) in " in caplog.text
@@ -162,7 +176,9 @@ class TestCollectLaunchpadLogging:
             "LaunchpadCollector",
             lambda projects, launchpad_maintainers: lp_collector,
         )
-        monkeypatch.setattr(collect_data, "_get_or_create_project", AsyncMock(return_value=202))
+        monkeypatch.setattr(
+            collect_data, "_get_or_create_project", AsyncMock(return_value=202)
+        )
         monkeypatch.setattr(collect_data, "generate_snapshot", AsyncMock())
 
         caplog.set_level(logging.INFO)
@@ -201,7 +217,9 @@ class TestMainLogging:
         monkeypatch.setattr(collect_data, "Settings", lambda: settings)
         monkeypatch.setattr(collect_data, "load_config", lambda path: SimpleNamespace())
         monkeypatch.setattr(collect_data, "get_engine", lambda url: fake_engine)
-        monkeypatch.setattr(collect_data, "get_session_factory", lambda engine: "session-factory")
+        monkeypatch.setattr(
+            collect_data, "get_session_factory", lambda engine: "session-factory"
+        )
         monkeypatch.setattr(
             collect_data,
             "_collect_github",

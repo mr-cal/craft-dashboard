@@ -75,19 +75,19 @@ class TestClassifyIssueEdgeCases:
 
 class TestComputeIssueHashEdgeCases:
     def test_none_body_matches_empty_body_hash(self) -> None:
-        assert _compute_issue_hash("title", None, "open", ["bug"]) == _compute_issue_hash(
-            "title", "", "open", ["bug"]
-        )
+        assert _compute_issue_hash(
+            "title", None, "open", ["bug"]
+        ) == _compute_issue_hash("title", "", "open", ["bug"])
 
     def test_label_order_does_not_change_hash(self) -> None:
-        assert _compute_issue_hash("title", "body", "open", ["zeta", "alpha"]) == _compute_issue_hash(
-            "title", "body", "open", ["alpha", "zeta"]
-        )
+        assert _compute_issue_hash(
+            "title", "body", "open", ["zeta", "alpha"]
+        ) == _compute_issue_hash("title", "body", "open", ["alpha", "zeta"])
 
     def test_different_state_changes_hash(self) -> None:
-        assert _compute_issue_hash("title", "body", "open", ["bug"]) != _compute_issue_hash(
-            "title", "body", "closed", ["bug"]
-        )
+        assert _compute_issue_hash(
+            "title", "body", "open", ["bug"]
+        ) != _compute_issue_hash("title", "body", "closed", ["bug"])
 
     def test_same_inputs_are_deterministic(self) -> None:
         hash1 = _compute_issue_hash("title", "body", "open", ["bug", "triaged"])
@@ -98,7 +98,9 @@ class TestComputeIssueHashEdgeCases:
 
 class TestFetchPrDetailsReviewLogic:
     def test_all_approved(self) -> None:
-        pr = _make_pr(reviews=[_make_review("alice", "APPROVED"), _make_review("bob", "APPROVED")])
+        pr = _make_pr(
+            reviews=[_make_review("alice", "APPROVED"), _make_review("bob", "APPROVED")]
+        )
 
         result = _fetch_pr_details(pr)
 

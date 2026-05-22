@@ -1,9 +1,10 @@
 """Tests for the GitHub data collector."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
+import urllib3
 from github import GithubException
 
 from craft_dashboard.collectors.github import (
@@ -93,6 +94,18 @@ class TestGitHubCollector:
         collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
 
         assert collector.org == "canonical"
+
+    def test_init_configures_timeout_and_retry(self) -> None:
+        """GitHubCollector configures PyGithub timeout and retries."""
+        with patch("craft_dashboard.collectors.github.Github") as mock_github:
+            GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
+
+        mock_github.assert_called_once_with(auth=ANY, timeout=30, retry=ANY)
+        retry = mock_github.call_args.kwargs["retry"]
+        assert isinstance(retry, urllib3.Retry)
+        assert retry.total == 3
+        assert retry.backoff_factor == 1
+        assert set(retry.status_forcelist) == {429, 500, 502, 503, 504}
 
     def test_is_maintainer(self) -> None:
         """is_maintainer checks against the maintainer list."""
@@ -205,7 +218,9 @@ class TestCollectIssuesExceptionHandling:
         existing_result.scalar_one_or_none.return_value = None
 
         session = AsyncMock()
-        session.execute = AsyncMock(side_effect=[due_count_result, existing_result, None])
+        session.execute = AsyncMock(
+            side_effect=[due_count_result, existing_result, None]
+        )
         session.commit = AsyncMock()
         return session
 
@@ -217,7 +232,9 @@ class TestCollectIssuesExceptionHandling:
         stmt.on_conflict_do_update.return_value = stmt
         return stmt
 
-    async def test_collect_issues_catches_github_exception_fetching_comments(self, mocker) -> None:
+    async def test_collect_issues_catches_github_exception_fetching_comments(
+        self, mocker
+    ) -> None:
         collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
         gh_issue = self._make_issue()
         repo = MagicMock()
@@ -240,7 +257,9 @@ class TestCollectIssuesExceptionHandling:
         assert count == 1
         session.commit.assert_awaited_once()
 
-    async def test_collect_issues_propagates_non_github_exception_fetching_comments(self, mocker) -> None:
+    async def test_collect_issues_propagates_non_github_exception_fetching_comments(
+        self, mocker
+    ) -> None:
         collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
         gh_issue = self._make_issue()
         repo = MagicMock()
@@ -261,7 +280,9 @@ class TestCollectIssuesExceptionHandling:
         with pytest.raises(RuntimeError, match="boom"):
             await collector.collect_issues("repo", 1, session)
 
-    async def test_collect_issues_catches_github_exception_fetching_pr_details(self, mocker) -> None:
+    async def test_collect_issues_catches_github_exception_fetching_pr_details(
+        self, mocker
+    ) -> None:
         collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
         gh_issue = self._make_issue(is_pr=True)
         repo = MagicMock()
@@ -281,7 +302,9 @@ class TestCollectIssuesExceptionHandling:
         assert count == 1
         session.commit.assert_awaited_once()
 
-    async def test_collect_issues_propagates_non_github_exception_fetching_pr_details(self, mocker) -> None:
+    async def test_collect_issues_propagates_non_github_exception_fetching_pr_details(
+        self, mocker
+    ) -> None:
         collector = GitHubCollector(token="ghp_test", org="canonical")  # noqa: S106
         gh_issue = self._make_issue(is_pr=True)
         repo = MagicMock()
@@ -365,7 +388,9 @@ class TestFetchPRDetails:
 
         last_commit = MagicMock()
         last_commit.get_check_runs.return_value = [
-            passing_check, failing_check, pending_check
+            passing_check,
+            failing_check,
+            pending_check,
         ]
 
         commits_list = [last_commit]
@@ -403,4 +428,3 @@ class TestFetchPRDetails:
         result = _fetch_pr_details(mock_pr)
 
         assert result["unresolved_review_comments"] == 1
-

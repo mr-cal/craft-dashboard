@@ -60,6 +60,14 @@ class TestParseEvaluationResponse:
 
         assert result["scores"]["staleness"] == 50
 
+    def test_parse_response_extracts_json_from_code_fence(self) -> None:
+        """JSON in markdown code fences with surrounding text is extracted."""
+        content = 'Here is the result:\n```json\n{"scores": {"staleness": 50}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}\n```\nDone.'
+        result = _parse_evaluation_response(content)
+        assert result is not None
+        assert result["scores"]["staleness"] == 50
+        assert result["suggested_action"] == "keep_open"
+
     def test_invalid_json_returns_none(self) -> None:
         """Invalid JSON returns None."""
         result = _parse_evaluation_response("This is not JSON at all.")
@@ -94,8 +102,18 @@ class TestComputeContentHash:
             "title", "body", "open", ["bug"], comments=[]
         )
         hash_with_comment = _compute_content_hash(
-            "title", "body", "open", ["bug"],
-            comments=[{"author": "alice", "body": "Is this fixed?", "created_at": "2024-01-01T00:00:00+00:00", "type": "comment"}],
+            "title",
+            "body",
+            "open",
+            ["bug"],
+            comments=[
+                {
+                    "author": "alice",
+                    "body": "Is this fixed?",
+                    "created_at": "2024-01-01T00:00:00+00:00",
+                    "type": "comment",
+                }
+            ],
         )
 
         assert hash_no_comments != hash_with_comment
@@ -104,7 +122,14 @@ class TestComputeContentHash:
         """Same comments produce same hash."""
         from craft_dashboard.llm.evaluator import _compute_content_hash
 
-        comments = [{"author": "alice", "body": "hi", "created_at": "2024-01-01T00:00:00+00:00", "type": "comment"}]
+        comments = [
+            {
+                "author": "alice",
+                "body": "hi",
+                "created_at": "2024-01-01T00:00:00+00:00",
+                "type": "comment",
+            }
+        ]
         hash1 = _compute_content_hash("t", "b", "open", [], comments=comments)
         hash2 = _compute_content_hash("t", "b", "open", [], comments=comments)
 
@@ -124,8 +149,18 @@ class TestComputeContentHash:
         from craft_dashboard.llm.evaluator import _compute_content_hash
 
         comments_a = [
-            {"author": "alice", "body": "first", "created_at": "2024-01-01T00:00:00+00:00", "type": "comment"},
-            {"author": "bob", "body": "second", "created_at": "2024-01-02T00:00:00+00:00", "type": "comment"},
+            {
+                "author": "alice",
+                "body": "first",
+                "created_at": "2024-01-01T00:00:00+00:00",
+                "type": "comment",
+            },
+            {
+                "author": "bob",
+                "body": "second",
+                "created_at": "2024-01-02T00:00:00+00:00",
+                "type": "comment",
+            },
         ]
         comments_b = list(reversed(comments_a))
 
@@ -167,10 +202,19 @@ class TestEvaluateIssueWithComments:
             evaluation_model="test-eval",
         )
 
-        comments = [{"author": "alice", "body": "hi", "created_at": "2024-01-01T00:00:00+00:00", "type": "comment"}]
+        comments = [
+            {
+                "author": "alice",
+                "body": "hi",
+                "created_at": "2024-01-01T00:00:00+00:00",
+                "type": "comment",
+            }
+        ]
 
-        with patch("craft_dashboard.llm.evaluator.build_summary_prompt") as mock_sum, \
-             patch("craft_dashboard.llm.evaluator.build_evaluation_prompt") as mock_eval:
+        with (
+            patch("craft_dashboard.llm.evaluator.build_summary_prompt") as mock_sum,
+            patch("craft_dashboard.llm.evaluator.build_evaluation_prompt") as mock_eval,
+        ):
             mock_sum.return_value = [{"role": "user", "content": "test"}]
             mock_eval.return_value = [{"role": "user", "content": "test"}]
 

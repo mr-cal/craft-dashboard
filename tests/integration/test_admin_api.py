@@ -54,7 +54,9 @@ class TestAdminPageIntegration:
 
         async def _seed() -> None:
             test_db_session.add(
-                Project(name="admin-project", category="application", github_org="canonical")
+                Project(
+                    name="admin-project", category="application", github_org="canonical"
+                )
             )
             await test_db_session.commit()
 
@@ -79,11 +81,15 @@ class TestAdminPageIntegration:
 class TestAdminHealthIntegration:
     """Integration tests for the admin health endpoint."""
 
-    def test_health_ok(self, client: TestClient, app_with_db: tuple[FastAPI, str]) -> None:
+    def test_health_ok(
+        self, client: TestClient, app_with_db: tuple[FastAPI, str]
+    ) -> None:
         """Health returns ok with an empty but reachable DB."""
         _, token = app_with_db
 
-        response = client.get("/admin/health", headers={"Authorization": f"Bearer {token}"})
+        response = client.get(
+            "/admin/health", headers={"Authorization": f"Bearer {token}"}
+        )
 
         assert response.status_code == 200
         assert response.json() == {
@@ -110,7 +116,9 @@ class TestAdminRefreshIntegration:
         """Refresh accepts a valid bearer token and queues work."""
         _, token = app_with_db
 
-        response = client.post("/admin/refresh", headers={"Authorization": f"Bearer {token}"})
+        response = client.post(
+            "/admin/refresh", headers={"Authorization": f"Bearer {token}"}
+        )
 
         assert response.status_code == 202
         assert response.json()["status"] == "refresh_queued"
@@ -142,7 +150,9 @@ class TestAdminLogsIntegration:
         """Logs returns plain text when called with a valid bearer token."""
         _, token = app_with_db
 
-        response = client.get("/admin/logs", headers={"Authorization": f"Bearer {token}"})
+        response = client.get(
+            "/admin/logs", headers={"Authorization": f"Bearer {token}"}
+        )
 
         assert response.status_code == 200
         assert "text/plain" in response.headers["content-type"]
@@ -155,7 +165,9 @@ class TestAdminLogsIntegration:
         """Logs always returns some body text, even without journalctl output."""
         _, token = app_with_db
 
-        response = client.get("/admin/logs", headers={"Authorization": f"Bearer {token}"})
+        response = client.get(
+            "/admin/logs", headers={"Authorization": f"Bearer {token}"}
+        )
 
         assert response.status_code == 200
         assert response.text.strip() != ""

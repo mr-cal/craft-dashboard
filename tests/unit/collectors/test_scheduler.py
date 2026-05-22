@@ -1,11 +1,17 @@
 """Tests for the refresh scheduler."""
 
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
+
+from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from craft_dashboard.collectors.scheduler import (
     distribute_refresh_dates,
     is_due_for_refresh,
+    record_refresh_error,
 )
+from craft_dashboard.models.refresh_schedule import RefreshSchedule
 
 
 class TestIsDueForRefresh:
@@ -80,3 +86,20 @@ class TestDistributeRefreshDates:
         assert len(result) == 20
         times = [dt for _, dt in result]
         assert len(set(times)) == 20
+
+
+class TestRecordRefreshError:
+    async def test_record_error_creates_new_schedule(self, test_db_session) -> None:
+        """When no schedule exists, record_refresh_error creates one."""
+        with patch("sqlalchemy.dialects.postgresql.insert", side_effect=sqlite_insert):
+            await record_refresh_error(999, "github", "test error", test_db_session)
+
+        result = await test_db_session.execute(
+            select(RefreshSchedule).where(
+                RefreshSchedule.project_id == 999,
+                RefreshSchedule.source == "github",
+            )
+        )
+        schedule = result.scalar_one()
+        assert schedule.last_error == "test error"
+        assert schedule.consecutive_failures == 1

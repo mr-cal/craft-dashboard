@@ -80,10 +80,14 @@ class TestIssueModel:
 
     def test_boolean_columns_explicitly_set_not_nullable(self) -> None:
         """Boolean columns should explicitly set nullable=False."""
-        module_path = Path(__file__).resolve().parents[3] / "craft_dashboard/models/issue.py"
+        module_path = (
+            Path(__file__).resolve().parents[3] / "craft_dashboard/models/issue.py"
+        )
         tree = ast.parse(module_path.read_text())
         issue_class = next(
-            node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Issue"
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "Issue"
         )
 
         for field_name in ("author_is_maintainer", "author_is_bot"):

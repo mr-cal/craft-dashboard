@@ -60,3 +60,11 @@ class TestDashboardConfig:
 
         with pytest.raises(FileNotFoundError):
             load_config(config_file)
+
+    def test_load_config_malformed_toml(self, tmp_path: pathlib.Path) -> None:
+        """Malformed TOML raises an error."""
+        config_file = tmp_path / "bad.toml"
+        config_file.write_text("this is not valid toml [[[")
+
+        with pytest.raises(Exception):
+            load_config(config_file)
