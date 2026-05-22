@@ -5,8 +5,11 @@ import logging
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette import status
+from starlette.exceptions import HTTPException
 
 from craft_dashboard.auth import verify_admin_token
 from craft_dashboard.dependencies import get_db_session
@@ -15,10 +18,31 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin")
 
+_LOG_SERVICE_UNITS = ["collect-data", "craft-dashboard"]
+
+
+class AdminActionResponse(BaseModel):
+    """Response model for admin action endpoints."""
+
+    status: str
+    message: str
+    count: int | None = None
+
 
 def _get_admin_token(request: Request) -> str:
     """Get the admin token from app settings."""
     return request.app.state.settings.admin_token
+
+
+def _verify_origin(request: Request) -> None:
+    """Verify request originates from dashboard UI (anti-CSRF for bearer token flows)."""
+    origin = request.headers.get("origin", "")
+    host = request.headers.get("host", "")
+    if origin and host not in origin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cross-origin request rejected.",
+        )
 
 
 @router.get("", response_class=HTMLResponse)
@@ -32,17 +56,23 @@ async def admin_page(
     from craft_dashboard.models.issue import Issue
     from craft_dashboard.models.llm_evaluation import LLMEvaluation
 
-    total_open = await session.scalar(
-        select(func.count()).select_from(Issue).where(Issue.state == "open")
-    ) or 0
+    total_open = (
+        await session.scalar(
+            select(func.count()).select_from(Issue).where(Issue.state == "open")
+        )
+        or 0
+    )
 
-    evaluated_count = await session.scalar(
-        select(func.count(func.distinct(LLMEvaluation.issue_id)))
-        .select_from(LLMEvaluation)
-        .join(Issue, LLMEvaluation.issue_id == Issue.id)
-        .where(Issue.state == "open")
-        .where(LLMEvaluation.latest.is_(True))
-    ) or 0
+    evaluated_count = (
+        await session.scalar(
+            select(func.count(func.distinct(LLMEvaluation.issue_id)))
+            .select_from(LLMEvaluation)
+            .join(Issue, LLMEvaluation.issue_id == Issue.id)
+            .where(Issue.state == "open")
+            .where(LLMEvaluation.latest.is_(True))
+        )
+        or 0
+    )
 
     result = await session.execute(
         select(
@@ -79,6 +109,7 @@ async def trigger_refresh(
     """
     admin_token = _get_admin_token(request)
     verify_admin_token(authorization, admin_token)
+    _verify_origin(request)
     logger.info("Admin: refresh queued")
 
     return JSONResponse(
@@ -99,6 +130,7 @@ async def trigger_re_evaluation(
     """
     admin_token = _get_admin_token(request)
     verify_admin_token(authorization, admin_token)
+    _verify_origin(request)
     logger.info("Admin: re-evaluation queued")
 
     return JSONResponse(
@@ -126,6 +158,7 @@ async def distribute_refresh_schedule(
 
     admin_token = _get_admin_token(request)
     verify_admin_token(authorization, admin_token)
+    _verify_origin(request)
 
     settings = request.app.state.settings
     refresh_age_days = settings.refresh_age_days
@@ -221,13 +254,13 @@ async def admin_logs(
     verify_admin_token(authorization, admin_token)
 
     try:
+        units = []
+        for unit in _LOG_SERVICE_UNITS:
+            units.extend(["-u", unit])
         result = subprocess.run(
             [
                 "journalctl",
-                "-u",
-                "collect-data",
-                "-u",
-                "craft-dashboard",
+                *units,
                 "-n",
                 "100",
                 "--no-pager",
@@ -237,6 +270,8 @@ async def admin_logs(
             capture_output=True,
             text=True,
             timeout=10,
+            shell=False,
+            check=False,
         )
         return PlainTextResponse(result.stdout or "(no logs)")
     except (subprocess.TimeoutExpired, FileNotFoundError):

@@ -18,6 +18,7 @@ dependencies = [
     "launchpadlib>=2.0",
     "click>=8.1",
     "python-multipart>=0.0.18",
+    "slowapi>=0.1.9",
 ]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",

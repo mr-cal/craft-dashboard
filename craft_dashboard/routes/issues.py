@@ -1,6 +1,7 @@
 """Issue and PR triage routes."""
 
 from datetime import UTC, datetime
+from enum import StrEnum
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
@@ -15,7 +16,22 @@ from craft_dashboard.models.project import Project
 
 router = APIRouter(prefix="/issues")
 
-ITEMS_PER_PAGE = 50
+VALID_PER_PAGE = {10, 50, 1000}
+DEFAULT_PER_PAGE = 50
+
+
+class IssueSort(StrEnum):
+    """Valid sort fields for the issue list."""
+
+    staleness = "staleness"
+    age = "age"
+    updated = "updated"
+    title = "title"
+    author = "author"
+    number = "number"
+
+
+_VALID_SORT_FIELDS = {e.value for e in IssueSort}
 
 
 def _compute_age_days(created_at: datetime | None) -> int:
@@ -39,11 +55,13 @@ def _apply_author_role_filter(query, author_role: str):  # noqa: ANN001
     for role in role_list:
         if role == "maintainer":
             role_conditions.append(
-                (Issue.author_is_maintainer.is_(True)) & (Issue.author_is_bot.is_(False))
+                (Issue.author_is_maintainer.is_(True))
+                & (Issue.author_is_bot.is_(False))
             )
         elif role == "contributor":
             role_conditions.append(
-                (Issue.author_is_maintainer.is_(False)) & (Issue.author_is_bot.is_(False))
+                (Issue.author_is_maintainer.is_(False))
+                & (Issue.author_is_bot.is_(False))
             )
         elif role == "bot":
             role_conditions.append(Issue.author_is_bot.is_(True))
@@ -65,6 +83,8 @@ async def _query_issues(
     sort_by: str = "staleness",
     page: int = 1,
     bots: list[str] | None = None,
+    search: str = "",
+    items_per_page: int = DEFAULT_PER_PAGE,
 ) -> tuple[list[dict], int]:
     """Query issues with filters and return (issues, total_pages)."""
     query = (
@@ -101,12 +121,25 @@ async def _query_issues(
             query = query.where(LLMEvaluation.suggested_action.in_(action_list))
     query = _apply_author_role_filter(query, author_role)
 
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.where(
+            or_(
+                Issue.title.ilike(search_pattern),
+                Issue.external_id == search,
+            )
+        )
+
     count_query = select(func.count()).select_from(query.subquery())
     total = await session.scalar(count_query) or 0
-    total_pages = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+    total_pages = max(1, (total + items_per_page - 1) // items_per_page)
 
     sort_field = sort_by.lstrip("-")
     sort_desc = sort_by.startswith("-")
+
+    if sort_field not in _VALID_SORT_FIELDS:
+        sort_field = "staleness"
+        sort_desc = False
 
     if sort_field == "age":
         col = Issue.created_at
@@ -130,8 +163,8 @@ async def _query_issues(
             func.coalesce(LLMEvaluation.scores["staleness"].as_float(), 0).desc()
         )
 
-    offset = (page - 1) * ITEMS_PER_PAGE
-    query = query.offset(offset).limit(ITEMS_PER_PAGE)
+    offset = (page - 1) * items_per_page
+    query = query.offset(offset).limit(items_per_page)
 
     result = await session.execute(query)
 
@@ -169,9 +202,12 @@ async def issue_list(
     author_role: str = Query("", alias="author_role"),
     sort: str = Query("staleness", alias="sort"),
     page: int = Query(1, ge=1),
+    search: str = Query("", alias="search"),
+    per_page: int = Query(DEFAULT_PER_PAGE, alias="per_page"),
 ) -> HTMLResponse:
     """Render the issue triage list page."""
     templates: Jinja2Templates = request.app.state.templates
+    effective_per_page = per_page if per_page in VALID_PER_PAGE else DEFAULT_PER_PAGE
 
     issues, total_pages = await _query_issues(
         session,
@@ -182,6 +218,8 @@ async def issue_list(
         author_role=author_role,
         sort_by=sort,
         page=page,
+        search=search,
+        items_per_page=effective_per_page,
     )
 
     project_result = await session.execute(
@@ -200,9 +238,11 @@ async def issue_list(
             "filter_type": issue_type,
             "filter_action": action,
             "filter_author_role": author_role,
+            "filter_search": search,
             "sort_by": sort,
             "page": page,
             "total_pages": total_pages,
+            "per_page": effective_per_page,
         },
     )
 
@@ -218,9 +258,12 @@ async def issue_table_partial(
     author_role: str = Query("", alias="author_role"),
     sort: str = Query("staleness", alias="sort"),
     page: int = Query(1, ge=1),
+    search: str = Query("", alias="search"),
+    per_page: int = Query(DEFAULT_PER_PAGE, alias="per_page"),
 ) -> HTMLResponse:
     """Return just the issue table partial (for HTMX swapping)."""
     templates: Jinja2Templates = request.app.state.templates
+    effective_per_page = per_page if per_page in VALID_PER_PAGE else DEFAULT_PER_PAGE
 
     issues, total_pages = await _query_issues(
         session,
@@ -231,6 +274,8 @@ async def issue_table_partial(
         author_role=author_role,
         sort_by=sort,
         page=page,
+        search=search,
+        items_per_page=effective_per_page,
     )
 
     return templates.TemplateResponse(
@@ -243,8 +288,10 @@ async def issue_table_partial(
             "filter_type": issue_type,
             "filter_action": action,
             "filter_author_role": author_role,
+            "filter_search": search,
             "sort_by": sort,
             "page": page,
             "total_pages": total_pages,
+            "per_page": effective_per_page,
         },
     )
