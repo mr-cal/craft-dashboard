@@ -30,8 +30,23 @@ class Settings(BaseSettings):
     # OpenRouter model settings
     openrouter_summary_model: str = "google/gemini-2.5-flash-lite"
     openrouter_evaluation_model: str = "anthropic/claude-haiku-4.5"
-    
+
+    # Database pool settings
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+
     # How many days before re-fetching an issue from GitHub
     refresh_age_days: int = 7
+
+    def validate_required_secrets(self) -> list[str]:
+        """Return a list of warning messages for missing secrets."""
+        warnings: list[str] = []
+        if not self.admin_token:
+            warnings.append(
+                "ADMIN_TOKEN is not set. Admin endpoints will reject all requests."
+            )
+        if not self.github_token:
+            warnings.append("GITHUB_TOKEN is not set. Data collection will fail.")
+        return warnings
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

@@ -1,16 +1,17 @@
 """Dependency collector for tracking project dependencies across branches."""
 
-import asyncio
 import logging
 import re
 import tomllib
-import urllib.request
 from datetime import UTC, datetime
 from typing import Any
 
 import github
+import httpx
+import urllib3
 from github import Github, GithubException, UnknownObjectException
 from packaging.version import Version
+from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
     "DependencyCollector",
@@ -93,19 +94,18 @@ async def get_pypi_versions(name: str) -> list[str]:
     if name in _PYPI_CACHE:
         return _PYPI_CACHE[name]
 
-    def _fetch() -> list[str]:
-        url = f"https://pypi.org/pypi/{name}/json"
-        try:
-            with urllib.request.urlopen(url, timeout=10) as resp:  # noqa: S310
-                import json  # noqa: PLC0415
-                data: dict[str, Any] = json.loads(resp.read())
-            releases = data.get("releases", {})
-            return [v for v in releases if not Version(v).is_prerelease]
-        except Exception:  # noqa: BLE001
-            logger.warning("Could not fetch PyPI versions for %s", name)
-            return []
+    url = f"https://pypi.org/pypi/{name}/json"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=10.0)
+            response.raise_for_status()
+            data: dict[str, Any] = response.json()
+        releases = data.get("releases", {})
+        result = [v for v in releases if not Version(v).is_prerelease]
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not fetch PyPI versions for %s", name)
+        result = []
 
-    result = await asyncio.to_thread(_fetch)
     _PYPI_CACHE[name] = result
     return result
 
@@ -136,7 +136,9 @@ def get_latest_for_branch(
     if branch_name == "main":
         return str(max(versions))
     # Hotfix branch — latest in the same minor series
-    series_versions = [v for v in versions if (v.major, v.minor) == (ver.major, ver.minor)]
+    series_versions = [
+        v for v in versions if (v.major, v.minor) == (ver.major, ver.minor)
+    ]
     return str(max(series_versions)) if series_versions else str(max(versions))
 
 
@@ -158,7 +160,16 @@ class DependencyCollector:
                 from ``uv.lock``.  If ``None``, no version resolution is attempted.
 
         """
-        self.gh = Github(auth=github.Auth.Token(token))
+        retry = urllib3.Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        self.gh = Github(
+            auth=github.Auth.Token(token),
+            timeout=30,
+            retry=retry,
+        )
         self.org = org
         self.craft_libraries: list[str] = craft_libraries or []
 
@@ -171,7 +182,7 @@ class DependencyCollector:
         repo_name: str,
         project_id: int,
         branches: list[str],
-        session,  # noqa: ANN001
+        session: AsyncSession,
     ) -> int:
         """Collect dependencies for a repository across specified branches.
 
@@ -252,14 +263,14 @@ class DependencyCollector:
                         try:
                             ver = Version(installed_version)
                             series = f"{ver.major}.{ver.minor}"
-                            all_versions = await self._get_pypi_versions_cached(dep_name)
+                            all_versions = await self._get_pypi_versions_cached(
+                                dep_name
+                            )
                             if all_versions:
                                 latest_version = get_latest_for_branch(
                                     branch, all_versions, installed_version
                                 )
-                                is_outdated = (
-                                    Version(latest_version) > ver
-                                )
+                                is_outdated = Version(latest_version) > ver
                         except Exception:
                             # Catches packaging.version.InvalidVersion and API errors
                             logger.warning(
@@ -299,4 +310,3 @@ class DependencyCollector:
         await session.commit()
         logger.info("Collected %d dependencies from %s/%s", count, self.org, repo_name)
         return count
-

@@ -1,5 +1,7 @@
 """Authentication helpers for admin endpoints."""
 
+import secrets
+
 from fastapi import HTTPException, status
 
 
@@ -27,7 +29,7 @@ def verify_admin_token(token: str, admin_token: str) -> None:
         )
 
     provided = token.removeprefix("Bearer ")
-    if provided != admin_token:
+    if not secrets.compare_digest(provided, admin_token):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid admin token.",
