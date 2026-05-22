@@ -128,6 +128,7 @@ class LaunchpadCollector:
                 state=state,
                 author=author,
                 author_is_maintainer=author_is_maintainer,
+                author_is_bot=False,
                 labels=list(bug.tags),
                 created_at=bug.date_created.replace(tzinfo=UTC)
                 if bug.date_created
@@ -150,6 +151,7 @@ class LaunchpadCollector:
                     "state": stmt.excluded.state,
                     "author": stmt.excluded.author,
                     "author_is_maintainer": stmt.excluded.author_is_maintainer,
+                    "author_is_bot": stmt.excluded.author_is_bot,
                     "labels": stmt.excluded.labels,
                     "updated_at": stmt.excluded.updated_at,
                     "closed_at": stmt.excluded.closed_at,

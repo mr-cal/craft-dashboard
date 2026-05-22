@@ -35,6 +35,8 @@ def compute_snapshot_counts(
         "open_issues_internal": 0,
         "open_prs_external": 0,
         "open_prs_internal": 0,
+        "open_issues_bots": 0,
+        "open_prs_bots": 0,
         "open_bugs": 0,
         "median_issue_age": 0,
         "median_pr_age": 0,
@@ -44,6 +46,8 @@ def compute_snapshot_counts(
         "closed_issues_internal": 0,
         "closed_prs_external": 0,
         "closed_prs_internal": 0,
+        "closed_issues_bots": 0,
+        "closed_prs_bots": 0,
     }
 
     open_issue_ages: list[int] = []
@@ -51,6 +55,7 @@ def compute_snapshot_counts(
 
     for issue in issues:
         is_internal = issue.get("author") in maintainers
+        is_bot = issue.get("author_is_bot", False)
         created_at = issue.get("created_at")
         closed_at = issue.get("closed_at")
 
@@ -67,6 +72,8 @@ def compute_snapshot_counts(
                     counts["open_issues_internal"] += 1
                 else:
                     counts["open_issues_external"] += 1
+                if is_bot:
+                    counts["open_issues_bots"] += 1
                 if "bug" in issue.get("labels", []):
                     counts["open_bugs"] += 1
             elif issue["issue_type"] == "pull_request":
@@ -76,6 +83,8 @@ def compute_snapshot_counts(
                     counts["open_prs_internal"] += 1
                 else:
                     counts["open_prs_external"] += 1
+                if is_bot:
+                    counts["open_prs_bots"] += 1
 
         elif issue["state"] in ("closed", "merged"):
             # Count issues closed exactly on this snapshot day
@@ -87,12 +96,16 @@ def compute_snapshot_counts(
                             counts["closed_issues_internal"] += 1
                         else:
                             counts["closed_issues_external"] += 1
+                        if is_bot:
+                            counts["closed_issues_bots"] += 1
                     elif issue["issue_type"] == "pull_request":
                         counts["closed_prs"] += 1
                         if is_internal:
                             counts["closed_prs_internal"] += 1
                         else:
                             counts["closed_prs_external"] += 1
+                        if is_bot:
+                            counts["closed_prs_bots"] += 1
 
     if open_issue_ages:
         counts["median_issue_age"] = int(statistics.median(open_issue_ages))
@@ -128,6 +141,7 @@ async def generate_snapshot(
             Issue.issue_type,
             Issue.state,
             Issue.author,
+            Issue.author_is_bot,
             Issue.labels,
             Issue.created_at,
             Issue.closed_at,
@@ -139,6 +153,7 @@ async def generate_snapshot(
             "issue_type": row.issue_type,
             "state": row.state,
             "author": row.author,
+            "author_is_bot": row.author_is_bot,
             "labels": row.labels if isinstance(row.labels, list) else [],
             "created_at": row.created_at,
             "closed_at": row.closed_at,

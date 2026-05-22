@@ -328,8 +328,8 @@ function updateSnapshotCharts() {
   }
   
   // Open Issues/PRs Chart
-  const issueKey = view === "external" ? "nm_open_issues" : "open_issues";
-  const prKey = view === "external" ? "nm_open_prs" : "open_prs";
+  const issueKey = view === "bots" ? "bots_open_issues" : view === "external" ? "nm_open_issues" : "open_issues";
+  const prKey = view === "bots" ? "bots_open_prs" : view === "external" ? "nm_open_prs" : "open_prs";
   
   snapshotOpenChart.data.labels = labels;
   snapshotOpenChart.data.datasets = [
@@ -416,9 +416,10 @@ function getCurrentView() {
   
   if (!maintainers && !contributors && !bots) return "none";
   if (maintainers && contributors && bots) return "all";
-  if (!maintainers && (contributors || bots)) return "external";
   if (maintainers && !contributors && !bots) return "internal";
-  // Mixed: maintainers + some external
+  if (!maintainers && !contributors && bots) return "bots";
+  if (!maintainers && contributors && !bots) return "external";
+  // Mixed cases - show all
   return "all";
 }
 
@@ -427,6 +428,7 @@ function getDataKey(baseKey) {
   if (view === "none") return null;
   if (view === "external") return baseKey + "_external";
   if (view === "internal") return baseKey + "_internal";
+  if (view === "bots") return baseKey + "_bots";
   return baseKey; // "all"
 }
 

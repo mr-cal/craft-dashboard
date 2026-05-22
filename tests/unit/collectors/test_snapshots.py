@@ -14,6 +14,7 @@ def _issue(
     closed_days_ago=None,
     author="user1",
     labels=None,
+    author_is_bot=False,
     reference_date=_TODAY,
 ):
     created_at = datetime.combine(reference_date, datetime.min.time(), tzinfo=UTC) - timedelta(
@@ -28,6 +29,7 @@ def _issue(
         "issue_type": issue_type,
         "state": state,
         "author": author,
+        "author_is_bot": author_is_bot,
         "labels": labels or [],
         "created_at": created_at,
         "closed_at": closed_at,
@@ -48,6 +50,8 @@ class TestComputeSnapshotCounts:
             "open_issues_internal": 0,
             "open_prs_external": 0,
             "open_prs_internal": 0,
+            "open_issues_bots": 0,
+            "open_prs_bots": 0,
             "open_bugs": 0,
             "median_issue_age": 0,
             "median_pr_age": 0,
@@ -57,6 +61,8 @@ class TestComputeSnapshotCounts:
             "closed_issues_internal": 0,
             "closed_prs_external": 0,
             "closed_prs_internal": 0,
+            "closed_issues_bots": 0,
+            "closed_prs_bots": 0,
         }
 
     def test_counts_open_issues(self) -> None:
@@ -189,3 +195,64 @@ class TestComputeSnapshotCounts:
         result = compute_snapshot_counts(issues=issues, maintainers=set(), today=_TODAY)
 
         assert result["closed_issues"] == 1
+
+    def test_bot_open_issue_counted_in_bots(self) -> None:
+        """Open issue from a bot author is counted in open_issues_bots."""
+        issues = [
+            _issue("open", author="renovate[bot]", author_is_bot=True),
+            _issue("open", author="human-user", author_is_bot=False),
+        ]
+
+        result = compute_snapshot_counts(issues=issues, maintainers=set(), today=_TODAY)
+
+        assert result["open_issues_bots"] == 1
+        assert result["open_issues"] == 2
+
+    def test_bot_open_pr_counted_in_bots(self) -> None:
+        """Open PR from a bot author is counted in open_prs_bots."""
+        issues = [
+            _issue("open", issue_type="pull_request", author="dependabot[bot]", author_is_bot=True),
+            _issue("open", issue_type="pull_request", author="human-user", author_is_bot=False),
+        ]
+
+        result = compute_snapshot_counts(issues=issues, maintainers=set(), today=_TODAY)
+
+        assert result["open_prs_bots"] == 1
+        assert result["open_prs"] == 2
+
+    def test_non_bot_issues_not_in_bots_count(self) -> None:
+        """Human-authored issues do not appear in open_issues_bots."""
+        issues = [
+            _issue("open", author="alice", author_is_bot=False),
+            _issue("open", author="bob", author_is_bot=False),
+        ]
+
+        result = compute_snapshot_counts(issues=issues, maintainers=set(), today=_TODAY)
+
+        assert result["open_issues_bots"] == 0
+
+    def test_lp_style_issues_have_zero_bots(self) -> None:
+        """LP-style issues (no author_is_bot field) default to 0 bots."""
+        lp_issues = [
+            {"issue_type": "issue", "state": "open", "author": "lp-user", "labels": [],
+             "created_at": None, "closed_at": None},
+            {"issue_type": "issue", "state": "open", "author": "another-lp-user", "labels": [],
+             "created_at": None, "closed_at": None},
+        ]
+
+        result = compute_snapshot_counts(issues=lp_issues, maintainers=set(), today=_TODAY)
+
+        assert result["open_issues_bots"] == 0
+        assert result["open_issues"] == 2
+
+    def test_bot_closed_issue_counted_in_closed_bots(self) -> None:
+        """Issue closed today by a bot is counted in closed_issues_bots."""
+        issues = [
+            _issue("closed", author="renovate[bot]", author_is_bot=True, closed_days_ago=0),
+            _issue("closed", author="human", author_is_bot=False, closed_days_ago=0),
+        ]
+
+        result = compute_snapshot_counts(issues=issues, maintainers=set(), today=_TODAY)
+
+        assert result["closed_issues_bots"] == 1
+        assert result["closed_issues"] == 2

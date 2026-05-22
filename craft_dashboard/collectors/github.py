@@ -312,6 +312,7 @@ class GitHubCollector:
                 state=state,
                 author=author,
                 author_is_maintainer=self.is_maintainer(author) if author else False,
+                author_is_bot=author.endswith("[bot]") if author else False,
                 labels=label_names,
                 created_at=gh_issue.created_at.replace(tzinfo=UTC)
                 if gh_issue.created_at
@@ -335,6 +336,7 @@ class GitHubCollector:
                     "state": stmt.excluded.state,
                     "author": stmt.excluded.author,
                     "author_is_maintainer": stmt.excluded.author_is_maintainer,
+                    "author_is_bot": stmt.excluded.author_is_bot,
                     "labels": stmt.excluded.labels,
                     "updated_at": stmt.excluded.updated_at,
                     "closed_at": stmt.excluded.closed_at,

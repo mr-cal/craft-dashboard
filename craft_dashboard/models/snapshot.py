@@ -39,6 +39,12 @@ class Snapshot(Base):
     closed_prs_external: Mapped[int] = mapped_column(Integer, default=0)
     closed_prs_internal: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Bot counts
+    open_issues_bots: Mapped[int] = mapped_column(Integer, default=0)
+    open_prs_bots: Mapped[int] = mapped_column(Integer, default=0)
+    closed_issues_bots: Mapped[int] = mapped_column(Integer, default=0)
+    closed_prs_bots: Mapped[int] = mapped_column(Integer, default=0)
+
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="snapshots")  # noqa: F821
 
