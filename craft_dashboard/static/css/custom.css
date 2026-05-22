@@ -204,3 +204,7 @@
 .multiselect__option span {
   flex: 1;
 }
+
+.sort-arrow {
+  margin-left: 0.25rem;
+}

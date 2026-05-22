@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function sortTable(table, columnIndex) {
   const tbody = table.querySelector('tbody');
+  if (!tbody) return;
   const rows = Array.from(tbody.querySelectorAll('tr'));
   
   // Get the current sort state from the table
@@ -37,7 +38,7 @@ function sortTable(table, columnIndex) {
   }
   
   // Store the sort state
-  table.dataset.sortColumn = columnIndex;
+  table.dataset.sortColumn = String(columnIndex);
   table.dataset.sortDirection = currentSortDirection;
   
   // Sort rows
@@ -87,7 +88,6 @@ function updateSortIndicators(table, sortedColumn, direction) {
       const arrowSpan = document.createElement('span');
       arrowSpan.className = 'sort-arrow';
       arrowSpan.textContent = direction === 'asc' ? ' ↑' : ' ↓';
-      arrowSpan.style.marginLeft = '0.25rem';
       header.appendChild(arrowSpan);
     }
   });
