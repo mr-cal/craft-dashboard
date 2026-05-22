@@ -110,7 +110,7 @@ class TestCollectGithubLogging:
         gh_collector.collect_issues = AsyncMock(return_value=4)
         gh_collector.collect_releases = AsyncMock(return_value=3)
 
-        monkeypatch.setattr(collect_data, "DependencyCollector", lambda token, org: dep_collector)
+        monkeypatch.setattr(collect_data, "DependencyCollector", lambda token, org, craft_libraries: dep_collector)
         monkeypatch.setattr(
             collect_data,
             "GitHubCollector",
