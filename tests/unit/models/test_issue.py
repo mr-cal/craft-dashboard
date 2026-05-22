@@ -1,5 +1,8 @@
 """Tests for the Issue model."""
 
+from datetime import UTC, datetime
+from typing import get_args
+
 from craft_dashboard.models.issue import Issue
 
 
@@ -51,3 +54,24 @@ class TestIssueModel:
         col = Issue.__table__.columns["project_id"]
         fk_targets = [fk.target_fullname for fk in col.foreign_keys]
         assert "projects.id" in fk_targets
+
+    def test_labels_annotation_uses_list_type(self) -> None:
+        """Issue.labels should be annotated as Mapped[list]."""
+        annotation = Issue.__annotations__["labels"]
+
+        assert get_args(annotation) == (list,)
+
+    def test_labels_is_list_type(self) -> None:
+        """Issue.labels should be typed as list, not dict."""
+        issue = Issue(
+            project_id=1,
+            source="github",
+            external_id="1",
+            issue_type="issue",
+            title="test",
+            state="open",
+            labels=["bug", "enhancement"],
+            last_fetched_at=datetime.now(tz=UTC),
+        )
+
+        assert isinstance(issue.labels, list)

@@ -36,7 +36,7 @@ class Issue(Base):
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
     author_is_maintainer: Mapped[bool] = mapped_column(Boolean, default=False)
     author_is_bot: Mapped[bool] = mapped_column(Boolean, default=False)
-    labels: Mapped[dict] = mapped_column(JSONB, default=list)
+    labels: Mapped[list] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
