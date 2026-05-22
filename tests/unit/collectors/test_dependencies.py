@@ -1,5 +1,10 @@
 """Tests for the dependency collector."""
 
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from github import GithubException, UnknownObjectException
+
 from craft_dashboard.collectors.dependencies import (
     DependencyCollector,
     get_latest_for_branch,
@@ -230,4 +235,148 @@ class TestDependencyCollector:
         collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
 
         assert collector.craft_libraries == []
+
+
+class TestCollectDependenciesExceptionHandling:
+    """Tests for collect_dependencies() exception handling."""
+
+    @staticmethod
+    def _fake_insert(_table) -> MagicMock:
+        stmt = MagicMock()
+        stmt.excluded = MagicMock()
+        stmt.values.return_value = stmt
+        stmt.on_conflict_do_update.return_value = stmt
+        return stmt
+
+    @staticmethod
+    def _make_contents(text: str) -> MagicMock:
+        contents = MagicMock()
+        contents.decoded_content = text.encode()
+        return contents
+
+    @staticmethod
+    def _make_repo(get_contents_side_effect) -> MagicMock:
+        repo = MagicMock()
+        repo.get_contents.side_effect = get_contents_side_effect
+        return repo
+
+    @staticmethod
+    def _make_session() -> AsyncMock:
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=None)
+        session.commit = AsyncMock()
+        return session
+
+    @staticmethod
+    def _pyproject_contents() -> MagicMock:
+        return TestCollectDependenciesExceptionHandling._make_contents(
+            "[project]\ndependencies = [\"requests>=2.0\"]\n"
+        )
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            GithubException(500, {"message": "boom"}),
+            UnknownObjectException(404, {"message": "missing"}),
+        ],
+    )
+    async def test_collect_dependencies_catches_missing_uv_lock(self, mocker, exc) -> None:
+        collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
+
+        def get_contents(path: str, ref: str):
+            if path == "uv.lock":
+                raise exc
+            if path == "pyproject.toml":
+                return self._pyproject_contents()
+            raise AssertionError(path)
+
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value = self._make_repo(get_contents)
+        session = self._make_session()
+
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._fake_insert,
+        )
+
+        count = await collector.collect_dependencies("repo", 1, ["main"], session)
+
+        assert count == 1
+        session.commit.assert_awaited_once()
+
+    async def test_collect_dependencies_propagates_non_github_exception_fetching_uv_lock(self, mocker) -> None:
+        collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
+
+        def get_contents(path: str, ref: str):
+            if path == "uv.lock":
+                raise RuntimeError("boom")
+            if path == "pyproject.toml":
+                return self._pyproject_contents()
+            raise AssertionError(path)
+
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value = self._make_repo(get_contents)
+        session = self._make_session()
+
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._fake_insert,
+        )
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await collector.collect_dependencies("repo", 1, ["main"], session)
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            GithubException(500, {"message": "boom"}),
+            UnknownObjectException(404, {"message": "missing"}),
+        ],
+    )
+    async def test_collect_dependencies_catches_missing_pyproject(self, mocker, exc) -> None:
+        collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
+
+        def get_contents(path: str, ref: str):
+            if path == "uv.lock":
+                raise UnknownObjectException(404, {"message": "missing"})
+            if path == "pyproject.toml":
+                raise exc
+            raise AssertionError(path)
+
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value = self._make_repo(get_contents)
+        session = self._make_session()
+
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._fake_insert,
+        )
+
+        count = await collector.collect_dependencies("repo", 1, ["main"], session)
+
+        assert count == 0
+        session.execute.assert_not_awaited()
+        session.commit.assert_awaited_once()
+
+    async def test_collect_dependencies_propagates_non_github_exception_fetching_pyproject(self, mocker) -> None:
+        collector = DependencyCollector(token="ghp_test", org="canonical")  # noqa: S106
+
+        def get_contents(path: str, ref: str):
+            if path == "uv.lock":
+                raise UnknownObjectException(404, {"message": "missing"})
+            if path == "pyproject.toml":
+                raise RuntimeError("boom")
+            raise AssertionError(path)
+
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value = self._make_repo(get_contents)
+        session = self._make_session()
+
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._fake_insert,
+        )
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await collector.collect_dependencies("repo", 1, ["main"], session)
 

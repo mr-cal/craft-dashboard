@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import github
-from github import Github
+from github import Github, GithubException, UnknownObjectException
 from packaging.version import Version
 
 logger = logging.getLogger(__name__)
@@ -195,14 +195,14 @@ class DependencyCollector:
                 lock_contents = repo.get_contents("uv.lock", ref=branch)
                 lock_packages = parse_uv_lock(lock_contents.decoded_content.decode())
                 source_file = "uv.lock"
-            except Exception:  # noqa: BLE001
+            except (GithubException, UnknownObjectException):
                 source_file = "pyproject.toml"
 
             # Fetch pyproject.toml for the dependency list.
             try:
                 contents = repo.get_contents("pyproject.toml", ref=branch)
                 pyproject = tomllib.loads(contents.decoded_content.decode())
-            except Exception:  # noqa: BLE001
+            except (GithubException, UnknownObjectException):
                 logger.warning(
                     "Could not read pyproject.toml from %s/%s@%s",
                     self.org,
@@ -253,7 +253,8 @@ class DependencyCollector:
                                 is_outdated = (
                                     Version(latest_version) > ver
                                 )
-                        except Exception:  # noqa: BLE001
+                        except Exception:
+                            # Catches packaging.version.InvalidVersion and API errors
                             logger.warning(
                                 "Could not compute version info for %s in %s@%s",
                                 dep_name,
