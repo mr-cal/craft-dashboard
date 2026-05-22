@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 _CORRECT_TOKEN = "correct-token"  # noqa: S105 — test-only dummy token
 _WRONG_TOKEN = "wrong-token"  # noqa: S105 — test-only dummy token
+_TEST_TOKEN = "test"  # noqa: S105 — test-only dummy token
 
 
 class TestVerifyAdminToken:
@@ -18,7 +19,9 @@ class TestVerifyAdminToken:
     def test_invalid_token_raises(self) -> None:
         """Invalid token raises HTTPException 401."""
         with pytest.raises(HTTPException) as exc_info:
-            verify_admin_token(token=f"Bearer {_WRONG_TOKEN}", admin_token=_CORRECT_TOKEN)
+            verify_admin_token(
+                token=f"Bearer {_WRONG_TOKEN}", admin_token=_CORRECT_TOKEN
+            )
         assert exc_info.value.status_code == 401
 
     def test_missing_bearer_prefix_raises(self) -> None:
@@ -30,5 +33,5 @@ class TestVerifyAdminToken:
     def test_empty_admin_token_raises(self) -> None:
         """Empty admin token always rejects (misconfiguration guard)."""
         with pytest.raises(HTTPException) as exc_info:
-            verify_admin_token(token="Bearer test", admin_token="")
+            verify_admin_token(token=f"Bearer {_TEST_TOKEN}", admin_token="")
         assert exc_info.value.status_code == 401

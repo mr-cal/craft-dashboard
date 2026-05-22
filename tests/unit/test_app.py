@@ -1,11 +1,12 @@
 """Tests for the FastAPI application factory."""
 
+import json
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from craft_dashboard.app import create_app, lifespan
+from craft_dashboard.app import JSONFormatter, create_app, lifespan
 from craft_dashboard.settings import Settings
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -120,11 +121,6 @@ class TestCreateApp:
 
     def test_json_formatter_formats_log_record(self) -> None:
         """JSONFormatter produces valid JSON."""
-        import json
-        import logging
-
-        from craft_dashboard.app import JSONFormatter
-
         formatter = JSONFormatter()
         record = logging.LogRecord(
             name="test",
