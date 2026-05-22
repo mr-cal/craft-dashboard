@@ -3,6 +3,7 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -17,6 +18,7 @@ from craft_dashboard.models.dependency import Dependency
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.release import Release
+from craft_dashboard.routes.stats import dependencies_data
 
 if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"
@@ -218,6 +220,68 @@ class TestDependenciesData:
         assert response.json() == {
             "libs": ["craft-parts", "craft-providers"],
             "apps": {},
+        }
+
+    @pytest.mark.asyncio
+    async def test_deps_query_filters_to_configured_libraries(self) -> None:
+        class RecordingSession:
+            def __init__(self) -> None:
+                self.statement = None
+
+            async def execute(self, statement):
+                self.statement = statement
+                return [
+                    SimpleNamespace(
+                        project_name="snapcraft",
+                        branch="main",
+                        dependency_name="craft-parts",
+                        version_spec=">=1.0",
+                        installed_version="1.2.3",
+                        latest_version="1.3.0",
+                        series="1.x",
+                        is_outdated=True,
+                    ),
+                    SimpleNamespace(
+                        project_name="snapcraft",
+                        branch="main",
+                        dependency_name="requests",
+                        version_spec=">=2.0",
+                        installed_version="2.31.0",
+                        latest_version="2.32.0",
+                        series="2.x",
+                        is_outdated=True,
+                    ),
+                ]
+
+        session = RecordingSession()
+        request = SimpleNamespace(
+            app=SimpleNamespace(
+                state=SimpleNamespace(
+                    config=DashboardConfig(
+                        craft_libraries=["craft-parts", "craft-providers"]
+                    )
+                )
+            )
+        )
+
+        response = await dependencies_data(request, session)
+
+        compiled = str(
+            session.statement.compile(compile_kwargs={"literal_binds": True})
+        )
+        assert "dependencies.dependency_name IN ('craft-parts', 'craft-providers')" in compiled
+        assert response == {
+            "libs": ["craft-parts", "craft-providers"],
+            "apps": {
+                "snapcraft/main": {
+                    "craft-parts": {
+                        "version": "1.2.3",
+                        "latest": "1.3.0",
+                        "series": "1.x",
+                        "outdated": True,
+                    }
+                }
+            },
         }
 
 

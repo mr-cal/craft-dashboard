@@ -81,6 +81,7 @@ async def dependencies_data(
         )
         .join(Project, Dependency.project_id == Project.id)
         .where(Project.category == "application")
+        .where(Dependency.dependency_name.in_(libs))
         .order_by(Project.name, Dependency.branch, Dependency.dependency_name)
     )
 
