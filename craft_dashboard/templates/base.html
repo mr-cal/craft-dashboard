@@ -17,7 +17,7 @@
     {% block head %}{% endblock %}
   </head>
   <body class="is-paper">
-    <header id="navigation" class="p-navigation is-dark">
+    <header id="navigation" class="p-navigation is-dark" role="banner">
       <div class="p-navigation__row--25-75">
         <div class="p-navigation__banner">
           <div class="p-navigation__tagged-logo">
@@ -25,7 +25,7 @@
               <span class="p-navigation__logo-title">craft-dashboard</span>
             </a>
           </div>
-          <ul class="p-navigation__items">
+          <ul class="p-navigation__items" aria-label="Mobile menu">
             <li class="p-navigation__item">
               <button class="js-menu-button p-navigation__link">Menu</button>
             </li>
@@ -46,7 +46,7 @@
         </nav>
       </div>
     </header>
-    <main class="l-main">
+    <main class="l-main" role="main">
       {% block layout %}
       <div class="p-strip">
         <div class="row">
@@ -57,7 +57,7 @@
       </div>
       {% endblock %}
     </main>
-    <footer class="l-footer--sticky p-strip is-dark is-shallow">
+    <footer class="l-footer--sticky p-strip is-dark is-shallow" role="contentinfo">
       <div class="row">
         <a class="is-dark" href="https://github.com/mr-cal/craft-dashboard">craft-dashboard</a>
       </div>
