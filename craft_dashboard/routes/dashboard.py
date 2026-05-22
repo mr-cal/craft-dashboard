@@ -1,14 +1,18 @@
 """Dashboard overview routes."""
 
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.project import Project
+
+if TYPE_CHECKING:
+    from fastapi.templating import Jinja2Templates
 
 router = APIRouter()
 

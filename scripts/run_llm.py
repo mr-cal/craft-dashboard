@@ -23,7 +23,7 @@ import asyncio
 import logging
 import pathlib
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import click
 
@@ -31,9 +31,11 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from craft_dashboard.config import load_config
 from craft_dashboard.database import get_engine, get_session_factory
-from craft_dashboard.llm.client import OpenRouterClient
+from craft_dashboard.llm.client import (
+    QuotaExhaustedError,
+    create_llm_client,
+)
 from craft_dashboard.llm.evaluator import IssueEvaluator
-from craft_dashboard.llm.client import QuotaExhaustedError, create_llm_client
 from craft_dashboard.settings import Settings
 
 logging.basicConfig(
@@ -66,13 +68,13 @@ async def _evaluate_issues(
 
     Returns:
         Stats dict with evaluated, skipped, errored counts.
-    """
-    from sqlalchemy import select
-    from sqlalchemy.dialects.postgresql import insert
 
+    """
     from craft_dashboard.models.issue import Issue
     from craft_dashboard.models.llm_evaluation import LLMEvaluation
     from craft_dashboard.models.project import Project
+    from sqlalchemy import select
+    from sqlalchemy.dialects.postgresql import insert
 
     stats = {"evaluated": 0, "skipped": 0, "errored": 0, "total_tokens": 0}
 
@@ -107,13 +109,13 @@ async def _evaluate_issues(
         existing_hash = row.issue_data_hash
         labels = issue.labels if isinstance(issue.labels, list) else []
 
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         created = issue.created_at or now
         updated = issue.updated_at or now
         if created.tzinfo is None:
-            created = created.replace(tzinfo=timezone.utc)
+            created = created.replace(tzinfo=UTC)
         if updated.tzinfo is None:
-            updated = updated.replace(tzinfo=timezone.utc)
+            updated = updated.replace(tzinfo=UTC)
 
         age_days = (now - created).days
         last_activity_days = (now - updated).days
@@ -178,7 +180,7 @@ async def _evaluate_issues(
                     suggested_action_reason=result["suggested_action_reason"],
                     scores=result["scores"],
                     tokens_used=result["tokens_used"],
-                    evaluated_at=datetime.now(tz=timezone.utc),
+                    evaluated_at=datetime.now(tz=UTC),
                     issue_data_hash=result["issue_data_hash"],
                     latest=True,
                 )

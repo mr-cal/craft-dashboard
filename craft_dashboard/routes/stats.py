@@ -1,8 +1,9 @@
 """Stats routes for dependencies, releases, and trends."""
 
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +12,9 @@ from craft_dashboard.models.dependency import Dependency
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.release import Release
 from craft_dashboard.models.snapshot import Snapshot
+
+if TYPE_CHECKING:
+    from fastapi.templating import Jinja2Templates
 
 router = APIRouter(prefix="/stats")
 

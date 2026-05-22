@@ -545,10 +545,9 @@ class GitHubCollector:
                         and len(ver) >= 2
                         and ver[0] == hf_major
                         and ver[1] == hf_minor
-                    ):
-                        if ver > best_ver:
-                            best_ver = ver
-                            best_tag = tag
+                    ) and ver > best_ver:
+                        best_ver = ver
+                        best_tag = tag
 
             if not best_tag:
                 logger.debug(

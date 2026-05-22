@@ -67,7 +67,7 @@ class TestCreateApp:
         app = create_app()
         app.router.lifespan_context = _noop_lifespan
 
-        with patch("craft_dashboard.routes.dashboard.get_db_session") as mock_dep:
+        with patch("craft_dashboard.routes.dashboard.get_db_session"):
             mock_session = AsyncMock()
             mock_result = AsyncMock()
             mock_result.scalars.return_value.all.return_value = []

@@ -2,10 +2,10 @@
 
 import logging
 from datetime import UTC
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,9 @@ from starlette.exceptions import HTTPException
 
 from craft_dashboard.auth import verify_admin_token
 from craft_dashboard.dependencies import get_db_session
+
+if TYPE_CHECKING:
+    from fastapi.templating import Jinja2Templates
 
 logger = logging.getLogger(__name__)
 
