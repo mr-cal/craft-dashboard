@@ -167,7 +167,7 @@ function updateOpenIssuesChart() {
   const firstProject = selected[0];
   issuesChart.data.labels = filteredProjects[firstProject].dates;
   
-  const dataKey = getDataKey("open_issues");
+  const dataKey = getDataKey("open");
   if (!dataKey) {
     issuesChart.data.labels = [];
     issuesChart.data.datasets = [];
@@ -176,7 +176,7 @@ function updateOpenIssuesChart() {
   }
   
   issuesChart.data.datasets = selected.map((name) => {
-    const rawData = filteredProjects[name][dataKey] || filteredProjects[name]["open_issues"];
+    const rawData = filteredProjects[name][dataKey] || filteredProjects[name]["open"];
     const smoothedData = rollingAverage(rawData, 28); // 4-week rolling average
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
     const color = CHART_COLORS.palette[colorIdx % CHART_COLORS.palette.length];
@@ -224,11 +224,10 @@ function updateMedianAgeChart() {
   const firstProject = selected[0];
   medianAgeChart.data.labels = filteredProjects[firstProject].dates;
   
-  // Map view to the correct data key
-  const dataKey = view === "internal" ? "median_issue_age_internal"
-                : view === "external" ? "nm_median_issue_age"
-                : view === "bots" ? "median_issue_age_bots"
-                : "median_issue_age";
+  const dataKey = view === "internal" ? "median_age_internal"
+                : view === "external" ? "nm_median_age"
+                : view === "bots" ? "median_age_bots"
+                : "median_age";
   
   medianAgeChart.data.datasets = selected.map((name) => {
     const rawData = filteredProjects[name][dataKey];
@@ -272,7 +271,7 @@ function updateClosedChart() {
   const firstProject = selected[0];
   closedChart.data.labels = filteredProjects[firstProject].dates;
   
-  const dataKey = getDataKey("closed_issues");
+  const dataKey = getDataKey("closed");
   if (!dataKey) {
     closedChart.data.labels = [];
     closedChart.data.datasets = [];
@@ -281,7 +280,7 @@ function updateClosedChart() {
   }
   
   closedChart.data.datasets = selected.map((name) => {
-    const rawData = (filteredProjects[name][dataKey] || filteredProjects[name]["closed_issues"]).map(v => v * 7); // Scale to per-week
+    const rawData = (filteredProjects[name][dataKey] || filteredProjects[name]["closed"]).map(v => v * 7); // Scale to per-week
     const smoothedData = rollingAverage(rawData, 28); // 4-week rolling average
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
     const color = CHART_COLORS.palette[colorIdx % CHART_COLORS.palette.length];
@@ -503,13 +502,25 @@ function applyDateFilter() {
         open_issues: [],
         open_issues_external: [],
         open_issues_bots: [],
+        open: [],
+        open_external: [],
+        open_internal: [],
+        open_bots: [],
         median_issue_age: [],
         median_issue_age_internal: [],
         nm_median_issue_age: [],
         median_issue_age_bots: [],
+        median_age: [],
+        median_age_internal: [],
+        nm_median_age: [],
+        median_age_bots: [],
         closed_issues: [],
         closed_issues_external: [],
         closed_issues_bots: [],
+        closed: [],
+        closed_external: [],
+        closed_internal: [],
+        closed_bots: [],
       };
     } else {
       // Slice dates and all data arrays
@@ -596,9 +607,9 @@ function populateSnapshotCheckboxes() {
 // Initialize charts
 // ============================================================================
 
-const issuesChart = createLineChart("issues-chart", "Open Issues (4-week avg)");
+const issuesChart = createLineChart("issues-chart", "Open Issues & PRs (4-week avg)");
 const medianAgeChart = createLineChart("median-age-chart", "Median Age (days, 4-week avg)");
-const closedChart = createLineChart("closed-chart", "Issues Closed per Week (4-week avg)");
+const closedChart = createLineChart("closed-chart", "Closed per Week (4-week avg)");
 
 const BAR_HEIGHT_PX = 28;
 const CHART_BASE_HEIGHT_PX = 80;

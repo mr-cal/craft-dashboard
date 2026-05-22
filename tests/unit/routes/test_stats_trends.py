@@ -5,11 +5,6 @@ from contextlib import asynccontextmanager
 from datetime import date, timedelta
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from craft_dashboard.app import create_app
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
@@ -19,6 +14,10 @@ from craft_dashboard.routes.stats import (
     _build_all_projects_aggregate,
     _build_snapshot_dict,
 )
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
+from sqlalchemy.ext.asyncio import AsyncSession
 
 if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"  # type: ignore[attr-defined]
@@ -38,6 +37,10 @@ _TIME_SERIES_KEYS = {
     "open_prs_external",
     "open_issues_bots",
     "open_prs_bots",
+    "open",
+    "open_external",
+    "open_internal",
+    "open_bots",
     "median_issue_age",
     "median_pr_age",
     "nm_median_issue_age",
@@ -46,12 +49,20 @@ _TIME_SERIES_KEYS = {
     "median_pr_age_internal",
     "median_issue_age_bots",
     "median_pr_age_bots",
+    "median_age",
+    "nm_median_age",
+    "median_age_internal",
+    "median_age_bots",
     "closed_issues",
     "closed_prs",
     "closed_issues_external",
     "closed_prs_external",
     "closed_issues_bots",
     "closed_prs_bots",
+    "closed",
+    "closed_external",
+    "closed_internal",
+    "closed_bots",
     "open_bugs",
 }
 
@@ -111,7 +122,9 @@ def _snapshot(project_id: int, snapshot_date: date, **overrides: int) -> Snapsho
     return Snapshot(project_id=project_id, snapshot_date=snapshot_date, **overrides)
 
 
-def _trend_series(**overrides: list[int] | list[str]) -> dict[str, list[int] | list[str]]:
+def _trend_series(
+    **overrides: list[int] | list[str],
+) -> dict[str, list[int] | list[str]]:
     data = {key: [0] for key in _TIME_SERIES_KEYS if key != "dates"}
     data["dates"] = ["2024-05-20"]
     data.update(overrides)
@@ -145,7 +158,9 @@ class TestTrendsAllDataSingleProject:
                 open_issues=11,
                 open_prs=4,
                 open_issues_external=6,
+                open_issues_internal=4,
                 open_prs_external=2,
+                open_prs_internal=1,
                 open_issues_bots=1,
                 open_prs_bots=1,
                 open_bugs=3,
@@ -157,10 +172,16 @@ class TestTrendsAllDataSingleProject:
                 median_pr_age_internal=21,
                 median_issue_age_bots=4,
                 median_pr_age_bots=5,
+                median_age=15,
+                nm_median_age=11,
+                median_age_internal=26,
+                median_age_bots=4,
                 closed_issues=7,
                 closed_prs=8,
                 closed_issues_external=2,
+                closed_issues_internal=4,
                 closed_prs_external=3,
+                closed_prs_internal=2,
                 closed_issues_bots=1,
                 closed_prs_bots=2,
             )
@@ -187,6 +208,10 @@ class TestTrendsAllDataSingleProject:
             "open_prs_external": [2],
             "open_issues_bots": [1],
             "open_prs_bots": [1],
+            "open": [15],
+            "open_external": [8],
+            "open_internal": [5],
+            "open_bots": [2],
             "median_issue_age": [17],
             "median_pr_age": [12],
             "nm_median_issue_age": [13],
@@ -195,12 +220,20 @@ class TestTrendsAllDataSingleProject:
             "median_pr_age_internal": [21],
             "median_issue_age_bots": [4],
             "median_pr_age_bots": [5],
+            "median_age": [15],
+            "nm_median_age": [11],
+            "median_age_internal": [26],
+            "median_age_bots": [4],
             "closed_issues": [7],
             "closed_prs": [8],
             "closed_issues_external": [2],
             "closed_prs_external": [3],
             "closed_issues_bots": [1],
             "closed_prs_bots": [2],
+            "closed": [15],
+            "closed_external": [5],
+            "closed_internal": [6],
+            "closed_bots": [3],
             "open_bugs": [3],
         }
         assert data["projects"]["all-projects"] == project
@@ -246,7 +279,9 @@ class TestTrendsAllProjectsTimeSeries:
                     open_issues=2,
                     open_prs=3,
                     open_issues_external=1,
+                    open_issues_internal=1,
                     open_prs_external=2,
+                    open_prs_internal=1,
                     open_issues_bots=1,
                     open_prs_bots=0,
                     open_bugs=4,
@@ -258,10 +293,16 @@ class TestTrendsAllProjectsTimeSeries:
                     median_pr_age_internal=30,
                     median_issue_age_bots=2,
                     median_pr_age_bots=4,
+                    median_age=12,
+                    nm_median_age=7,
+                    median_age_internal=25,
+                    median_age_bots=2,
                     closed_issues=5,
                     closed_prs=6,
                     closed_issues_external=2,
+                    closed_issues_internal=2,
                     closed_prs_external=3,
+                    closed_prs_internal=1,
                     closed_issues_bots=1,
                     closed_prs_bots=2,
                 ),
@@ -271,7 +312,9 @@ class TestTrendsAllProjectsTimeSeries:
                     open_issues=5,
                     open_prs=7,
                     open_issues_external=4,
+                    open_issues_internal=1,
                     open_prs_external=5,
+                    open_prs_internal=2,
                     open_issues_bots=2,
                     open_prs_bots=3,
                     open_bugs=6,
@@ -283,10 +326,16 @@ class TestTrendsAllProjectsTimeSeries:
                     median_pr_age_internal=50,
                     median_issue_age_bots=8,
                     median_pr_age_bots=12,
+                    median_age=28,
+                    nm_median_age=14,
+                    median_age_internal=55,
+                    median_age_bots=10,
                     closed_issues=8,
                     closed_prs=9,
                     closed_issues_external=4,
+                    closed_issues_internal=2,
                     closed_prs_external=5,
+                    closed_prs_internal=3,
                     closed_issues_bots=2,
                     closed_prs_bots=1,
                 ),
@@ -308,12 +357,20 @@ class TestTrendsAllProjectsTimeSeries:
         assert all_projects["open_prs_external"] == [7]
         assert all_projects["open_issues_bots"] == [3]
         assert all_projects["open_prs_bots"] == [3]
+        assert all_projects["open"] == [17]
+        assert all_projects["open_external"] == [12]
+        assert all_projects["open_internal"] == [5]
+        assert all_projects["open_bots"] == [6]
         assert all_projects["closed_issues"] == [13]
         assert all_projects["closed_prs"] == [15]
         assert all_projects["closed_issues_external"] == [6]
         assert all_projects["closed_prs_external"] == [8]
         assert all_projects["closed_issues_bots"] == [3]
         assert all_projects["closed_prs_bots"] == [3]
+        assert all_projects["closed"] == [28]
+        assert all_projects["closed_external"] == [14]
+        assert all_projects["closed_internal"] == [8]
+        assert all_projects["closed_bots"] == [6]
         assert all_projects["open_bugs"] == [10]
         assert all_projects["median_issue_age"] == [25]
         assert all_projects["median_pr_age"] == [19]
@@ -323,6 +380,10 @@ class TestTrendsAllProjectsTimeSeries:
         assert all_projects["median_pr_age_internal"] == [40]
         assert all_projects["median_issue_age_bots"] == [5]
         assert all_projects["median_pr_age_bots"] == [8]
+        assert all_projects["median_age"] == [20]
+        assert all_projects["nm_median_age"] == [10]
+        assert all_projects["median_age_internal"] == [40]
+        assert all_projects["median_age_bots"] == [6]
 
 
 class TestTrendsProjectOrder:
@@ -352,7 +413,12 @@ class TestTrendsProjectOrder:
         assert response.status_code == 200
         data = response.json()
         assert data["order"] == ["first", "second", "third"]
-        assert list(data["projects"].keys()) == ["first", "second", "third", "all-projects"]
+        assert list(data["projects"].keys()) == [
+            "first",
+            "second",
+            "third",
+            "all-projects",
+        ]
 
 
 class TestTrendsSnapshotClosedYear:
@@ -449,6 +515,10 @@ class TestBuildAllProjectsAggregate:
                 open_prs_external=[7, 8],
                 open_issues_bots=[1, 0],
                 open_prs_bots=[0, 1],
+                open=[4, 6],
+                open_external=[12, 14],
+                open_internal=[2, 3],
+                open_bots=[1, 1],
                 median_issue_age=[10, 20],
                 median_pr_age=[30, 40],
                 nm_median_issue_age=[11, 21],
@@ -457,12 +527,20 @@ class TestBuildAllProjectsAggregate:
                 median_pr_age_internal=[32, 42],
                 median_issue_age_bots=[0, 23],
                 median_pr_age_bots=[33, 43],
+                median_age=[15, 25],
+                nm_median_age=[16, 26],
+                median_age_internal=[17, 27],
+                median_age_bots=[0, 28],
                 closed_issues=[9, 10],
                 closed_prs=[11, 12],
                 closed_issues_external=[13, 14],
                 closed_prs_external=[15, 16],
                 closed_issues_bots=[1, 2],
                 closed_prs_bots=[3, 4],
+                closed=[20, 22],
+                closed_external=[28, 30],
+                closed_internal=[18, 19],
+                closed_bots=[4, 6],
                 open_bugs=[5, 6],
             ),
             "beta": _trend_series(
@@ -473,6 +551,10 @@ class TestBuildAllProjectsAggregate:
                 open_prs_external=[13, 14],
                 open_issues_bots=[2, 3],
                 open_prs_bots=[4, 5],
+                open=[16, 18],
+                open_external=[24, 26],
+                open_internal=[9, 10],
+                open_bots=[6, 8],
                 median_issue_age=[50, 60],
                 median_pr_age=[70, 80],
                 nm_median_issue_age=[51, 61],
@@ -481,12 +563,20 @@ class TestBuildAllProjectsAggregate:
                 median_pr_age_internal=[72, 82],
                 median_issue_age_bots=[53, 63],
                 median_pr_age_bots=[73, 83],
+                median_age=[55, 65],
+                nm_median_age=[56, 66],
+                median_age_internal=[57, 67],
+                median_age_bots=[58, 68],
                 closed_issues=[17, 18],
                 closed_prs=[19, 20],
                 closed_issues_external=[21, 22],
                 closed_prs_external=[23, 24],
                 closed_issues_bots=[5, 6],
                 closed_prs_bots=[7, 8],
+                closed=[36, 38],
+                closed_external=[44, 46],
+                closed_internal=[25, 26],
+                closed_bots=[12, 14],
                 open_bugs=[9, 10],
             ),
         }
@@ -499,12 +589,20 @@ class TestBuildAllProjectsAggregate:
             "open_prs_external": [7, 21, 14],
             "open_issues_bots": [1, 2, 3],
             "open_prs_bots": [0, 5, 5],
+            "open": [4, 22, 18],
+            "open_external": [12, 38, 26],
+            "open_internal": [2, 12, 10],
+            "open_bots": [1, 7, 8],
             "closed_issues": [9, 27, 18],
             "closed_prs": [11, 31, 20],
             "closed_issues_external": [13, 35, 22],
             "closed_prs_external": [15, 39, 24],
             "closed_issues_bots": [1, 7, 6],
             "closed_prs_bots": [3, 11, 8],
+            "closed": [20, 58, 38],
+            "closed_external": [28, 74, 46],
+            "closed_internal": [18, 44, 26],
+            "closed_bots": [4, 18, 14],
             "open_bugs": [5, 15, 10],
             "median_issue_age": [10, 35, 60],
             "median_pr_age": [30, 55, 80],
@@ -514,11 +612,17 @@ class TestBuildAllProjectsAggregate:
             "median_pr_age_internal": [32, 57, 82],
             "median_issue_age_bots": [0, 38, 63],
             "median_pr_age_bots": [33, 58, 83],
+            "median_age": [15, 40, 65],
+            "nm_median_age": [16, 41, 66],
+            "median_age_internal": [17, 42, 67],
+            "median_age_bots": [0, 43, 68],
         }
 
 
 class TestBuildSnapshotDict:
-    def test_build_snapshot_dict_uses_latest_values_and_aggregate_snapshot(self) -> None:
+    def test_build_snapshot_dict_uses_latest_values_and_aggregate_snapshot(
+        self,
+    ) -> None:
         projects = {
             "alpha": _trend_series(
                 dates=["2024-05-20", "2024-05-21"],
@@ -528,6 +632,10 @@ class TestBuildSnapshotDict:
                 open_prs_external=[6, 8],
                 open_issues_bots=[0, 1],
                 open_prs_bots=[1, 2],
+                open=[3, 7],
+                open_external=[11, 15],
+                open_internal=[2, 3],
+                open_bots=[1, 3],
                 median_issue_age=[10, 30],
                 median_pr_age=[20, 40],
                 nm_median_issue_age=[11, 31],
@@ -536,10 +644,18 @@ class TestBuildSnapshotDict:
                 median_pr_age_internal=[22, 42],
                 median_issue_age_bots=[13, 33],
                 median_pr_age_bots=[23, 43],
+                median_age=[15, 35],
+                nm_median_age=[16, 36],
+                median_age_internal=[17, 37],
+                median_age_bots=[18, 38],
                 closed_issues=[9, 10],
                 closed_prs=[11, 12],
                 closed_issues_external=[13, 14],
                 closed_prs_external=[15, 16],
+                closed=[20, 22],
+                closed_external=[28, 30],
+                closed_internal=[19, 20],
+                closed_bots=[4, 6],
             ),
             "beta": _trend_series(
                 open_issues=[4],
@@ -548,6 +664,10 @@ class TestBuildSnapshotDict:
                 open_prs_external=[7],
                 open_issues_bots=[2],
                 open_prs_bots=[3],
+                open=[9],
+                open_external=[13],
+                open_internal=[4],
+                open_bots=[5],
                 median_issue_age=[50],
                 median_pr_age=[60],
                 nm_median_issue_age=[51],
@@ -556,10 +676,18 @@ class TestBuildSnapshotDict:
                 median_pr_age_internal=[62],
                 median_issue_age_bots=[53],
                 median_pr_age_bots=[63],
+                median_age=[55],
+                nm_median_age=[56],
+                median_age_internal=[57],
+                median_age_bots=[58],
                 closed_issues=[20],
                 closed_prs=[21],
                 closed_issues_external=[22],
                 closed_prs_external=[23],
+                closed=[41],
+                closed_external=[45],
+                closed_internal=[24],
+                closed_bots=[7],
             ),
             "all-projects": _trend_series(open_issues=[999]),
         }
@@ -698,3 +826,59 @@ class TestTrendsAllProjectsMedianZeroExcluded:
         assert data["projects"]["all-projects"]["median_pr_age"] == [12]
         assert data["snapshot"]["all-projects"]["median_issue_age"] == 30
         assert data["snapshot"]["all-projects"]["median_pr_age"] == 12
+
+
+class TestTrendsCombinedSeries:
+    @pytest.fixture
+    async def seeded(self, test_db_session: AsyncSession) -> None:
+        project = _project("combined", 10)
+        test_db_session.add(project)
+        await test_db_session.flush()
+
+        test_db_session.add(
+            _snapshot(
+                project.id,
+                date(2024, 5, 22),
+                open_issues=4,
+                open_prs=6,
+                open_issues_external=2,
+                open_issues_internal=1,
+                open_prs_external=3,
+                open_prs_internal=2,
+                open_issues_bots=1,
+                open_prs_bots=1,
+                median_age=18,
+                nm_median_age=12,
+                median_age_internal=20,
+                median_age_bots=8,
+                closed_issues=5,
+                closed_prs=7,
+                closed_issues_external=2,
+                closed_issues_internal=1,
+                closed_prs_external=3,
+                closed_prs_internal=2,
+                closed_issues_bots=1,
+                closed_prs_bots=2,
+            )
+        )
+        await test_db_session.commit()
+
+    def test_response_includes_combined_open_closed_and_median_age_series(
+        self, test_client: TestClient, seeded: None
+    ) -> None:
+        response = test_client.get("/stats/trends/all-data")
+
+        assert response.status_code == 200
+        project = response.json()["projects"]["combined"]
+        assert project["open"] == [10]
+        assert project["open_external"] == [5]
+        assert project["open_internal"] == [3]
+        assert project["open_bots"] == [2]
+        assert project["median_age"] == [18]
+        assert project["nm_median_age"] == [12]
+        assert project["median_age_internal"] == [20]
+        assert project["median_age_bots"] == [8]
+        assert project["closed"] == [12]
+        assert project["closed_external"] == [5]
+        assert project["closed_internal"] == [3]
+        assert project["closed_bots"] == [3]

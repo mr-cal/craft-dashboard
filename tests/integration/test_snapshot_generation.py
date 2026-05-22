@@ -23,6 +23,10 @@ _ZERO_COUNTS = {
     "median_pr_age_internal": 0,
     "median_issue_age_bots": 0,
     "median_pr_age_bots": 0,
+    "median_age": 0,
+    "nm_median_age": 0,
+    "median_age_internal": 0,
+    "median_age_bots": 0,
     "closed_issues": 0,
     "closed_prs": 0,
     "closed_issues_external": 0,
@@ -77,7 +81,9 @@ class TestRealisticSnapshotScenarios:
                         "age_days": age,
                         "labels": ["bug"] if index <= 2 else [],
                     }
-                    for index, age in zip(range(1, 6), [50, 60, 70, 80, 90], strict=True)
+                    for index, age in zip(
+                        range(1, 6), [50, 60, 70, 80, 90], strict=True
+                    )
                 ],
                 *[
                     {
@@ -91,11 +97,25 @@ class TestRealisticSnapshotScenarios:
                         strict=True,
                     )
                 ],
-                {"author": "renovate[bot]", "is_bot": True, "age_days": 5, "labels": ["bug"]},
+                {
+                    "author": "renovate[bot]",
+                    "is_bot": True,
+                    "age_days": 5,
+                    "labels": ["bug"],
+                },
                 {"author": "dependabot[bot]", "is_bot": True, "age_days": 15},
                 {"author": "maintainer-1", "state": "closed", "closed_days_ago": 0},
-                {"author": "contributor-closed", "state": "closed", "closed_days_ago": 0},
-                {"author": "release-bot[bot]", "is_bot": True, "state": "closed", "closed_days_ago": 0},
+                {
+                    "author": "contributor-closed",
+                    "state": "closed",
+                    "closed_days_ago": 0,
+                },
+                {
+                    "author": "release-bot[bot]",
+                    "is_bot": True,
+                    "state": "closed",
+                    "closed_days_ago": 0,
+                },
                 *[
                     {
                         "author": f"old-closed-{index}",
@@ -212,7 +232,12 @@ class TestRealisticSnapshotScenarios:
                 {"author": "bug-reporter-1", "labels": ["bug"]},
                 {"author": "bug-reporter-2", "labels": ["needs-triage", "bug"]},
                 {"author": "feature-requester", "labels": ["enhancement"]},
-                {"author": "bug-closed", "state": "closed", "labels": ["bug"], "closed_days_ago": 0},
+                {
+                    "author": "bug-closed",
+                    "state": "closed",
+                    "labels": ["bug"],
+                    "closed_days_ago": 0,
+                },
                 {
                     "issue_type": "pull_request",
                     "author": "pr-author",

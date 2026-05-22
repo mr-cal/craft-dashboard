@@ -68,6 +68,10 @@ def compute_snapshot_counts(
         "median_pr_age_internal": 0,
         "median_issue_age_bots": 0,
         "median_pr_age_bots": 0,
+        "median_age": 0,
+        "nm_median_age": 0,
+        "median_age_internal": 0,
+        "median_age_bots": 0,
         "closed_issues": 0,
         "closed_prs": 0,
         "closed_issues_external": 0,
@@ -78,12 +82,16 @@ def compute_snapshot_counts(
         "closed_prs_bots": 0,
     }
 
+    open_ages: list[int] = []
     open_issue_ages: list[int] = []
     open_pr_ages: list[int] = []
+    open_ages_internal: list[int] = []
     open_issue_ages_internal: list[int] = []
     open_pr_ages_internal: list[int] = []
+    open_ages_external: list[int] = []
     open_issue_ages_external: list[int] = []
     open_pr_ages_external: list[int] = []
+    open_ages_bots: list[int] = []
     open_issue_ages_bots: list[int] = []
     open_pr_ages_bots: list[int] = []
 
@@ -112,6 +120,13 @@ def compute_snapshot_counts(
                 is_bot=is_bot,
                 prefix="open",
             )
+            open_ages.append(age_days)
+            if is_internal:
+                open_ages_internal.append(age_days)
+            elif not is_bot:
+                open_ages_external.append(age_days)
+            if is_bot:
+                open_ages_bots.append(age_days)
             if issue["issue_type"] == "issue":
                 open_issue_ages.append(age_days)
                 if is_internal:
@@ -152,20 +167,28 @@ def compute_snapshot_counts(
         counts["median_issue_age"] = int(statistics.median(open_issue_ages))
     if open_pr_ages:
         counts["median_pr_age"] = int(statistics.median(open_pr_ages))
+    if open_ages:
+        counts["median_age"] = int(statistics.median(open_ages))
     if open_issue_ages_internal:
         counts["median_issue_age_internal"] = int(
             statistics.median(open_issue_ages_internal)
         )
     if open_pr_ages_internal:
         counts["median_pr_age_internal"] = int(statistics.median(open_pr_ages_internal))
+    if open_ages_internal:
+        counts["median_age_internal"] = int(statistics.median(open_ages_internal))
     if open_issue_ages_external:
         counts["nm_median_issue_age"] = int(statistics.median(open_issue_ages_external))
     if open_pr_ages_external:
         counts["nm_median_pr_age"] = int(statistics.median(open_pr_ages_external))
+    if open_ages_external:
+        counts["nm_median_age"] = int(statistics.median(open_ages_external))
     if open_issue_ages_bots:
         counts["median_issue_age_bots"] = int(statistics.median(open_issue_ages_bots))
     if open_pr_ages_bots:
         counts["median_pr_age_bots"] = int(statistics.median(open_pr_ages_bots))
+    if open_ages_bots:
+        counts["median_age_bots"] = int(statistics.median(open_ages_bots))
 
     return counts
 

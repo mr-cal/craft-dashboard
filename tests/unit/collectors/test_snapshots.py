@@ -72,6 +72,10 @@ class TestComputeSnapshotCounts:
             "median_pr_age_internal": 0,
             "median_issue_age_bots": 0,
             "median_pr_age_bots": 0,
+            "median_age": 0,
+            "nm_median_age": 0,
+            "median_age_internal": 0,
+            "median_age_bots": 0,
             "closed_issues": 0,
             "closed_prs": 0,
             "closed_issues_external": 0,
@@ -455,6 +459,36 @@ class TestComputeSnapshotCounts:
         assert result["median_pr_age_internal"] == 20
         assert result["nm_median_pr_age"] == 40
         assert result["median_pr_age_bots"] == 8
+
+    def test_combined_median_age_tracks_issues_and_prs_together(self) -> None:
+        """Combined median age fields should include both issues and PRs."""
+        maintainers = {"maintainer"}
+        issues = [
+            _issue("open", author="maintainer", created_days_ago=10),
+            _issue("open", author="external-user", created_days_ago=20),
+            _issue(
+                "open",
+                issue_type="pull_request",
+                author="maintainer",
+                created_days_ago=30,
+            ),
+            _issue(
+                "open",
+                issue_type="pull_request",
+                author="bot-user",
+                author_is_bot=True,
+                created_days_ago=40,
+            ),
+        ]
+
+        result = compute_snapshot_counts(
+            issues=issues, maintainers=maintainers, today=_TODAY
+        )
+
+        assert result["median_age"] == 25
+        assert result["median_age_internal"] == 20
+        assert result["nm_median_age"] == 20
+        assert result["median_age_bots"] == 40
 
 
 class TestSnapshotNaiveClosedAt:

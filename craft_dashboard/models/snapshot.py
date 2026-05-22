@@ -26,7 +26,7 @@ class Snapshot(Base):
     open_prs_external: Mapped[int] = mapped_column(Integer, default=0)
     open_prs_internal: Mapped[int] = mapped_column(Integer, default=0)
     open_bugs: Mapped[int] = mapped_column(Integer, default=0)
-    
+
     # Median ages (in days)
     median_issue_age: Mapped[int] = mapped_column(Integer, default=0)
     median_pr_age: Mapped[int] = mapped_column(Integer, default=0)
@@ -36,7 +36,13 @@ class Snapshot(Base):
     median_pr_age_internal: Mapped[int] = mapped_column(Integer, default=0)
     median_issue_age_bots: Mapped[int] = mapped_column(Integer, default=0)
     median_pr_age_bots: Mapped[int] = mapped_column(Integer, default=0)
-    
+
+    # Combined median ages (issues + PRs together, matches starcraft-stats)
+    median_age: Mapped[int] = mapped_column(Integer, default=0)
+    nm_median_age: Mapped[int] = mapped_column(Integer, default=0)
+    median_age_internal: Mapped[int] = mapped_column(Integer, default=0)
+    median_age_bots: Mapped[int] = mapped_column(Integer, default=0)
+
     # Closed counts
     closed_issues: Mapped[int] = mapped_column(Integer, default=0)
     closed_prs: Mapped[int] = mapped_column(Integer, default=0)

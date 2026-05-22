@@ -26,6 +26,10 @@ class TestSnapshotModel:
             "open_prs_external",
             "open_prs_internal",
             "open_bugs",
+            "median_age",
+            "nm_median_age",
+            "median_age_internal",
+            "median_age_bots",
         }
         assert expected.issubset(column_names)
 

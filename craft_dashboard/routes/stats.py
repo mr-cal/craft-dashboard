@@ -101,9 +101,7 @@ async def dependencies_data(
                 "outdated": row.is_outdated,
             }
         else:
-            apps[key][row.dependency_name] = {
-                "version_spec": row.version_spec or "any"
-            }
+            apps[key][row.dependency_name] = {"version_spec": row.version_spec or "any"}
 
     return {"libs": libs, "apps": apps}
 
@@ -135,19 +133,25 @@ async def releases_page(
     for row in result:
         days_ago = None
         if row.released_at:
-            released = row.released_at.replace(tzinfo=UTC) if row.released_at.tzinfo is None else row.released_at
+            released = (
+                row.released_at.replace(tzinfo=UTC)
+                if row.released_at.tzinfo is None
+                else row.released_at
+            )
             days_ago = (datetime.now(tz=UTC) - released).days
         commits_since_tag = None
         if row.metadata_:
             commits_since_tag = row.metadata_.get("commits_since_tag")
-        releases.append({
-            "project_name": row.project_name,
-            "branch": row.branch or "main",
-            "version": row.version,
-            "released_at": row.released_at,
-            "days_ago": days_ago,
-            "commits_since_tag": commits_since_tag,
-        })
+        releases.append(
+            {
+                "project_name": row.project_name,
+                "branch": row.branch or "main",
+                "version": row.version,
+                "released_at": row.released_at,
+                "days_ago": days_ago,
+                "commits_since_tag": commits_since_tag,
+            }
+        )
 
     return templates.TemplateResponse(
         request,
@@ -188,17 +192,41 @@ def _build_all_projects_aggregate(projects: dict[str, dict]) -> dict[str, list]:
     all_dates_sorted = sorted(all_dates_set)
 
     scalar_keys = [
-        "open_issues", "open_prs", "open_issues_external", "open_prs_external",
-        "open_issues_bots", "open_prs_bots",
-        "closed_issues", "closed_prs", "closed_issues_external", "closed_prs_external",
-        "closed_issues_bots", "closed_prs_bots",
+        "open_issues",
+        "open_prs",
+        "open_issues_external",
+        "open_prs_external",
+        "open_issues_bots",
+        "open_prs_bots",
+        "open",
+        "open_external",
+        "open_internal",
+        "open_bots",
+        "closed_issues",
+        "closed_prs",
+        "closed_issues_external",
+        "closed_prs_external",
+        "closed_issues_bots",
+        "closed_prs_bots",
+        "closed",
+        "closed_external",
+        "closed_internal",
+        "closed_bots",
         "open_bugs",
     ]
     median_age_keys = [
-        "median_issue_age", "median_pr_age",
-        "nm_median_issue_age", "nm_median_pr_age",
-        "median_issue_age_internal", "median_pr_age_internal",
-        "median_issue_age_bots", "median_pr_age_bots",
+        "median_issue_age",
+        "median_pr_age",
+        "nm_median_issue_age",
+        "nm_median_pr_age",
+        "median_issue_age_internal",
+        "median_pr_age_internal",
+        "median_issue_age_bots",
+        "median_pr_age_bots",
+        "median_age",
+        "nm_median_age",
+        "median_age_internal",
+        "median_age_bots",
     ]
     all_projects: dict[str, list] = {
         "dates": all_dates_sorted,
@@ -265,20 +293,30 @@ def _build_snapshot_dict(projects: dict[str, dict]) -> dict[str, dict]:
         }
 
     scalar_snap_keys = [
-        "open_issues", "open_prs", "nm_open_issues", "nm_open_prs",
-        "bots_open_issues", "bots_open_prs",
-        "closed_issues_year", "closed_prs_year",
-        "nm_closed_issues_year", "nm_closed_prs_year",
+        "open_issues",
+        "open_prs",
+        "nm_open_issues",
+        "nm_open_prs",
+        "bots_open_issues",
+        "bots_open_prs",
+        "closed_issues_year",
+        "closed_prs_year",
+        "nm_closed_issues_year",
+        "nm_closed_prs_year",
     ]
     median_snap_keys = [
-        "median_issue_age", "median_pr_age",
-        "nm_median_issue_age", "nm_median_pr_age",
-        "median_issue_age_internal", "median_pr_age_internal",
-        "median_issue_age_bots", "median_pr_age_bots",
+        "median_issue_age",
+        "median_pr_age",
+        "nm_median_issue_age",
+        "nm_median_pr_age",
+        "median_issue_age_internal",
+        "median_pr_age_internal",
+        "median_issue_age_bots",
+        "median_pr_age_bots",
     ]
-    ap_snap: dict[str, int] = {k: 0 for k in scalar_snap_keys}
-    ap_snap.update({k: 0 for k in median_snap_keys})
-    median_counts: dict[str, int] = {k: 0 for k in median_snap_keys}
+    ap_snap: dict[str, int] = dict.fromkeys(scalar_snap_keys, 0)
+    ap_snap.update(dict.fromkeys(median_snap_keys, 0))
+    median_counts: dict[str, int] = dict.fromkeys(median_snap_keys, 0)
 
     for proj_snap in snapshot.values():
         for k in scalar_snap_keys:
@@ -323,6 +361,10 @@ async def trends_all_data(
             Snapshot.median_pr_age_internal,
             Snapshot.median_issue_age_bots,
             Snapshot.median_pr_age_bots,
+            Snapshot.median_age,
+            Snapshot.nm_median_age,
+            Snapshot.median_age_internal,
+            Snapshot.median_age_bots,
             Snapshot.closed_issues,
             Snapshot.closed_prs,
             Snapshot.closed_issues_external,
@@ -348,6 +390,10 @@ async def trends_all_data(
                 "open_prs_external": [],
                 "open_issues_bots": [],
                 "open_prs_bots": [],
+                "open": [],
+                "open_external": [],
+                "open_internal": [],
+                "open_bots": [],
                 "median_issue_age": [],
                 "median_pr_age": [],
                 "nm_median_issue_age": [],
@@ -356,12 +402,20 @@ async def trends_all_data(
                 "median_pr_age_internal": [],
                 "median_issue_age_bots": [],
                 "median_pr_age_bots": [],
+                "median_age": [],
+                "nm_median_age": [],
+                "median_age_internal": [],
+                "median_age_bots": [],
                 "closed_issues": [],
                 "closed_prs": [],
                 "closed_issues_external": [],
                 "closed_prs_external": [],
                 "closed_issues_bots": [],
                 "closed_prs_bots": [],
+                "closed": [],
+                "closed_external": [],
+                "closed_internal": [],
+                "closed_bots": [],
                 "open_bugs": [],
             }
         projects[name]["dates"].append(row.snapshot_date.isoformat())
@@ -371,30 +425,56 @@ async def trends_all_data(
         projects[name]["open_prs_external"].append(row.open_prs_external)
         projects[name]["open_issues_bots"].append(row.open_issues_bots)
         projects[name]["open_prs_bots"].append(row.open_prs_bots)
+        projects[name]["open"].append(row.open_issues + row.open_prs)
+        projects[name]["open_external"].append(
+            row.open_issues_external + row.open_prs_external
+        )
+        projects[name]["open_internal"].append(
+            row.open_issues_internal + row.open_prs_internal
+        )
+        projects[name]["open_bots"].append(row.open_issues_bots + row.open_prs_bots)
         projects[name]["median_issue_age"].append(row.median_issue_age)
         projects[name]["median_pr_age"].append(row.median_pr_age)
         projects[name]["nm_median_issue_age"].append(row.nm_median_issue_age)
         projects[name]["nm_median_pr_age"].append(row.nm_median_pr_age)
-        projects[name]["median_issue_age_internal"].append(row.median_issue_age_internal)
+        projects[name]["median_issue_age_internal"].append(
+            row.median_issue_age_internal
+        )
         projects[name]["median_pr_age_internal"].append(row.median_pr_age_internal)
         projects[name]["median_issue_age_bots"].append(row.median_issue_age_bots)
         projects[name]["median_pr_age_bots"].append(row.median_pr_age_bots)
+        projects[name]["median_age"].append(row.median_age)
+        projects[name]["nm_median_age"].append(row.nm_median_age)
+        projects[name]["median_age_internal"].append(row.median_age_internal)
+        projects[name]["median_age_bots"].append(row.median_age_bots)
         projects[name]["closed_issues"].append(row.closed_issues)
         projects[name]["closed_prs"].append(row.closed_prs)
         projects[name]["closed_issues_external"].append(row.closed_issues_external)
         projects[name]["closed_prs_external"].append(row.closed_prs_external)
         projects[name]["closed_issues_bots"].append(row.closed_issues_bots)
         projects[name]["closed_prs_bots"].append(row.closed_prs_bots)
+        projects[name]["closed"].append(row.closed_issues + row.closed_prs)
+        projects[name]["closed_external"].append(
+            row.closed_issues_external + row.closed_prs_external
+        )
+        projects[name]["closed_internal"].append(
+            row.closed_issues_internal + row.closed_prs_internal
+        )
+        projects[name]["closed_bots"].append(
+            row.closed_issues_bots + row.closed_prs_bots
+        )
         projects[name]["open_bugs"].append(row.open_bugs)
 
     project_order = list(projects.keys())
 
     if projects:
         projects["all-projects"] = _build_all_projects_aggregate(projects)
-    
+
     snapshot = _build_snapshot_dict(projects)
 
-    return JSONResponse({"projects": projects, "order": project_order, "snapshot": snapshot})
+    return JSONResponse(
+        {"projects": projects, "order": project_order, "snapshot": snapshot}
+    )
 
 
 async def _get_trend_chart_data(session: AsyncSession, project: str) -> dict:
