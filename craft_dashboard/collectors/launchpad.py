@@ -2,6 +2,10 @@
 
 import logging
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from launchpadlib.launchpad import Launchpad
 
 import sqlalchemy as sa
 
@@ -49,17 +53,23 @@ def _map_lp_status(lp_status: str) -> str:
 class LaunchpadCollector:
     """Collects bug data from Launchpad."""
 
-    def __init__(self, projects: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        projects: list[str] | None = None,
+        launchpad_maintainers: list[str] | None = None,
+    ) -> None:
         """Initialize the Launchpad collector.
 
         Args:
             projects: List of Launchpad project names to collect from.
+            launchpad_maintainers: List of Launchpad usernames considered maintainers.
 
         """
         self.projects = projects or []
+        self._maintainers: set[str] = set(launchpad_maintainers or [])
         self._lp = None
 
-    def _get_launchpad(self):  # noqa: ANN202
+    def _get_launchpad(self) -> "Launchpad":
         """Lazily initialize the Launchpad API client.
 
         Returns:
@@ -103,6 +113,10 @@ class LaunchpadCollector:
         for task in bug_tasks:
             bug = task.bug
             state = _map_lp_status(task.status)
+            author = (
+                str(task.owner_link).rsplit("/", 1)[-1] if task.owner_link else None
+            )
+            author_is_maintainer = author in self._maintainers if author else False
 
             stmt = insert(Issue).values(
                 project_id=project_id,
@@ -112,10 +126,8 @@ class LaunchpadCollector:
                 title=bug.title,
                 body=bug.description,
                 state=state,
-                author=str(task.owner_link).rsplit("/", 1)[-1]
-                if task.owner_link
-                else None,
-                author_is_maintainer=False,
+                author=author,
+                author_is_maintainer=author_is_maintainer,
                 labels=list(bug.tags),
                 created_at=bug.date_created.replace(tzinfo=UTC)
                 if bug.date_created
@@ -136,6 +148,8 @@ class LaunchpadCollector:
                     "title": stmt.excluded.title,
                     "body": stmt.excluded.body,
                     "state": stmt.excluded.state,
+                    "author": stmt.excluded.author,
+                    "author_is_maintainer": stmt.excluded.author_is_maintainer,
                     "labels": stmt.excluded.labels,
                     "updated_at": stmt.excluded.updated_at,
                     "closed_at": stmt.excluded.closed_at,
