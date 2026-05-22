@@ -80,18 +80,16 @@ async def _query_issues(
         for role in role_list:
             if role == "maintainer":
                 role_conditions.append(
-                    (Issue.author_is_maintainer == True) & ~Issue.author.like("%[bot]")
+                    (Issue.author_is_maintainer.is_(True))
+                    & (Issue.author_is_bot.is_(False))
                 )
             elif role == "contributor":
                 role_conditions.append(
-                    (Issue.author_is_maintainer == False) & ~Issue.author.like("%[bot]")
+                    (Issue.author_is_maintainer.is_(False))
+                    & (Issue.author_is_bot.is_(False))
                 )
             elif role == "bot":
-                from sqlalchemy import or_
-                bot_conditions = [Issue.author.like("%[bot]")]
-                if bots:
-                    bot_conditions.extend(Issue.author == b for b in bots)
-                role_conditions.append(or_(*bot_conditions))
+                role_conditions.append(Issue.author_is_bot.is_(True))
         if len(role_conditions) == 1:
             query = query.where(role_conditions[0])
         elif role_conditions:

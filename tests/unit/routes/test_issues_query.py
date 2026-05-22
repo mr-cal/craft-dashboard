@@ -202,6 +202,79 @@ async def _seed_author_role_issues(session) -> None:
     await session.commit()
 
 
+async def _seed_author_role_column_issues(session) -> None:
+    project = Project(name="snapcraft", category="app", github_org="canonical", display_order=1)
+    session.add(project)
+    await session.flush()
+
+    now = datetime(2025, 1, 31, 12, 0, tzinfo=UTC)
+    session.add_all(
+        [
+            Issue(
+                project_id=project.id,
+                source="github",
+                external_id="13",
+                issue_type="issue",
+                title="Maintainer issue",
+                body="body",
+                state="open",
+                author="alice",
+                author_is_maintainer=True,
+                author_is_bot=False,
+                labels=[],
+                created_at=now - timedelta(days=3),
+                updated_at=now - timedelta(days=1),
+                closed_at=None,
+                url="https://example.test/issues/13",
+                metadata_={},
+                comments=[],
+                last_fetched_at=now,
+            ),
+            Issue(
+                project_id=project.id,
+                source="github",
+                external_id="14",
+                issue_type="issue",
+                title="Contributor issue",
+                body="body",
+                state="open",
+                author="bob",
+                author_is_maintainer=False,
+                author_is_bot=False,
+                labels=[],
+                created_at=now - timedelta(days=2),
+                updated_at=now - timedelta(days=1),
+                closed_at=None,
+                url="https://example.test/issues/14",
+                metadata_={},
+                comments=[],
+                last_fetched_at=now,
+            ),
+            Issue(
+                project_id=project.id,
+                source="github",
+                external_id="15",
+                issue_type="issue",
+                title="Bot issue",
+                body="body",
+                state="open",
+                author="dependabot",
+                author_is_maintainer=False,
+                author_is_bot=True,
+                labels=[],
+                created_at=now - timedelta(days=1),
+                updated_at=now - timedelta(hours=12),
+                closed_at=None,
+                url="https://example.test/issues/15",
+                metadata_={},
+                comments=[],
+                last_fetched_at=now,
+            ),
+        ]
+    )
+    await session.commit()
+
+
 async def _seed_sorted_issues(session) -> None:
     project = Project(name="snapcraft", category="app", github_org="canonical", display_order=1)
     session.add(project)
@@ -423,6 +496,41 @@ class TestQueryIssuesAuthorRole:
 
         assert len(issues) == 2
         assert {issue["author"] for issue in issues} == {"alice", "bob"}
+
+
+class TestQueryIssuesAuthorRoleColumn:
+    async def test_bot_filter_matches_author_is_bot_without_suffix(self, test_db_session) -> None:
+        await _seed_author_role_column_issues(test_db_session)
+
+        issues, _ = await _query_issues(
+            test_db_session,
+            author_role="bot",
+            sort_by="title",
+        )
+
+        assert [issue["author"] for issue in issues] == ["dependabot"]
+
+    async def test_bot_filter_excludes_non_bot_maintainer(self, test_db_session) -> None:
+        await _seed_author_role_column_issues(test_db_session)
+
+        issues, _ = await _query_issues(
+            test_db_session,
+            author_role="bot",
+            sort_by="title",
+        )
+
+        assert "alice" not in {issue["author"] for issue in issues}
+
+    async def test_contributor_filter_matches_non_bot_contributor(self, test_db_session) -> None:
+        await _seed_author_role_column_issues(test_db_session)
+
+        issues, _ = await _query_issues(
+            test_db_session,
+            author_role="contributor",
+            sort_by="title",
+        )
+
+        assert [issue["author"] for issue in issues] == ["bob"]
 
 
 class TestQueryIssuesSort:
