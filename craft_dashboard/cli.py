@@ -1,11 +1,7 @@
 """CLI entry point for craft-dashboard."""
 
-import pathlib
-
 import click
 import uvicorn
-
-from craft_dashboard.config import load_config
 
 
 @click.group()
@@ -14,11 +10,20 @@ def main() -> None:
 
 
 @main.command()
-@click.option("--host", default="127.0.0.1", help="Bind host.")
+@click.option(
+    "--host", default="127.0.0.1", help="Bind host (e.g., 0.0.0.0 for all interfaces)."
+)
 @click.option("--port", default=8000, type=int, help="Bind port.")
 @click.option("--reload", is_flag=True, help="Enable auto-reload for development.")
 def serve(*, host: str, port: int, reload: bool) -> None:
-    """Start the web server."""
+    """Start the craft-dashboard web server.
+
+    Examples::
+
+        craft-dashboard serve
+        craft-dashboard serve --host 0.0.0.0 --port 9000
+        craft-dashboard serve --reload
+    """
     uvicorn.run(
         "craft_dashboard.app:create_app",
         factory=True,
@@ -41,11 +46,26 @@ def serve(*, host: str, port: int, reload: bool) -> None:
     default="craft-dashboard.toml",
     help="Path to configuration file.",
 )
-def collect(*, source: str, config_file: str) -> None:
-    """Collect data from external sources."""
-    config = load_config(pathlib.Path(config_file))
-    click.echo(f"Collecting data from: {source}")
-    click.echo(f"Projects: {len(config.craft_projects)}")
-    # The actual async collection is handled by scripts/collect_data.py
-    # This CLI command delegates to it
-    click.echo("Use 'uv run scripts/collect_data.py' for cron-based collection.")
+@click.option("--limit", default=0, type=int, help="Max issues per repo (0 = all).")
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging.")
+def collect(*, source: str, config_file: str, limit: int, verbose: bool) -> None:  # noqa: ARG001
+    """Collect data from GitHub and Launchpad.
+
+    Fetches issues, PRs, releases, dependencies, and generates daily
+    snapshots. Typically run via cron (see scripts/collect_data.py).
+
+    Examples::
+
+        craft-dashboard collect
+        craft-dashboard collect --source github --limit 25
+        craft-dashboard collect --source launchpad
+    """
+    import subprocess  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    cmd = [sys.executable, "scripts/collect_data.py", "--source", source]
+    if limit:
+        cmd.extend(["--limit", str(limit)])
+    if verbose:
+        cmd.append("--verbose")
+    subprocess.run(cmd, check=True)
