@@ -25,12 +25,12 @@ class TestReleaseModel:
         assert expected.issubset(column_names)
 
     def test_unique_constraint(self) -> None:
-        """Release has a unique constraint on (project_id, version)."""
+        """Release has a unique constraint on (project_id, branch)."""
         constraints = Release.__table__.constraints
         unique_constraints = [
             c
             for c in constraints
             if hasattr(c, "columns")
-            and {col.name for col in c.columns} == {"project_id", "version"}
+            and {col.name for col in c.columns} == {"project_id", "branch"}
         ]
         assert len(unique_constraints) == 1
