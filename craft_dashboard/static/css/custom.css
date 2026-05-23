@@ -214,6 +214,11 @@
   margin-left: 0.25rem;
 }
 
+th a.is-active {
+  font-weight: 700;
+  color: #0066cc !important;
+}
+
 .htmx-indicator {
   display: none;
 }

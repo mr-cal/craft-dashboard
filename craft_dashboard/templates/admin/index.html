@@ -32,11 +32,12 @@
 <hr class="p-rule" />
 
 <h3>Admin Actions</h3>
-<div style="margin-bottom: 1rem;">
-  <label for="admin-token">Admin Token:</label>
-  <input type="password" id="admin-token" placeholder="Enter admin token" style="width: 300px; margin-right: 0.5rem;" />
-  <button class="p-button--neutral" onclick="saveToken()">Save Token</button>
-  <small id="token-status" style="margin-left: 0.5rem;"></small>
+<div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+  <label for="admin-token" id="admin-token-label">Admin Token:</label>
+  <input type="password" id="admin-token" placeholder="Enter admin token" style="width: 300px;" />
+  <button class="p-button--neutral" id="save-token-btn" onclick="saveToken()">Save Token</button>
+  <button class="p-button--neutral" id="logout-btn" onclick="logout()" style="display: none;">Log out</button>
+  <small id="token-status"></small>
 </div>
 
 <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
@@ -60,44 +61,96 @@
 <pre id="logs-output" style="max-height: 400px; overflow-y: auto; font-size: 0.75rem; background: #f5f5f5; padding: 1rem; white-space: pre-wrap; margin-top: 1rem;">(click Refresh Logs to load)</pre>
 
 <script>
-function saveToken() {
-  const token = document.getElementById('admin-token').value;
-  if (token) {
-    sessionStorage.setItem('adminToken', token);
-    document.getElementById('token-status').textContent = '✓ Token saved';
-    document.getElementById('token-status').style.color = 'green';
-  } else {
-    document.getElementById('token-status').textContent = '✗ Token required';
-    document.getElementById('token-status').style.color = 'red';
+function setTokenStatus(message, color) {
+  const status = document.getElementById('token-status');
+  status.textContent = message;
+  status.style.color = color;
+}
+
+function setAuthenticated(authenticated) {
+  document.getElementById('admin-token-label').style.display = authenticated ? 'none' : 'inline';
+  document.getElementById('admin-token').style.display = authenticated ? 'none' : 'inline-block';
+  document.getElementById('save-token-btn').style.display = authenticated ? 'none' : 'inline-block';
+  document.getElementById('logout-btn').style.display = authenticated ? 'inline-block' : 'none';
+  if (authenticated) {
+    document.getElementById('admin-token').value = '';
+    setTokenStatus('✓ Authenticated', 'green');
+  }
+}
+
+async function saveToken() {
+  const token = document.getElementById('admin-token').value.trim();
+  if (!token) {
+    setTokenStatus('✗ Token required', 'red');
+    return;
+  }
+
+  const button = document.getElementById('save-token-btn');
+  button.disabled = true;
+  setTokenStatus('Authenticating...', 'gray');
+
+  try {
+    const response = await fetch('/admin/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    const data = await response.json();
+
+    if (response.ok) {
+      setAuthenticated(true);
+      await loadLogs();
+    } else {
+      setAuthenticated(false);
+      setTokenStatus(`✗ ${data.detail || 'Authentication failed'}`, 'red');
+    }
+  } catch (error) {
+    setAuthenticated(false);
+    setTokenStatus(`✗ ${error.message}`, 'red');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function logout() {
+  const button = document.getElementById('logout-btn');
+  button.disabled = true;
+
+  try {
+    const response = await fetch('/admin/logout', { method: 'POST' });
+    if (response.ok) {
+      setAuthenticated(false);
+      setTokenStatus('Logged out', 'gray');
+      document.getElementById('logs-output').textContent = '(click Refresh Logs to load)';
+    } else {
+      const data = await response.json();
+      setTokenStatus(`✗ ${data.detail || 'Logout failed'}`, 'red');
+    }
+  } catch (error) {
+    setTokenStatus(`✗ ${error.message}`, 'red');
+  } finally {
+    button.disabled = false;
   }
 }
 
 async function callEndpoint(endpoint, btnId, statusId, successMsg) {
-  const token = sessionStorage.getItem('adminToken');
-  if (!token) {
-    document.getElementById(statusId).innerHTML = '<span style="color: red;">✗ No token saved</span>';
-    return;
-  }
-
   const btn = document.getElementById(btnId);
   const statusDiv = document.getElementById(statusId);
-  
+
   btn.disabled = true;
   statusDiv.innerHTML = '<span style="color: gray;">Running...</span>';
 
   try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
-
+    const response = await fetch(endpoint, { method: 'POST' });
     const data = await response.json();
 
     if (response.ok) {
       statusDiv.innerHTML = `<span style="color: green;">✓ ${data.message || successMsg}</span>`;
     } else {
+      if (response.status === 401) {
+        setAuthenticated(false);
+        setTokenStatus('✗ Authentication required', 'red');
+      }
       statusDiv.innerHTML = `<span style="color: red;">✗ ${data.detail || 'Error'}</span>`;
     }
   } catch (error) {
@@ -123,26 +176,40 @@ function triggerDistribute() {
 }
 
 async function loadLogs() {
-  const token = sessionStorage.getItem('adminToken');
-  if (!token) {
-    document.getElementById('logs-output').textContent = 'No token saved. Save a token first.';
-    return;
-  }
   document.getElementById('logs-btn').disabled = true;
   document.getElementById('logs-output').textContent = 'Loading...';
   try {
-    const resp = await fetch('/admin/logs', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const resp = await fetch('/admin/logs');
+    if (resp.status === 401) {
+      setAuthenticated(false);
+      setTokenStatus('✗ Authentication required', 'red');
+      document.getElementById('logs-output').textContent = 'Authenticate to load logs.';
+      return;
+    }
     document.getElementById('logs-output').textContent = resp.ok ? await resp.text() : `Error: ${resp.status}`;
-  } catch (e) {
-    document.getElementById('logs-output').textContent = `Error: ${e.message}`;
+  } catch (error) {
+    document.getElementById('logs-output').textContent = `Error: ${error.message}`;
   } finally {
     document.getElementById('logs-btn').disabled = false;
   }
 }
 
-// Auto-load if token exists
-if (sessionStorage.getItem('adminToken')) loadLogs();
+async function initializeAdminSession() {
+  try {
+    const response = await fetch('/admin/health');
+    if (response.ok) {
+      setAuthenticated(true);
+      await loadLogs();
+      return;
+    }
+  } catch (error) {
+    console.error(error);
+  }
+
+  setAuthenticated(false);
+  setTokenStatus('', '');
+}
+
+initializeAdminSession();
 </script>
 {% endblock %}

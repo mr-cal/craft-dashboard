@@ -11,7 +11,9 @@
              hx-swap="outerHTML"
              hx-include=".filter-bar [name]:not([name='sort'])"
              hx-vals='{"sort": "{{ ("-" ~ field) if sort_by == field else field }}"}'
+             hx-indicator="#loading-indicator"
              hx-push-url="false"
+             class="{% if sort_by == field or sort_by == '-' ~ field %}is-active{% endif %}"
              style="text-decoration:none;color:inherit;cursor:pointer;">
             {{ label }}
             {% if sort_by == field %} &#8593;{% elif sort_by == "-" ~ field %} &#8595;{% endif %}

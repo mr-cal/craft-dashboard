@@ -115,3 +115,9 @@ class TestIssueModel:
         assert get_args(metadata_type) == (str, Any)
         assert get_origin(comments_type) is list
         assert get_args(get_args(comments_type)[0]) == (str, Any)
+
+    def test_issue_created_at_has_server_default(self) -> None:
+        """Issue.created_at should fall back to a DB-side timestamp."""
+        created_at = Issue.__table__.columns["created_at"]
+
+        assert created_at.server_default is not None

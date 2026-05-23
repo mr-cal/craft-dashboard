@@ -159,6 +159,12 @@ async def releases_page(
 
     from datetime import UTC, datetime  # noqa: PLC0415 — deferred import
 
+    latest_release = (
+        select(func.max(Release.id).label("id"))
+        .group_by(Release.project_id, Release.branch)
+        .subquery()
+    )
+
     result = await session.execute(
         select(
             Project.name.label("project_name"),
@@ -168,6 +174,7 @@ async def releases_page(
             Release.metadata_,
         )
         .join(Project, Release.project_id == Project.id)
+        .join(latest_release, Release.id == latest_release.c.id)
         .where(Project.category == "application")
         .order_by(Project.display_order, Release.branch)
     )
@@ -275,7 +282,9 @@ def _build_all_projects_aggregate(  # noqa: PLR0912
                 for name, data in projects.items():
                     idx = proj_by_date[name].get(d)
                     if idx is not None and data[mk][idx] > 0:
-                        weight = max(data["open_issues"][idx] + data["open_prs"][idx], 1)
+                        weight = max(
+                            data["open_issues"][idx] + data["open_prs"][idx], 1
+                        )
                         weighted_sum += data[mk][idx] * weight
                         total_weight += weight
                 all_projects[mk].append(
@@ -328,9 +337,7 @@ def _build_snapshot_dict(projects: dict[str, dict]) -> dict[str, dict]:
             "closed_prs_year": closed_prs_year,
             "nm_closed_issues_year": nm_closed_issues_year,
             "nm_closed_prs_year": nm_closed_prs_year,
-            "bots_closed_issues_year": sum(
-                data["closed_issues_bots"][year_start_idx:]
-            ),
+            "bots_closed_issues_year": sum(data["closed_issues_bots"][year_start_idx:]),
             "bots_closed_prs_year": sum(data["closed_prs_bots"][year_start_idx:]),
             "internal_closed_issues_year": closed_issues_year
             - nm_closed_issues_year
@@ -538,9 +545,7 @@ async def trends_all_data(
     )
 
 
-async def _get_trend_chart_data(
-    session: AsyncSession, project: str
-) -> dict | None:
+async def _get_trend_chart_data(session: AsyncSession, project: str) -> dict | None:
     """Fetch snapshot trend data for a project. Returns None if not found."""
     exists = await session.scalar(
         select(func.count()).select_from(Project).where(Project.name == project)

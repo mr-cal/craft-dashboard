@@ -3,11 +3,11 @@
 <nav aria-label="Pagination">
   <ul>
     {% if page > 1 %}
-    <li><a href="{{ base_url }}&page={{ page - 1 }}" hx-get="{{ base_url }}&page={{ page - 1 }}" hx-target="#issue-table" hx-swap="outerHTML">&laquo; Previous</a></li>
+    <li><a href="{{ base_url }}&page={{ page - 1 }}" hx-get="{{ base_url }}&page={{ page - 1 }}" hx-target="#issue-table" hx-swap="outerHTML" hx-indicator="#loading-indicator">&laquo; Previous</a></li>
     {% endif %}
     <li><span>Page {{ page }} of {{ total_pages }}</span></li>
     {% if page < total_pages %}
-    <li><a href="{{ base_url }}&page={{ page + 1 }}" hx-get="{{ base_url }}&page={{ page + 1 }}" hx-target="#issue-table" hx-swap="outerHTML">Next &raquo;</a></li>
+    <li><a href="{{ base_url }}&page={{ page + 1 }}" hx-get="{{ base_url }}&page={{ page + 1 }}" hx-target="#issue-table" hx-swap="outerHTML" hx-indicator="#loading-indicator">Next &raquo;</a></li>
     {% endif %}
   </ul>
 </nav>

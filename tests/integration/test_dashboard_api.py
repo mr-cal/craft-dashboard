@@ -4,6 +4,7 @@ import re
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from html.parser import HTMLParser
 
 import pytest
 from craft_dashboard.app import create_app
@@ -97,6 +98,38 @@ async def _seed_project_with_issues(test_db_session: AsyncSession) -> Project:
     return project
 
 
+class _HTMLCollector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.elements = []
+        self._stack = []
+
+    def handle_starttag(self, tag, attrs) -> None:
+        element = {"tag": tag, "attrs": dict(attrs), "text": ""}
+        self.elements.append(element)
+        self._stack.append(element)
+
+    def handle_endtag(self, tag) -> None:
+        for index in range(len(self._stack) - 1, -1, -1):
+            if self._stack[index]["tag"] == tag:
+                del self._stack[index:]
+                break
+
+    def handle_data(self, data) -> None:
+        if self._stack and data.strip():
+            self._stack[-1]["text"] += data.strip()
+
+
+def _parse_html(html):
+    parser = _HTMLCollector()
+    parser.feed(html)
+    return parser.elements
+
+
+def _has_class(element, class_name):
+    return class_name in element["attrs"].get("class", "").split()
+
+
 class TestDashboardWithData:
     @pytest.fixture
     async def seeded(self, test_db_session: AsyncSession) -> None:
@@ -156,6 +189,120 @@ class TestIssuesPageWithData:
         response = test_client.get("/issues")
 
         assert response.status_code == 200
+
+
+class TestIssuesPageMarkup:
+    @pytest.fixture
+    async def seeded(self, test_db_session: AsyncSession) -> None:
+        await _seed_project_with_issues(test_db_session)
+
+    def test_all_htmx_get_elements_have_loading_indicator(
+        self, test_client: TestClient, seeded: None
+    ) -> None:
+        response = test_client.get("/issues")
+
+        assert response.status_code == 200
+        elements = _parse_html(response.text)
+        htmx_elements = [
+            element for element in elements if "hx-get" in element["attrs"]
+        ]
+
+        assert htmx_elements
+        assert all(
+            element["attrs"].get("hx-indicator") == "#loading-indicator"
+            for element in htmx_elements
+        )
+
+    def test_multiselect_markup_has_accessibility_attributes(
+        self, test_client: TestClient, seeded: None
+    ) -> None:
+        response = test_client.get("/issues")
+
+        assert response.status_code == 200
+        elements = _parse_html(response.text)
+        input_wraps = [
+            element
+            for element in elements
+            if element["tag"] == "div"
+            and _has_class(element, "multiselect__input-wrap")
+        ]
+        option_lists = [
+            element
+            for element in elements
+            if element["tag"] == "div"
+            and _has_class(element, "multiselect__options")
+        ]
+        options = [
+            element
+            for element in elements
+            if element["tag"] == "label"
+            and _has_class(element, "multiselect__option")
+        ]
+
+        assert len(input_wraps) == 4
+        assert all(element["attrs"].get("role") == "combobox" for element in input_wraps)
+        assert all("aria-expanded" in element["attrs"] for element in input_wraps)
+        assert all(
+            element["attrs"].get("aria-haspopup") == "listbox"
+            for element in input_wraps
+        )
+        assert {
+            element["attrs"].get("aria-label") for element in input_wraps
+        } == {
+            "Select projects",
+            "Select author roles",
+            "Select states",
+            "Select actions",
+        }
+        assert len(option_lists) == 4
+        assert all(element["attrs"].get("role") == "listbox" for element in option_lists)
+        assert options
+        assert all(element["attrs"].get("role") == "option" for element in options)
+
+    def test_active_sort_header_is_marked_active(
+        self, test_client: TestClient, seeded: None
+    ) -> None:
+        response = test_client.get("/issues", params={"sort": "age"})
+
+        assert response.status_code == 200
+        elements = _parse_html(response.text)
+        age_link = next(
+            element
+            for element in elements
+            if element["tag"] == "a"
+            and "hx-get" in element["attrs"]
+            and "Age" in element["text"]
+        )
+
+        assert "is-active" in age_link["attrs"].get("class", "").split()
+
+    def test_base_template_includes_htmx_error_feedback(
+        self, test_client: TestClient, seeded: None
+    ) -> None:
+        response = test_client.get("/issues")
+
+        assert response.status_code == 200
+        assert 'id="htmx-error-toast"' in response.text
+        assert 'id="htmx-error-message"' in response.text
+        assert 'document.body.addEventListener("htmx:responseError"' in response.text
+        assert 'document.body.addEventListener("htmx:sendError"' in response.text
+
+    def test_issues_page_has_single_state_hidden_input(
+        self, test_client: TestClient, seeded: None
+    ) -> None:
+        response = test_client.get("/issues")
+
+        assert response.status_code == 200
+        elements = _parse_html(response.text)
+        state_inputs = [
+            element
+            for element in elements
+            if element["tag"] == "input"
+            and element["attrs"].get("type") == "hidden"
+            and element["attrs"].get("name") == "state"
+        ]
+
+        assert len(state_inputs) == 1
 
 
 class TestDashboardExcludesAggregate:

@@ -2,7 +2,19 @@
 
 import secrets
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
+
+
+def get_admin_bearer_token(request: Request, authorization: str = "") -> str:
+    """Return the bearer token from the header or admin session cookie."""
+    if authorization:
+        return authorization
+
+    cookie_token = request.cookies.get("admin_session")
+    if cookie_token:
+        return f"Bearer {cookie_token}"
+
+    return authorization
 
 
 def verify_admin_token(token: str, admin_token: str) -> None:

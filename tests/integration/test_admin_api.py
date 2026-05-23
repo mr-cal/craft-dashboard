@@ -9,6 +9,7 @@ from craft_dashboard.app import create_app
 from craft_dashboard.config import DashboardConfig
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.project import Project
+from craft_dashboard.routes import admin as admin_routes
 from craft_dashboard.settings import Settings
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -106,23 +107,113 @@ class TestAdminHealthIntegration:
         assert response.status_code == 401
 
 
-class TestAdminRefreshIntegration:
-    """Integration tests for refresh and re-evaluate endpoints."""
+class TestAdminAuthIntegration:
+    """Integration tests for admin cookie authentication."""
 
-    def test_refresh_with_valid_token(
+    def test_admin_auth_sets_cookie_and_allows_cookie_auth(
         self,
         client: TestClient,
         app_with_db: tuple[FastAPI, str],
     ) -> None:
-        """Refresh accepts a valid bearer token and queues work."""
+        """Valid admin auth sets a secure session cookie usable by admin routes."""
         _, token = app_with_db
 
         response = client.post(
-            "/admin/refresh", headers={"Authorization": f"Bearer {token}"}
+            "/admin/auth",
+            json={"token": token},
+            headers={"Origin": "http://localhost", "Host": "localhost"},
         )
 
-        assert response.status_code == 202
-        assert response.json()["status"] == "refresh_queued"
+        assert response.status_code == 200
+        assert response.json()["status"] == "authenticated"
+        assert client.cookies.get("admin_session") == token
+        set_cookie = response.headers["set-cookie"]
+        assert "HttpOnly" in set_cookie
+        assert "SameSite=strict" in set_cookie
+
+        refresh_response = client.post(
+            "/admin/refresh",
+            headers={"Origin": "http://localhost", "Host": "localhost"},
+        )
+
+        assert refresh_response.status_code == 202
+        assert refresh_response.json()["status"] == "refresh_queued"
+
+    def test_admin_auth_rejects_invalid_token(self, client: TestClient) -> None:
+        """Invalid admin auth requests are rejected."""
+        response = client.post(
+            "/admin/auth",
+            json={"token": "wrong-token"},
+            headers={"Origin": "http://localhost", "Host": "localhost"},
+        )
+
+        assert response.status_code == 401
+        assert client.cookies.get("admin_session") is None
+
+    def test_admin_logout_clears_cookie(
+        self,
+        client: TestClient,
+        app_with_db: tuple[FastAPI, str],
+    ) -> None:
+        """Logout clears the admin session cookie."""
+        _, token = app_with_db
+
+        auth_response = client.post(
+            "/admin/auth",
+            json={"token": token},
+            headers={"Origin": "http://localhost", "Host": "localhost"},
+        )
+        assert auth_response.status_code == 200
+
+        response = client.post(
+            "/admin/logout",
+            headers={"Origin": "http://localhost", "Host": "localhost"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "logged_out"
+        assert client.cookies.get("admin_session") is None
+        assert "admin_session=" in response.headers["set-cookie"]
+
+        refresh_response = client.post(
+            "/admin/refresh",
+            headers={"Origin": "http://localhost", "Host": "localhost"},
+        )
+        assert refresh_response.status_code == 401
+
+
+class TestAdminRefreshIntegration:
+    """Integration tests for refresh and re-evaluate endpoints."""
+
+    @pytest.mark.parametrize(
+        ("origin", "host", "expected_status"),
+        [
+            ("http://localhost", "localhost", 202),
+            ("http://evil.com", "localhost", 403),
+            ("http://evil.com?localhost", "localhost", 403),
+        ],
+    )
+    def test_refresh_origin_validation(
+        self,
+        client: TestClient,
+        app_with_db: tuple[FastAPI, str],
+        origin: str,
+        host: str,
+        expected_status: int,
+    ) -> None:
+        """Refresh compares the parsed Origin netloc with Host exactly."""
+        _, token = app_with_db
+
+        response = client.post(
+            "/admin/refresh",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Origin": origin,
+                "Host": host,
+            },
+        )
+
+        assert response.status_code == expected_status
 
     def test_re_evaluate_with_valid_token(
         self,
@@ -172,3 +263,80 @@ class TestAdminLogsIntegration:
 
         assert response.status_code == 200
         assert response.text.strip() != ""
+
+    def test_logs_escape_html_entities(
+        self,
+        client: TestClient,
+        app_with_db: tuple[FastAPI, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Logs escape HTML entities before returning output."""
+        _, token = app_with_db
+
+        class _FakeProcess:
+            async def communicate(self) -> tuple[bytes, bytes]:
+                return (b"<script>alert(1)</script>", b"")
+
+        async def _fake_create_subprocess_exec(*args, **kwargs):
+            return _FakeProcess()
+
+        monkeypatch.setattr(
+            admin_routes.asyncio,
+            "create_subprocess_exec",
+            _fake_create_subprocess_exec,
+        )
+
+        response = client.get(
+            "/admin/logs", headers={"Authorization": f"Bearer {token}"}
+        )
+
+        assert response.status_code == 200
+        assert response.text == "&lt;script&gt;alert(1)&lt;/script&gt;"
+
+    def test_logs_use_async_subprocess_exec(
+        self,
+        client: TestClient,
+        app_with_db: tuple[FastAPI, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Logs use asyncio.create_subprocess_exec for journalctl."""
+        _, token = app_with_db
+        seen: dict[str, tuple | dict] = {}
+
+        class _FakeProcess:
+            async def communicate(self) -> tuple[bytes, bytes]:
+                return (b"async logs", b"")
+
+        async def _fake_create_subprocess_exec(*args, **kwargs):
+            seen["args"] = args
+            seen["kwargs"] = kwargs
+            return _FakeProcess()
+
+        monkeypatch.setattr(
+            admin_routes.asyncio,
+            "create_subprocess_exec",
+            _fake_create_subprocess_exec,
+        )
+
+        response = client.get(
+            "/admin/logs", headers={"Authorization": f"Bearer {token}"}
+        )
+
+        assert response.status_code == 200
+        assert response.text == "async logs"
+        assert seen["args"] == (
+            "journalctl",
+            "-u",
+            "collect-data",
+            "-u",
+            "craft-dashboard",
+            "-n",
+            "100",
+            "--no-pager",
+            "--output",
+            "short",
+        )
+        assert seen["kwargs"] == {
+            "stdout": admin_routes.asyncio.subprocess.PIPE,
+            "stderr": admin_routes.asyncio.subprocess.PIPE,
+        }

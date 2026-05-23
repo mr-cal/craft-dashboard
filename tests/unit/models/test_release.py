@@ -1,6 +1,7 @@
 """Tests for the Release model."""
 
 import ast
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, get_args, get_origin
 
@@ -71,3 +72,25 @@ class TestReleaseModel:
 
         assert get_origin(metadata_type) is dict
         assert get_args(metadata_type) == (str, Any)
+
+    def test_branch_none_is_coalesced_to_empty_string(self) -> None:
+        """Release.branch should coalesce None to the unique sentinel value."""
+        release = Release(
+            project_id=1,
+            version="1.0.0",
+            branch=None,
+            released_at=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+
+        assert release.branch == ""
+
+    def test_branch_value_is_preserved_when_present(self) -> None:
+        """Release.branch should keep explicit branch names unchanged."""
+        release = Release(
+            project_id=1,
+            version="1.0.0",
+            branch="stable",
+            released_at=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+
+        assert release.branch == "stable"

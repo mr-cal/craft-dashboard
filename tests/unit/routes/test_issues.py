@@ -1,5 +1,6 @@
 """Tests for the issue triage routes."""
 
+import re
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -57,4 +58,9 @@ class TestIssueList:
         assert response.status_code == 200
         assert 'id="loading-indicator"' in response.text
         assert "Loading..." in response.text
-        assert response.text.count('hx-indicator="#loading-indicator"') == 5
+
+        hx_get_count = len(re.findall(r'\bhx-get="', response.text))
+        hx_indicator_count = response.text.count('hx-indicator="#loading-indicator"')
+
+        assert hx_get_count > 0
+        assert hx_indicator_count == hx_get_count

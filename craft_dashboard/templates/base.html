@@ -63,6 +63,29 @@
         <a class="is-dark" href="https://github.com/mr-cal/craft-dashboard">craft-dashboard</a>
       </div>
     </footer>
+    <div id="htmx-error-toast" style="display:none;position:fixed;bottom:1rem;right:1rem;z-index:100;padding:0.75rem 1.5rem;background:#c7162b;color:white;border-radius:4px;font-size:0.875rem;max-width:400px;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+      <span id="htmx-error-message"></span>
+      <button onclick="this.parentElement.style.display='none'" style="margin-left:1rem;background:none;border:none;color:white;cursor:pointer;font-size:1.1rem;">&times;</button>
+    </div>
+    <script>
+      document.body.addEventListener("htmx:responseError", function(event) {
+        var toast = document.getElementById("htmx-error-toast");
+        var msg = document.getElementById("htmx-error-message");
+        var status = event.detail.xhr ? event.detail.xhr.status : 0;
+        msg.textContent = "Request failed" + (status ? " (" + status + ")" : "") + ". Please try again.";
+        toast.style.display = "flex";
+        toast.style.alignItems = "center";
+        setTimeout(function() { toast.style.display = "none"; }, 8000);
+      });
+      document.body.addEventListener("htmx:sendError", function() {
+        var toast = document.getElementById("htmx-error-toast");
+        var msg = document.getElementById("htmx-error-message");
+        msg.textContent = "Network error. Check your connection and try again.";
+        toast.style.display = "flex";
+        toast.style.alignItems = "center";
+        setTimeout(function() { toast.style.display = "none"; }, 8000);
+      });
+    </script>
     {% block scripts %}{% endblock %}
   </body>
 </html>

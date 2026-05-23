@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -41,7 +42,7 @@ class Issue(Base):
     author_is_bot: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     labels: Mapped[list] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime(timezone=True), nullable=True, server_default=func.now()
     )
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

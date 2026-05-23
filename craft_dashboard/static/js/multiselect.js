@@ -67,6 +67,7 @@
       if (!isOpen) {
         dropdown.classList.remove("u-hide");
         container.classList.add("is-open");
+        inputWrap.setAttribute("aria-expanded", "true");
       }
     });
 
@@ -99,6 +100,9 @@
     document.querySelectorAll(".multiselect").forEach((ms) => {
       ms.querySelector(".multiselect__dropdown").classList.add("u-hide");
       ms.classList.remove("is-open");
+      ms
+        .querySelector(".multiselect__input-wrap")
+        .setAttribute("aria-expanded", "false");
     });
   }
 

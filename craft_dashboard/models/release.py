@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from craft_dashboard.models.base import Base
 
@@ -21,7 +21,7 @@ class Release(Base):
         Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     version: Mapped[str] = mapped_column(String(100), nullable=False)
-    branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    branch: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     released_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -30,6 +30,11 @@ class Release(Base):
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="releases")  # noqa: F821 — SQLAlchemy forward reference for relationship
+
+    @validates("branch")
+    def _coalesce_branch(self, _key: str, value: str | None) -> str:
+        """Coalesce NULL branch values to an empty string."""
+        return value or ""
 
     def __repr__(self) -> str:
         """Return a string representation."""

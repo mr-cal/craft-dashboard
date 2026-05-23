@@ -7,14 +7,14 @@
   <div class="filter-group">
     <label>Projects</label>
     <div class="multiselect" data-name="project" data-hidden="project-hidden">
-      <div class="multiselect__input-wrap" tabindex="0">
+      <div class="multiselect__input-wrap" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-label="Select projects">
         <span class="multiselect__placeholder">All projects</span>
         <div class="multiselect__chips"></div>
       </div>
       <div class="multiselect__dropdown u-hide">
-        <div class="multiselect__options">
+        <div class="multiselect__options" role="listbox">
           {% for p in project_names %}
-          <label class="multiselect__option">
+          <label class="multiselect__option" role="option">
             <input type="checkbox" value="{{ p }}" {% if p in (filter_project or "").split(",") and filter_project %}checked{% endif %} />
             <span>{{ p }}</span>
           </label>
@@ -34,14 +34,14 @@
   <div class="filter-group">
     <label>Author Role</label>
     <div class="multiselect" data-name="author_role" data-hidden="role-hidden">
-      <div class="multiselect__input-wrap" tabindex="0">
+      <div class="multiselect__input-wrap" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-label="Select author roles">
         <span class="multiselect__placeholder">Select roles...</span>
         <div class="multiselect__chips"></div>
       </div>
       <div class="multiselect__dropdown u-hide">
-        <div class="multiselect__options">
+        <div class="multiselect__options" role="listbox">
           {% for role in ["maintainer", "contributor", "bot"] %}
-          <label class="multiselect__option">
+          <label class="multiselect__option" role="option">
             <input type="checkbox" value="{{ role }}" {% if role in (filter_author_role or "").split(",") and filter_author_role %}checked{% endif %} />
             <span>{{ role|capitalize }}{% if role == "bot" %}s{% endif %}</span>
           </label>
@@ -65,6 +65,7 @@
             hx-target="#issue-table"
             hx-swap="outerHTML"
             hx-include=".filter-bar [name]"
+            hx-indicator="#loading-indicator"
             hx-push-url="false">
       <option value="">All Types</option>
       <option value="issue" {% if filter_type == "issue" %}selected{% endif %}>Issues</option>
@@ -75,14 +76,14 @@
   <div class="filter-group">
     <label>State</label>
     <div class="multiselect" data-name="state" data-hidden="state-hidden">
-      <div class="multiselect__input-wrap" tabindex="0">
+      <div class="multiselect__input-wrap" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-label="Select states">
         <span class="multiselect__placeholder">Open</span>
         <div class="multiselect__chips"></div>
       </div>
       <div class="multiselect__dropdown u-hide">
-        <div class="multiselect__options">
+        <div class="multiselect__options" role="listbox">
           {% for s in ["open", "closed", "merged"] %}
-          <label class="multiselect__option">
+          <label class="multiselect__option" role="option">
             <input type="checkbox" value="{{ s }}" {% if s in (filter_state or "open").split(",") %}checked{% endif %} />
             <span>{{ s|capitalize }}</span>
           </label>
@@ -102,14 +103,14 @@
   <div class="filter-group">
     <label>Actions</label>
     <div class="multiselect" data-name="action" data-hidden="action-hidden">
-      <div class="multiselect__input-wrap" tabindex="0">
+      <div class="multiselect__input-wrap" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-label="Select actions">
         <span class="multiselect__placeholder">Select actions...</span>
         <div class="multiselect__chips"></div>
       </div>
       <div class="multiselect__dropdown u-hide">
-        <div class="multiselect__options">
+        <div class="multiselect__options" role="listbox">
           {% for act in ["close_stale", "close_duplicate", "close_not_a_bug", "close_outdated", "needs_triage", "needs_review", "needs_rebase", "keep_open"] %}
-          <label class="multiselect__option">
+          <label class="multiselect__option" role="option">
             <input type="checkbox" value="{{ act }}" {% if act in (filter_action or "").split(",") and filter_action %}checked{% endif %} />
             <span>{{ act|replace("_", " ")|title }}</span>
           </label>
@@ -127,7 +128,6 @@
   </div>
 
   <input type="hidden" name="source" value="{{ filter_source or '' }}" />
-  <input type="hidden" name="state" value="{{ filter_state or 'open' }}" />
   <input type="hidden" name="sort" value="{{ sort_by or 'staleness' }}" />
 
   <div class="filter-group">
@@ -150,6 +150,7 @@
             hx-target="#issue-table"
             hx-swap="outerHTML"
             hx-include=".filter-bar [name]"
+            hx-indicator="#loading-indicator"
             hx-push-url="false">
       <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
       <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>

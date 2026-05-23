@@ -1,6 +1,9 @@
 """Admin routes for triggering refreshes and re-evaluations."""
 
+import asyncio
+import html
 import logging
+import urllib.parse
 from datetime import UTC
 from typing import TYPE_CHECKING
 
@@ -12,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 from starlette.exceptions import HTTPException
 
-from craft_dashboard.auth import verify_admin_token
+from craft_dashboard.auth import get_admin_bearer_token, verify_admin_token
 from craft_dashboard.dependencies import get_db_session
 
 if TYPE_CHECKING:
@@ -22,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin")
 
+_ADMIN_SESSION_COOKIE = "admin_session"
 _LOG_SERVICE_UNITS = ["collect-data", "craft-dashboard"]
 
 
@@ -33,20 +37,62 @@ class AdminActionResponse(BaseModel):
     count: int | None = None
 
 
+class AdminAuthRequest(BaseModel):
+    """Request model for admin cookie authentication."""
+
+    token: str
+
+
 def _get_admin_token(request: Request) -> str:
     """Get the admin token from app settings."""
     return request.app.state.settings.admin_token
 
 
 def _verify_origin(request: Request) -> None:
-    """Verify request originates from dashboard UI (anti-CSRF for bearer token flows)."""
+    """Verify request originates from dashboard UI."""
     origin = request.headers.get("origin", "")
     host = request.headers.get("host", "")
-    if origin and host not in origin:
+    if origin and urllib.parse.urlparse(origin).netloc != host:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cross-origin request rejected.",
         )
+
+
+def _require_admin_auth(request: Request, authorization: str = "") -> None:
+    """Verify admin auth from the Authorization header or session cookie."""
+    admin_token = _get_admin_token(request)
+    token = get_admin_bearer_token(request, authorization)
+    verify_admin_token(token, admin_token)
+
+
+@router.post("/auth")
+async def admin_auth(
+    request: Request,
+    credentials: AdminAuthRequest,
+) -> JSONResponse:
+    """Validate the admin token and establish an admin session cookie."""
+    _verify_origin(request)
+    verify_admin_token(f"Bearer {credentials.token}", _get_admin_token(request))
+
+    response = JSONResponse({"status": "authenticated", "message": "Authenticated."})
+    response.set_cookie(
+        _ADMIN_SESSION_COOKIE,
+        credentials.token,
+        httponly=True,
+        samesite="strict",
+        path="/admin",
+    )
+    return response
+
+
+@router.post("/logout")
+async def admin_logout(request: Request) -> JSONResponse:
+    """Clear the admin session cookie."""
+    _verify_origin(request)
+    response = JSONResponse({"status": "logged_out", "message": "Logged out."})
+    response.delete_cookie(_ADMIN_SESSION_COOKIE, path="/admin")
+    return response
 
 
 @router.get("", response_class=HTMLResponse)
@@ -111,8 +157,7 @@ async def trigger_refresh(
 
     Requires admin authentication via Bearer token.
     """
-    admin_token = _get_admin_token(request)
-    verify_admin_token(authorization, admin_token)
+    _require_admin_auth(request, authorization)
     _verify_origin(request)
     logger.info("Admin: refresh queued")
 
@@ -132,8 +177,7 @@ async def trigger_re_evaluation(
 
     Requires admin authentication via Bearer token.
     """
-    admin_token = _get_admin_token(request)
-    verify_admin_token(authorization, admin_token)
+    _require_admin_auth(request, authorization)
     _verify_origin(request)
     logger.info("Admin: re-evaluation queued")
 
@@ -160,8 +204,7 @@ async def distribute_refresh_schedule(
 
     from craft_dashboard.models.refresh_schedule import RefreshSchedule
 
-    admin_token = _get_admin_token(request)
-    verify_admin_token(authorization, admin_token)
+    _require_admin_auth(request, authorization)
     _verify_origin(request)
 
     settings = request.app.state.settings
@@ -209,8 +252,7 @@ async def admin_health(
 
     from craft_dashboard.models.refresh_schedule import RefreshSchedule
 
-    admin_token = _get_admin_token(request)
-    verify_admin_token(authorization, admin_token)
+    _require_admin_auth(request, authorization)
 
     try:
         await session.execute(text("SELECT 1"))
@@ -252,17 +294,15 @@ async def admin_logs(
     authorization: str = Header(default=""),
 ) -> PlainTextResponse:
     """Return recent service logs. Requires admin auth."""
-    import subprocess  # noqa: PLC0415 — intentional blocking call to journalctl for bounded log retrieval
-
-    admin_token = _get_admin_token(request)
-    verify_admin_token(authorization, admin_token)
+    _require_admin_auth(request, authorization)
 
     try:
-        units = []
+        units: list[str] = []
         for unit in _LOG_SERVICE_UNITS:
             units.extend(["-u", unit])
-        result = subprocess.run(  # noqa: ASYNC221 — intentional blocking call to journalctl for bounded log retrieval
-            [
+
+        proc = await asyncio.wait_for(
+            asyncio.create_subprocess_exec(
                 "journalctl",
                 *units,
                 "-n",
@@ -270,13 +310,15 @@ async def admin_logs(
                 "--no-pager",
                 "--output",
                 "short",
-            ],
-            capture_output=True,
-            text=True,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            ),
             timeout=10,
-            shell=False,
-            check=False,
         )
-        return PlainTextResponse(result.stdout or "(no logs)")
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+        stdout, _ = await proc.communicate()
+        output = stdout.decode() if stdout else "(no logs)"
+        return PlainTextResponse(
+            html.escape(output) if output != "(no logs)" else output
+        )
+    except (asyncio.TimeoutError, FileNotFoundError):
         return PlainTextResponse("(journalctl not available)")
