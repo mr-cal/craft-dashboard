@@ -309,6 +309,12 @@ def _build_snapshot_dict(projects: dict[str, dict]) -> dict[str, dict]:
             "nm_open_prs": data["open_prs_external"][idx],
             "bots_open_issues": data["open_issues_bots"][idx],
             "bots_open_prs": data["open_prs_bots"][idx],
+            "internal_open_issues": data["open_issues"][idx]
+            - data["open_issues_external"][idx]
+            - data["open_issues_bots"][idx],
+            "internal_open_prs": data["open_prs"][idx]
+            - data["open_prs_external"][idx]
+            - data["open_prs_bots"][idx],
             "median_issue_age": data["median_issue_age"][idx],
             "median_pr_age": data["median_pr_age"][idx],
             "nm_median_issue_age": data["nm_median_issue_age"][idx],
@@ -321,6 +327,16 @@ def _build_snapshot_dict(projects: dict[str, dict]) -> dict[str, dict]:
             "closed_prs_year": closed_prs_year,
             "nm_closed_issues_year": nm_closed_issues_year,
             "nm_closed_prs_year": nm_closed_prs_year,
+            "bots_closed_issues_year": sum(
+                data["closed_issues_bots"][year_start_idx:]
+            ),
+            "bots_closed_prs_year": sum(data["closed_prs_bots"][year_start_idx:]),
+            "internal_closed_issues_year": closed_issues_year
+            - nm_closed_issues_year
+            - sum(data["closed_issues_bots"][year_start_idx:]),
+            "internal_closed_prs_year": closed_prs_year
+            - nm_closed_prs_year
+            - sum(data["closed_prs_bots"][year_start_idx:]),
         }
 
     scalar_snap_keys = [
@@ -330,10 +346,16 @@ def _build_snapshot_dict(projects: dict[str, dict]) -> dict[str, dict]:
         "nm_open_prs",
         "bots_open_issues",
         "bots_open_prs",
+        "internal_open_issues",
+        "internal_open_prs",
         "closed_issues_year",
         "closed_prs_year",
         "nm_closed_issues_year",
         "nm_closed_prs_year",
+        "bots_closed_issues_year",
+        "bots_closed_prs_year",
+        "internal_closed_issues_year",
+        "internal_closed_prs_year",
     ]
     median_snap_keys = [
         "median_issue_age",

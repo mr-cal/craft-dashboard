@@ -106,7 +106,11 @@ def create_app() -> FastAPI:
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     app.state.settings = settings
-    app.state.templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+    templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+    # Cache-bust static assets using app startup timestamp
+    _startup_ts = str(int(datetime.now(tz=UTC).timestamp()))
+    templates.env.globals["cache_bust"] = _startup_ts
+    app.state.templates = templates
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     class HealthResponse(BaseModel):

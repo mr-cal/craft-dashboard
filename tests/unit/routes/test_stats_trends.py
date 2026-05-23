@@ -73,6 +73,8 @@ _SNAPSHOT_KEYS = {
     "nm_open_prs",
     "bots_open_issues",
     "bots_open_prs",
+    "internal_open_issues",
+    "internal_open_prs",
     "median_issue_age",
     "median_pr_age",
     "nm_median_issue_age",
@@ -85,6 +87,10 @@ _SNAPSHOT_KEYS = {
     "closed_prs_year",
     "nm_closed_issues_year",
     "nm_closed_prs_year",
+    "bots_closed_issues_year",
+    "bots_closed_prs_year",
+    "internal_closed_issues_year",
+    "internal_closed_prs_year",
 }
 
 
@@ -253,6 +259,8 @@ class TestTrendsAllDataSingleProject:
             "nm_open_prs": 2,
             "bots_open_issues": 1,
             "bots_open_prs": 1,
+            "internal_open_issues": 4,
+            "internal_open_prs": 1,
             "median_issue_age": 17,
             "median_pr_age": 12,
             "nm_median_issue_age": 13,
@@ -265,6 +273,10 @@ class TestTrendsAllDataSingleProject:
             "closed_prs_year": 8,
             "nm_closed_issues_year": 2,
             "nm_closed_prs_year": 3,
+            "bots_closed_issues_year": 1,
+            "bots_closed_prs_year": 2,
+            "internal_closed_issues_year": 4,
+            "internal_closed_prs_year": 3,
         }
         assert data["snapshot"]["chisel"] == expected_snapshot
         assert data["snapshot"]["all-projects"] == expected_snapshot
@@ -715,6 +727,8 @@ class TestBuildSnapshotDict:
                 "nm_open_prs": 8,
                 "bots_open_issues": 1,
                 "bots_open_prs": 2,
+                "internal_open_issues": -5,
+                "internal_open_prs": -6,
                 "median_issue_age": 30,
                 "median_pr_age": 40,
                 "nm_median_issue_age": 31,
@@ -727,6 +741,10 @@ class TestBuildSnapshotDict:
                 "closed_prs_year": 23,
                 "nm_closed_issues_year": 27,
                 "nm_closed_prs_year": 31,
+                "bots_closed_issues_year": 0,
+                "bots_closed_prs_year": 0,
+                "internal_closed_issues_year": -8,
+                "internal_closed_prs_year": -8,
             },
             "beta": {
                 "open_issues": 4,
@@ -735,6 +753,8 @@ class TestBuildSnapshotDict:
                 "nm_open_prs": 7,
                 "bots_open_issues": 2,
                 "bots_open_prs": 3,
+                "internal_open_issues": -4,
+                "internal_open_prs": -5,
                 "median_issue_age": 50,
                 "median_pr_age": 60,
                 "nm_median_issue_age": 51,
@@ -747,6 +767,10 @@ class TestBuildSnapshotDict:
                 "closed_prs_year": 21,
                 "nm_closed_issues_year": 22,
                 "nm_closed_prs_year": 23,
+                "bots_closed_issues_year": 0,
+                "bots_closed_prs_year": 0,
+                "internal_closed_issues_year": -2,
+                "internal_closed_prs_year": -2,
             },
             "all-projects": {
                 "open_issues": 7,
@@ -755,6 +779,8 @@ class TestBuildSnapshotDict:
                 "nm_open_prs": 15,
                 "bots_open_issues": 3,
                 "bots_open_prs": 5,
+                "internal_open_issues": -9,
+                "internal_open_prs": -11,
                 "median_issue_age": 40,
                 "median_pr_age": 50,
                 "nm_median_issue_age": 41,
@@ -767,6 +793,10 @@ class TestBuildSnapshotDict:
                 "closed_prs_year": 44,
                 "nm_closed_issues_year": 49,
                 "nm_closed_prs_year": 54,
+                "bots_closed_issues_year": 0,
+                "bots_closed_prs_year": 0,
+                "internal_closed_issues_year": -10,
+                "internal_closed_prs_year": -10,
             },
         }
 

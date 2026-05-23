@@ -377,8 +377,14 @@ function updateSnapshotCharts() {
   }
   
   // Open Issues/PRs Chart
-  const issueKey = view === "bots" ? "bots_open_issues" : view === "external" ? "nm_open_issues" : "open_issues";
-  const prKey = view === "bots" ? "bots_open_prs" : view === "external" ? "nm_open_prs" : "open_prs";
+  const issueKey = view === "bots" ? "bots_open_issues"
+    : view === "external" ? "nm_open_issues"
+    : view === "internal" ? "internal_open_issues"
+    : "open_issues";
+  const prKey = view === "bots" ? "bots_open_prs"
+    : view === "external" ? "nm_open_prs"
+    : view === "internal" ? "internal_open_prs"
+    : "open_prs";
   
   snapshotOpenChart.data.labels = labels;
   snapshotOpenChart.data.datasets = [
@@ -427,8 +433,14 @@ function updateSnapshotCharts() {
   ];
   
   // Closed Last Year Chart
-  const closedIssueKey = view === "external" ? "nm_closed_issues_year" : "closed_issues_year";
-  const closedPrKey = view === "external" ? "nm_closed_prs_year" : "closed_prs_year";
+  const closedIssueKey = view === "external" ? "nm_closed_issues_year"
+    : view === "bots" ? "bots_closed_issues_year"
+    : view === "internal" ? "internal_closed_issues_year"
+    : "closed_issues_year";
+  const closedPrKey = view === "external" ? "nm_closed_prs_year"
+    : view === "bots" ? "bots_closed_prs_year"
+    : view === "internal" ? "internal_closed_prs_year"
+    : "closed_prs_year";
   
   snapshotClosedChart.data.labels = labels;
   snapshotClosedChart.data.datasets = [
@@ -679,9 +691,13 @@ applyDateFilter();
 
 // Initial render (applyDateFilter already calls these, but ensure snapshot charts are updated)
 updateSnapshotCharts();
+
+// Hide loading spinner
+document.getElementById("trends-loading").style.display = "none";
 } catch (error) {
   console.error("Failed to load trend data:", error);
-  document.querySelectorAll(".trends-section canvas").forEach(c => {
+  document.getElementById("trends-loading").style.display = "none";
+  document.querySelectorAll("canvas").forEach(c => {
     const ctx = c.getContext("2d");
     ctx.font = "14px sans-serif";
     ctx.fillStyle = "#666";

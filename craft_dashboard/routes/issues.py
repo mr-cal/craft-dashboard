@@ -227,7 +227,9 @@ async def issue_list(
     )
 
     project_result = await session.execute(
-        select(Project.name).order_by(Project.display_order)
+        select(Project.name)
+        .where(Project.category != "aggregate")
+        .order_by(Project.display_order)
     )
     project_names = [row.name for row in project_result]
 
