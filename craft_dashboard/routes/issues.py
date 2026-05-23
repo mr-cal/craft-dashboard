@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import Integer as SAInteger
+from sqlalchemy import cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
@@ -38,10 +39,10 @@ class IssueSort(StrEnum):
 _VALID_SORT_FIELDS = {e.value for e in IssueSort}
 
 
-def _compute_age_days(created_at: datetime | None) -> int:
-    """Compute days since creation."""
+def _compute_age_days(created_at: datetime | None) -> int | None:
+    """Compute days since creation, or None if unknown."""
     if created_at is None:
-        return 0
+        return None
     now = datetime.now(tz=UTC)
     created = (
         created_at.replace(tzinfo=UTC) if created_at.tzinfo is None else created_at
@@ -81,6 +82,7 @@ async def _query_issues(
     *,
     project: str = "",
     source: str = "",
+    state: str = "open",
     issue_type: str = "",
     action: str = "",
     author_role: str = "",
@@ -104,8 +106,16 @@ async def _query_issues(
             LLMEvaluation,
             (LLMEvaluation.issue_id == Issue.id) & LLMEvaluation.latest.is_(True),
         )
-        .where(Issue.state == "open")
     )
+
+    if state:
+        state_list = [s.strip() for s in state.split(",") if s.strip()]
+        if len(state_list) == 1:
+            query = query.where(Issue.state == state_list[0])
+        elif state_list:
+            query = query.where(Issue.state.in_(state_list))
+    else:
+        query = query.where(Issue.state == "open")
 
     if project:
         project_list = [p.strip() for p in project.split(",") if p.strip()]
@@ -137,6 +147,7 @@ async def _query_issues(
     count_query = select(func.count()).select_from(query.subquery())
     total = await session.scalar(count_query) or 0
     total_pages = max(1, (total + items_per_page - 1) // items_per_page)
+    page = min(page, total_pages)
 
     sort_field = sort_by.lstrip("-")
     sort_desc = sort_by.startswith("-")
@@ -158,10 +169,11 @@ async def _query_issues(
         col = Issue.author
         query = query.order_by(col.asc() if not sort_desc else col.desc())
     elif sort_field == "number":
+        numeric_id = cast(Issue.external_id, SAInteger)
         if sort_desc:
-            query = query.order_by(Project.name.desc(), Issue.external_id.desc())
+            query = query.order_by(Project.name.desc(), numeric_id.desc())
         else:
-            query = query.order_by(Project.name.asc(), Issue.external_id.asc())
+            query = query.order_by(Project.name.asc(), numeric_id.asc())
     else:  # staleness (default)
         query = query.order_by(
             func.coalesce(LLMEvaluation.scores["staleness"].as_float(), 0).desc()
@@ -201,6 +213,7 @@ async def issue_list(
     session: AsyncSession = Depends(get_db_session),
     project: str = Query("", alias="project"),
     source: str = Query("", alias="source"),
+    state: str = Query("open", alias="state"),
     issue_type: str = Query("", alias="type"),
     action: str = Query("", alias="action"),
     author_role: str = Query("", alias="author_role"),
@@ -215,6 +228,7 @@ async def issue_list(
 
     issues, total_pages = await _query_issues(
         session,
+        state=state,
         project=project,
         source=source,
         issue_type=issue_type,
@@ -225,6 +239,7 @@ async def issue_list(
         search=search,
         items_per_page=effective_per_page,
     )
+    page = min(page, total_pages)
 
     project_result = await session.execute(
         select(Project.name)
@@ -241,6 +256,7 @@ async def issue_list(
             "project_names": project_names,
             "filter_project": project,
             "filter_source": source,
+            "filter_state": state,
             "filter_type": issue_type,
             "filter_action": action,
             "filter_author_role": author_role,
@@ -259,6 +275,7 @@ async def issue_table_partial(
     session: AsyncSession = Depends(get_db_session),
     project: str = Query("", alias="project"),
     source: str = Query("", alias="source"),
+    state: str = Query("open", alias="state"),
     issue_type: str = Query("", alias="type"),
     action: str = Query("", alias="action"),
     author_role: str = Query("", alias="author_role"),
@@ -273,6 +290,7 @@ async def issue_table_partial(
 
     issues, total_pages = await _query_issues(
         session,
+        state=state,
         project=project,
         source=source,
         issue_type=issue_type,
@@ -283,6 +301,7 @@ async def issue_table_partial(
         search=search,
         items_per_page=effective_per_page,
     )
+    page = min(page, total_pages)
 
     return templates.TemplateResponse(
         request,
@@ -291,6 +310,7 @@ async def issue_table_partial(
             "issues": issues,
             "filter_project": project,
             "filter_source": source,
+            "filter_state": state,
             "filter_type": issue_type,
             "filter_action": action,
             "filter_author_role": author_role,

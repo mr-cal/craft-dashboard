@@ -4,8 +4,9 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.exceptions import HTTPException
 
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.dependency import Dependency
@@ -537,8 +538,16 @@ async def trends_all_data(
     )
 
 
-async def _get_trend_chart_data(session: AsyncSession, project: str) -> dict:
-    """Fetch snapshot trend data for a project and return Chart.js-compatible dict."""
+async def _get_trend_chart_data(
+    session: AsyncSession, project: str
+) -> dict | None:
+    """Fetch snapshot trend data for a project. Returns None if not found."""
+    exists = await session.scalar(
+        select(func.count()).select_from(Project).where(Project.name == project)
+    )
+    if not exists:
+        return None
+
     result = await session.execute(
         select(
             Snapshot.snapshot_date,
@@ -579,6 +588,8 @@ async def trends_data(
 ) -> JSONResponse:
     """Return trend data as JSON for Chart.js (API endpoint)."""
     data = await _get_trend_chart_data(session, project)
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project}' not found")
     return JSONResponse(data)
 
 
@@ -597,6 +608,8 @@ async def trends_chart_partial(
     import json  # noqa: PLC0415 — deferred import
 
     chart_data = await _get_trend_chart_data(session, project)
+    if chart_data is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project}' not found")
 
     return templates.TemplateResponse(
         request,

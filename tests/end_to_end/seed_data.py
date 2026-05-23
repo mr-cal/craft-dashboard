@@ -9,7 +9,7 @@ endpoint (only available when ``CRAFT_DASHBOARD_E2E=1``).
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 # ---------------------------------------------------------------------------
 # Projects
@@ -115,7 +115,7 @@ def _make_snapshots(project_id: int, project_name: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 def _make_issues(project_id: int, project_name: str) -> list[dict]:
     """Generate issue rows for a project."""
-    now = datetime(2024, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2024, 7, 1, 12, 0, 0, tzinfo=UTC)
     issues = []
     base = 1000 * PROJECTS.index(
         next(p for p in PROJECTS if p["name"] == project_name)
@@ -167,12 +167,12 @@ def _make_releases(project_id: int, project_name: str) -> list[dict]:
     if project_name in ("craft-parts", "all-projects"):
         return []
 
-    now = datetime(2024, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2024, 7, 1, 12, 0, 0, tzinfo=UTC)
     releases = []
     versions = [
         ("8.0.0", "main", 30, False, 150),
         ("7.5.1", "7.x/stable", 60, True, 5),
-        ("7.5.0", "7.x/stable", 90, False, 80),
+        ("7.5.0", "7.x/candidate", 90, False, 80),
     ]
     for ver, branch, days_ago, is_hotfix, commits in versions:
         releases.append({
@@ -194,7 +194,7 @@ def _make_dependencies(project_id: int, project_name: str) -> list[dict]:
     if project_name == "all-projects":
         return []
 
-    now = datetime(2024, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2024, 7, 1, 12, 0, 0, tzinfo=UTC)
     deps = [
         ("craft-parts", ">=1.0,<2.0", "1.5.0", "1.6.0", True),
         ("craft-cli", ">=2.0", "2.1.0", "2.1.0", False),
@@ -230,7 +230,7 @@ def generate_seed_sql() -> str:
     stmts.append("DELETE FROM llm_evaluations;")
     stmts.append("DELETE FROM issues;")
     stmts.append("DELETE FROM snapshots;")
-    stmts.append("DELETE FROM refresh_schedules;")
+    stmts.append("DELETE FROM refresh_schedule;")
     stmts.append("DELETE FROM projects;")
 
     for pid, proj in enumerate(PROJECTS, start=1):

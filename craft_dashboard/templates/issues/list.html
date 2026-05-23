@@ -73,6 +73,33 @@
   </div>
 
   <div class="filter-group">
+    <label>State</label>
+    <div class="multiselect" data-name="state" data-hidden="state-hidden">
+      <div class="multiselect__input-wrap" tabindex="0">
+        <span class="multiselect__placeholder">Open</span>
+        <div class="multiselect__chips"></div>
+      </div>
+      <div class="multiselect__dropdown u-hide">
+        <div class="multiselect__options">
+          {% for s in ["open", "closed", "merged"] %}
+          <label class="multiselect__option">
+            <input type="checkbox" value="{{ s }}" {% if s in (filter_state or "open").split(",") %}checked{% endif %} />
+            <span>{{ s|capitalize }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    <input type="hidden" name="state" id="state-hidden" value="{{ filter_state or 'open' }}"
+           hx-get="/issues/table"
+           hx-target="#issue-table"
+           hx-swap="outerHTML"
+           hx-include=".filter-bar [name]"
+           hx-indicator="#loading-indicator"
+           hx-trigger="change" />
+  </div>
+
+  <div class="filter-group">
     <label>Actions</label>
     <div class="multiselect" data-name="action" data-hidden="action-hidden">
       <div class="multiselect__input-wrap" tabindex="0">
@@ -99,6 +126,8 @@
            hx-trigger="change" />
   </div>
 
+  <input type="hidden" name="source" value="{{ filter_source or '' }}" />
+  <input type="hidden" name="state" value="{{ filter_state or 'open' }}" />
   <input type="hidden" name="sort" value="{{ sort_by or 'staleness' }}" />
 
   <div class="filter-group">

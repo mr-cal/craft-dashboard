@@ -265,6 +265,24 @@ class TestMedianAgePerGroupInAPIResponse:
         assert result["median_issue_age_bots"] == 5
 
 
+class TestTrendsDataNonexistentProject:
+    def test_trends_data_returns_404_for_nonexistent_project(
+        self, test_client: TestClient
+    ) -> None:
+        response = test_client.get(
+            "/stats/trends/data", params={"project": "nonexistent"}
+        )
+        assert response.status_code == 404
+
+    def test_trends_chart_returns_404_for_nonexistent_project(
+        self, test_client: TestClient
+    ) -> None:
+        response = test_client.get(
+            "/stats/trends/chart", params={"project": "nonexistent"}
+        )
+        assert response.status_code == 404
+
+
 # ---------------------------------------------------------------------------
 # Bug 4: Rolling-average labels use "4-week", never "30-day"
 # ---------------------------------------------------------------------------

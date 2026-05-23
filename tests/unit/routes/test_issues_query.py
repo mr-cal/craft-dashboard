@@ -389,8 +389,8 @@ async def _seed_issue_types(session) -> None:
 
 
 class TestComputeAgeDays:
-    def test_none_returns_zero(self) -> None:
-        assert _compute_age_days(None) == 0
+    def test_none_returns_none(self) -> None:
+        assert _compute_age_days(None) is None
 
     def test_today_returns_zero(self) -> None:
         with patch("craft_dashboard.routes.issues.datetime", FrozenDateTime):

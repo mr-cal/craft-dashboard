@@ -57,4 +57,4 @@ class TestIssueList:
         assert response.status_code == 200
         assert 'id="loading-indicator"' in response.text
         assert "Loading..." in response.text
-        assert response.text.count('hx-indicator="#loading-indicator"') == 4
+        assert response.text.count('hx-indicator="#loading-indicator"') == 5

@@ -30,7 +30,9 @@ async def index(
     templates: Jinja2Templates = request.app.state.templates
 
     # Summary counts
-    project_count = await session.scalar(select(func.count(Project.id)))
+    project_count = await session.scalar(
+        select(func.count(Project.id)).where(Project.category != "aggregate")
+    )
     open_issues = await session.scalar(
         select(func.count(Issue.id)).where(
             Issue.state == "open", Issue.issue_type == "issue"
@@ -55,6 +57,7 @@ async def index(
             .label("open_prs"),
         )
         .outerjoin(Issue, Issue.project_id == Project.id)
+        .where(Project.category != "aggregate")
         .group_by(Project.id)
         .order_by(Project.display_order)
     )

@@ -1,8 +1,10 @@
-import sys
+from click.testing import CliRunner
+from craft_dashboard.cli import main
 
-from starcraft_stats import cli
 
+def test_smoketest() -> None:
+    runner = CliRunner()
 
-def test_smoketest(mocker):
-    mocker.patch.object(sys, "argv", ["starcraft-stats", "get-releases"])
-    cli.main()
+    result = runner.invoke(main, ["--help"])
+
+    assert result.exit_code == 0

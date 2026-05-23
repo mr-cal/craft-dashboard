@@ -49,6 +49,7 @@ dev = [
     "aiosqlite>=0.22.1",
     "ruff>=0.15.13",
     "requests>=2.31",
+    "build>=1.2",
 ]
 
 [build-system]

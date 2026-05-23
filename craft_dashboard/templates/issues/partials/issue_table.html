@@ -37,7 +37,7 @@
         </td>
         <td>{{ issue.title|truncate(80) }}</td>
         <td>{{ issue.author or "unknown" }}</td>
-        <td>{{ issue.age_days }}d</td>
+        <td>{{ (issue.age_days ~ "d") if issue.age_days is not none else "?" }}</td>
         <td>
           {% if issue.staleness is not none %}
           {% set score_value = issue.staleness %}
@@ -65,6 +65,6 @@
     </tbody>
   </table>
 
-  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&author_role=" ~ (filter_author_role or "") ~ "&sort=" ~ (sort_by or "staleness") ~ "&search=" ~ (filter_search or "") ~ "&per_page=" ~ (per_page or 50) %}
+  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&source=" ~ (filter_source or "") ~ "&state=" ~ (filter_state or "open") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&author_role=" ~ (filter_author_role or "") ~ "&sort=" ~ (sort_by or "staleness") ~ "&search=" ~ (filter_search or "") ~ "&per_page=" ~ (per_page or 50) %}
   {% include "components/pagination.html" %}
 </div>
