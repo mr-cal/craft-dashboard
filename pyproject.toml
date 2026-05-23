@@ -48,6 +48,7 @@ dev = [
     "httpx",
     "aiosqlite>=0.22.1",
     "ruff>=0.15.13",
+    "requests>=2.31",
 ]
 
 [build-system]
@@ -80,6 +81,10 @@ minversion = "8.0"
 testpaths = "tests"
 xfail_strict = true
 asyncio_mode = "auto"
+markers = [
+    "e2e: end-to-end tests requiring a live LXD VM",
+    "slow: tests that take a long time to run",
+]
 
 [tool.coverage.run]
 branch = true

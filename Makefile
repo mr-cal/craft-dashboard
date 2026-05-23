@@ -75,3 +75,7 @@ deploy-vm: ansible-deps  ## Deploy to LXD VM with SSL skipped (sources provision
 		exit 1; \
 	fi
 	set -a; . provisioning/secrets.env; set +a; cd provisioning && ansible-playbook playbook.yml --skip-tags ssl
+
+.PHONY: test-e2e
+test-e2e:  ## Run end-to-end tests (requires LXD and provisioning/secrets.env)
+	CRAFT_DASHBOARD_E2E=1 uv run pytest tests/end_to_end/ -v -x --timeout=300

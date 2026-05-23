@@ -2,13 +2,14 @@
 
 import json
 import logging
+import os
 import pathlib
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -149,5 +150,25 @@ def create_app() -> FastAPI:
     app.include_router(issues_router)
     app.include_router(stats_router)
     app.include_router(admin_router)
+
+    # E2E test seeding endpoint – only available when CRAFT_DASHBOARD_E2E=1
+    if os.environ.get("CRAFT_DASHBOARD_E2E") == "1":
+
+        @app.post("/e2e/seed", response_class=PlainTextResponse)
+        async def e2e_seed(
+            request: Request,
+            session: AsyncSession = Depends(get_db_session),
+        ) -> PlainTextResponse:
+            """Execute SQL statements to seed the database with test data.
+
+            Accepts a POST body containing newline-separated SQL statements.
+            """
+            body = (await request.body()).decode()
+            for stmt in body.split("\n"):
+                stmt = stmt.strip()
+                if stmt:
+                    await session.execute(text(stmt))
+            await session.commit()
+            return PlainTextResponse("OK")
 
     return app
