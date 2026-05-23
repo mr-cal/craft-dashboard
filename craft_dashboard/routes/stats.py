@@ -222,8 +222,16 @@ async def trends_page(
     )
 
 
-def _build_all_projects_aggregate(projects: dict[str, dict]) -> dict[str, list]:
-    """Build the all-projects time-aligned aggregate."""
+def _build_all_projects_aggregate(  # noqa: PLR0912
+    projects: dict[str, dict],
+    db_medians: dict[str, list] | None = None,
+) -> dict[str, list]:
+    """Build the all-projects time-aligned aggregate.
+
+    Scalar keys (open_issues, closed_prs, etc.) are summed across projects.
+    Median keys use pre-computed true cross-project medians from the DB when
+    available; otherwise fall back to a weighted average.
+    """
     proj_by_date: dict[str, dict[str, int]] = {}
     for name, data in projects.items():
         proj_by_date[name] = {d: i for i, d in enumerate(data["dates"])}
@@ -232,6 +240,13 @@ def _build_all_projects_aggregate(projects: dict[str, dict]) -> dict[str, list]:
     for data in projects.values():
         all_dates_set.update(data["dates"])
     all_dates_sorted = sorted(all_dates_set)
+
+    # Build a lookup for DB median values by date
+    db_median_by_date: dict[str, dict[str, int]] | None = None
+    if db_medians and db_medians.get("dates"):
+        db_median_by_date = {}
+        for i, d in enumerate(db_medians["dates"]):
+            db_median_by_date[d] = {mk: db_medians[mk][i] for mk in _MEDIAN_AGE_KEYS}
 
     all_projects: dict[str, list] = {
         "dates": all_dates_sorted,
@@ -247,13 +262,24 @@ def _build_all_projects_aggregate(projects: dict[str, dict]) -> dict[str, list]:
                 if idx is not None:
                     total += data[k][idx]
             all_projects[k].append(total)
-        for mk in _MEDIAN_AGE_KEYS:
-            ages = []
-            for name, data in projects.items():
-                idx = proj_by_date[name].get(d)
-                if idx is not None and data[mk][idx] > 0:
-                    ages.append(data[mk][idx])
-            all_projects[mk].append(int(sum(ages) / len(ages)) if ages else 0)
+
+        if db_median_by_date and d in db_median_by_date:
+            for mk in _MEDIAN_AGE_KEYS:
+                all_projects[mk].append(db_median_by_date[d][mk])
+        else:
+            # Fallback: weighted average by open item count
+            for mk in _MEDIAN_AGE_KEYS:
+                weighted_sum = 0
+                total_weight = 0
+                for name, data in projects.items():
+                    idx = proj_by_date[name].get(d)
+                    if idx is not None and data[mk][idx] > 0:
+                        weight = max(data["open_issues"][idx] + data["open_prs"][idx], 1)
+                        weighted_sum += data[mk][idx] * weight
+                        total_weight += weight
+                all_projects[mk].append(
+                    int(weighted_sum / total_weight) if total_weight > 0 else 0
+                )
 
     return all_projects
 
@@ -472,8 +498,15 @@ async def trends_all_data(
 
     project_order = list(projects.keys())
 
+    # If the DB contains pre-computed all-projects snapshots, pop them and
+    # use their true cross-project medians in the aggregate.
+    db_all_projects = projects.pop("all-projects", None)
+    project_order = [p for p in project_order if p != "all-projects"]
+
     if projects:
-        projects["all-projects"] = _build_all_projects_aggregate(projects)
+        projects["all-projects"] = _build_all_projects_aggregate(
+            projects, db_medians=db_all_projects
+        )
 
     snapshot = _build_snapshot_dict(projects)
 

@@ -273,6 +273,117 @@ def backfill_project(session: Session, project: Project) -> None:
     print(f"  ✓ Backfilled {len(snapshots_to_upsert)} snapshots for {project.name}")
 
 
+def backfill_cross_project(session: Session, all_projects: list[Project]) -> None:
+    """Compute cross-project aggregate snapshots with true medians.
+
+    Loads all issues across all projects and computes a true cross-project
+    median (rather than averaging per-project medians).
+    """
+    # Get or create the aggregate project
+    from sqlalchemy.dialects.postgresql import insert as pg_insert  # noqa: PLC0415
+
+    stmt = pg_insert(Project).values(
+        name="all-projects",
+        category="aggregate",
+        github_org="canonical",
+        display_order=-1,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["name"],
+        set_={"category": "aggregate", "display_order": -1},
+    )
+    session.execute(stmt)
+    session.commit()
+
+    agg_project = session.execute(
+        select(Project).where(Project.name == "all-projects")
+    ).scalar_one()
+
+    print(f"Computing cross-project aggregate (project_id={agg_project.id})...")
+
+    # Load ALL issues across all real projects
+    project_ids = [p.id for p in all_projects if p.name != "all-projects"]
+    all_issues = list(
+        session.execute(
+            select(Issue)
+            .where(Issue.project_id.in_(project_ids))
+            .where(Issue.created_at.isnot(None))
+        ).scalars()
+    )
+    print(f"  Loaded {len(all_issues)} issues across {len(project_ids)} projects")
+
+    if not all_issues:
+        print("  No issues found, skipping cross-project backfill")
+        return
+
+    # Get the full date range from existing per-project snapshots
+    date_rows = session.execute(
+        select(Snapshot.snapshot_date)
+        .where(Snapshot.project_id.in_(project_ids))
+        .distinct()
+        .order_by(Snapshot.snapshot_date)
+    ).scalars()
+    all_dates = list(date_rows)
+    print(f"  Computing medians for {len(all_dates)} dates...")
+
+    snapshots_to_upsert = []
+    for i, snapshot_date in enumerate(all_dates):
+        metrics = compute_snapshot_for_date(all_issues, snapshot_date)
+        metrics["project_id"] = agg_project.id
+        metrics["snapshot_date"] = snapshot_date
+        snapshots_to_upsert.append(metrics)
+
+        if (i + 1) % 500 == 0:
+            print(f"    {i + 1}/{len(all_dates)} dates processed...")
+
+    if snapshots_to_upsert:
+        # Upsert in batches to avoid memory issues
+        batch_size = 500
+        for batch_start in range(0, len(snapshots_to_upsert), batch_size):
+            batch = snapshots_to_upsert[batch_start : batch_start + batch_size]
+            stmt = pg_insert(Snapshot).values(batch)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["project_id", "snapshot_date"],
+                set_={
+                    "open_issues": stmt.excluded.open_issues,
+                    "open_prs": stmt.excluded.open_prs,
+                    "open_issues_external": stmt.excluded.open_issues_external,
+                    "open_issues_internal": stmt.excluded.open_issues_internal,
+                    "open_issues_bots": stmt.excluded.open_issues_bots,
+                    "open_prs_external": stmt.excluded.open_prs_external,
+                    "open_prs_internal": stmt.excluded.open_prs_internal,
+                    "open_prs_bots": stmt.excluded.open_prs_bots,
+                    "open_bugs": stmt.excluded.open_bugs,
+                    "median_issue_age": stmt.excluded.median_issue_age,
+                    "median_pr_age": stmt.excluded.median_pr_age,
+                    "nm_median_issue_age": stmt.excluded.nm_median_issue_age,
+                    "nm_median_pr_age": stmt.excluded.nm_median_pr_age,
+                    "median_issue_age_internal": stmt.excluded.median_issue_age_internal,
+                    "median_pr_age_internal": stmt.excluded.median_pr_age_internal,
+                    "median_issue_age_bots": stmt.excluded.median_issue_age_bots,
+                    "median_pr_age_bots": stmt.excluded.median_pr_age_bots,
+                    "median_age": stmt.excluded.median_age,
+                    "nm_median_age": stmt.excluded.nm_median_age,
+                    "median_age_internal": stmt.excluded.median_age_internal,
+                    "median_age_bots": stmt.excluded.median_age_bots,
+                    "closed_issues": stmt.excluded.closed_issues,
+                    "closed_prs": stmt.excluded.closed_prs,
+                    "closed_issues_external": stmt.excluded.closed_issues_external,
+                    "closed_issues_internal": stmt.excluded.closed_issues_internal,
+                    "closed_issues_bots": stmt.excluded.closed_issues_bots,
+                    "closed_prs_external": stmt.excluded.closed_prs_external,
+                    "closed_prs_internal": stmt.excluded.closed_prs_internal,
+                    "closed_prs_bots": stmt.excluded.closed_prs_bots,
+                },
+            )
+            session.execute(stmt)
+        session.commit()
+
+    print(
+        f"  ✓ Backfilled {len(snapshots_to_upsert)} cross-project snapshots"
+    )
+
+
 def main() -> None:
     """Run the backfill script."""
     # Change to app directory so Settings finds the .env file.
@@ -299,8 +410,13 @@ def main() -> None:
         print("")
 
         for project in projects:
+            if project.name == "all-projects":
+                continue
             backfill_project(session, project)
             print("")
+
+        backfill_cross_project(session, projects)
+        print("")
 
         print("✓ Backfill complete!")
 

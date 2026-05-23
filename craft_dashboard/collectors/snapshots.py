@@ -282,3 +282,93 @@ async def generate_snapshot(
     await session.commit()
 
     logger.info("Generated snapshot for project_id=%d on %s", project_id, today_val)
+
+
+async def generate_cross_project_snapshot(
+    session: AsyncSession,
+    maintainers: set[str],
+    bots: set[str] | None = None,
+) -> None:
+    """Generate a cross-project aggregate snapshot with true medians.
+
+    Queries all open issues across all real projects (not aggregate) and
+    computes the true cross-project median ages for today.
+    """
+    from sqlalchemy import select as sa_select  # noqa: PLC0415
+    from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415
+
+    from craft_dashboard.models.issue import Issue  # noqa: PLC0415
+    from craft_dashboard.models.project import Project  # noqa: PLC0415
+    from craft_dashboard.models.snapshot import Snapshot  # noqa: PLC0415
+
+    # Get or create the "all-projects" aggregate project
+    agg_stmt = insert(Project).values(
+        name="all-projects",
+        category="aggregate",
+        github_org="canonical",
+        display_order=-1,
+    )
+    agg_stmt = agg_stmt.on_conflict_do_update(
+        index_elements=["name"],
+        set_={"category": "aggregate", "display_order": -1},
+    )
+    await session.execute(agg_stmt)
+    await session.commit()
+
+    agg_result = await session.execute(
+        sa_select(Project.id).where(Project.name == "all-projects")
+    )
+    agg_project_id = agg_result.scalar_one()
+
+    # Get all real project IDs
+    proj_result = await session.execute(
+        sa_select(Project.id).where(Project.category != "aggregate")
+    )
+    project_ids = list(proj_result.scalars())
+
+    # Query all issues across all real projects
+    result = await session.execute(
+        sa_select(
+            Issue.issue_type,
+            Issue.state,
+            Issue.author,
+            Issue.author_is_bot,
+            Issue.labels,
+            Issue.created_at,
+            Issue.closed_at,
+        ).where(Issue.project_id.in_(project_ids))
+    )
+
+    issues = [
+        {
+            "issue_type": row.issue_type,
+            "state": row.state,
+            "author": row.author,
+            "author_is_bot": row.author_is_bot,
+            "labels": row.labels if isinstance(row.labels, list) else [],
+            "created_at": row.created_at,
+            "closed_at": row.closed_at,
+        }
+        for row in result
+    ]
+
+    counts = compute_snapshot_counts(issues, maintainers, bots=bots)
+    today_val = date.today()
+
+    stmt = insert(Snapshot).values(
+        project_id=agg_project_id,
+        snapshot_date=today_val,
+        **counts,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["project_id", "snapshot_date"],
+        set_=counts,
+    )
+    await session.execute(stmt)
+    await session.commit()
+
+    logger.info(
+        "Generated cross-project snapshot for %s (project_id=%d)",
+        today_val,
+        agg_project_id,
+    )

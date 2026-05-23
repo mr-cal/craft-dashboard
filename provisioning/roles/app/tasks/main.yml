@@ -88,11 +88,11 @@
 
 - name: Run snapshot backfill in background (one-time)
   ansible.builtin.shell: |
-    if [ ! -f {{ app_dir }}/.backfill_v2_done ]; then
+    if [ ! -f {{ app_dir }}/.backfill_v3_done ]; then
       nohup {{ app_venv }}/bin/python scripts/backfill_snapshots.py \
         > /tmp/backfill.log 2>&1 &
       echo "Backfill started in background (PID $!)"
-      touch {{ app_dir }}/.backfill_v2_done
+      touch {{ app_dir }}/.backfill_v3_done
     else
       echo "Backfill already completed, skipping"
     fi

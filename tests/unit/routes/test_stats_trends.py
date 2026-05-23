@@ -380,18 +380,19 @@ class TestTrendsAllProjectsTimeSeries:
         assert all_projects["closed_internal"] == [8]
         assert all_projects["closed_bots"] == [6]
         assert all_projects["open_bugs"] == [10]
-        assert all_projects["median_issue_age"] == [25]
-        assert all_projects["median_pr_age"] == [19]
-        assert all_projects["nm_median_issue_age"] == [12]
+        # Weighted by open item count (alpha=5, beta=12)
+        assert all_projects["median_issue_age"] == [31]
+        assert all_projects["median_pr_age"] == [21]
+        assert all_projects["nm_median_issue_age"] == [14]
         assert all_projects["nm_median_pr_age"] == [9]
-        assert all_projects["median_issue_age_internal"] == [40]
-        assert all_projects["median_pr_age_internal"] == [40]
-        assert all_projects["median_issue_age_bots"] == [5]
-        assert all_projects["median_pr_age_bots"] == [8]
-        assert all_projects["median_age"] == [20]
-        assert all_projects["nm_median_age"] == [10]
-        assert all_projects["median_age_internal"] == [40]
-        assert all_projects["median_age_bots"] == [6]
+        assert all_projects["median_issue_age_internal"] == [48]
+        assert all_projects["median_pr_age_internal"] == [44]
+        assert all_projects["median_issue_age_bots"] == [6]
+        assert all_projects["median_pr_age_bots"] == [9]
+        assert all_projects["median_age"] == [23]
+        assert all_projects["nm_median_age"] == [11]
+        assert all_projects["median_age_internal"] == [46]
+        assert all_projects["median_age_bots"] == [7]
 
 
 class TestTrendsProjectOrder:
@@ -612,18 +613,22 @@ class TestBuildAllProjectsAggregate:
             "closed_internal": [18, 44, 26],
             "closed_bots": [4, 18, 14],
             "open_bugs": [5, 15, 10],
-            "median_issue_age": [10, 35, 60],
-            "median_pr_age": [30, 55, 80],
-            "nm_median_issue_age": [11, 36, 61],
-            "nm_median_pr_age": [31, 56, 81],
-            "median_issue_age_internal": [12, 37, 62],
-            "median_pr_age_internal": [32, 57, 82],
-            "median_issue_age_bots": [0, 38, 63],
-            "median_pr_age_bots": [33, 58, 83],
-            "median_age": [15, 40, 65],
-            "nm_median_age": [16, 41, 66],
-            "median_age_internal": [17, 42, 67],
-            "median_age_bots": [0, 43, 68],
+            # Weighted by open item count (alpha: open_i+open_p, beta: open_i+open_p)
+            # 2024-05-20: only alpha (weight=4) → alpha values
+            # 2024-05-21: alpha (weight=6) + beta (weight=16) → weighted avg
+            # 2024-05-22: only beta (weight=18) → beta values
+            "median_issue_age": [10, 41, 60],
+            "median_pr_age": [30, 61, 80],
+            "nm_median_issue_age": [11, 42, 61],
+            "nm_median_pr_age": [31, 62, 81],
+            "median_issue_age_internal": [12, 43, 62],
+            "median_pr_age_internal": [32, 63, 82],
+            "median_issue_age_bots": [0, 44, 63],
+            "median_pr_age_bots": [33, 64, 83],
+            "median_age": [15, 46, 65],
+            "nm_median_age": [16, 47, 66],
+            "median_age_internal": [17, 48, 67],
+            "median_age_bots": [0, 49, 68],
         }
 
 

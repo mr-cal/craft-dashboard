@@ -27,11 +27,38 @@ function rollingAverage(data, windowSize) {
   const result = [];
   for (let i = 0; i < data.length; i++) {
     const start = Math.max(0, i - windowSize + 1);
-    const window = data.slice(start, i + 1);
-    const avg = window.reduce((sum, val) => sum + val, 0) / window.length;
-    result.push(avg);
+    const window = data.slice(start, i + 1).filter(v => v !== null);
+    if (window.length === 0) {
+      result.push(null);
+    } else {
+      result.push(window.reduce((sum, val) => sum + val, 0) / window.length);
+    }
   }
   return result;
+}
+
+// Build a sorted union of all selected projects' dates.
+function getUnifiedDates(selected) {
+  const dateSet = new Set();
+  for (const name of selected) {
+    for (const d of filteredProjects[name].dates) {
+      dateSet.add(d);
+    }
+  }
+  return Array.from(dateSet).sort();
+}
+
+// Align a project's data array to the unified date axis.
+// Returns null for dates where the project has no data.
+function alignData(name, dataKey, unifiedDates) {
+  const projDates = filteredProjects[name].dates;
+  const projData = filteredProjects[name][dataKey];
+  if (!projData) return unifiedDates.map(() => null);
+  const dateMap = new Map();
+  for (let i = 0; i < projDates.length; i++) {
+    dateMap.set(projDates[i], projData[i]);
+  }
+  return unifiedDates.map(d => dateMap.has(d) ? dateMap.get(d) : null);
 }
 
 // Like rollingAverage but treats null/zero values as missing (skips them).
@@ -165,7 +192,8 @@ function updateOpenIssuesChart() {
   }
   
   const firstProject = selected[0];
-  issuesChart.data.labels = filteredProjects[firstProject].dates;
+  const unifiedDates = getUnifiedDates(selected);
+  issuesChart.data.labels = unifiedDates;
   
   const dataKey = getDataKey("open");
   if (!dataKey) {
@@ -176,7 +204,8 @@ function updateOpenIssuesChart() {
   }
   
   issuesChart.data.datasets = selected.map((name) => {
-    const rawData = filteredProjects[name][dataKey] || filteredProjects[name]["open"];
+    const rawData = alignData(name, dataKey, unifiedDates)
+                    || alignData(name, "open", unifiedDates);
     const smoothedData = rollingAverage(rawData, 28); // 4-week rolling average
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
     const color = CHART_COLORS.palette[colorIdx % CHART_COLORS.palette.length];
@@ -222,7 +251,8 @@ function updateMedianAgeChart() {
   }
   
   const firstProject = selected[0];
-  medianAgeChart.data.labels = filteredProjects[firstProject].dates;
+  const unifiedDates = getUnifiedDates(selected);
+  medianAgeChart.data.labels = unifiedDates;
   
   const dataKey = view === "internal" ? "median_age_internal"
                 : view === "external" ? "nm_median_age"
@@ -230,7 +260,7 @@ function updateMedianAgeChart() {
                 : "median_age";
   
   medianAgeChart.data.datasets = selected.map((name) => {
-    const rawData = filteredProjects[name][dataKey];
+    const rawData = alignData(name, dataKey, unifiedDates);
     const smoothedData = rollingAverageNullable(rawData, 28); // 4-week rolling average, skips zeros
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
     const color = CHART_COLORS.palette[colorIdx % CHART_COLORS.palette.length];
@@ -269,7 +299,8 @@ function updateClosedChart() {
   }
   
   const firstProject = selected[0];
-  closedChart.data.labels = filteredProjects[firstProject].dates;
+  const unifiedDates = getUnifiedDates(selected);
+  closedChart.data.labels = unifiedDates;
   
   const dataKey = getDataKey("closed");
   if (!dataKey) {
@@ -280,7 +311,8 @@ function updateClosedChart() {
   }
   
   closedChart.data.datasets = selected.map((name) => {
-    const rawData = (filteredProjects[name][dataKey] || filteredProjects[name]["closed"]).map(v => v * 7); // Scale to per-week
+    const rawData = (alignData(name, dataKey, unifiedDates)
+                    || alignData(name, "closed", unifiedDates)).map(v => v !== null ? v * 7 : null); // Scale to per-week
     const smoothedData = rollingAverage(rawData, 28); // 4-week rolling average
     const colorIdx = name === "all-projects" ? 0 : order.indexOf(name);
     const color = CHART_COLORS.palette[colorIdx % CHART_COLORS.palette.length];

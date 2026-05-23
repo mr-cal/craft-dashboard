@@ -36,7 +36,10 @@ from craft_dashboard.collectors.scheduler import (
     record_refresh_error,
     update_refresh_schedule,
 )
-from craft_dashboard.collectors.snapshots import generate_snapshot
+from craft_dashboard.collectors.snapshots import (
+    generate_cross_project_snapshot,
+    generate_snapshot,
+)
 from craft_dashboard.config import load_config
 from craft_dashboard.database import get_engine, get_session_factory
 from craft_dashboard.models.project import Project
@@ -437,6 +440,26 @@ async def _main(
             stats.issues_collected,
             _format_duration(time.monotonic() - run_started_at),
         )
+
+        # Generate cross-project aggregate snapshot with true medians
+        try:
+            cross_started_at = time.monotonic()
+            bots = set(getattr(config, "bots", []))
+            async with session_factory() as session:
+                await generate_cross_project_snapshot(
+                    session,
+                    set(config.maintainers),
+                    bots=bots,
+                )
+            logger.info(
+                "Cross-project snapshot generated in %s",
+                _format_duration(time.monotonic() - cross_started_at),
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to generate cross-project snapshot",
+                exc_info=True,
+            )
     finally:
         await engine.dispose()
 
