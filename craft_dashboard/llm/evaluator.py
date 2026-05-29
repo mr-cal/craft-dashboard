@@ -196,7 +196,7 @@ class IssueEvaluator:
         response = await self.client.chat(
             model=self.evaluation_model,
             messages=eval_messages,
-            max_tokens=512,
+            max_tokens=2048,
             response_format={"type": "json_object"},
         )
         parsed = _parse_evaluation_response(response.content)
@@ -249,7 +249,7 @@ class IssueEvaluator:
             logger.debug("Skipping evaluation (content unchanged): %s", title)
             return None
 
-        logger.info("Evaluating: %s", title)
+        logger.debug("Evaluating: %s", title)
         summary, summary_tokens = await self._summarize(
             title=title,
             body=body,

@@ -131,34 +131,14 @@ async def _evaluate_issues(
             else None
         )
 
+        project_name = row.project_name
+        issue_ref = f"{project_name}#{issue.external_id}"
+        logger.info("Evaluating %s: %s", issue_ref, issue.title[:60])
+
         try:
-            result = await evaluator.evaluate_issue(
-                title=issue.title,
-                body=issue.body,
-                issue_type=issue.issue_type,
-                labels=labels,
-                age_days=age_days,
-                last_activity_days=last_activity_days,
-                author=issue.author or "unknown",
-                is_maintainer=issue.author in maintainers if issue.author else False,
-                comment_count=len(issue_comments),
-                comments=issue_comments,
-                pr_details=pr_details,
-                existing_hash=existing_hash,
-            )
-        except QuotaExhaustedError:
-            logger.warning(
-                "OpenRouter daily quota exhausted. Stopping evaluation. "
-                "%d evaluated so far.",
-                stats["evaluated"],
-            )
-            break
-        except Exception:
-            logger.exception("Error evaluating issue %s", issue.title)
-            stats["errored"] += 1
-            continue
 
         if result is None:
+            logger.info("Skipped %s (content unchanged): %s", issue_ref, issue.title[:60])
             stats["skipped"] += 1
             continue
 
@@ -196,10 +176,11 @@ async def _evaluate_issues(
         stats["evaluated"] += 1
         stats["total_tokens"] += result["tokens_used"]
         logger.info(
-            "Evaluated: %s (%s, %d tokens)",
-            issue.title[:60],
+            "Evaluated %s (%s, %d tokens): %s",
+            issue_ref,
             result["suggested_action"],
             result["tokens_used"],
+            issue.title[:60],
         )
 
     return stats
