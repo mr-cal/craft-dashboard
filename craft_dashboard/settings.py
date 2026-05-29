@@ -49,4 +49,4 @@ class Settings(BaseSettings):
             warnings.append("GITHUB_TOKEN is not set. Data collection will fail.")
         return warnings
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
