@@ -121,6 +121,7 @@ select = [
 ignore = [
     "E501", "D105", "D107", "D203", "D213", "D215",
     "A003", "SIM117", "PLW1641", "COM812", "ISC001", "TRY003",
+    "PLR0912", "PLR0915",
 ]
 
 [tool.ruff.lint.flake8-annotations]
@@ -140,7 +141,36 @@ max-args = 8
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**.py" = [
-    "D", "ANN", "ARG", "S101", "S103", "S108",
-    "PLR0913", "PLR2004", "SLF",
+    "D", "ANN", "ARG", "S101", "S103", "S105", "S108",
+    "FBT001", "PLR0913", "PLR2004", "SLF",
 ]
+"craft_dashboard/app.py" = ["B008"]
+"craft_dashboard/cli.py" = ["ARG001", "PLC0415"]
+"craft_dashboard/collectors/dependencies.py" = ["PLC0415"]
+"craft_dashboard/collectors/github.py" = ["PLC0415", "UP037"]
+"craft_dashboard/collectors/launchpad.py" = ["PLC0415"]
+"craft_dashboard/collectors/scheduler.py" = ["PLC0415"]
+"craft_dashboard/collectors/snapshots.py" = ["PLC0415"]
+"craft_dashboard/dependencies.py" = ["PLW0603"]
+"craft_dashboard/llm/evaluator.py" = ["PLC0415", "PLR0913"]
+"craft_dashboard/llm/prompts.py" = ["PLR0913"]
+"craft_dashboard/routes/*.py" = ["B008", "PLR0913"]
+"craft_dashboard/routes/admin.py" = ["B008", "PLR0913", "PLC0415"]
+"craft_dashboard/routes/stats.py" = ["B008", "PLR0913", "PLC0415"]
+"scripts/*.py" = ["ANN001", "BLE001", "FBT001", "FBT002", "PLC0415"]
 "__init__.py" = ["I001", "F401"]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[[tool.ty.overrides]]
+include = ["tests/**"]
+
+[tool.ty.overrides.rules]
+all = "ignore"
+
+[[tool.ty.overrides]]
+include = ["scripts/**"]
+
+[tool.ty.overrides.rules]
+all = "ignore"

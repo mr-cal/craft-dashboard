@@ -1,9 +1,17 @@
 """Project model for tracked *craft repositories."""
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from craft_dashboard.models.base import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from craft_dashboard.models.dependency import Dependency
+    from craft_dashboard.models.issue import Issue
+    from craft_dashboard.models.release import Release
+    from craft_dashboard.models.snapshot import Snapshot
 
 
 class Project(TimestampMixin, Base):
@@ -20,10 +28,10 @@ class Project(TimestampMixin, Base):
     display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # Relationships
-    issues: Mapped[list["Issue"]] = relationship(back_populates="project")  # noqa: F821 — SQLAlchemy forward reference for relationship
-    snapshots: Mapped[list["Snapshot"]] = relationship(back_populates="project")  # noqa: F821 — SQLAlchemy forward reference for relationship
-    releases: Mapped[list["Release"]] = relationship(back_populates="project")  # noqa: F821 — SQLAlchemy forward reference for relationship
-    dependencies: Mapped[list["Dependency"]] = relationship(back_populates="project")  # noqa: F821 — SQLAlchemy forward reference for relationship
+    issues: Mapped[list["Issue"]] = relationship(back_populates="project")
+    snapshots: Mapped[list["Snapshot"]] = relationship(back_populates="project")
+    releases: Mapped[list["Release"]] = relationship(back_populates="project")
+    dependencies: Mapped[list["Dependency"]] = relationship(back_populates="project")
 
     def __repr__(self) -> str:
         """Return a string representation."""

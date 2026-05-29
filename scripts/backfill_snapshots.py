@@ -280,7 +280,7 @@ def backfill_cross_project(session: Session, all_projects: list[Project]) -> Non
     median (rather than averaging per-project medians).
     """
     # Get or create the aggregate project
-    from sqlalchemy.dialects.postgresql import insert as pg_insert  # noqa: PLC0415
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     stmt = pg_insert(Project).values(
         name="all-projects",
@@ -379,15 +379,13 @@ def backfill_cross_project(session: Session, all_projects: list[Project]) -> Non
             session.execute(stmt)
         session.commit()
 
-    print(
-        f"  ✓ Backfilled {len(snapshots_to_upsert)} cross-project snapshots"
-    )
+    print(f"  ✓ Backfilled {len(snapshots_to_upsert)} cross-project snapshots")
 
 
 def main() -> None:
     """Run the backfill script."""
     # Change to app directory so Settings finds the .env file.
-    import os  # noqa: PLC0415
+    import os
 
     app_dir = Path(__file__).parent.parent
     os.chdir(app_dir)

@@ -129,7 +129,7 @@ async def record_refresh_error(
         session: An async SQLAlchemy session.
 
     """
-    from sqlalchemy import update  # noqa: PLC0415 — deferred to avoid circular import
+    from sqlalchemy import update
 
     from craft_dashboard.models.refresh_schedule import (
         RefreshSchedule,
@@ -148,9 +148,10 @@ async def record_refresh_error(
         )
     )
     result = await session.execute(stmt)
+    rows_updated = getattr(result, "rowcount", 0) or 0
 
     # If no row existed yet, insert one
-    if result.rowcount == 0:
+    if rows_updated == 0:
         from sqlalchemy.dialects.postgresql import (
             insert,
         )

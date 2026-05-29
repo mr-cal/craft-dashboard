@@ -7,8 +7,9 @@ import pathlib
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from typing import cast
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -29,6 +30,14 @@ from craft_dashboard.routes.stats import router as stats_router
 from craft_dashboard.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+
+def _slowapi_rate_limit_handler(request: Request, exc: Exception) -> Response:
+    """Adapt slowapi's handler to Starlette's broader exception type."""
+    if not isinstance(exc, RateLimitExceeded):
+        raise exc
+    return _rate_limit_exceeded_handler(request, exc)
+
 
 _PACKAGE_DIR = pathlib.Path(__file__).parent
 _TEMPLATES_DIR = _PACKAGE_DIR / "templates"
@@ -104,13 +113,14 @@ def create_app() -> FastAPI:
     # Rate limiter
     limiter = Limiter(key_func=get_remote_address)
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_exception_handler(RateLimitExceeded, _slowapi_rate_limit_handler)
 
     app.state.settings = settings
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
     # Cache-bust static assets using app startup timestamp
     _startup_ts = str(int(datetime.now(tz=UTC).timestamp()))
-    templates.env.globals["cache_bust"] = _startup_ts
+    template_globals = cast(dict[str, object], templates.env.globals)
+    template_globals["cache_bust"] = _startup_ts
     app.state.templates = templates
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
@@ -128,7 +138,7 @@ def create_app() -> FastAPI:
         try:
             await session.execute(text("SELECT 1"))
             return HealthResponse(status="ok", database="ok")
-        except Exception:  # noqa: BLE001 — health check must not crash on any DB error
+        except Exception:  # noqa: BLE001 - health checks should degrade gracefully
             return JSONResponse(
                 {"status": "degraded", "database": "error"},
                 status_code=503,
@@ -151,7 +161,7 @@ def create_app() -> FastAPI:
     app.include_router(stats_router)
     app.include_router(admin_router)
 
-    # E2E test seeding endpoint – only available when CRAFT_DASHBOARD_E2E=1
+    # E2E test seeding endpoint - only available when CRAFT_DASHBOARD_E2E=1
     if os.environ.get("CRAFT_DASHBOARD_E2E") == "1":
 
         @app.post("/e2e/seed", response_class=PlainTextResponse)
@@ -164,10 +174,10 @@ def create_app() -> FastAPI:
             Accepts a POST body containing newline-separated SQL statements.
             """
             body = (await request.body()).decode()
-            for stmt in body.split("\n"):
-                stmt = stmt.strip()
-                if stmt:
-                    await session.execute(text(stmt))
+            for statement in body.split("\n"):
+                stmt_line = statement.strip()
+                if stmt_line:
+                    await session.execute(text(stmt_line))
             await session.commit()
             return PlainTextResponse("OK")
 

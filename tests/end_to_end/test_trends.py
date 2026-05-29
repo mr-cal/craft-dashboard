@@ -8,6 +8,7 @@ correctness.
 from __future__ import annotations
 
 import pytest
+import requests
 
 from tests.end_to_end.helpers import make_script, run_puppeteer
 
@@ -70,16 +71,16 @@ _FETCH_CHART_DATA_SCRIPT = """\
 """
 
 
-def _get_chart_data(base_url: str, *, maintainers: bool, contributors: bool, bots: bool) -> dict:
+def _get_chart_data(
+    base_url: str, *, maintainers: bool, contributors: bool, bots: bool
+) -> dict:
     """Fetch chart data with a specific view configuration."""
     views_json = (
         f"{{maintainers: {str(maintainers).lower()}, "
         f"contributors: {str(contributors).lower()}, "
         f"bots: {str(bots).lower()}}}"
     )
-    script = make_script(
-        _FETCH_CHART_DATA_SCRIPT.replace("VIEWS_CONFIG", views_json)
-    )
+    script = make_script(_FETCH_CHART_DATA_SCRIPT.replace("VIEWS_CONFIG", views_json))
     return run_puppeteer(script, base_url=base_url, timeout=45)
 
 
@@ -105,7 +106,6 @@ class TestSpinner:
 # Tests: All 7 view combinations
 # ---------------------------------------------------------------------------
 _VIEW_COMBOS = [
-    # (maintainers, contributors, bots, description)
     (True, True, True, "all-three"),
     (True, True, False, "maintainers+contributors"),
     (True, False, True, "maintainers+bots"),
@@ -118,7 +118,7 @@ _VIEW_COMBOS = [
 
 class TestViewCombinations:
     @pytest.mark.parametrize(
-        "maintainers,contributors,bots,desc",
+        ("maintainers", "contributors", "bots", "desc"),
         _VIEW_COMBOS,
         ids=[c[3] for c in _VIEW_COMBOS],
     )
@@ -138,8 +138,14 @@ class TestViewCombinations:
             bots=bots,
         )
         # All 6 charts should exist
-        for chart_id in ["issues-chart", "median-age-chart", "closed-chart",
-                         "snapshot-open-chart", "snapshot-age-chart", "snapshot-closed-chart"]:
+        for chart_id in [
+            "issues-chart",
+            "median-age-chart",
+            "closed-chart",
+            "snapshot-open-chart",
+            "snapshot-age-chart",
+            "snapshot-closed-chart",
+        ]:
             assert data.get(chart_id) is not None, f"{chart_id} missing for view {desc}"
 
         # Line charts should have data points
@@ -149,14 +155,16 @@ class TestViewCombinations:
             assert len(chart["datasets"]) > 0, f"{chart_id} has no datasets"
 
         # Snapshot charts should have data
-        for chart_id in ["snapshot-open-chart", "snapshot-age-chart", "snapshot-closed-chart"]:
+        for chart_id in [
+            "snapshot-open-chart",
+            "snapshot-age-chart",
+            "snapshot-closed-chart",
+        ]:
             chart = data[chart_id]
             assert len(chart["labels"]) > 0, f"{chart_id} has no labels"
             assert len(chart["datasets"]) > 0, f"{chart_id} has no datasets"
 
-    def test_snapshot_values_differ_between_all_and_bots(
-        self, seeded_url: str
-    ) -> None:
+    def test_snapshot_values_differ_between_all_and_bots(self, seeded_url: str) -> None:
         """Snapshot 'Open Issues & PRs' must show different values for all vs bots."""
         all_data = _get_chart_data(
             seeded_url, maintainers=True, contributors=True, bots=True
@@ -360,7 +368,7 @@ class TestMedianAge:
                     drop_pct = (points[i - 1] - points[i]) / points[i - 1]
                     assert drop_pct < 0.5, (
                         f"Median age dropped >50% in dataset '{ds['label']}' "
-                        f"at index {i}: {points[i-1]} -> {points[i]} ({drop_pct:.0%})"
+                        f"at index {i}: {points[i - 1]} -> {points[i]} ({drop_pct:.0%})"
                     )
 
 
@@ -383,7 +391,11 @@ class TestChartTypes:
         data = _get_chart_data(
             seeded_url, maintainers=True, contributors=True, bots=True
         )
-        for chart_id in ["snapshot-open-chart", "snapshot-age-chart", "snapshot-closed-chart"]:
+        for chart_id in [
+            "snapshot-open-chart",
+            "snapshot-age-chart",
+            "snapshot-closed-chart",
+        ]:
             assert data[chart_id]["type"] == "bar", (
                 f"{chart_id} should be bar chart, got {data[chart_id]['type']}"
             )
@@ -440,7 +452,5 @@ class TestDataAlignment:
 class TestCacheBusting:
     def test_trends_js_has_cache_bust_param(self, seeded_url: str) -> None:
         """The trends.js script tag should have a cache-busting query param."""
-        import requests
-
         resp = requests.get(f"{seeded_url}/stats/trends", timeout=10)
         assert "trends.js?v=" in resp.text, "trends.js should have cache-busting param"

@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-_TEST_ADMIN_TOKEN = "test-admin-token"  # noqa: S105 — test-only dummy token
+_TEST_ADMIN_TOKEN = "test-admin-token"
 
 
 @asynccontextmanager

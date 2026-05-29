@@ -4,9 +4,9 @@ import pytest
 from craft_dashboard.auth import verify_admin_token
 from fastapi import HTTPException
 
-_CORRECT_TOKEN = "correct-token"  # noqa: S105 — test-only dummy token
-_WRONG_TOKEN = "wrong-token"  # noqa: S105 — test-only dummy token
-_TEST_TOKEN = "test"  # noqa: S105 — test-only dummy token
+_CORRECT_TOKEN = "correct-token"
+_WRONG_TOKEN = "wrong-token"
+_TEST_TOKEN = "test"
 
 
 class TestVerifyAdminToken:

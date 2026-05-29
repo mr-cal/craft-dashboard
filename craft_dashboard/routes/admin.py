@@ -104,7 +104,9 @@ async def admin_page(
     templates: Jinja2Templates = request.app.state.templates
 
     from craft_dashboard.models.issue import Issue
-    from craft_dashboard.models.llm_evaluation import LLMEvaluation
+    from craft_dashboard.models.llm_evaluation import (
+        LLMEvaluation,
+    )
 
     total_open = (
         await session.scalar(
@@ -202,7 +204,9 @@ async def distribute_refresh_schedule(
     """
     from datetime import datetime, timedelta
 
-    from craft_dashboard.models.refresh_schedule import RefreshSchedule
+    from craft_dashboard.models.refresh_schedule import (
+        RefreshSchedule,
+    )
 
     _require_admin_auth(request, authorization)
     _verify_origin(request)
@@ -250,7 +254,9 @@ async def admin_health(
     """Detailed health check: DB connectivity and collection status."""
     from sqlalchemy import select, text
 
-    from craft_dashboard.models.refresh_schedule import RefreshSchedule
+    from craft_dashboard.models.refresh_schedule import (
+        RefreshSchedule,
+    )
 
     _require_admin_auth(request, authorization)
 
@@ -320,5 +326,5 @@ async def admin_logs(
         return PlainTextResponse(
             html.escape(output) if output != "(no logs)" else output
         )
-    except (asyncio.TimeoutError, FileNotFoundError):
+    except (TimeoutError, FileNotFoundError):
         return PlainTextResponse("(journalctl not available)")

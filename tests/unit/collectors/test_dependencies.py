@@ -16,8 +16,8 @@ from craft_dashboard.collectors.dependencies import (
 from github import GithubException, UnknownObjectException
 from packaging.version import Version
 
-_TEST_TOKEN = "ghp_test"  # noqa: S105 — test-only dummy token, not a real secret
-_TEST_ADMIN_TOKEN = "admin-secret"  # noqa: S105 — test-only dummy token, not a real secret
+_TEST_TOKEN = "ghp_test"
+_TEST_ADMIN_TOKEN = "admin-secret"
 
 
 class TestParseRequirementsLine:

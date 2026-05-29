@@ -154,7 +154,7 @@ class IssueEvaluator:
         )
         return response.content, response.total_tokens
 
-    async def _score(  # noqa: PLR0913 — LLM evaluation requires many distinct issue attributes
+    async def _score(
         self,
         *,
         title: str,
@@ -199,7 +199,7 @@ class IssueEvaluator:
             logger.warning("Could not parse evaluation for: %s", title)
         return parsed, response.total_tokens
 
-    async def evaluate_issue(  # noqa: PLR0913 — LLM evaluation requires many distinct issue attributes
+    async def evaluate_issue(
         self,
         *,
         title: str,

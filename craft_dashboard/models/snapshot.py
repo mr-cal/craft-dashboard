@@ -1,11 +1,15 @@
 """Daily snapshot model for tracking issue/PR trends over time."""
 
 from datetime import date
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Date, ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from craft_dashboard.models.base import Base
+
+if TYPE_CHECKING:
+    from craft_dashboard.models.project import Project
 
 
 class Snapshot(Base):
@@ -68,7 +72,7 @@ class Snapshot(Base):
         return self.nm_median_pr_age
 
     # Relationships
-    project: Mapped["Project"] = relationship(back_populates="snapshots")  # noqa: F821 — SQLAlchemy forward reference for relationship
+    project: Mapped["Project"] = relationship(back_populates="snapshots")
 
     def __repr__(self) -> str:
         """Return a string representation."""

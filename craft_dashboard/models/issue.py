@@ -1,7 +1,7 @@
 """Issue and Pull Request model."""
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     Boolean,
@@ -17,6 +17,10 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from craft_dashboard.models.base import Base
+
+if TYPE_CHECKING:
+    from craft_dashboard.models.llm_evaluation import LLMEvaluation
+    from craft_dashboard.models.project import Project
 
 
 class Issue(Base):
@@ -61,14 +65,14 @@ class Issue(Base):
     )
 
     # Relationships
-    project: Mapped["Project"] = relationship(back_populates="issues")  # noqa: F821 — SQLAlchemy forward reference for relationship
-    evaluations: Mapped[list["LLMEvaluation"]] = relationship(  # noqa: F821 — SQLAlchemy forward reference for relationship
+    project: Mapped["Project"] = relationship(back_populates="issues")
+    evaluations: Mapped[list["LLMEvaluation"]] = relationship(
         back_populates="issue",
         order_by="LLMEvaluation.evaluated_at.desc()",
     )
 
     @property
-    def latest_evaluation(self) -> "LLMEvaluation | None":  # noqa: F821 — SQLAlchemy forward reference for relationship
+    def latest_evaluation(self) -> "LLMEvaluation | None":
         """Return the most recent LLM evaluation, or None."""
         return next((e for e in self.evaluations if e.latest), None)
 

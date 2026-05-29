@@ -1,7 +1,7 @@
 """LLM evaluation model for issue/PR scoring."""
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     Boolean,
@@ -18,6 +18,9 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from craft_dashboard.models.base import Base
+
+if TYPE_CHECKING:
+    from craft_dashboard.models.issue import Issue
 
 
 class LLMEvaluation(Base):
@@ -59,7 +62,7 @@ class LLMEvaluation(Base):
     latest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     # Relationships
-    issue: Mapped["Issue"] = relationship(back_populates="evaluations")  # noqa: F821 — SQLAlchemy forward reference for relationship
+    issue: Mapped["Issue"] = relationship(back_populates="evaluations")
 
     def __repr__(self) -> str:
         """Return a string representation."""

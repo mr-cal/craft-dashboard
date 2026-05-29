@@ -48,7 +48,7 @@ def serve(*, host: str, port: int, reload: bool) -> None:
 )
 @click.option("--limit", default=0, type=int, help="Max issues per repo (0 = all).")
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging.")
-def collect(*, source: str, config_file: str, limit: int, verbose: bool) -> None:  # noqa: ARG001 — click option parsed but delegated to subprocess
+def collect(*, source: str, config_file: str, limit: int, verbose: bool) -> None:
     """Collect data from GitHub and Launchpad.
 
     Fetches issues, PRs, releases, dependencies, and generates daily
@@ -60,8 +60,8 @@ def collect(*, source: str, config_file: str, limit: int, verbose: bool) -> None
         craft-dashboard collect --source github --limit 25
         craft-dashboard collect --source launchpad
     """
-    import subprocess  # noqa: PLC0415 — deferred import
-    import sys  # noqa: PLC0415 — deferred import
+    import subprocess
+    import sys
 
     cmd = [sys.executable, "scripts/collect_data.py", "--source", source]
     if limit:

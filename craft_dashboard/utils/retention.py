@@ -23,7 +23,7 @@ async def prune_old_snapshots(
         delete(Snapshot).where(Snapshot.snapshot_date < cutoff)
     )
     await session.commit()
-    deleted = result.rowcount or 0
+    deleted = getattr(result, "rowcount", 0) or 0
     if deleted:
         logger.info("Pruned %d snapshots older than %s", deleted, cutoff)
     return deleted

@@ -1,6 +1,7 @@
 """Dependency model for tracking project dependencies."""
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -14,6 +15,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from craft_dashboard.models.base import Base
+
+if TYPE_CHECKING:
+    from craft_dashboard.models.project import Project
 
 
 class Dependency(Base):
@@ -41,7 +45,7 @@ class Dependency(Base):
     is_outdated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # Relationships
-    project: Mapped["Project"] = relationship(back_populates="dependencies")  # noqa: F821 — SQLAlchemy forward reference for relationship
+    project: Mapped["Project"] = relationship(back_populates="dependencies")
 
     def __repr__(self) -> str:
         """Return a string representation."""

@@ -107,7 +107,7 @@ class LaunchpadCollector:
             The number of bugs upserted.
 
         """
-        from sqlalchemy import (  # noqa: PLC0415 — deferred to avoid circular import
+        from sqlalchemy import (
             func,
             select,
         )

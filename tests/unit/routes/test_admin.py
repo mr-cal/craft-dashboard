@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException
 
-_ADMIN_TOKEN = "test-token-123"  # noqa: S105 — test-only dummy token
+_ADMIN_TOKEN = "test-token-123"
 
 
 class _EmptyResult:

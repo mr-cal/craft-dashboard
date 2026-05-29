@@ -128,7 +128,7 @@ def _get_dep_branches(
         Sorted list of branch names starting with ``"main"``.
 
     """
-    from packaging.version import Version  # noqa: PLC0415
+    from packaging.version import Version
 
     branches = ["main"]
     try:
@@ -142,20 +142,24 @@ def _get_dep_branches(
             ver_str = branch_name.split("/", 1)[1]
             try:
                 ver = Version(ver_str)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 continue
             if hotfix_min_version:
                 try:
                     if ver < Version(hotfix_min_version):
                         continue
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception:
+                    logger.debug(
+                        "Could not compare hotfix minimum version %r",
+                        hotfix_min_version,
+                        exc_info=True,
+                    )
             major = ver.major
             if major not in latest_per_major or ver > latest_per_major[major][0]:
                 latest_per_major[major] = (ver, branch_name)
 
         branches += sorted(b for _, b in latest_per_major.values())
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("Could not list branches for %s", project_name, exc_info=True)
     return branches
 
@@ -223,7 +227,7 @@ async def _collect_github(
                     dependency_count,
                     _format_duration(time.monotonic() - dep_started_at),
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "Failed to collect dependencies for %s",
                     project_name,
@@ -245,7 +249,7 @@ async def _collect_github(
                         release_count,
                         _format_duration(time.monotonic() - releases_started_at),
                     )
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.warning(
                         "Failed to collect releases for %s",
                         project_name,
@@ -388,7 +392,7 @@ async def _main(
     source: str,
     limit: int,
     projects: list[str],
-    verbose: bool,  # noqa: FBT001
+    verbose: bool,
 ) -> None:
     """Run data collection."""
     settings = Settings()
@@ -455,7 +459,7 @@ async def _main(
                 "Cross-project snapshot generated in %s",
                 _format_duration(time.monotonic() - cross_started_at),
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "Failed to generate cross-project snapshot",
                 exc_info=True,
@@ -494,7 +498,7 @@ def main(
     source: str,
     limit: int,
     projects: tuple[str, ...],
-    verbose: bool,  # noqa: FBT001
+    verbose: bool,
 ) -> None:
     """Collect data from external sources."""
     asyncio.run(_main(source, limit, list(projects), verbose))

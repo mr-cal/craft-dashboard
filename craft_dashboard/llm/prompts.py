@@ -132,7 +132,7 @@ def build_summary_prompt(
     ]
 
 
-def build_evaluation_prompt(  # noqa: PLR0913 — LLM evaluation requires many distinct issue attributes
+def build_evaluation_prompt(
     *,
     title: str,
     body: str | None,

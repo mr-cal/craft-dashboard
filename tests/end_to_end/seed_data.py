@@ -15,11 +15,36 @@ from datetime import UTC, date, datetime, timedelta
 # Projects
 # ---------------------------------------------------------------------------
 PROJECTS = [
-    {"name": "snapcraft", "category": "application", "github_org": "canonical", "display_order": 10},
-    {"name": "charmcraft", "category": "application", "github_org": "canonical", "display_order": 20},
-    {"name": "rockcraft", "category": "application", "github_org": "canonical", "display_order": 30},
-    {"name": "craft-parts", "category": "library", "github_org": "canonical", "display_order": 40},
-    {"name": "all-projects", "category": "aggregate", "github_org": "canonical", "display_order": -1},
+    {
+        "name": "snapcraft",
+        "category": "application",
+        "github_org": "canonical",
+        "display_order": 10,
+    },
+    {
+        "name": "charmcraft",
+        "category": "application",
+        "github_org": "canonical",
+        "display_order": 20,
+    },
+    {
+        "name": "rockcraft",
+        "category": "application",
+        "github_org": "canonical",
+        "display_order": 30,
+    },
+    {
+        "name": "craft-parts",
+        "category": "library",
+        "github_org": "canonical",
+        "display_order": 40,
+    },
+    {
+        "name": "all-projects",
+        "category": "aggregate",
+        "github_org": "canonical",
+        "display_order": -1,
+    },
 ]
 
 
@@ -30,7 +55,7 @@ def _date_range(start: date, end: date) -> list[date]:
 
 
 # ---------------------------------------------------------------------------
-# Snapshots – one per day for ~60 days so trends charts have data to render
+# Snapshots - one per day for ~60 days so trends charts have data to render
 # ---------------------------------------------------------------------------
 def _make_snapshots(project_id: int, project_name: str) -> list[dict]:
     """Generate snapshot rows for a project.
@@ -74,55 +99,55 @@ def _make_snapshots(project_id: int, project_name: str) -> list[dict]:
         closed_bots_issues = max(0, i // 15)
         closed_bots_prs = max(0, i // 20)
 
-        snapshots.append({
-            "project_id": project_id,
-            "snapshot_date": d.isoformat(),
-            "open_issues": base_issues,
-            "open_prs": base_prs,
-            "open_issues_external": external_issues,
-            "open_issues_internal": internal_issues,
-            "open_prs_external": external_prs,
-            "open_prs_internal": internal_prs,
-            "open_issues_bots": bots_issues,
-            "open_prs_bots": bots_prs,
-            "open_bugs": int(base_issues * 0.3),
-            "median_issue_age": 100 + i * 2 + multiplier * 10,
-            "median_pr_age": 30 + i + multiplier * 5,
-            "nm_median_issue_age": 80 + i * 2 + multiplier * 8,
-            "nm_median_pr_age": 25 + i + multiplier * 4,
-            "median_issue_age_internal": 150 + i * 3 + multiplier * 12,
-            "median_pr_age_internal": 45 + i * 2 + multiplier * 7,
-            "median_issue_age_bots": 10 + i,
-            "median_pr_age_bots": 5 + i // 2,
-            "median_age": 70 + i + multiplier * 8,
-            "nm_median_age": 55 + i + multiplier * 6,
-            "median_age_internal": 100 + i * 2 + multiplier * 10,
-            "median_age_bots": 8 + i,
-            "closed_issues": closed_issues,
-            "closed_prs": closed_prs,
-            "closed_issues_external": closed_ext_issues,
-            "closed_issues_internal": closed_int_issues,
-            "closed_prs_external": closed_ext_prs,
-            "closed_prs_internal": closed_int_prs,
-            "closed_issues_bots": closed_bots_issues,
-            "closed_prs_bots": closed_bots_prs,
-        })
+        snapshots.append(
+            {
+                "project_id": project_id,
+                "snapshot_date": d.isoformat(),
+                "open_issues": base_issues,
+                "open_prs": base_prs,
+                "open_issues_external": external_issues,
+                "open_issues_internal": internal_issues,
+                "open_prs_external": external_prs,
+                "open_prs_internal": internal_prs,
+                "open_issues_bots": bots_issues,
+                "open_prs_bots": bots_prs,
+                "open_bugs": int(base_issues * 0.3),
+                "median_issue_age": 100 + i * 2 + multiplier * 10,
+                "median_pr_age": 30 + i + multiplier * 5,
+                "nm_median_issue_age": 80 + i * 2 + multiplier * 8,
+                "nm_median_pr_age": 25 + i + multiplier * 4,
+                "median_issue_age_internal": 150 + i * 3 + multiplier * 12,
+                "median_pr_age_internal": 45 + i * 2 + multiplier * 7,
+                "median_issue_age_bots": 10 + i,
+                "median_pr_age_bots": 5 + i // 2,
+                "median_age": 70 + i + multiplier * 8,
+                "nm_median_age": 55 + i + multiplier * 6,
+                "median_age_internal": 100 + i * 2 + multiplier * 10,
+                "median_age_bots": 8 + i,
+                "closed_issues": closed_issues,
+                "closed_prs": closed_prs,
+                "closed_issues_external": closed_ext_issues,
+                "closed_issues_internal": closed_int_issues,
+                "closed_prs_external": closed_ext_prs,
+                "closed_prs_internal": closed_int_prs,
+                "closed_issues_bots": closed_bots_issues,
+                "closed_prs_bots": closed_bots_prs,
+            }
+        )
     return snapshots
 
 
 # ---------------------------------------------------------------------------
-# Issues – a handful of open/closed issues per project
+# Issues - a handful of open/closed issues per project
 # ---------------------------------------------------------------------------
 def _make_issues(project_id: int, project_name: str) -> list[dict]:
     """Generate issue rows for a project."""
     now = datetime(2024, 7, 1, 12, 0, 0, tzinfo=UTC)
     issues = []
-    base = 1000 * PROJECTS.index(
-        next(p for p in PROJECTS if p["name"] == project_name)
-    )
+    base = 1000 * PROJECTS.index(next(p for p in PROJECTS if p["name"] == project_name))
 
     configs = [
-        # (state, author_maintainer, author_bot, issue_type, age_days)
+        # state, author_maintainer, author_bot, issue_type, age_days
         ("open", True, False, "issue", 30),
         ("open", True, False, "issue", 90),
         ("open", False, False, "issue", 180),
@@ -136,31 +161,35 @@ def _make_issues(project_id: int, project_name: str) -> list[dict]:
     for j, (state, is_maint, is_bot, itype, age) in enumerate(configs):
         created = now - timedelta(days=age)
         closed = (now - timedelta(days=age // 3)) if state == "closed" else None
-        issues.append({
-            "project_id": project_id,
-            "source": "github",
-            "external_id": str(base + j + 1),
-            "issue_type": itype,
-            "title": f"[{project_name}] Test {itype} #{j + 1} ({state})",
-            "body": f"Test body for {project_name} {itype} #{j + 1}",
-            "state": state,
-            "author": "test-maintainer" if is_maint else ("renovate[bot]" if is_bot else "community-user"),
-            "author_is_maintainer": is_maint,
-            "author_is_bot": is_bot,
-            "labels": json.dumps(["bug"] if j % 3 == 0 else ["enhancement"]),
-            "created_at": created.isoformat(),
-            "updated_at": (closed or now).isoformat(),
-            "closed_at": closed.isoformat() if closed else None,
-            "url": f"https://github.com/canonical/{project_name}/issues/{base + j + 1}",
-            "metadata": json.dumps({}),
-            "comments": json.dumps([]),
-            "last_fetched_at": now.isoformat(),
-        })
+        issues.append(
+            {
+                "project_id": project_id,
+                "source": "github",
+                "external_id": str(base + j + 1),
+                "issue_type": itype,
+                "title": f"[{project_name}] Test {itype} #{j + 1} ({state})",
+                "body": f"Test body for {project_name} {itype} #{j + 1}",
+                "state": state,
+                "author": "test-maintainer"
+                if is_maint
+                else ("renovate[bot]" if is_bot else "community-user"),
+                "author_is_maintainer": is_maint,
+                "author_is_bot": is_bot,
+                "labels": json.dumps(["bug"] if j % 3 == 0 else ["enhancement"]),
+                "created_at": created.isoformat(),
+                "updated_at": (closed or now).isoformat(),
+                "closed_at": closed.isoformat() if closed else None,
+                "url": f"https://github.com/canonical/{project_name}/issues/{base + j + 1}",
+                "metadata": json.dumps({}),
+                "comments": json.dumps([]),
+                "last_fetched_at": now.isoformat(),
+            }
+        )
     return issues
 
 
 # ---------------------------------------------------------------------------
-# Releases – a few per application project
+# Releases - a few per application project
 # ---------------------------------------------------------------------------
 def _make_releases(project_id: int, project_name: str) -> list[dict]:
     """Generate release rows for application projects."""
@@ -175,14 +204,16 @@ def _make_releases(project_id: int, project_name: str) -> list[dict]:
         ("7.5.0", "7.x/candidate", 90, False, 80),
     ]
     for ver, branch, days_ago, is_hotfix, commits in versions:
-        releases.append({
-            "project_id": project_id,
-            "version": ver,
-            "branch": branch,
-            "released_at": (now - timedelta(days=days_ago)).isoformat(),
-            "is_hotfix": is_hotfix,
-            "metadata": json.dumps({"commits_since_tag": commits}),
-        })
+        releases.append(
+            {
+                "project_id": project_id,
+                "version": ver,
+                "branch": branch,
+                "released_at": (now - timedelta(days=days_ago)).isoformat(),
+                "is_hotfix": is_hotfix,
+                "metadata": json.dumps({"commits_since_tag": commits}),
+            }
+        )
     return releases
 
 
@@ -260,7 +291,7 @@ def generate_seed_sql() -> str:
                 elif isinstance(v, (int, float)):
                     vals.append(str(v))
                 else:
-                    vals.append(f"'{str(v).replace(chr(39), chr(39)+chr(39))}'")
+                    vals.append(f"'{str(v).replace(chr(39), chr(39) + chr(39))}'")
             stmts.append(f"INSERT INTO issues ({cols}) VALUES ({', '.join(vals)});")
 
     for pid, proj in enumerate(PROJECTS, start=1):
@@ -275,7 +306,7 @@ def generate_seed_sql() -> str:
                 elif isinstance(v, (int, float)):
                     vals.append(str(v))
                 else:
-                    vals.append(f"'{str(v).replace(chr(39), chr(39)+chr(39))}'")
+                    vals.append(f"'{str(v).replace(chr(39), chr(39) + chr(39))}'")
             stmts.append(f"INSERT INTO releases ({cols}) VALUES ({', '.join(vals)});")
 
     for pid, proj in enumerate(PROJECTS, start=1):
@@ -290,14 +321,16 @@ def generate_seed_sql() -> str:
                 elif isinstance(v, (int, float)):
                     vals.append(str(v))
                 else:
-                    vals.append(f"'{str(v).replace(chr(39), chr(39)+chr(39))}'")
-            stmts.append(f"INSERT INTO dependencies ({cols}) VALUES ({', '.join(vals)});")
+                    vals.append(f"'{str(v).replace(chr(39), chr(39) + chr(39))}'")
+            stmts.append(
+                f"INSERT INTO dependencies ({cols}) VALUES ({', '.join(vals)});"
+            )
 
     # Reset sequence counters
-    for table in ("projects", "snapshots", "issues", "releases", "dependencies"):
-        stmts.append(
-            f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
-            f"COALESCE((SELECT MAX(id) FROM {table}), 1));"
-        )
+    stmts.extend(
+        f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
+        f"COALESCE((SELECT MAX(id) FROM {table}), 1));"
+        for table in ("projects", "snapshots", "issues", "releases", "dependencies")
+    )
 
     return "\n".join(stmts)

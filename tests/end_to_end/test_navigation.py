@@ -40,14 +40,20 @@ class TestNavigation:
     console.log(JSON.stringify({links: links}));
 """)
         result = run_puppeteer(script, base_url=seeded_url, timeout=20)
-        hrefs = [l["href"] for l in result["links"]]
+        hrefs = [link["href"] for link in result["links"]]
         # Should have links to major sections
         assert any("/issues" in h for h in hrefs), "Should have link to Issues page"
         assert any("/stats" in h for h in hrefs), "Should have link to Stats page"
 
     def test_navigate_between_pages(self, seeded_url: str) -> None:
         """Navigation between pages should work without errors."""
-        pages = ["/", "/issues", "/stats/trends", "/stats/releases", "/stats/dependencies"]
+        pages = [
+            "/",
+            "/issues",
+            "/stats/trends",
+            "/stats/releases",
+            "/stats/dependencies",
+        ]
         for page_path in pages:
             resp = requests.get(f"{seeded_url}{page_path}", timeout=10)
             assert resp.status_code == 200, (
@@ -65,7 +71,11 @@ class TestDashboardPage:
         """The dashboard should show project information."""
         resp = requests.get(f"{seeded_url}/", timeout=10)
         # Dashboard should mention at least one project
-        assert "snapcraft" in resp.text.lower() or "charmcraft" in resp.text.lower() or "craft" in resp.text.lower()
+        assert (
+            "snapcraft" in resp.text.lower()
+            or "charmcraft" in resp.text.lower()
+            or "craft" in resp.text.lower()
+        )
 
 
 class TestDependenciesPage:
@@ -128,7 +138,11 @@ class TestTrendsDataAPI:
         for project in ["snapcraft", "charmcraft", "rockcraft"]:
             snap = data["snapshot"][project]
             total_issues = snap["open_issues"]
-            parts = snap["nm_open_issues"] + snap["internal_open_issues"] + snap["bots_open_issues"]
+            parts = (
+                snap["nm_open_issues"]
+                + snap["internal_open_issues"]
+                + snap["bots_open_issues"]
+            )
             assert total_issues == parts, (
                 f"{project}: open_issues={total_issues} != "
                 f"external({snap['nm_open_issues']}) + internal({snap['internal_open_issues']}) "

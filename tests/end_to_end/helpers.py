@@ -50,6 +50,7 @@ def run_puppeteer(
             capture_output=True,
             text=True,
             timeout=timeout,
+            check=False,
             env={
                 "PATH": "/usr/bin:/bin:/usr/local/bin",
                 "HOME": "/tmp",
@@ -66,11 +67,11 @@ def run_puppeteer(
 
         # Parse the last JSON line from stdout
         lines = result.stdout.strip().splitlines()
-        for line in reversed(lines):
-            line = line.strip()
-            if line.startswith("{") or line.startswith("["):
+        for output_line in reversed(lines):
+            stripped_line = output_line.strip()
+            if stripped_line.startswith(("{", "[")):
                 try:
-                    return json.loads(line)
+                    return json.loads(stripped_line)
                 except json.JSONDecodeError:
                     continue
 

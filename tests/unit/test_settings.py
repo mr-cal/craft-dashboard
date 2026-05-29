@@ -4,8 +4,8 @@ import pytest
 from craft_dashboard.settings import Settings
 from pydantic import ValidationError
 
-_EXPECTED_GITHUB_TOKEN = "ghp_test123"  # noqa: S105 — expected value in test fixture
-_EXPECTED_ADMIN_TOKEN = "admin-secret"  # noqa: S105 — expected value in test fixture
+_EXPECTED_GITHUB_TOKEN = "ghp_test123"
+_EXPECTED_ADMIN_TOKEN = "admin-secret"
 _EXPECTED_LOCAL_LLM_API_KEY = "my-bearer-token"
 
 
@@ -88,7 +88,7 @@ class TestSettings:
         monkeypatch.delenv("ADMIN_TOKEN", raising=False)
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
 
-        settings = Settings()
+        settings = Settings(_env_file=None)
 
         assert settings.validate_required_secrets() == [
             "ADMIN_TOKEN is not set. Admin endpoints will reject all requests.",

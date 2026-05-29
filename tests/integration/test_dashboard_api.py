@@ -229,33 +229,33 @@ class TestIssuesPageMarkup:
         option_lists = [
             element
             for element in elements
-            if element["tag"] == "div"
-            and _has_class(element, "multiselect__options")
+            if element["tag"] == "div" and _has_class(element, "multiselect__options")
         ]
         options = [
             element
             for element in elements
-            if element["tag"] == "label"
-            and _has_class(element, "multiselect__option")
+            if element["tag"] == "label" and _has_class(element, "multiselect__option")
         ]
 
         assert len(input_wraps) == 4
-        assert all(element["attrs"].get("role") == "combobox" for element in input_wraps)
+        assert all(
+            element["attrs"].get("role") == "combobox" for element in input_wraps
+        )
         assert all("aria-expanded" in element["attrs"] for element in input_wraps)
         assert all(
             element["attrs"].get("aria-haspopup") == "listbox"
             for element in input_wraps
         )
-        assert {
-            element["attrs"].get("aria-label") for element in input_wraps
-        } == {
+        assert {element["attrs"].get("aria-label") for element in input_wraps} == {
             "Select projects",
             "Select author roles",
             "Select states",
             "Select actions",
         }
         assert len(option_lists) == 4
-        assert all(element["attrs"].get("role") == "listbox" for element in option_lists)
+        assert all(
+            element["attrs"].get("role") == "listbox" for element in option_lists
+        )
         assert options
         assert all(element["attrs"].get("role") == "option" for element in options)
 
@@ -308,16 +308,20 @@ class TestIssuesPageMarkup:
 class TestDashboardExcludesAggregate:
     @pytest.fixture
     async def seeded(self, test_db_session: AsyncSession) -> None:
-        test_db_session.add_all([
-            Project(name="snapcraft", category="application", github_org="canonical"),
-            Project(name="craft-parts", category="library", github_org="canonical"),
-            Project(
-                name="all-projects",
-                category="aggregate",
-                github_org="canonical",
-                display_order=-1,
-            ),
-        ])
+        test_db_session.add_all(
+            [
+                Project(
+                    name="snapcraft", category="application", github_org="canonical"
+                ),
+                Project(name="craft-parts", category="library", github_org="canonical"),
+                Project(
+                    name="all-projects",
+                    category="aggregate",
+                    github_org="canonical",
+                    display_order=-1,
+                ),
+            ]
+        )
         await test_db_session.commit()
 
     def test_project_count_excludes_aggregate(
@@ -494,9 +498,7 @@ class TestIssueStateFilter:
         assert "Closed issue" in response.text
         assert "Open issue" not in response.text
 
-    def test_filter_all_states(
-        self, test_client: TestClient, seeded: None
-    ) -> None:
+    def test_filter_all_states(self, test_client: TestClient, seeded: None) -> None:
         response = test_client.get("/issues", params={"state": "open,closed"})
         assert "Open issue" in response.text
         assert "Closed issue" in response.text

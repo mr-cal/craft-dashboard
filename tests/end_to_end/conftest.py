@@ -12,6 +12,7 @@ Requirements:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -105,9 +106,7 @@ def _deploy_to_vm(vm_name: str) -> str:
 
     # Create a temporary inventory pointing at this VM
     inventory_path = REPO_ROOT / "provisioning" / "inventory_e2e.ini"
-    inventory_path.write_text(
-        f"[dashboard]\n{vm_name} ansible_connection=lxd\n"
-    )
+    inventory_path.write_text(f"[dashboard]\n{vm_name} ansible_connection=lxd\n")
 
     try:
         # Set E2E env var in the deploy environment
@@ -115,10 +114,14 @@ def _deploy_to_vm(vm_name: str) -> str:
         # Source secrets.env
         secrets_path = REPO_ROOT / "provisioning" / "secrets.env"
         if secrets_path.exists():
-            for line in secrets_path.read_text().splitlines():
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, _, val = line.partition("=")
+            for raw_line in secrets_path.read_text().splitlines():
+                stripped_line = raw_line.strip()
+                if (
+                    stripped_line
+                    and not stripped_line.startswith("#")
+                    and "=" in stripped_line
+                ):
+                    key, _, val = stripped_line.partition("=")
                     env[key.strip()] = val.strip()
 
         env["CRAFT_DASHBOARD_E2E"] = "1"
@@ -127,8 +130,10 @@ def _deploy_to_vm(vm_name: str) -> str:
             [
                 "ansible-playbook",
                 "playbook.yml",
-                "--skip-tags", "ssl",
-                "-i", str(inventory_path),
+                "--skip-tags",
+                "ssl",
+                "-i",
+                str(inventory_path),
             ],
             cwd=str(REPO_ROOT / "provisioning"),
             env=env,
@@ -166,11 +171,16 @@ def e2e_vm() -> str:
         logger.info("Launching ephemeral VM %s", name)
         _run(
             [
-                "lxc", "launch", VM_IMAGE, name,
+                "lxc",
+                "launch",
+                VM_IMAGE,
+                name,
                 "--vm",
                 "--ephemeral",
-                "-c", "limits.cpu=2",
-                "-c", "limits.memory=4GB",
+                "-c",
+                "limits.cpu=2",
+                "-c",
+                "limits.memory=4GB",
             ],
             timeout=120,
         )
@@ -184,23 +194,19 @@ def e2e_vm() -> str:
             raise RuntimeError(f"VM {name} did not get an IP within 120s")
 
         # Wait for cloud-init to finish
-        try:
+        with contextlib.suppress(subprocess.CalledProcessError):
             _run(
                 ["lxc", "exec", name, "--", "cloud-init", "status", "--wait"],
                 timeout=300,
             )
-        except subprocess.CalledProcessError:
-            pass  # Some images don't have cloud-init
 
     yield name
 
     # Cleanup: stop ephemeral VM (auto-deletes)
     if _vm_exists(name):
         logger.info("Stopping ephemeral VM %s", name)
-        try:
+        with contextlib.suppress(subprocess.TimeoutExpired):
             _run(["lxc", "stop", name, "--force"], check=False, timeout=30)
-        except subprocess.TimeoutExpired:
-            pass
 
 
 @pytest.fixture(scope="session")

@@ -1,13 +1,16 @@
 """Release model for tracking project versions."""
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from craft_dashboard.models.base import Base
+
+if TYPE_CHECKING:
+    from craft_dashboard.models.project import Project
 
 
 class Release(Base):
@@ -29,7 +32,7 @@ class Release(Base):
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, default=dict)
 
     # Relationships
-    project: Mapped["Project"] = relationship(back_populates="releases")  # noqa: F821 — SQLAlchemy forward reference for relationship
+    project: Mapped["Project"] = relationship(back_populates="releases")
 
     @validates("branch")
     def _coalesce_branch(self, _key: str, value: str | None) -> str:

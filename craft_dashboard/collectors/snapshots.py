@@ -5,6 +5,8 @@ from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from craft_dashboard.utils import normalize_datetime as _normalize_datetime
+
 __all__ = ["compute_snapshot_counts", "generate_snapshot", "backfill_missing_snapshots"]
 
 logger = logging.getLogger(__name__)
@@ -27,9 +29,6 @@ def _increment_counts(
         counts[f"{prefix}_{type_key}_external"] += 1
     if is_bot:
         counts[f"{prefix}_{type_key}_bots"] += 1
-
-
-from craft_dashboard.utils import normalize_datetime as _normalize_datetime
 
 
 def _starcraft_get_median_date(dates: list[datetime]) -> datetime:
@@ -216,20 +215,15 @@ def _filter_issues_for_date(
     issues: list[dict],
     snapshot_date: date,
 ) -> list[dict]:
-    """Return a view of *issues* as they existed on *snapshot_date*.
+    """Return issues as they existed on *snapshot_date*.
 
-    Uses ``created_at`` and ``closed_at`` timestamps to determine each
-    issue's state on the given historical date, rather than the current DB
-    state.  This makes historical snapshots accurate even when the DB was
-    temporarily out of sync with GitHub.
+    Uses ``created_at`` and ``closed_at`` to determine each issue's state
+    on the given date rather than the current DB state.
 
-    * Issues not yet created on ``snapshot_date`` are excluded.
-    * Issues open on ``snapshot_date`` are returned with ``state="open"``.
-    * Issues closed *exactly* on ``snapshot_date`` are returned with their
-      original state (``"closed"`` or ``"merged"``).
-    * Issues already closed before ``snapshot_date`` are excluded.
-    * Issues with ``closed_at=None`` are treated as still open (we cannot
-      determine a historical close date without the timestamp).
+    Issues not yet created are excluded. Issues open on the date are returned
+    with ``state="open"``. Issues closed on that exact date are returned with
+    their original state. Issues already closed before the date are excluded.
+    Issues with no ``closed_at`` timestamp are treated as open.
 
     Args:
         issues: List of issue dicts (as produced by ``generate_snapshot``).
@@ -248,19 +242,21 @@ def _filter_issues_for_date(
             continue
 
         created = created_at.date() if hasattr(created_at, "date") else created_at
-        closed = closed_at.date() if (closed_at and hasattr(closed_at, "date")) else None
+        closed = (
+            closed_at.date() if (closed_at and hasattr(closed_at, "date")) else None
+        )
 
         if created > snapshot_date:
             continue  # not created yet on this date
 
         if closed is None or closed > snapshot_date:
-            # Open on this date — override state so compute_snapshot_counts
+            # Open on this date: override state so compute_snapshot_counts
             # counts it correctly regardless of the current DB state.
             result.append({**issue, "state": "open"})
         elif closed == snapshot_date:
-            # Closed on exactly this date — preserve original state ("closed"/"merged")
+            # Closed on exactly this date: preserve original state ("closed"/"merged")
             result.append(issue)
-        # else: already closed before snapshot_date — exclude
+        # else: already closed before snapshot_date, exclude
 
     return result
 
@@ -274,9 +270,9 @@ async def backfill_missing_snapshots(
 ) -> int:
     """Generate snapshots for any dates missing between the last snapshot and today.
 
-    Uses temporal reasoning (``created_at`` / ``closed_at``) rather than the
-    current DB state so that historical data is accurate even after an outage
-    or delayed collection run.
+    Computes each missing date's counts from ``created_at`` / ``closed_at``
+    timestamps rather than the current DB state, so history stays accurate
+    after an outage or delayed collection run.
 
     Args:
         project_id: The database ID of the project.
@@ -289,10 +285,10 @@ async def backfill_missing_snapshots(
         The number of missing snapshots that were backfilled.
 
     """
-    from sqlalchemy import func, select  # noqa: PLC0415
-    from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415
+    from sqlalchemy import func, select
+    from sqlalchemy.dialects.postgresql import insert
 
-    from craft_dashboard.models.snapshot import Snapshot  # noqa: PLC0415
+    from craft_dashboard.models.snapshot import Snapshot
 
     today_val = date.today()
 
@@ -355,9 +351,8 @@ async def generate_snapshot(
 ) -> None:
     """Generate a daily snapshot for a project.
 
-    Queries current open issues/PRs and upserts a snapshot row for today.
-    Also backfills any dates that were missed since the last snapshot using
-    temporal reasoning so the trends chart never has gaps.
+    Queries all issues from the DB, upserts a snapshot row for today, then
+    backfills any dates that were missed since the last snapshot.
 
     Args:
         project_id: The database ID of the project.
@@ -366,7 +361,7 @@ async def generate_snapshot(
         bots: Optional set of configured bot usernames.
 
     """
-    from sqlalchemy import select  # noqa: PLC0415 — deferred to avoid circular import
+    from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import (
         insert,
     )
@@ -421,7 +416,9 @@ async def generate_snapshot(
     logger.info("Generated snapshot for project_id=%d on %s", project_id, today_val)
 
     # Backfill any dates the collector skipped (e.g. after an outage)
-    await backfill_missing_snapshots(project_id, issues, session, maintainers, bots=bots)
+    await backfill_missing_snapshots(
+        project_id, issues, session, maintainers, bots=bots
+    )
 
 
 async def generate_cross_project_snapshot(
@@ -434,12 +431,12 @@ async def generate_cross_project_snapshot(
     Queries all open issues across all real projects (not aggregate) and
     computes the true cross-project median ages for today.
     """
-    from sqlalchemy import select as sa_select  # noqa: PLC0415
-    from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415
+    from sqlalchemy import select as sa_select
+    from sqlalchemy.dialects.postgresql import insert
 
-    from craft_dashboard.models.issue import Issue  # noqa: PLC0415
-    from craft_dashboard.models.project import Project  # noqa: PLC0415
-    from craft_dashboard.models.snapshot import Snapshot  # noqa: PLC0415
+    from craft_dashboard.models.issue import Issue
+    from craft_dashboard.models.project import Project
+    from craft_dashboard.models.snapshot import Snapshot
 
     # Get or create the "all-projects" aggregate project
     agg_stmt = insert(Project).values(

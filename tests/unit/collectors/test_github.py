@@ -14,7 +14,7 @@ from craft_dashboard.collectors.github import (
 )
 from github import GithubException
 
-_TEST_TOKEN = "ghp_test"  # noqa: S105 — test-only dummy token, not a real secret
+_TEST_TOKEN = "ghp_test"
 
 
 class TestClassifyIssue:
@@ -226,7 +226,13 @@ class TestCollectIssuesExceptionHandling:
 
         session = AsyncMock()
         session.execute = AsyncMock(
-            side_effect=[due_count_result, total_count_result, oldest_fetch_result, existing_result, None]
+            side_effect=[
+                due_count_result,
+                total_count_result,
+                oldest_fetch_result,
+                existing_result,
+                None,
+            ]
         )
         session.commit = AsyncMock()
         return session

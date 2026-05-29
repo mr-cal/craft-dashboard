@@ -71,8 +71,12 @@ async def _evaluate_issues(
 
     """
     from craft_dashboard.models.issue import Issue
-    from craft_dashboard.models.llm_evaluation import LLMEvaluation
-    from craft_dashboard.models.project import Project
+    from craft_dashboard.models.llm_evaluation import (
+        LLMEvaluation,
+    )
+    from craft_dashboard.models.project import (
+        Project,
+    )
     from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import insert
 
@@ -161,7 +165,9 @@ async def _evaluate_issues(
         # Upsert evaluation: mark previous evaluation as not-latest, then insert new one
         async with session_factory() as session:
             # Mark previous evaluation(s) for this issue as not latest
-            from sqlalchemy import update as sa_update
+            from sqlalchemy import (
+                update as sa_update,
+            )
 
             await session.execute(
                 sa_update(LLMEvaluation)

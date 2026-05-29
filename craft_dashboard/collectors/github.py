@@ -4,6 +4,7 @@ import hashlib
 import logging
 import time
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import github
 import sqlalchemy as sa
@@ -18,6 +19,12 @@ from craft_dashboard.collectors import ISSUE_UPSERT_FIELDS
 __all__ = ["GitHubCollector"]
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from github.GitRelease import GitRelease as GHRelease
+
+_PROGRESS_LOG_INTERVAL_SECONDS = 30
+_HOTFIX_VERSION_COMPONENTS = 2
 
 
 def _classify_issue(gh_issue: GHIssue) -> tuple[str, str]:
@@ -291,7 +298,7 @@ class GitHubCollector:
             Issue.project_id == project_id,
             Issue.source == "github",
             sa.or_(
-                Issue.last_fetched_at == None,  # noqa: E711 — SQLAlchemy requires == for IS NULL SQL generation
+                Issue.last_fetched_at.is_(None),
                 Issue.last_fetched_at < cutoff,
             ),
         )
@@ -334,7 +341,7 @@ class GitHubCollector:
             )
             since_date = max(oldest_fetch_tz - timedelta(days=1), _max_lookback)
         else:
-            # Fresh project with no issues yet — fetch the last 90 days.
+            # Fresh project with no issues yet: fetch the last 90 days.
             since_date = _max_lookback
 
         gh_issues = repo.get_issues(
@@ -462,7 +469,7 @@ class GitHubCollector:
             count += 1
 
             now = time.monotonic()
-            if now - last_progress >= 30:
+            if now - last_progress >= _PROGRESS_LOG_INTERVAL_SECONDS:
                 logger.info("  %s/%s: %d issues fetched...", self.org, repo_name, count)
                 last_progress = now
 
@@ -498,7 +505,7 @@ class GitHubCollector:
             Number of branch+release rows upserted.
 
         """
-        import re  # noqa: PLC0415 — deferred import
+        import re
 
         from sqlalchemy.dialects.postgresql import (
             insert,
@@ -513,7 +520,7 @@ class GitHubCollector:
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
 
         # Collect all non-prerelease, non-draft releases
-        all_releases: dict[str, object] = {}  # tag_name → GH release object
+        all_releases: dict[str, "GHRelease"] = {}  # tag_name -> GH release object
         for gh_rel in repo.get_releases():
             if not gh_rel.prerelease and not gh_rel.draft:
                 all_releases[gh_rel.tag_name] = gh_rel
@@ -582,7 +589,7 @@ class GitHubCollector:
                     ver = parse_version(tag)
                     if (
                         ver
-                        and len(ver) >= 2
+                        and len(ver) >= _HOTFIX_VERSION_COMPONENTS
                         and ver[0] == hf_major
                         and ver[1] == hf_minor
                     ) and ver > best_ver:
@@ -649,7 +656,7 @@ class GitHubCollector:
                     commits_since,
                     best_tag,
                 )
-            except Exception:  # noqa: BLE001 — individual release errors should not abort collection
+            except Exception:  # noqa: BLE001 - missing compare data should not abort release collection
                 logger.warning(
                     "  Could not compute commits for %s@%s",
                     repo_name,

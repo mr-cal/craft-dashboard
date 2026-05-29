@@ -9,7 +9,7 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 def set_session_factory(factory: async_sessionmaker[AsyncSession]) -> None:
     """Set the session factory (called during app startup)."""
-    global _session_factory  # noqa: PLW0603 — module-level singleton set once at startup
+    global _session_factory
     _session_factory = factory
 
 

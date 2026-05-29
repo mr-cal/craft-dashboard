@@ -18,7 +18,11 @@ class TestTriagePage:
         """The triage page should load and show issues."""
         resp = requests.get(f"{seeded_url}/issues", timeout=10)
         assert resp.status_code == 200
-        assert "Test issue" in resp.text or "Test pull_request" in resp.text or "issue" in resp.text.lower()
+        assert (
+            "Test issue" in resp.text
+            or "Test pull_request" in resp.text
+            or "issue" in resp.text.lower()
+        )
 
     def test_triage_dropdown_excludes_aggregate(self, seeded_url: str) -> None:
         """The project dropdown should not contain 'all-projects'."""

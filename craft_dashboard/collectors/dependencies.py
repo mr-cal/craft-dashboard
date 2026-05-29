@@ -4,12 +4,13 @@ import logging
 import re
 import tomllib
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import github
 import httpx
 import urllib3
 from github import Github, GithubException, UnknownObjectException
+from github.ContentFile import ContentFile
 from packaging.version import Version
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -102,7 +103,7 @@ async def get_pypi_versions(name: str) -> list[str]:
             data: dict[str, Any] = response.json()
         releases = data.get("releases", {})
         result = [v for v in releases if not Version(v).is_prerelease]
-    except Exception:  # noqa: BLE001 — gracefully handle any PyPI response error
+    except Exception:  # noqa: BLE001 - PyPI fetch failures should not abort collection
         logger.warning("Could not fetch PyPI versions for %s", name)
         result = []
 
@@ -214,7 +215,9 @@ class DependencyCollector:
             # Try uv.lock first for exact installed versions.
             lock_packages: dict[str, str] | None = None
             try:
-                lock_contents = repo.get_contents("uv.lock", ref=branch)
+                lock_contents = cast(
+                    ContentFile, repo.get_contents("uv.lock", ref=branch)
+                )
                 lock_packages = parse_uv_lock(lock_contents.decoded_content.decode())
                 source_file = "uv.lock"
             except (GithubException, UnknownObjectException):
@@ -222,7 +225,9 @@ class DependencyCollector:
 
             # Fetch pyproject.toml for the dependency list.
             try:
-                contents = repo.get_contents("pyproject.toml", ref=branch)
+                contents = cast(
+                    ContentFile, repo.get_contents("pyproject.toml", ref=branch)
+                )
                 pyproject = tomllib.loads(contents.decoded_content.decode())
             except (GithubException, UnknownObjectException):
                 logger.warning(
@@ -275,7 +280,7 @@ class DependencyCollector:
                                     branch, all_versions, installed_version
                                 )
                                 is_outdated = Version(latest_version) > ver
-                        except Exception:
+                        except Exception:  # noqa: BLE001 - version parsing/API failures are non-fatal here
                             # Catches packaging.version.InvalidVersion and API errors
                             logger.warning(
                                 "Could not compute version info for %s in %s@%s",

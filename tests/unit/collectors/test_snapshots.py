@@ -1,9 +1,12 @@
 """Tests for the snapshot generator."""
 
 from datetime import UTC, date, datetime, timedelta
+from unittest.mock import AsyncMock, patch
 
 from craft_dashboard.collectors.snapshots import (
+    _filter_issues_for_date,
     _increment_counts,
+    backfill_missing_snapshots,
     compute_snapshot_counts,
 )
 
@@ -745,14 +748,10 @@ class TestIncrementCounts:
 class TestFilterIssuesForDate:
     """Tests for _filter_issues_for_date."""
 
-    from craft_dashboard.collectors.snapshots import _filter_issues_for_date
-
     _DATE = date(2024, 6, 15)
 
     def test_open_issue_included_as_open(self) -> None:
         """Issues open on the target date are included with state='open'."""
-        from craft_dashboard.collectors.snapshots import _filter_issues_for_date
-
         issue = _issue("open", created_days_ago=10, reference_date=self._DATE)
         result = _filter_issues_for_date([issue], self._DATE)
         assert len(result) == 1
@@ -760,69 +759,67 @@ class TestFilterIssuesForDate:
 
     def test_closed_before_date_excluded(self) -> None:
         """Issues closed before the target date are excluded."""
-        from craft_dashboard.collectors.snapshots import _filter_issues_for_date
-
-        issue = _issue("closed", created_days_ago=20, closed_days_ago=5, reference_date=self._DATE)
+        issue = _issue(
+            "closed", created_days_ago=20, closed_days_ago=5, reference_date=self._DATE
+        )
         result = _filter_issues_for_date([issue], self._DATE)
         assert result == []
 
     def test_closed_on_date_included_with_original_state(self) -> None:
         """Issues closed exactly on the target date are included with their original state."""
-        from craft_dashboard.collectors.snapshots import _filter_issues_for_date
-
-        issue = _issue("closed", created_days_ago=10, closed_days_ago=0, reference_date=self._DATE)
+        issue = _issue(
+            "closed", created_days_ago=10, closed_days_ago=0, reference_date=self._DATE
+        )
         result = _filter_issues_for_date([issue], self._DATE)
         assert len(result) == 1
         assert result[0]["state"] == "closed"
 
     def test_merged_pr_closed_on_date_preserves_merged_state(self) -> None:
         """Merged PRs closed on the date keep 'merged' state."""
-        from craft_dashboard.collectors.snapshots import _filter_issues_for_date
-
-        issue = _issue("merged", issue_type="pull_request", created_days_ago=10, closed_days_ago=0, reference_date=self._DATE)
+        issue = _issue(
+            "merged",
+            issue_type="pull_request",
+            created_days_ago=10,
+            closed_days_ago=0,
+            reference_date=self._DATE,
+        )
         result = _filter_issues_for_date([issue], self._DATE)
         assert len(result) == 1
         assert result[0]["state"] == "merged"
 
     def test_not_yet_created_excluded(self) -> None:
         """Issues created after the target date are excluded."""
-        from craft_dashboard.collectors.snapshots import _filter_issues_for_date
-
-        future_date = self._DATE + timedelta(days=5)
-        issue = _issue("open", created_days_ago=-5, reference_date=self._DATE)  # created in the future
+        issue = _issue("open", created_days_ago=-5, reference_date=self._DATE)
         result = _filter_issues_for_date([issue], self._DATE)
         assert result == []
 
     def test_stale_open_state_overridden_for_already_closed_issue(self) -> None:
-        """An issue with state='open' in DB but closed_at set AFTER the date is open on that date."""
-        from craft_dashboard.collectors.snapshots import _filter_issues_for_date
-
-        # closed 2 days after the snapshot date but DB state might still be stale
-        issue = _issue("open", created_days_ago=10, closed_days_ago=-2, reference_date=self._DATE)
+        """Closed after the snapshot date keeps the issue open for that day."""
+        issue = _issue(
+            "open", created_days_ago=10, closed_days_ago=-2, reference_date=self._DATE
+        )
         result = _filter_issues_for_date([issue], self._DATE)
         assert len(result) == 1
         assert result[0]["state"] == "open"
 
     def test_stale_open_state_corrected_for_issue_already_closed(self) -> None:
-        """An issue with state='open' in DB but closed 5 days BEFORE the date is excluded."""
-        from craft_dashboard.collectors.snapshots import _filter_issues_for_date
-
-        # closed 5 days before snapshot date but DB state is incorrectly "open"
-        issue = _issue("open", created_days_ago=20, closed_days_ago=5, reference_date=self._DATE)
+        """Closed before the snapshot date excludes the issue for that day."""
+        issue = _issue(
+            "open", created_days_ago=20, closed_days_ago=5, reference_date=self._DATE
+        )
         result = _filter_issues_for_date([issue], self._DATE)
         assert result == []
 
     def test_closed_with_no_closed_at_treated_as_open(self) -> None:
-        """Issues with state='closed' but no closed_at are treated as open (unknown close date)."""
-        from craft_dashboard.collectors.snapshots import _filter_issues_for_date
-
+        """Issues with no close date are treated as open."""
         issue = {
             "issue_type": "issue",
             "state": "closed",
             "author": "user1",
             "author_is_bot": False,
             "labels": [],
-            "created_at": datetime.combine(self._DATE, datetime.min.time(), tzinfo=UTC) - timedelta(days=10),
+            "created_at": datetime.combine(self._DATE, datetime.min.time(), tzinfo=UTC)
+            - timedelta(days=10),
             "closed_at": None,
         }
         result = _filter_issues_for_date([issue], self._DATE)
@@ -831,8 +828,6 @@ class TestFilterIssuesForDate:
 
     def test_missing_created_at_excluded(self) -> None:
         """Issues without a created_at are excluded."""
-        from craft_dashboard.collectors.snapshots import _filter_issues_for_date
-
         issue = {
             "issue_type": "issue",
             "state": "open",
@@ -847,17 +842,25 @@ class TestFilterIssuesForDate:
 
     def test_multiple_issues_mixed(self) -> None:
         """Mix of open, pre-closed, same-day-closed, and not-yet-created issues."""
-        from craft_dashboard.collectors.snapshots import _filter_issues_for_date
-
         issues = [
-            _issue("open", created_days_ago=10, reference_date=self._DATE),          # open → included as open
-            _issue("closed", created_days_ago=20, closed_days_ago=5, reference_date=self._DATE),  # closed 5 days before → excluded
-            _issue("closed", created_days_ago=10, closed_days_ago=0, reference_date=self._DATE),  # closed today → included as closed
-            _issue("open", created_days_ago=-3, reference_date=self._DATE),           # future issue → excluded
+            _issue("open", created_days_ago=10, reference_date=self._DATE),
+            _issue(
+                "closed",
+                created_days_ago=20,
+                closed_days_ago=5,
+                reference_date=self._DATE,
+            ),
+            _issue(
+                "closed",
+                created_days_ago=10,
+                closed_days_ago=0,
+                reference_date=self._DATE,
+            ),
+            _issue("open", created_days_ago=-3, reference_date=self._DATE),
         ]
         result = _filter_issues_for_date(issues, self._DATE)
         assert len(result) == 2
-        states = {r["state"] for r in result}
+        states = {result_item["state"] for result_item in result}
         assert states == {"open", "closed"}
 
 
@@ -866,11 +869,17 @@ class TestBackfillMissingSnapshots:
 
     _DATE = date(2024, 6, 15)
 
-    def _make_issue(self, created_days_ago: int, closed_days_ago: int | None = None) -> dict:
-        created_at = datetime.combine(self._DATE, datetime.min.time(), tzinfo=UTC) - timedelta(days=created_days_ago)
+    def _make_issue(
+        self, created_days_ago: int, closed_days_ago: int | None = None
+    ) -> dict:
+        created_at = datetime.combine(
+            self._DATE, datetime.min.time(), tzinfo=UTC
+        ) - timedelta(days=created_days_ago)
         closed_at = None
         if closed_days_ago is not None:
-            closed_at = datetime.combine(self._DATE, datetime.min.time(), tzinfo=UTC) - timedelta(days=closed_days_ago)
+            closed_at = datetime.combine(
+                self._DATE, datetime.min.time(), tzinfo=UTC
+            ) - timedelta(days=closed_days_ago)
         return {
             "issue_type": "issue",
             "state": "open" if closed_days_ago is None else "closed",
@@ -883,10 +892,6 @@ class TestBackfillMissingSnapshots:
 
     async def test_no_backfill_without_previous_snapshot(self) -> None:
         """Returns 0 and does nothing when there's no previous snapshot."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        from craft_dashboard.collectors.snapshots import backfill_missing_snapshots
-
         session = AsyncMock()
         session.scalar = AsyncMock(return_value=None)  # no previous snapshot
 
@@ -895,12 +900,6 @@ class TestBackfillMissingSnapshots:
 
     async def test_backfills_missing_dates(self) -> None:
         """Generates snapshots for each missing date between last snapshot and today."""
-        import asyncio
-        from datetime import date
-        from unittest.mock import AsyncMock, MagicMock, call, patch
-
-        from craft_dashboard.collectors.snapshots import backfill_missing_snapshots
-
         today = date.today()
         last = today - timedelta(days=4)  # 3 missing dates: today-3, today-2, today-1
 

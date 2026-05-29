@@ -88,7 +88,7 @@ async def _query_issues(
     author_role: str = "",
     sort_by: str = "staleness",
     page: int = 1,
-    bots: list[str] | None = None,  # noqa: ARG001 — reserved for future bot filtering feature
+    _bots: list[str] | None = None,
     search: str = "",
     items_per_page: int = DEFAULT_PER_PAGE,
 ) -> tuple[list[dict], int]:
