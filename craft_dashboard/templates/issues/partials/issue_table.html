@@ -1,10 +1,25 @@
 {# Partial: issue table body, swapped via HTMX #}
+{# Score descriptions for column header tooltips #}
+{% set score_tooltips = {
+  "staleness": "How stale/inactive this issue is (0=very active, 100=completely dead)",
+  "duplicateness": "How likely this is a duplicate of another issue (0=unique, 100=clearly duplicate)",
+  "complexity": "How complex this issue is to resolve (0=trivial, 100=extremely complex)",
+  "support_request": "How likely this is a support request rather than a bug or feature (0=not support, 100=clearly support)",
+  "readiness": "How ready this PR is for review and merge (0=not ready, 100=ready to merge)",
+} %}
+{% set score_labels = {
+  "staleness": "Staleness",
+  "duplicateness": "Duplicate",
+  "complexity": "Complexity",
+  "support_request": "Support Req",
+  "readiness": "Readiness",
+} %}
 <div id="issue-table">
   <table>
     <thead>
       <tr>
-        {% macro sort_header(label, field) %}
-        <th>
+        {% macro sort_header(label, field, tooltip="") %}
+        <th {% if tooltip %}data-tooltip="{{ tooltip }}"{% endif %}>
           <a href="#"
              hx-get="/issues/table"
              hx-target="#issue-table"
@@ -20,13 +35,15 @@
           </a>
         </th>
         {% endmacro %}
-        {{ sort_header("Issue", "number") }}
-        {{ sort_header("Title", "title") }}
-        {{ sort_header("Author", "author") }}
-        {{ sort_header("Age", "age") }}
-        <th>Staleness</th>
-        <th>Action</th>
-        <th>Summary</th>
+        {{ sort_header("Issue", "number", "Project and issue/PR number") }}
+        {{ sort_header("Title", "title", "Issue or pull request title") }}
+        {{ sort_header("Author", "author", "Who created this issue or PR") }}
+        {{ sort_header("Age", "age", "Days since this issue or PR was created") }}
+        {% for score_key in active_scores %}
+        {{ sort_header(score_labels.get(score_key, score_key), score_key, score_tooltips.get(score_key, "")) }}
+        {% endfor %}
+        <th data-tooltip="LLM-suggested next action for this issue">Action</th>
+        <th data-tooltip="LLM-generated summary of the current state">Summary</th>
       </tr>
     </thead>
     <tbody>
@@ -40,25 +57,28 @@
         <td>{{ issue.title|truncate(80) }}</td>
         <td>{{ issue.author or "unknown" }}</td>
         <td>{{ (issue.age_days ~ "d") if issue.age_days is not none else "?" }}</td>
+        {% for score_key in active_scores %}
         <td>
-          {% if issue.staleness is not none %}
-          {% set score_value = issue.staleness %}
-          {% set score_name = "Staleness" %}
+          {% set sv = issue.get(score_key) if issue.get is defined else issue[score_key] %}
+          {% if sv is not none %}
+          {% set score_value = sv %}
+          {% set score_name = score_labels.get(score_key, score_key) %}
           {% include "components/score_badge.html" %}
           {% else %}
           <span class="score-badge" style="background:#ccc;color:#666;">-</span>
           {% endif %}
         </td>
+        {% endfor %}
         <td>
           {% if issue.suggested_action %}
-          <span class="action-badge">{{ issue.suggested_action|replace("_", " ") }}</span>
+          <span class="action-badge" {% if issue.suggested_action_reason %}data-tooltip="{{ issue.suggested_action_reason }}"{% endif %}>{{ issue.suggested_action|replace("_", " ") }}</span>
           {% endif %}
         </td>
         <td>{{ (issue.summary or "")|truncate(280) }}</td>
       </tr>
       {% else %}
       <tr>
-        <td colspan="7">
+        <td colspan="{{ 6 + (active_scores|length) }}">
           No issues found matching the current filters.
           <a href="/issues">Clear all filters</a> to see all issues.
         </td>
@@ -67,6 +87,6 @@
     </tbody>
   </table>
 
-  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&source=" ~ (filter_source or "") ~ "&state=" ~ (filter_state or "open") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&author_role=" ~ (filter_author_role or "") ~ "&sort=" ~ (sort_by or "staleness") ~ "&search=" ~ (filter_search or "") ~ "&per_page=" ~ (per_page or 50) %}
+  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&source=" ~ (filter_source or "") ~ "&state=" ~ (filter_state or "open") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&author_role=" ~ (filter_author_role or "") ~ "&sort=" ~ (sort_by or "staleness") ~ "&search=" ~ (filter_search or "") ~ "&per_page=" ~ (per_page or 50) ~ "&scores=" ~ (filter_scores or "staleness,readiness") %}
   {% include "components/pagination.html" %}
 </div>
