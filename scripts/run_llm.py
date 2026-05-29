@@ -111,15 +111,17 @@ async def _evaluate_issues(
 
         # Apply --issue filters if specified
         if issue_filters:
-            from sqlalchemy import and_, or_
+            from sqlalchemy import Integer, and_, cast, or_
 
             conditions = []
             for project_name, min_id, max_id in issue_filters:
+                # external_id is VARCHAR, so cast to Integer for numeric comparison.
+                ext_id_int = cast(Issue.external_id, Integer)
                 conditions.append(
                     and_(
                         Project.name == project_name,
-                        Issue.external_id >= min_id,
-                        Issue.external_id <= max_id,
+                        ext_id_int >= min_id,
+                        ext_id_int <= max_id,
                     )
                 )
             query = query.where(or_(*conditions))
