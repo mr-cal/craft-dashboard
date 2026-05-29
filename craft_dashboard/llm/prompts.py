@@ -26,7 +26,10 @@ close_outdated, needs_triage, needs_review, keep_open>",
 }
 
 Score guidelines:
-- staleness: 0 = very active, 100 = completely dead (no activity in months)
+- staleness: 0 = very active, 100 = completely dead. Consider the pace of \
+open-source projects: issues under 1 month old are fresh (0-10), 1-3 months \
+is mildly stale (10-30), 3-6 months is moderately stale (30-60), and only \
+issues with no activity for 6+ months should score above 60.
 - duplicateness: 0 = unique, 100 = clearly a duplicate
 - complexity: 0 = trivial, 100 = extremely complex
 """

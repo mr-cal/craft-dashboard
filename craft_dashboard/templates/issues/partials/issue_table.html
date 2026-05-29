@@ -16,6 +16,15 @@
 } %}
 <div id="issue-table">
   <table role="grid" aria-label="Issues and pull requests">
+    <colgroup>
+      <col class="col-issue">
+      <col class="col-title">
+      <col class="col-author">
+      <col class="col-age">
+      {% for _ in active_scores %}<col class="col-score">{% endfor %}
+      <col class="col-action">
+      <col class="col-summary">
+    </colgroup>
     <thead>
       <tr>
         {% macro sort_header(label, field, tooltip="") %}
