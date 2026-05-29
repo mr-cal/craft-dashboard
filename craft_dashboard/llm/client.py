@@ -185,24 +185,29 @@ class LocalLLMClient:
     Retries on timeout/network errors only.
     """
 
-    def __init__(self, base_url: str = LOCAL_LLM_BASE_URL, api_key: str = "") -> None:
+    def __init__(self, base_url: str = LOCAL_LLM_BASE_URL, api_key: str = "", ca_cert: str = "") -> None:
         """Initialize the local LLM client.
 
         Args:
             base_url: Base URL for the OpenAI-compatible API endpoint.
                       Default: http://localhost:11434/v1
             api_key: Optional bearer token for servers that require authentication.
+            ca_cert: Path to a PEM CA certificate for verifying the server's TLS
+                     certificate. Required when base_url uses https:// with a
+                     self-signed cert. Leave empty to use the system CA bundle.
 
         """
         self.base_url = base_url
         self.api_key = api_key
+        self.ca_cert = ca_cert
         self._http: httpx.AsyncClient | None = None
 
     @property
     def http(self) -> httpx.AsyncClient:
         """Return a persistent HTTP client, creating one if needed."""
         if self._http is None or self._http.is_closed:
-            self._http = httpx.AsyncClient(timeout=120.0)
+            verify: bool | str = self.ca_cert if self.ca_cert else True
+            self._http = httpx.AsyncClient(timeout=120.0, verify=verify)
         return self._http
 
     async def close(self) -> None:
@@ -289,7 +294,9 @@ def create_llm_client(settings: Settings) -> OpenRouterClient | LocalLLMClient:
     """
     if settings.llm_backend == "local":
         return LocalLLMClient(
-            base_url=settings.local_llm_url, api_key=settings.local_llm_api_key
+            base_url=settings.local_llm_url,
+            api_key=settings.local_llm_api_key,
+            ca_cert=settings.local_llm_ca_cert,
         )
     if settings.llm_backend == "openrouter":
         return OpenRouterClient(api_key=settings.openrouter_api_key)

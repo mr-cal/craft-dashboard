@@ -282,9 +282,22 @@ To use a local LLM server instead of OpenRouter, set these in
 
 ```
 LLM_BACKEND=local
-LOCAL_LLM_URL=http://192.168.1.10:11434/v1
+LOCAL_LLM_URL=https://192.168.1.10:8443/v1
+LOCAL_LLM_API_KEY=your-bearer-token
 LOCAL_LLM_SUMMARY_MODEL=qwen2.5
 LOCAL_LLM_EVALUATION_MODEL=qwen2.5
+```
+
+If the server uses a self-signed TLS certificate (as set up by the
+[local-llm](https://github.com/mr-cal/local-llm) tool), copy the CA cert to the
+VM and set `LOCAL_LLM_CA_CERT`:
+
+```fish
+# Copy the cert from your local machine to the VM
+lxc file push ~/.config/local-llm/cert.pem $VM_NAME/opt/craft-dashboard/local-llm-cert.pem
+
+# Then add to provisioning/secrets.env:
+LOCAL_LLM_CA_CERT=/opt/craft-dashboard/local-llm-cert.pem
 ```
 
 Then re-deploy. The local server needs to be reachable from the VM/VPS.

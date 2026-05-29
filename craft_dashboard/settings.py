@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     local_llm_api_key: str = ""
     local_llm_summary_model: str = "llama3.2"
     local_llm_evaluation_model: str = "llama3.2"
+    # Path to a PEM CA cert for verifying the local LLM server's TLS certificate.
+    # Required when LOCAL_LLM_URL uses https:// with a self-signed cert.
+    local_llm_ca_cert: str = ""
 
     # OpenRouter model settings
     openrouter_summary_model: str = "google/gemini-2.5-flash-lite"

@@ -95,6 +95,18 @@ class TestLocalLLMClient:
 
         assert client.api_key == ""
 
+    def test_init_with_ca_cert(self) -> None:
+        """LocalLLMClient stores a CA cert path for self-signed TLS."""
+        client = LocalLLMClient(ca_cert="/etc/ssl/local-llm/cert.pem")
+
+        assert client.ca_cert == "/etc/ssl/local-llm/cert.pem"
+
+    def test_init_default_no_ca_cert(self) -> None:
+        """LocalLLMClient defaults to no CA cert (uses system CA bundle)."""
+        client = LocalLLMClient()
+
+        assert client.ca_cert == ""
+
 
 class TestCreateLLMClient:
     """Tests for the create_llm_client factory."""
@@ -128,6 +140,17 @@ class TestCreateLLMClient:
 
         assert isinstance(client, LocalLLMClient)
         assert client.api_key == "my-secret-token"
+
+    def test_local_backend_with_ca_cert(self, monkeypatch) -> None:
+        """create_llm_client passes the CA cert path to LocalLLMClient."""
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+        monkeypatch.setenv("LLM_BACKEND", "local")
+        monkeypatch.setenv("LOCAL_LLM_CA_CERT", "/etc/ssl/local-llm/cert.pem")
+
+        client = create_llm_client(Settings())
+
+        assert isinstance(client, LocalLLMClient)
+        assert client.ca_cert == "/etc/ssl/local-llm/cert.pem"
 
 
 class TestOpenRouterResponse:

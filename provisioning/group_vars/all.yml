@@ -36,6 +36,7 @@ app_env:
   LOCAL_LLM_API_KEY: "{{ lookup('env', 'LOCAL_LLM_API_KEY') | default('', true) }}"
   LOCAL_LLM_SUMMARY_MODEL: "{{ lookup('env', 'LOCAL_LLM_SUMMARY_MODEL') | default('llama3.2', true) }}"
   LOCAL_LLM_EVALUATION_MODEL: "{{ lookup('env', 'LOCAL_LLM_EVALUATION_MODEL') | default('llama3.2', true) }}"
+  LOCAL_LLM_CA_CERT: "{{ lookup('env', 'LOCAL_LLM_CA_CERT') | default('', true) }}"
   CRAFT_DASHBOARD_E2E: "{{ lookup('env', 'CRAFT_DASHBOARD_E2E') | default('0', true) }}"
 
 # Cron schedules (systemd timer OnCalendar format)
