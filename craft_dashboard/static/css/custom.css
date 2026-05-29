@@ -222,13 +222,12 @@ th a.is-active {
 /* Tooltip for column headers and action badges */
 [data-tooltip] {
   position: relative;
-  cursor: help;
 }
 
 [data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
-  bottom: 100%;
+  bottom: calc(100% + 4px);
   left: 50%;
   transform: translateX(-50%);
   background: #333;
@@ -237,18 +236,35 @@ th a.is-active {
   border-radius: 4px;
   font-size: 0.78rem;
   font-weight: 400;
+  line-height: 1.4;
   white-space: normal;
   width: max-content;
   max-width: 260px;
+  min-width: 120px;
   text-align: center;
-  z-index: 100;
+  z-index: 200;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.15s;
+  visibility: hidden;
+  transition: opacity 0.15s, visibility 0.15s;
 }
 
 [data-tooltip]:hover::after {
   opacity: 1;
+  visibility: visible;
+}
+
+/* Ensure table headers don't clip tooltips */
+table thead th {
+  overflow: visible;
+}
+
+table thead {
+  overflow: visible;
+}
+
+table {
+  overflow: visible;
 }
 
 .htmx-indicator {

@@ -50,9 +50,9 @@
       {% for issue in issues %}
       <tr>
         <td style="white-space:nowrap;">
-          <a href="{{ issue.url }}" target="_blank" rel="noopener">
-            {{ issue.project_name }}{% if issue.source == "launchpad" %}-lp{% endif %}#{{ issue.external_id }}
-          </a>
+          {{ issue.project_name }}{% if issue.source == "launchpad" %}-lp{% endif %}<br>
+          {{ "pr" if issue.issue_type == "pull_request" else "issue" }}
+          <a href="{{ issue.url }}" target="_blank" rel="noopener">#{{ issue.external_id }}</a>
         </td>
         <td>{{ issue.title|truncate(80) }}</td>
         <td>{{ issue.author or "unknown" }}</td>

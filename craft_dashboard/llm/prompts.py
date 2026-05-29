@@ -2,9 +2,10 @@
 
 _SUMMARY_SYSTEM = (
     "You are a concise technical writer. Write a single sentence of at most "
-    "256 characters summarising the current state of the following GitHub issue "
-    "or pull request. Include what it is about, how old it is, and its current "
-    "activity level. Do not include markdown formatting."
+    "256 characters summarising the following GitHub issue or pull request. "
+    "Focus on what it is about and its current state (e.g. under discussion, "
+    "waiting for review, stalled, has a proposed fix). "
+    "Do not include markdown formatting."
 )
 
 _EVALUATION_SYSTEM = """\

@@ -140,7 +140,11 @@ async def _query_issues(
     if source:
         query = query.where(Issue.source == source)
     if issue_type:
-        query = query.where(Issue.issue_type == issue_type)
+        type_list = [t.strip() for t in issue_type.split(",") if t.strip()]
+        if len(type_list) == 1:
+            query = query.where(Issue.issue_type == type_list[0])
+        elif type_list:
+            query = query.where(Issue.issue_type.in_(type_list))
     if action:
         action_list = [a.strip() for a in action.split(",") if a.strip()]
         if len(action_list) == 1:

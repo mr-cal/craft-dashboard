@@ -60,17 +60,29 @@
 
   <div class="filter-group">
     <label>Type</label>
-    <select name="type"
-            hx-get="/issues/table"
-            hx-target="#issue-table"
-            hx-swap="outerHTML"
-            hx-include=".filter-bar [name]"
-            hx-indicator="#loading-indicator"
-            hx-push-url="false">
-      <option value="">All Types</option>
-      <option value="issue" {% if filter_type == "issue" %}selected{% endif %}>Issues</option>
-      <option value="pull_request" {% if filter_type == "pull_request" %}selected{% endif %}>PRs</option>
-    </select>
+    <div class="multiselect" data-name="type" data-hidden="type-hidden">
+      <div class="multiselect__input-wrap" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-label="Select types">
+        <span class="multiselect__placeholder">All types</span>
+        <div class="multiselect__chips"></div>
+      </div>
+      <div class="multiselect__dropdown u-hide">
+        <div class="multiselect__options" role="listbox">
+          {% for val, label in [("issue", "Issues"), ("pull_request", "PRs")] %}
+          <label class="multiselect__option" role="option">
+            <input type="checkbox" value="{{ val }}" {% if val in (filter_type or "").split(",") and filter_type %}checked{% endif %} />
+            <span>{{ label }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    <input type="hidden" name="type" id="type-hidden" value="{{ filter_type or '' }}"
+           hx-get="/issues/table"
+           hx-target="#issue-table"
+           hx-swap="outerHTML"
+           hx-include=".filter-bar [name]"
+           hx-indicator="#loading-indicator"
+           hx-trigger="change" />
   </div>
 
   <div class="filter-group">

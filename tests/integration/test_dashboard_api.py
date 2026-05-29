@@ -237,7 +237,7 @@ class TestIssuesPageMarkup:
             if element["tag"] == "label" and _has_class(element, "multiselect__option")
         ]
 
-        assert len(input_wraps) == 5
+        assert len(input_wraps) == 6
         assert all(
             element["attrs"].get("role") == "combobox" for element in input_wraps
         )
@@ -252,8 +252,9 @@ class TestIssuesPageMarkup:
             "Select states",
             "Select actions",
             "Select score columns",
+            "Select types",
         }
-        assert len(option_lists) == 5
+        assert len(option_lists) == 6
         assert all(
             element["attrs"].get("role") == "listbox" for element in option_lists
         )
@@ -371,11 +372,11 @@ class TestIssueNumberSort:
         response = test_client.get("/issues", params={"sort": "number"})
         assert response.status_code == 200
         text = response.text
-        pos_1 = re.search(r"snapcraft#1(?!\\d)", text)
-        pos_2 = re.search(r"snapcraft#2(?!\\d)", text)
-        pos_3 = re.search(r"snapcraft#3(?!\\d)", text)
-        pos_10 = re.search(r"snapcraft#10(?!\\d)", text)
-        pos_20 = re.search(r"snapcraft#20(?!\\d)", text)
+        pos_1 = re.search(r"issue\s+<a[^>]*>#1\b", text)
+        pos_2 = re.search(r"issue\s+<a[^>]*>#2\b", text)
+        pos_3 = re.search(r"issue\s+<a[^>]*>#3\b", text)
+        pos_10 = re.search(r"issue\s+<a[^>]*>#10\b", text)
+        pos_20 = re.search(r"issue\s+<a[^>]*>#20\b", text)
         assert all(match is not None for match in (pos_1, pos_2, pos_3, pos_10, pos_20))
         assert (
             pos_1.start()
