@@ -4,9 +4,8 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import create_engine
-
 from craft_dashboard.models import Base
+from sqlalchemy import create_engine
 
 config = context.config
 if config.config_file_name is not None:
@@ -15,9 +14,7 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # Use synchronous URL for migrations (replace asyncpg with psycopg2)
-database_url = os.environ.get(
-    "DATABASE_URL", "postgresql://localhost/craft_dashboard"
-)
+database_url = os.environ.get("DATABASE_URL", "postgresql://localhost/craft_dashboard")
 sync_url = database_url.replace("+asyncpg", "")
 
 
@@ -40,7 +37,11 @@ def run_migrations_online() -> None:
     connectable = create_engine(sync_url)
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, transaction_per_migration=True)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            transaction_per_migration=True,
+        )
 
         with context.begin_transaction():
             context.run_migrations()
