@@ -1,5 +1,6 @@
 """Dashboard overview routes."""
 
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Request
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.project import Project
+from craft_dashboard.models.snapshot import Snapshot
 
 if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
@@ -43,6 +45,36 @@ async def index(
             Issue.state == "open", Issue.issue_type == "pull_request"
         )
     )
+
+    # Get the most recent aggregate snapshot
+    latest_snap = await session.execute(
+        select(Snapshot)
+        .join(Project, Snapshot.project_id == Project.id)
+        .where(Project.category == "aggregate")
+        .order_by(Snapshot.snapshot_date.desc())
+        .limit(1)
+    )
+    latest = latest_snap.scalar()
+
+    # Get the snapshot from ~30 days ago
+    thirty_days_ago = datetime.now(tz=UTC) - timedelta(days=30)
+    old_snap = await session.execute(
+        select(Snapshot)
+        .join(Project, Snapshot.project_id == Project.id)
+        .where(Project.category == "aggregate")
+        .where(Snapshot.snapshot_date <= thirty_days_ago)
+        .order_by(Snapshot.snapshot_date.desc())
+        .limit(1)
+    )
+    old = old_snap.scalar()
+
+    # Calculate changes
+    if latest and old:
+        issue_change = (latest.open_issues or 0) - (old.open_issues or 0)
+        pr_change = (latest.open_prs or 0) - (old.open_prs or 0)
+    else:
+        issue_change = None
+        pr_change = None
 
     # Per-project summary
     project_stats = await session.execute(
@@ -79,6 +111,8 @@ async def index(
             "project_count": project_count or 0,
             "open_issues": open_issues or 0,
             "open_prs": open_prs or 0,
+            "issue_change": issue_change,
+            "pr_change": pr_change,
             "projects": projects,
         },
     )

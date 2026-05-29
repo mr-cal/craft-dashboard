@@ -117,42 +117,8 @@ async def admin_page(
     """Render the admin dashboard page."""
     templates: Jinja2Templates = request.app.state.templates
 
-    from craft_dashboard.models.issue import Issue
-    from craft_dashboard.models.llm_evaluation import (
-        LLMEvaluation,
-    )
     from craft_dashboard.models.project import Project
     from craft_dashboard.models.refresh_schedule import RefreshSchedule
-
-    total_open = (
-        await session.scalar(
-            select(func.count()).select_from(Issue).where(Issue.state == "open")
-        )
-        or 0
-    )
-
-    evaluated_count = (
-        await session.scalar(
-            select(func.count(func.distinct(LLMEvaluation.issue_id)))
-            .select_from(LLMEvaluation)
-            .join(Issue, LLMEvaluation.issue_id == Issue.id)
-            .where(Issue.state == "open")
-            .where(LLMEvaluation.latest.is_(True))
-        )
-        or 0
-    )
-
-    result = await session.execute(
-        select(
-            LLMEvaluation.suggested_action,
-            func.count().label("count"),
-        )
-        .join(Issue, LLMEvaluation.issue_id == Issue.id)
-        .where(Issue.state == "open")
-        .where(LLMEvaluation.latest.is_(True))
-        .group_by(LLMEvaluation.suggested_action)
-    )
-    action_counts = {row.suggested_action: row.count for row in result}
 
     # Get project names
     project_result = await session.execute(select(Project.name).order_by(Project.name))
@@ -187,9 +153,6 @@ async def admin_page(
         request,
         "admin/index.html",
         {
-            "evaluated_count": evaluated_count,
-            "total_open": total_open,
-            "action_counts": action_counts,
             "project_names": project_names,
             "schedule_days": schedule_days,
         },
@@ -258,6 +221,36 @@ async def trigger_re_evaluation(
 
     logger.info("Admin: re-evaluation triggered with params: %s", params.model_dump())
 
+    if params.dry_run:
+        # Run synchronously to capture the count
+        import re
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        output = stdout.decode() if stdout else ""
+        # Parse the "DRY RUN: N issues would be evaluated" line from output
+        match = re.search(r"DRY RUN:\s*(\d+)\s*issues would be evaluated", output)
+        count = int(match.group(1)) if match else None
+
+        if count is not None:
+            return JSONResponse(
+                {
+                    "status": "dry_run_complete",
+                    "message": f"Dry run: {count} issues would be evaluated",
+                    "count": count,
+                }
+            )
+        # Fallback: show raw output
+        return JSONResponse(
+            {
+                "status": "dry_run_complete",
+                "message": "Dry run completed. Check logs for details.",
+            }
+        )
     # Run in background
     asyncio.create_task(
         asyncio.create_subprocess_exec(
@@ -278,8 +271,6 @@ async def trigger_re_evaluation(
         desc_parts.append("force")
     if params.incomplete:
         desc_parts.append("incomplete")
-    if params.dry_run:
-        desc_parts.append("dry_run")
     desc = ", ".join(desc_parts) or "all open issues"
 
     return JSONResponse(

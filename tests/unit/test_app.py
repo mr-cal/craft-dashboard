@@ -69,10 +69,13 @@ class TestCreateApp:
         app.router.lifespan_context = _noop_lifespan
 
         with patch("craft_dashboard.routes.dashboard.get_db_session"):
+            # Mock the result of execute() - use MagicMock not AsyncMock
+            mock_execute_result = MagicMock()
+            mock_execute_result.scalars.return_value.all.return_value = []
+            mock_execute_result.scalar.return_value = None  # For Snapshot queries
+
             mock_session = AsyncMock()
-            mock_result = AsyncMock()
-            mock_result.scalars.return_value.all.return_value = []
-            mock_session.execute.return_value = mock_result
+            mock_session.execute.return_value = mock_execute_result
             mock_session.scalar.return_value = 0
 
             async def fake_session():

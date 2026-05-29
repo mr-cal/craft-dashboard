@@ -1,8 +1,15 @@
 {% extends "base.html" %}
-{% macro stat_card(value, label) %}
+{% macro stat_card(value, label, change=None) %}
 <div class="col-4">
   <div class="p-card--highlighted" style="text-align:center;">
-    <p class="p-heading--2">{{ value }}</p>
+    <p class="p-heading--2">
+      {{ value }}
+      {% if change is not none %}
+      <span style="font-size:0.6em;color:{% if change > 0 %}#c7162b{% elif change < 0 %}#28a745{% else %}#666{% endif %};">
+        ({{ "+%d"|format(change) if change >= 0 else change }})
+      </span>
+      {% endif %}
+    </p>
     <p>{{ label }}</p>
   </div>
 </div>
@@ -13,8 +20,8 @@
 
 <div class="row" style="margin-bottom: 1.5rem;">
   {{ stat_card(project_count, "Projects") }}
-  {{ stat_card(open_issues, "Open Issues") }}
-  {{ stat_card(open_prs, "Open PRs") }}
+  {{ stat_card(open_issues, "Open Issues (30 day change)", issue_change) }}
+  {{ stat_card(open_prs, "Open PRs (30 day change)", pr_change) }}
 </div>
 
 {% set applications = projects | selectattr("category", "equalto", "application") | list %}

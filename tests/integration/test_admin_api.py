@@ -77,7 +77,7 @@ class TestAdminPageIntegration:
         response = client.get("/admin")
 
         assert response.status_code == 200
-        assert "No evaluations yet." in response.text
+        assert "Project Refresh Schedule" in response.text
 
 
 class TestAdminHealthIntegration:

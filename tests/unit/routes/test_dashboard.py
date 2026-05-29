@@ -3,7 +3,6 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
 
 import pytest
 from craft_dashboard.app import create_app
@@ -35,6 +34,33 @@ async def _noop_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
 
+class _EmptyResult:
+    def scalars(self):
+        return []
+
+    def scalar(self):
+        return None
+
+    def __iter__(self):
+        return iter(())
+
+
+class _DashboardSession:
+    """Mock session for dashboard tests."""
+
+    def __init__(self, counts=None):
+        self.counts = counts or [0, 0, 0]
+        self.count_idx = 0
+
+    async def scalar(self, _query):
+        val = self.counts[self.count_idx]
+        self.count_idx += 1
+        return val
+
+    async def execute(self, _query):
+        return _EmptyResult()
+
+
 class TestDashboardIndex:
     """Tests for the dashboard index route."""
 
@@ -43,12 +69,8 @@ class TestDashboardIndex:
         app = create_app()
         app.router.lifespan_context = _noop_lifespan
 
-        mock_session = AsyncMock()
-        mock_session.execute.return_value = []
-        mock_session.scalar.return_value = 0
-
         async def fake_session():
-            yield mock_session
+            yield _DashboardSession()
 
         app.dependency_overrides[get_db_session] = fake_session
 
@@ -64,12 +86,8 @@ class TestDashboardIndex:
         app = create_app()
         app.router.lifespan_context = _noop_lifespan
 
-        mock_session = AsyncMock()
-        mock_session.execute.return_value = []
-        mock_session.scalar.side_effect = [3, 7, 4]
-
         async def fake_session():
-            yield mock_session
+            yield _DashboardSession(counts=[3, 7, 4])
 
         app.dependency_overrides[get_db_session] = fake_session
 

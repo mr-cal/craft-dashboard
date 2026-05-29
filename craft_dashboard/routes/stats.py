@@ -10,6 +10,8 @@ from starlette.exceptions import HTTPException
 
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.dependency import Dependency
+from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.release import Release
 from craft_dashboard.models.snapshot import Snapshot
@@ -620,4 +622,53 @@ async def trends_chart_partial(
         request,
         "stats/partials/trend_chart.html",
         {"chart_data_json": json.dumps(chart_data), "project": project},
+    )
+
+
+@router.get("/triage", response_class=HTMLResponse)
+async def stats_triage(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    """Show LLM triage statistics."""
+    templates: Jinja2Templates = request.app.state.templates
+
+    total_open = (
+        await session.scalar(
+            select(func.count()).select_from(Issue).where(Issue.state == "open")
+        )
+        or 0
+    )
+
+    evaluated_count = (
+        await session.scalar(
+            select(func.count(func.distinct(LLMEvaluation.issue_id)))
+            .select_from(LLMEvaluation)
+            .join(Issue, LLMEvaluation.issue_id == Issue.id)
+            .where(Issue.state == "open")
+            .where(LLMEvaluation.latest.is_(True))
+        )
+        or 0
+    )
+
+    result = await session.execute(
+        select(
+            LLMEvaluation.suggested_action,
+            func.count().label("count"),
+        )
+        .join(Issue, LLMEvaluation.issue_id == Issue.id)
+        .where(Issue.state == "open")
+        .where(LLMEvaluation.latest.is_(True))
+        .group_by(LLMEvaluation.suggested_action)
+    )
+    action_counts = {row.suggested_action: row.count for row in result}
+
+    return templates.TemplateResponse(
+        request,
+        "stats/triage.html",
+        {
+            "evaluated_count": evaluated_count,
+            "total_open": total_open,
+            "action_counts": action_counts,
+        },
     )

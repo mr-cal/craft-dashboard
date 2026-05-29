@@ -3,34 +3,6 @@
 {% block content %}
 <h2>Admin</h2>
 
-<h3>LLM Triage Status</h3>
-<p>{{ evaluated_count }} of {{ total_open }} open issues and PRs have been evaluated by the LLM.</p>
-
-{% if action_counts %}
-<table>
-  <thead>
-    <tr>
-      <th>Suggested Action</th>
-      <th>Count</th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for action, count in action_counts.items() | sort %}
-    <tr>
-      <td><span class="action-badge">{{ action | replace("_", " ") }}</span></td>
-      <td>{{ count }}</td>
-      <td><a href="/issues?action={{ action }}">View</a></td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p>No evaluations yet. Run <code>scripts/run_llm.py</code> to triage open issues.</p>
-{% endif %}
-
-<hr class="p-rule" />
-
 <h3>Project Refresh Schedule (Next 7 Days)</h3>
 <p style="font-size:0.875rem;color:#666;">Number of projects scheduled for data collection each day.</p>
 <table>
