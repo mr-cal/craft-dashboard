@@ -31,6 +31,26 @@
 
 <hr class="p-rule" />
 
+<h3>Refresh Schedule (Next 7 Days)</h3>
+<table>
+  <thead>
+    <tr>
+      {% for day in schedule_days %}
+      <th {% if day.is_today %}style="font-weight: bold;"{% endif %}>{{ day.date }}</th>
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      {% for day in schedule_days %}
+      <td style="text-align:center;{% if day.is_today %}font-weight:bold;{% endif %}">{{ day.count }}</td>
+      {% endfor %}
+    </tr>
+  </tbody>
+</table>
+
+<hr class="p-rule" />
+
 <h3>Admin Actions</h3>
 <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
   <label for="admin-token" id="admin-token-label">Admin Token:</label>
@@ -40,18 +60,73 @@
   <small id="token-status"></small>
 </div>
 
-<div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-  <div style="flex: 1; min-width: 200px;">
-    <button class="p-button--positive" id="refresh-btn" onclick="triggerRefresh()">Refresh Data</button>
-    <div id="refresh-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
+<div style="display: flex; gap: 2rem; flex-wrap: wrap;">
+  <div style="flex: 1; min-width: 300px;">
+    <h4>Refresh Data</h4>
+    <div class="admin-form">
+      <div class="admin-form__row">
+        <label for="refresh-project">Project:</label>
+        <select id="refresh-project">
+          <option value="">All projects</option>
+          {% for proj in project_names %}
+          <option value="{{ proj }}">{{ proj }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="p-button--positive" id="refresh-btn" onclick="triggerRefresh()">Refresh Data</button>
+      <div id="refresh-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
+    </div>
   </div>
-  <div style="flex: 1; min-width: 200px;">
-    <button class="p-button--positive" id="evaluate-btn" onclick="triggerEvaluate()">Re-evaluate Issues</button>
-    <div id="evaluate-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
+
+  <div style="flex: 1; min-width: 300px;">
+    <h4>Re-evaluate Issues</h4>
+    <div class="admin-form">
+      <div class="admin-form__row">
+        <label for="eval-project">Project:</label>
+        <select id="eval-project">
+          <option value="">All projects</option>
+          {% for proj in project_names %}
+          <option value="{{ proj }}">{{ proj }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="admin-form__row">
+        <label for="eval-limit">Limit:</label>
+        <input type="number" id="eval-limit" value="0" min="0" placeholder="0 = unlimited" />
+      </div>
+      <div class="admin-form__row">
+        <label for="eval-stale-days">Stale days:</label>
+        <input type="number" id="eval-stale-days" value="0" min="0" placeholder="0 = disabled" />
+      </div>
+      <div class="admin-form__row">
+        <label>
+          <input type="checkbox" id="eval-force" /> Force (ignore content hash)
+        </label>
+      </div>
+      <div class="admin-form__row">
+        <label>
+          <input type="checkbox" id="eval-incomplete" /> Incomplete only (missing summary/scores)
+        </label>
+      </div>
+      <div class="admin-form__row">
+        <label>
+          <input type="checkbox" id="eval-open-only" checked /> Open issues only
+        </label>
+      </div>
+      <div style="display:flex;gap:0.5rem;">
+        <button class="p-button--positive" id="evaluate-btn" onclick="triggerEvaluate()">Run Evaluation</button>
+        <button class="p-button--neutral" id="dry-run-btn" onclick="triggerDryRun()">Dry Run</button>
+      </div>
+      <div id="evaluate-status" style="margin-top:0.5rem;font-size:0.875rem;"></div>
+    </div>
   </div>
-  <div style="flex: 1; min-width: 200px;">
-    <button class="p-button--neutral" id="distribute-btn" onclick="triggerDistribute()">Redistribute Schedule</button>
-    <div id="distribute-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
+
+  <div style="flex: 1; min-width: 300px;">
+    <h4>Schedule Management</h4>
+    <div class="admin-form">
+      <button class="p-button--neutral" id="distribute-btn" onclick="triggerDistribute()">Redistribute Schedule</button>
+      <div id="distribute-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
+    </div>
   </div>
 </div>
 
@@ -161,13 +236,89 @@ async function callEndpoint(endpoint, btnId, statusId, successMsg) {
 }
 
 function triggerRefresh() {
-  if (!confirm('Refresh all project data? This may take several minutes.')) return;
+  const project = document.getElementById('refresh-project').value;
+  const confirmMsg = project 
+    ? `Refresh data for project "${project}"? This may take several minutes.`
+    : 'Refresh all project data? This may take several minutes.';
+  if (!confirm(confirmMsg)) return;
   callEndpoint('/admin/refresh', 'refresh-btn', 'refresh-status', 'Refresh queued');
 }
 
-function triggerEvaluate() {
-  if (!confirm('Re-evaluate all open issues with LLM? This will consume API credits.')) return;
-  callEndpoint('/admin/re-evaluate', 'evaluate-btn', 'evaluate-status', 'Evaluation queued');
+function gatherEvalParams() {
+  return {
+    project: document.getElementById('eval-project').value,
+    limit: parseInt(document.getElementById('eval-limit').value) || 0,
+    stale_days: parseInt(document.getElementById('eval-stale-days').value) || 0,
+    force: document.getElementById('eval-force').checked,
+    incomplete: document.getElementById('eval-incomplete').checked,
+    open_only: document.getElementById('eval-open-only').checked,
+    dry_run: false,
+  };
+}
+
+async function triggerEvaluate() {
+  const params = gatherEvalParams();
+  const desc = [];
+  if (params.project) desc.push(`project: ${params.project}`);
+  if (params.limit > 0) desc.push(`limit: ${params.limit}`);
+  if (params.force) desc.push('force');
+  const confirmMsg = desc.length ? `Re-evaluate issues (${desc.join(', ')})?` : 'Re-evaluate all open issues?';
+  if (!confirm(confirmMsg + ' This will consume API credits.')) return;
+  
+  const btn = document.getElementById('evaluate-btn');
+  const statusDiv = document.getElementById('evaluate-status');
+  btn.disabled = true;
+  statusDiv.innerHTML = '<span style="color:gray;">Running...</span>';
+  
+  try {
+    const response = await fetch('/admin/re-evaluate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(params),
+    });
+    const data = await response.json();
+    if (response.ok) {
+      statusDiv.innerHTML = `<span style="color:green;">✓ ${data.message}</span>`;
+    } else {
+      if (response.status === 401) {
+        setAuthenticated(false);
+        setTokenStatus('✗ Authentication required', 'red');
+      }
+      statusDiv.innerHTML = `<span style="color:red;">✗ ${data.detail || 'Error'}</span>`;
+    }
+  } catch (error) {
+    statusDiv.innerHTML = `<span style="color:red;">✗ ${error.message}</span>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function triggerDryRun() {
+  const params = gatherEvalParams();
+  params.dry_run = true;
+  
+  const btn = document.getElementById('dry-run-btn');
+  const statusDiv = document.getElementById('evaluate-status');
+  btn.disabled = true;
+  statusDiv.innerHTML = '<span style="color:gray;">Checking...</span>';
+  
+  try {
+    const response = await fetch('/admin/re-evaluate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(params),
+    });
+    const data = await response.json();
+    if (response.ok) {
+      statusDiv.innerHTML = `<span style="color:blue;">ℹ ${data.message}</span>`;
+    } else {
+      statusDiv.innerHTML = `<span style="color:red;">✗ ${data.detail || 'Error'}</span>`;
+    }
+  } catch (error) {
+    statusDiv.innerHTML = `<span style="color:red;">✗ ${error.message}</span>`;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function triggerDistribute() {

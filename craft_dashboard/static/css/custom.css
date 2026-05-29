@@ -277,3 +277,24 @@ table {
 .htmx-request.htmx-indicator {
   display: inline-block;
 }
+
+.admin-form {
+  max-width: 480px;
+  margin-bottom: 1rem;
+}
+
+.admin-form__row {
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-form__row label {
+  min-width: 100px;
+}
+
+.admin-form__row input[type="number"],
+.admin-form__row select {
+  flex: 1;
+}

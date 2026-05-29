@@ -7,13 +7,13 @@ for the daily cron job. Use --backend local for a local LLM server.
 
 Usage:
     uv run scripts/run_llm.py                          # all issues, openrouter
-    uv run scripts/run_llm.py --backend local          # all issues, local LLM server
     uv run scripts/run_llm.py --open-only              # open issues only (cron mode)
-    uv run scripts/run_llm.py --project snapcraft
-    uv run scripts/run_llm.py --limit 100
     uv run scripts/run_llm.py --force                  # re-evaluate all (ignore hash)
     uv run scripts/run_llm.py --issue charmcraft#2687  # specific issue (implies --force)
-    uv run scripts/run_llm.py --issue "charmcraft#100-200,snapcraft#50"
+    uv run scripts/run_llm.py --incomplete             # only issues with missing data
+    uv run scripts/run_llm.py --stale-days 30          # issues not evaluated in 30 days
+    uv run scripts/run_llm.py --dry-run                # show count without evaluating
+    uv run scripts/run_llm.py --dry-run --stale-days 7 # see how many are stale
 
 Environment variables:
     DATABASE_URL: PostgreSQL connection URL
@@ -48,7 +48,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def _evaluate_issues(
+async def _evaluate_issues(  # noqa: PLR0913
     session_factory,
     evaluator: IssueEvaluator,
     maintainers: set[str],
@@ -57,6 +57,9 @@ async def _evaluate_issues(
     open_only: bool = False,
     force: bool = False,
     issue_filters: list[tuple[str, int, int]] | None = None,
+    incomplete: bool = False,
+    stale_days: int = 0,
+    dry_run: bool = False,
 ) -> dict[str, int]:
     """Evaluate issues/PRs that need re-evaluation.
 
@@ -72,6 +75,9 @@ async def _evaluate_issues(
         open_only: If True, only evaluate open issues.
         force: If True, re-evaluate all matched issues (ignore content hash).
         issue_filters: Optional list of (project_name, min_id, max_id) tuples for --issue filtering.
+        incomplete: If True, only evaluate issues with incomplete LLM data.
+        stale_days: Only evaluate issues older than N days (0 = disabled).
+        dry_run: If True, show count without evaluating.
 
     Returns:
         Stats dict with evaluated, skipped, errored counts.
@@ -84,7 +90,7 @@ async def _evaluate_issues(
     from craft_dashboard.models.project import (
         Project,
     )
-    from sqlalchemy import select
+    from sqlalchemy import or_, select
     from sqlalchemy.dialects.postgresql import insert
 
     stats = {"evaluated": 0, "skipped": 0, "errored": 0, "total_tokens": 0}
@@ -111,7 +117,7 @@ async def _evaluate_issues(
 
         # Apply --issue filters if specified
         if issue_filters:
-            from sqlalchemy import Integer, and_, cast, or_
+            from sqlalchemy import Integer, and_, cast
 
             conditions = []
             for project_name, min_id, max_id in issue_filters:
@@ -126,10 +132,49 @@ async def _evaluate_issues(
                 )
             query = query.where(or_(*conditions))
 
+        # Apply --incomplete filter
+        if incomplete:
+            query = query.where(
+                or_(
+                    LLMEvaluation.issue_id.is_(None),  # never evaluated
+                    LLMEvaluation.summary.is_(None),
+                    LLMEvaluation.summary == "",
+                    LLMEvaluation.suggested_action.is_(None),
+                    LLMEvaluation.suggested_action == "",
+                    LLMEvaluation.scores.is_(None),
+                )
+            )
+
+        # Apply --stale-days filter
+        if stale_days > 0:
+            from datetime import timedelta
+
+            cutoff = datetime.now(tz=UTC) - timedelta(days=stale_days)
+            query = query.where(
+                or_(
+                    LLMEvaluation.issue_id.is_(None),  # never evaluated
+                    LLMEvaluation.evaluated_at < cutoff,
+                )
+            )
+
         result = await session.execute(query)
         rows = result.all()
 
-    for row in rows:
+    # Dry-run: show count and exit
+    if dry_run:
+        logger.info("DRY RUN: %d issues would be evaluated", len(rows))
+        return {
+            "evaluated": 0,
+            "skipped": 0,
+            "errored": 0,
+            "total_tokens": 0,
+            "would_evaluate": len(rows),
+        }
+
+    total_to_eval = len(rows)
+    logger.info("Starting evaluation of %d issues", total_to_eval)
+
+    for idx, row in enumerate(rows):
         issue = row[0]
         # If --force is used, pass None to skip hash check
         existing_hash = None if force else row.issue_data_hash
@@ -155,7 +200,13 @@ async def _evaluate_issues(
 
         project_name = row.project_name
         issue_ref = f"{project_name}#{issue.external_id}"
-        logger.info("Evaluating %s: %s", issue_ref, issue.title[:60])
+        logger.info(
+            "[%d/%d] Evaluating %s: %s",
+            idx + 1,
+            total_to_eval,
+            issue_ref,
+            issue.title[:60],
+        )
 
         try:
             result = await evaluator.evaluate_issue(
@@ -225,12 +276,13 @@ async def _evaluate_issues(
         stats["evaluated"] += 1
         stats["total_tokens"] += result["tokens_used"]
         logger.info(
-            "Evaluated %s (%s, %d tokens): %s\n  Summary: %s",
+            "[%d/%d] Evaluated %s (%s, %d tokens): %s",
+            stats["evaluated"],
+            total_to_eval,
             issue_ref,
             result["suggested_action"],
             result["tokens_used"],
             issue.title[:60],
-            result["summary"],
         )
 
         # Check limit after successful evaluation (not after skips)
@@ -292,7 +344,7 @@ def _parse_issue_filter(issue_spec: str) -> list[tuple[str, int, int]]:
     return filters
 
 
-async def _main(
+async def _main(  # noqa: PLR0913
     project: str,
     limit: int,
     backend: str,
@@ -300,6 +352,9 @@ async def _main(
     verbose: bool,
     force: bool,
     issue: str,
+    incomplete: bool,
+    stale_days: int,
+    dry_run: bool,
 ) -> None:
     """Run LLM evaluation."""
     settings = Settings()
@@ -350,6 +405,10 @@ async def _main(
         force = True
         logger.info("Filtering to specific issues (force=True): %s", issue_filters)
 
+    # Imply --force when --incomplete or --stale-days is used
+    if incomplete or stale_days > 0:
+        force = True
+
     logger.info(
         "Using %s backend (summary=%s, eval=%s, open_only=%s, force=%s)",
         settings.llm_backend,
@@ -369,6 +428,9 @@ async def _main(
             open_only=open_only,
             force=force,
             issue_filters=issue_filters,
+            incomplete=incomplete,
+            stale_days=stale_days,
+            dry_run=dry_run,
         )
         logger.info(
             "Evaluation complete: %d evaluated, %d skipped, %d errors, %d total tokens",
@@ -414,7 +476,25 @@ async def _main(
     default="",
     help="Evaluate specific issues (e.g., charmcraft#2687,snapcraft#100-200). Implies --force.",
 )
-def main(
+@click.option(
+    "--incomplete",
+    is_flag=True,
+    default=False,
+    help="Only evaluate issues with incomplete LLM data (missing summary, action, or scores).",
+)
+@click.option(
+    "--stale-days",
+    default=0,
+    type=int,
+    help="Only evaluate issues whose LLM evaluation is older than N days (0=disabled).",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Show how many issues would be evaluated without actually running.",
+)
+def main(  # noqa: PLR0913
     project: str,
     limit: int,
     backend: str,
@@ -422,6 +502,9 @@ def main(
     verbose: bool,
     force: bool,
     issue: str,
+    incomplete: bool,
+    stale_days: int,
+    dry_run: bool,
 ) -> None:
     """Run LLM evaluation on issues and PRs.
 
@@ -433,7 +516,20 @@ def main(
     Use --force to re-evaluate all matched issues even if content hasn't changed.
     Use --issue to evaluate specific issues by reference (implies --force).
     """
-    asyncio.run(_main(project, limit, backend, open_only, verbose, force, issue))
+    asyncio.run(
+        _main(
+            project,
+            limit,
+            backend,
+            open_only,
+            verbose,
+            force,
+            issue,
+            incomplete,
+            stale_days,
+            dry_run,
+        )
+    )
 
 
 if __name__ == "__main__":

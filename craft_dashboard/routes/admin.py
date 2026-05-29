@@ -3,8 +3,10 @@
 import asyncio
 import html
 import logging
+import pathlib
+import sys
 import urllib.parse
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Header, Request
@@ -41,6 +43,18 @@ class AdminAuthRequest(BaseModel):
     """Request model for admin cookie authentication."""
 
     token: str
+
+
+class ReEvaluateRequest(BaseModel):
+    """Request model for re-evaluation parameters."""
+
+    project: str = ""
+    limit: int = 0
+    stale_days: int = 0
+    force: bool = False
+    incomplete: bool = False
+    open_only: bool = True
+    dry_run: bool = False
 
 
 def _get_admin_token(request: Request) -> str:
@@ -107,6 +121,8 @@ async def admin_page(
     from craft_dashboard.models.llm_evaluation import (
         LLMEvaluation,
     )
+    from craft_dashboard.models.project import Project
+    from craft_dashboard.models.refresh_schedule import RefreshSchedule
 
     total_open = (
         await session.scalar(
@@ -138,6 +154,35 @@ async def admin_page(
     )
     action_counts = {row.suggested_action: row.count for row in result}
 
+    # Get project names
+    project_result = await session.execute(select(Project.name).order_by(Project.name))
+    project_names = [row[0] for row in project_result]
+
+    # Get 7-day schedule
+    now = datetime.now(UTC)
+    schedule_days = []
+    for day_offset in range(7):
+        day_start = (now + timedelta(days=day_offset)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        day_end = day_start + timedelta(days=1)
+        count_result = (
+            await session.scalar(
+                select(func.count())
+                .select_from(RefreshSchedule)
+                .where(RefreshSchedule.next_refresh_at >= day_start)
+                .where(RefreshSchedule.next_refresh_at < day_end)
+            )
+            or 0
+        )
+        schedule_days.append(
+            {
+                "date": day_start.strftime("%a %b %d"),
+                "count": count_result,
+                "is_today": day_offset == 0,
+            }
+        )
+
     return templates.TemplateResponse(
         request,
         "admin/index.html",
@@ -145,6 +190,8 @@ async def admin_page(
             "evaluated_count": evaluated_count,
             "total_open": total_open,
             "action_counts": action_counts,
+            "project_names": project_names,
+            "schedule_days": schedule_days,
         },
     )
 
@@ -172,21 +219,73 @@ async def trigger_refresh(
 @router.post("/re-evaluate")
 async def trigger_re_evaluation(
     request: Request,
+    body: ReEvaluateRequest | None = None,
     authorization: str = Header(default=""),
     _session: AsyncSession = Depends(get_db_session),
 ) -> JSONResponse:
-    """Trigger LLM re-evaluation of all open issues.
+    """Trigger LLM re-evaluation of issues with optional parameters.
 
     Requires admin authentication via Bearer token.
     """
     _require_admin_auth(request, authorization)
     _verify_origin(request)
-    logger.info("Admin: re-evaluation queued")
+
+    params = body or ReEvaluateRequest()
+
+    # Build command for run_llm.py
+    cmd = [
+        sys.executable,
+        str(
+            pathlib.Path(__file__).resolve().parent.parent.parent  # noqa: ASYNC240
+            / "scripts"
+            / "run_llm.py"
+        ),
+    ]
+    if params.project:
+        cmd.extend(["--project", params.project])
+    if params.limit > 0:
+        cmd.extend(["--limit", str(params.limit)])
+    if params.stale_days > 0:
+        cmd.extend(["--stale-days", str(params.stale_days)])
+    if params.force:
+        cmd.append("--force")
+    if params.incomplete:
+        cmd.append("--incomplete")
+    if params.open_only:
+        cmd.append("--open-only")
+    if params.dry_run:
+        cmd.append("--dry-run")
+
+    logger.info("Admin: re-evaluation triggered with params: %s", params.model_dump())
+
+    # Run in background
+    asyncio.create_task(
+        asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    )
+
+    desc_parts = []
+    if params.project:
+        desc_parts.append(f"project={params.project}")
+    if params.limit > 0:
+        desc_parts.append(f"limit={params.limit}")
+    if params.stale_days > 0:
+        desc_parts.append(f"stale_days={params.stale_days}")
+    if params.force:
+        desc_parts.append("force")
+    if params.incomplete:
+        desc_parts.append("incomplete")
+    if params.dry_run:
+        desc_parts.append("dry_run")
+    desc = ", ".join(desc_parts) or "all open issues"
 
     return JSONResponse(
         {
             "status": "evaluation_queued",
-            "message": "LLM re-evaluation has been queued.",
+            "message": f"LLM re-evaluation queued: {desc}",
         },
         status_code=202,
     )

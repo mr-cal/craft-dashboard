@@ -198,7 +198,7 @@ class TestAdminRefreshWithAuth:
                 )
 
         assert response.status_code == 202
-        assert "Admin: re-evaluation queued" in caplog.text
+        assert "Admin: re-evaluation triggered with params:" in caplog.text
 
 
 class TestAdminDistribute:
