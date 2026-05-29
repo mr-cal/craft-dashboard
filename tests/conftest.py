@@ -1,5 +1,6 @@
 """Shared test fixtures for craft-dashboard."""
 
+import os
 import pathlib
 
 import craft_dashboard
@@ -13,6 +14,18 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Skip e2e tests unless CRAFT_DASHBOARD_E2E=1 is set."""
+    if os.environ.get("CRAFT_DASHBOARD_E2E") == "1":
+        return
+    skip_e2e = pytest.mark.skip(
+        reason="set CRAFT_DASHBOARD_E2E=1 to run end-to-end tests"
+    )
+    for item in items:
+        if item.get_closest_marker("e2e"):
+            item.add_marker(skip_e2e)
 
 
 @pytest.fixture

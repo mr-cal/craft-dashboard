@@ -67,7 +67,9 @@ def _get_vm_ip(name: str) -> str | None:
         vms = json.loads(output)
         for vm in vms:
             if vm["name"] == name:
-                for net_name, net in vm.get("state", {}).get("network", {}).items():
+                state = vm.get("state") or {}
+                network = state.get("network") or {}
+                for net_name, net in network.items():
                     if net_name == "lo":
                         continue
                     for addr in net.get("addresses", []):
