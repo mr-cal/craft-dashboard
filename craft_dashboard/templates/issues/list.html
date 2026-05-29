@@ -121,7 +121,7 @@
       </div>
       <div class="multiselect__dropdown u-hide">
         <div class="multiselect__options" role="listbox">
-          {% for act in ["close_stale", "close_duplicate", "close_not_a_bug", "close_outdated", "needs_triage", "needs_review", "needs_rebase", "keep_open"] %}
+          {% for act in ["close_stale", "close_duplicate", "close_not_a_bug", "close_outdated", "needs_triage", "needs_review", "keep_open"] %}
           <label class="multiselect__option" role="option">
             <input type="checkbox" value="{{ act }}" {% if act in (filter_action or "").split(",") and filter_action %}checked{% endif %} />
             <span>{{ act|replace("_", " ")|title }}</span>

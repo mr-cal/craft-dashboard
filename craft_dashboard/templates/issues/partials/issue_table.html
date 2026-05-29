@@ -15,35 +15,39 @@
   "readiness": "Readiness",
 } %}
 <div id="issue-table">
-  <table>
+  <table role="grid" aria-label="Issues and pull requests">
     <thead>
       <tr>
         {% macro sort_header(label, field, tooltip="") %}
-        <th {% if tooltip %}data-tooltip="{{ tooltip }}"{% endif %}>
+        {% set is_asc = sort_by == field %}
+        {% set is_desc = sort_by == ("-" ~ field) %}
+        <th {% if tooltip %}data-tooltip="{{ tooltip }}" tabindex="0"{% endif %}
+            {% if is_asc %}aria-sort="ascending"{% elif is_desc %}aria-sort="descending"{% else %}aria-sort="none"{% endif %}>
           <a href="#"
              hx-get="/issues/table"
              hx-target="#issue-table"
              hx-swap="outerHTML"
              hx-include=".filter-bar [name]:not([name='sort'])"
-             hx-vals='{"sort": "{{ ("-" ~ field) if sort_by == field else field }}"}'
+             hx-vals='{"sort": "{{ ("-" ~ field) if is_asc else field }}"}'
              hx-indicator="#loading-indicator"
              hx-push-url="false"
-             class="{% if sort_by == field or sort_by == '-' ~ field %}is-active{% endif %}"
+             class="{% if is_asc or is_desc %}is-active{% endif %}"
+             aria-label="Sort by {{ label }}"
              style="text-decoration:none;color:inherit;cursor:pointer;">
             {{ label }}
-            {% if sort_by == field %} &#8593;{% elif sort_by == "-" ~ field %} &#8595;{% endif %}
+            {% if is_asc %} &#8593;{% elif is_desc %} &#8595;{% endif %}
           </a>
         </th>
         {% endmacro %}
-        {{ sort_header("Issue", "number", "Project and issue/PR number") }}
-        {{ sort_header("Title", "title", "Issue or pull request title") }}
-        {{ sort_header("Author", "author", "Who created this issue or PR") }}
-        {{ sort_header("Age", "age", "Days since this issue or PR was created") }}
+        {{ sort_header("Issue", "number") }}
+        {{ sort_header("Title", "title") }}
+        {{ sort_header("Author", "author") }}
+        {{ sort_header("Age", "age") }}
         {% for score_key in active_scores %}
         {{ sort_header(score_labels.get(score_key, score_key), score_key, score_tooltips.get(score_key, "")) }}
         {% endfor %}
-        <th data-tooltip="LLM-suggested next action for this issue">Action</th>
-        <th data-tooltip="LLM-generated summary of the current state">Summary</th>
+        <th>Action</th>
+        <th>Summary</th>
       </tr>
     </thead>
     <tbody>
@@ -71,7 +75,7 @@
         {% endfor %}
         <td>
           {% if issue.suggested_action %}
-          <span class="action-badge" {% if issue.suggested_action_reason %}data-tooltip="{{ issue.suggested_action_reason }}"{% endif %}>{{ issue.suggested_action|replace("_", " ") }}</span>
+          <span class="action-badge" aria-label="Suggested action: {{ issue.suggested_action|replace('_', ' ') }}">{{ issue.suggested_action|replace("_", " ") }}</span>
           {% endif %}
         </td>
         <td>{{ (issue.summary or "")|truncate(280) }}</td>

@@ -256,7 +256,6 @@ _ACTIONS = [
     "keep_open",
     "needs_review",
     "close_duplicate",
-    "needs_rebase",
     "close_outdated",
     "close_not_a_bug",
 ]

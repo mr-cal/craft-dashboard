@@ -219,7 +219,7 @@ th a.is-active {
   color: #0066cc !important;
 }
 
-/* Tooltip for column headers and action badges */
+/* Tooltip for score column headers */
 [data-tooltip] {
   position: relative;
 }
@@ -238,6 +238,7 @@ th a.is-active {
   font-weight: 400;
   line-height: 1.4;
   white-space: normal;
+  text-transform: none;
   width: max-content;
   max-width: 260px;
   min-width: 120px;
@@ -249,7 +250,8 @@ th a.is-active {
   transition: opacity 0.15s, visibility 0.15s;
 }
 
-[data-tooltip]:hover::after {
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-within::after {
   opacity: 1;
   visibility: visible;
 }

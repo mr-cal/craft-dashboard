@@ -2,7 +2,8 @@
 {# Expects: score_value (int 0-100), score_name (str) #}
 {% if score_value is not none %}
 <span class="score-badge {% if score_value >= 70 %}score-high{% elif score_value >= 40 %}score-medium{% else %}score-low{% endif %}"
-      title="{{ score_name }}: {{ score_value }}/100">
+      title="{{ score_name }}: {{ score_value }}/100"
+      aria-label="{{ score_name }}: {{ score_value }} out of 100">
   {{ score_value }}
 </span>
 {% endif %}

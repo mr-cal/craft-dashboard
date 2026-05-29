@@ -21,7 +21,7 @@ Respond with valid JSON matching this schema:
     <additional scores based on type>
   },
   "suggested_action": "<one of: close_stale, close_duplicate, close_not_a_bug, \
-close_outdated, needs_triage, needs_review, needs_rebase, keep_open>",
+close_outdated, needs_triage, needs_review, keep_open>",
   "suggested_action_reason": "<brief explanation for the suggested action>"
 }
 

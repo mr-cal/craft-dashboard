@@ -165,12 +165,11 @@ class IssueEvaluator:
             comments=comments,
         )
         # Allow enough tokens for thinking models (e.g. Qwen3) to reason
-        # before producing the actual summary. 512 was too low — the thinking
-        # block alone can exhaust it, leaving no tokens for the summary itself.
+        # before producing the actual summary.
         response = await self.client.chat(
             model=self.summary_model,
             messages=summary_messages,
-            max_tokens=2048,
+            max_tokens=4096,
         )
         # Strip <think>...</think> reasoning blocks emitted by thinking models.
         content = re.sub(
@@ -215,7 +214,7 @@ class IssueEvaluator:
         response = await self.client.chat(
             model=self.evaluation_model,
             messages=eval_messages,
-            max_tokens=2048,
+            max_tokens=4096,
             response_format={"type": "json_object"},
         )
         parsed = _parse_evaluation_response(response.content)
