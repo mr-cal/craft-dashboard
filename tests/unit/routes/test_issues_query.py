@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.routes.issues import (
     _apply_author_role_filter,
@@ -701,3 +702,279 @@ class TestQueryIssuesIssueType:
 
         assert len(issues) == 1
         assert [issue["issue_type"] for issue in issues] == ["pull_request"]
+
+
+async def _seed_issues_with_scores(session) -> None:
+    """Seed issues with LLM evaluation scores for testing."""
+    project = Project(
+        name="snapcraft", category="app", github_org="canonical", display_order=1
+    )
+    session.add(project)
+    await session.flush()
+
+    now = datetime(2025, 1, 31, 12, 0, tzinfo=UTC)
+
+    # Issue with high staleness, low readiness
+    issue_stale = Issue(
+        project_id=project.id,
+        source="github",
+        external_id="100",
+        issue_type="issue",
+        title="Stale issue",
+        body="body",
+        state="open",
+        author="alice",
+        author_is_maintainer=False,
+        author_is_bot=False,
+        labels=[],
+        created_at=now - timedelta(days=30),
+        updated_at=now - timedelta(days=30),
+        closed_at=None,
+        url="https://example.test/issues/100",
+        metadata_={},
+        comments=[],
+        last_fetched_at=now,
+    )
+    session.add(issue_stale)
+    await session.flush()
+
+    eval_stale = LLMEvaluation(
+        issue_id=issue_stale.id,
+        model_name="test-model",
+        summary="Very stale issue",
+        suggested_action="close",
+        suggested_action_reason="No activity",
+        scores={
+            "staleness": 0.95,
+            "duplicateness": 0.1,
+            "complexity": 0.3,
+            "support_request": 0.2,
+            "readiness": 0.2,
+        },
+        latest=True,
+    )
+    session.add(eval_stale)
+
+    # Issue with low staleness, high readiness
+    issue_ready = Issue(
+        project_id=project.id,
+        source="github",
+        external_id="101",
+        issue_type="issue",
+        title="Ready issue",
+        body="body",
+        state="open",
+        author="bob",
+        author_is_maintainer=False,
+        author_is_bot=False,
+        labels=[],
+        created_at=now - timedelta(days=1),
+        updated_at=now - timedelta(hours=1),
+        closed_at=None,
+        url="https://example.test/issues/101",
+        metadata_={},
+        comments=[],
+        last_fetched_at=now,
+    )
+    session.add(issue_ready)
+    await session.flush()
+
+    eval_ready = LLMEvaluation(
+        issue_id=issue_ready.id,
+        model_name="test-model",
+        summary="Ready to work on",
+        suggested_action="work",
+        suggested_action_reason="Good first issue",
+        scores={
+            "staleness": 0.1,
+            "duplicateness": 0.05,
+            "complexity": 0.2,
+            "support_request": 0.05,
+            "readiness": 0.9,
+        },
+        latest=True,
+    )
+    session.add(eval_ready)
+
+    # Issue with high complexity
+    issue_complex = Issue(
+        project_id=project.id,
+        source="github",
+        external_id="102",
+        issue_type="issue",
+        title="Complex issue",
+        body="body",
+        state="open",
+        author="carol",
+        author_is_maintainer=False,
+        author_is_bot=False,
+        labels=[],
+        created_at=now - timedelta(days=5),
+        updated_at=now - timedelta(days=2),
+        closed_at=None,
+        url="https://example.test/issues/102",
+        metadata_={},
+        comments=[],
+        last_fetched_at=now,
+    )
+    session.add(issue_complex)
+    await session.flush()
+
+    eval_complex = LLMEvaluation(
+        issue_id=issue_complex.id,
+        model_name="test-model",
+        summary="Complex architecture change",
+        suggested_action="investigate",
+        suggested_action_reason="Requires deep analysis",
+        scores={
+            "staleness": 0.4,
+            "duplicateness": 0.15,
+            "complexity": 0.95,
+            "support_request": 0.1,
+            "readiness": 0.5,
+        },
+        latest=True,
+    )
+    session.add(eval_complex)
+
+    # Issue without scores (no LLM evaluation)
+    issue_no_scores = Issue(
+        project_id=project.id,
+        source="github",
+        external_id="103",
+        issue_type="issue",
+        title="Unscored issue",
+        body="body",
+        state="open",
+        author="dave",
+        author_is_maintainer=False,
+        author_is_bot=False,
+        labels=[],
+        created_at=now - timedelta(days=3),
+        updated_at=now - timedelta(days=1),
+        closed_at=None,
+        url="https://example.test/issues/103",
+        metadata_={},
+        comments=[],
+        last_fetched_at=now,
+    )
+    session.add(issue_no_scores)
+
+    await session.commit()
+
+
+class TestQueryIssuesLLMScores:
+    """Test that _query_issues properly returns all LLM score fields."""
+
+    async def test_query_returns_all_score_fields(self, test_db_session) -> None:
+        """_query_issues should return all LLM score fields for issues."""
+        await _seed_issues_with_scores(test_db_session)
+
+        issues, _ = await _query_issues(test_db_session, sort_by="staleness")
+
+        # Find the issue with scores
+        scored_issue = next(
+            (issue for issue in issues if issue["external_id"] == "100"), None
+        )
+        assert scored_issue is not None
+
+        # Verify all score fields are present
+        assert "staleness" in scored_issue
+        assert "duplicateness" in scored_issue
+        assert "complexity" in scored_issue
+        assert "support_request" in scored_issue
+        assert "readiness" in scored_issue
+        assert "suggested_action" in scored_issue
+        assert "suggested_action_reason" in scored_issue
+
+        # Verify score values
+        assert scored_issue["staleness"] == 0.95
+        assert scored_issue["duplicateness"] == 0.1
+        assert scored_issue["complexity"] == 0.3
+        assert scored_issue["support_request"] == 0.2
+        assert scored_issue["readiness"] == 0.2
+        assert scored_issue["suggested_action"] == "close"
+        assert scored_issue["suggested_action_reason"] == "No activity"
+
+    async def test_query_handles_missing_scores(self, test_db_session) -> None:
+        """_query_issues should handle issues without LLM evaluations."""
+        await _seed_issues_with_scores(test_db_session)
+
+        issues, _ = await _query_issues(test_db_session, sort_by="title")
+
+        # Find the issue without scores
+        unscored_issue = next(
+            (issue for issue in issues if issue["external_id"] == "103"), None
+        )
+        assert unscored_issue is not None
+
+        # Verify score fields are None
+        assert unscored_issue["staleness"] is None
+        assert unscored_issue["duplicateness"] is None
+        assert unscored_issue["complexity"] is None
+        assert unscored_issue["support_request"] is None
+        assert unscored_issue["readiness"] is None
+        assert unscored_issue["suggested_action"] is None
+        assert unscored_issue["suggested_action_reason"] is None
+
+    async def test_sort_by_staleness_score(self, test_db_session) -> None:
+        """Sort by staleness should order by staleness score descending."""
+        await _seed_issues_with_scores(test_db_session)
+
+        issues, _ = await _query_issues(test_db_session, sort_by="staleness")
+
+        # First issue should be the one with highest staleness
+        assert issues[0]["external_id"] == "100"
+        assert issues[0]["staleness"] == 0.95
+
+    async def test_sort_by_readiness_score(self, test_db_session) -> None:
+        """Sort by readiness should order by readiness score descending."""
+        await _seed_issues_with_scores(test_db_session)
+
+        issues, _ = await _query_issues(test_db_session, sort_by="readiness")
+
+        # First issue should be the one with highest readiness
+        assert issues[0]["external_id"] == "101"
+        assert issues[0]["readiness"] == 0.9
+
+    async def test_sort_by_complexity_score(self, test_db_session) -> None:
+        """Sort by complexity should order by complexity score descending."""
+        await _seed_issues_with_scores(test_db_session)
+
+        issues, _ = await _query_issues(test_db_session, sort_by="complexity")
+
+        # First issue should be the one with highest complexity
+        assert issues[0]["external_id"] == "102"
+        assert issues[0]["complexity"] == 0.95
+
+    async def test_sort_by_duplicateness_score(self, test_db_session) -> None:
+        """Sort by duplicateness should order by duplicateness score descending."""
+        await _seed_issues_with_scores(test_db_session)
+
+        issues, _ = await _query_issues(test_db_session, sort_by="duplicateness")
+
+        # First issue should be the one with highest duplicateness
+        assert issues[0]["external_id"] == "102"
+        assert issues[0]["duplicateness"] == 0.15
+
+    async def test_sort_by_support_request_score(self, test_db_session) -> None:
+        """Sort by support_request should order by support_request score descending."""
+        await _seed_issues_with_scores(test_db_session)
+
+        issues, _ = await _query_issues(test_db_session, sort_by="support_request")
+
+        # First issue should be the one with highest support_request
+        assert issues[0]["external_id"] == "100"
+        assert issues[0]["support_request"] == 0.2
+
+    async def test_reverse_sort_by_readiness_score(self, test_db_session) -> None:
+        """Reverse sort by readiness should order by readiness score ascending."""
+        await _seed_issues_with_scores(test_db_session)
+
+        issues, _ = await _query_issues(test_db_session, sort_by="-readiness")
+
+        # Last scored issue should be the one with highest readiness
+        # (issues with no scores come first with 0)
+        scored_issues = [i for i in issues if i["readiness"] is not None]
+        assert scored_issues[-1]["external_id"] == "101"
+        assert scored_issues[-1]["readiness"] == 0.9
