@@ -54,7 +54,7 @@
           <span class="action-badge">{{ issue.suggested_action|replace("_", " ") }}</span>
           {% endif %}
         </td>
-        <td>{{ (issue.summary or "")|truncate(120) }}</td>
+        <td>{{ (issue.summary or "")|truncate(280) }}</td>
       </tr>
       {% else %}
       <tr>

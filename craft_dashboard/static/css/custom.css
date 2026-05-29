@@ -219,6 +219,38 @@ th a.is-active {
   color: #0066cc !important;
 }
 
+/* Tooltip for column headers and action badges */
+[data-tooltip] {
+  position: relative;
+  cursor: help;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #333;
+  color: #fff;
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 400;
+  white-space: normal;
+  width: max-content;
+  max-width: 260px;
+  text-align: center;
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+[data-tooltip]:hover::after {
+  opacity: 1;
+}
+
 .htmx-indicator {
   display: none;
 }

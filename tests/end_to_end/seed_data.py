@@ -248,6 +248,77 @@ def _make_dependencies(project_id: int, project_name: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# LLM Evaluations - one per issue for triage page testing
+# ---------------------------------------------------------------------------
+_ACTIONS = [
+    "close_stale",
+    "needs_triage",
+    "keep_open",
+    "needs_review",
+    "close_duplicate",
+    "needs_rebase",
+    "close_outdated",
+    "close_not_a_bug",
+]
+
+_ACTION_REASONS = [
+    "No activity for over 6 months, likely abandoned.",
+    "New issue needs initial assessment by a maintainer.",
+    "Active discussion and recent commits, keep monitoring.",
+    "PR has approvals but CI is failing, needs author attention.",
+    "Very similar to issue #42, likely a duplicate report.",
+    "PR has merge conflicts that need resolving.",
+    "References an API that was removed in v3.0.",
+    "This is expected behavior, not a bug.",
+]
+
+
+def _make_llm_evaluations(
+    issue_id_start: int,
+    issue_count: int,
+    project_name: str,
+) -> list[dict]:
+    """Generate LLM evaluation rows for seeded issues."""
+    evals = []
+    now = datetime(2024, 7, 1, 12, 0, 0, tzinfo=UTC)
+
+    for j in range(issue_count):
+        issue_id = issue_id_start + j
+        # Deterministic scores based on index
+        is_pr = j in (3, 5, 7)  # matches _make_issues PR indices
+        staleness = min(100, (j + 1) * 15)
+        duplicateness = min(100, j * 12)
+        complexity = min(100, 20 + j * 10)
+
+        scores: dict = {
+            "staleness": staleness,
+            "duplicateness": duplicateness,
+            "complexity": complexity,
+        }
+        if is_pr:
+            scores["readiness"] = min(100, 30 + j * 15)
+        else:
+            scores["support_request"] = min(100, j * 18)
+
+        action_idx = j % len(_ACTIONS)
+        evals.append(
+            {
+                "issue_id": issue_id,
+                "model_name": "test-model",
+                "summary": f"Test summary for {project_name} issue #{j + 1}.",
+                "suggested_action": _ACTIONS[action_idx],
+                "suggested_action_reason": _ACTION_REASONS[action_idx],
+                "scores": json.dumps(scores),
+                "tokens_used": 100 + j * 10,
+                "evaluated_at": now.isoformat(),
+                "issue_data_hash": f"seed-hash-{issue_id}",
+                "latest": True,
+            }
+        )
+    return evals
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 def generate_seed_sql() -> str:
@@ -326,11 +397,42 @@ def generate_seed_sql() -> str:
                 f"INSERT INTO dependencies ({cols}) VALUES ({', '.join(vals)});"
             )
 
+    # Insert LLM evaluations for each project's issues
+    issue_id_counter = 1
+    for pid, proj in enumerate(PROJECTS, start=1):
+        issue_count = len(_make_issues(pid, proj["name"]))
+        if issue_count > 0:
+            for ev in _make_llm_evaluations(
+                issue_id_counter, issue_count, proj["name"]
+            ):
+                cols = ", ".join(ev.keys())
+                vals = []
+                for v in ev.values():
+                    if v is None:
+                        vals.append("NULL")
+                    elif isinstance(v, bool):
+                        vals.append("true" if v else "false")
+                    elif isinstance(v, (int, float)):
+                        vals.append(str(v))
+                    else:
+                        vals.append(f"'{str(v).replace(chr(39), chr(39) + chr(39))}'")
+                stmts.append(
+                    f"INSERT INTO llm_evaluations ({cols}) VALUES ({', '.join(vals)});"
+                )
+        issue_id_counter += issue_count
+
     # Reset sequence counters
     stmts.extend(
         f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
         f"COALESCE((SELECT MAX(id) FROM {table}), 1));"
-        for table in ("projects", "snapshots", "issues", "releases", "dependencies")
+        for table in (
+            "projects",
+            "snapshots",
+            "issues",
+            "releases",
+            "dependencies",
+            "llm_evaluations",
+        )
     )
 
     return "\n".join(stmts)

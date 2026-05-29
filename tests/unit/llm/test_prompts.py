@@ -37,6 +37,38 @@ class TestBuildSummaryPrompt:
         assert "Feature request: dark mode" in user_msg
         assert "dark mode support" in user_msg
 
+    def test_includes_state_context(self) -> None:
+        """The user message includes age, activity, and author state."""
+        messages = build_summary_prompt(
+            title="Bug: crash",
+            body="It crashes.",
+            issue_type="issue",
+            labels=["bug"],
+            age_days=120,
+            last_activity_days=30,
+            comment_count=5,
+            author="alice",
+            is_maintainer=True,
+        )
+
+        user_msg = messages[1]["content"]
+        assert "120" in user_msg
+        assert "30" in user_msg
+        assert "5" in user_msg
+        assert "alice" in user_msg
+        assert "maintainer" in user_msg
+
+    def test_system_prompt_mentions_256_characters(self) -> None:
+        """The system prompt instructs the model to stay under 256 characters."""
+        messages = build_summary_prompt(
+            title="Bug",
+            body="Body",
+            issue_type="issue",
+            labels=[],
+        )
+
+        assert "256" in messages[0]["content"]
+
 
 class TestBuildSummaryPromptWithComments:
     """Tests for build_summary_prompt with comments."""

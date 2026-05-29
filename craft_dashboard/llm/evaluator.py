@@ -137,6 +137,11 @@ class IssueEvaluator:
         body: str | None,
         issue_type: str,
         labels: list[str],
+        age_days: int,
+        last_activity_days: int,
+        author: str,
+        is_maintainer: bool,
+        comment_count: int,
         comments: list[dict] | None = None,
     ) -> tuple[str, int]:
         """Generate a summary using the cheap model.
@@ -145,19 +150,32 @@ class IssueEvaluator:
             Tuple of (summary text, tokens used).
 
         """
+        import re
+
         summary_messages = build_summary_prompt(
             title=title,
             body=body,
             issue_type=issue_type,
             labels=labels,
+            age_days=age_days,
+            last_activity_days=last_activity_days,
+            author=author,
+            is_maintainer=is_maintainer,
+            comment_count=comment_count,
             comments=comments,
         )
+        # Allow enough tokens for thinking models (e.g. Qwen3) to reason
+        # before producing the actual summary.
         response = await self.client.chat(
             model=self.summary_model,
             messages=summary_messages,
-            max_tokens=256,
+            max_tokens=512,
         )
-        return response.content, response.total_tokens
+        # Strip <think>...</think> reasoning blocks emitted by thinking models.
+        content = re.sub(
+            r"<think>.*?</think>", "", response.content, flags=re.DOTALL
+        ).strip()
+        return content, response.total_tokens
 
     async def _score(
         self,
@@ -255,6 +273,11 @@ class IssueEvaluator:
             body=body,
             issue_type=issue_type,
             labels=label_names,
+            age_days=age_days,
+            last_activity_days=last_activity_days,
+            author=author,
+            is_maintainer=is_maintainer,
+            comment_count=comment_count,
             comments=comments,
         )
 

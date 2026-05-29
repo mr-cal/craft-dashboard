@@ -24,11 +24,24 @@ router = APIRouter(prefix="/issues")
 VALID_PER_PAGE = {10, 50, 1000}
 DEFAULT_PER_PAGE = 50
 
+ALL_SCORES = {
+    "staleness": "Staleness",
+    "duplicateness": "Duplicateness",
+    "complexity": "Complexity",
+    "support_request": "Support Request",
+    "readiness": "Readiness",
+}
+DEFAULT_SCORES = "staleness,readiness"
+
 
 class IssueSort(StrEnum):
     """Valid sort fields for the issue list."""
 
     staleness = "staleness"
+    duplicateness = "duplicateness"
+    complexity = "complexity"
+    support_request = "support_request"
+    readiness = "readiness"
     age = "age"
     updated = "updated"
     title = "title"
@@ -99,6 +112,7 @@ async def _query_issues(
             Project.name.label("project_name"),
             LLMEvaluation.summary,
             LLMEvaluation.suggested_action,
+            LLMEvaluation.suggested_action_reason,
             LLMEvaluation.scores,
         )
         .join(Project, Issue.project_id == Project.id)
@@ -174,9 +188,11 @@ async def _query_issues(
             query = query.order_by(Project.name.desc(), numeric_id.desc())
         else:
             query = query.order_by(Project.name.asc(), numeric_id.asc())
-    else:  # staleness (default)
+    elif sort_field in ALL_SCORES:
         query = query.order_by(
-            func.coalesce(LLMEvaluation.scores["staleness"].as_float(), 0).desc()
+            func.coalesce(LLMEvaluation.scores[sort_field].as_float(), 0).desc()
+            if not sort_desc
+            else func.coalesce(LLMEvaluation.scores[sort_field].as_float(), 0).asc()
         )
 
     offset = (page - 1) * items_per_page
@@ -199,7 +215,12 @@ async def _query_issues(
                 "url": issue.url,
                 "age_days": _compute_age_days(issue.created_at),
                 "staleness": scores.get("staleness"),
+                "duplicateness": scores.get("duplicateness"),
+                "complexity": scores.get("complexity"),
+                "support_request": scores.get("support_request"),
+                "readiness": scores.get("readiness"),
                 "suggested_action": row.suggested_action,
+                "suggested_action_reason": row.suggested_action_reason,
                 "summary": row.summary,
             }
         )
@@ -221,10 +242,15 @@ async def issue_list(
     page: int = Query(1, ge=1),
     search: str = Query("", alias="search"),
     per_page: int = Query(DEFAULT_PER_PAGE, alias="per_page"),
+    scores: str = Query(DEFAULT_SCORES, alias="scores"),
 ) -> HTMLResponse:
     """Render the issue triage list page."""
     templates: Jinja2Templates = request.app.state.templates
     effective_per_page = per_page if per_page in VALID_PER_PAGE else DEFAULT_PER_PAGE
+
+    active_scores = [s.strip() for s in scores.split(",") if s.strip() in ALL_SCORES]
+    if not active_scores:
+        active_scores = DEFAULT_SCORES.split(",")
 
     issues, total_pages = await _query_issues(
         session,
@@ -265,6 +291,9 @@ async def issue_list(
             "page": page,
             "total_pages": total_pages,
             "per_page": effective_per_page,
+            "filter_scores": scores,
+            "active_scores": active_scores,
+            "all_scores": ALL_SCORES,
         },
     )
 
@@ -283,10 +312,15 @@ async def issue_table_partial(
     page: int = Query(1, ge=1),
     search: str = Query("", alias="search"),
     per_page: int = Query(DEFAULT_PER_PAGE, alias="per_page"),
+    scores: str = Query(DEFAULT_SCORES, alias="scores"),
 ) -> HTMLResponse:
     """Return just the issue table partial (for HTMX swapping)."""
     templates: Jinja2Templates = request.app.state.templates
     effective_per_page = per_page if per_page in VALID_PER_PAGE else DEFAULT_PER_PAGE
+
+    active_scores = [s.strip() for s in scores.split(",") if s.strip() in ALL_SCORES]
+    if not active_scores:
+        active_scores = DEFAULT_SCORES.split(",")
 
     issues, total_pages = await _query_issues(
         session,
@@ -319,5 +353,8 @@ async def issue_table_partial(
             "page": page,
             "total_pages": total_pages,
             "per_page": effective_per_page,
+            "filter_scores": scores,
+            "active_scores": active_scores,
+            "all_scores": ALL_SCORES,
         },
     )

@@ -203,11 +203,12 @@ async def _evaluate_issues(
         stats["evaluated"] += 1
         stats["total_tokens"] += result["tokens_used"]
         logger.info(
-            "Evaluated %s (%s, %d tokens): %s",
+            "Evaluated %s (%s, %d tokens): %s\n  Summary: %s",
             issue_ref,
             result["suggested_action"],
             result["tokens_used"],
             issue.title[:60],
+            result["summary"],
         )
 
     return stats
