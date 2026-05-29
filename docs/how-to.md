@@ -3,8 +3,9 @@
 ## Scripts
 
 All scripts live in `scripts/` and are meant to run on the server (inside the
-VM or VPS). They are also used locally for development if you have a
-`DATABASE_URL` and `GITHUB_TOKEN` in your `.env`.
+VM or VPS). They can also run locally, but they need a real PostgreSQL database
+(unlike the test suite, which uses SQLite). Set `DATABASE_URL` in your `.env`
+pointing at a local or remote Postgres instance. Tests do not need this.
 
 ### collect_data.py
 
@@ -58,6 +59,30 @@ force a full refresh of all projects, see "Force-refresh all data" below.
 Sends issues to an LLM for triage evaluation (summary, suggested action,
 staleness score).
 
+**Prerequisites:** The script needs a PostgreSQL database (`DATABASE_URL` in
+`.env`) and an LLM backend. For `--backend openrouter`, set `OPENROUTER_API_KEY`.
+For `--backend local`, a local LLM server (e.g. ollama or llama-server) must
+be running at `LOCAL_LLM_URL` (default: `http://localhost:11434/v1`).
+
+The easiest way to run this is on the server where the database is already set
+up (see "run directly on the server" below). For local runs, open an SSH tunnel
+to the server's database and set `DATABASE_URL` in your `.env`:
+
+```fish
+# In one terminal: forward the server's Postgres port to localhost:5432
+ssh -L 5432:localhost:5432 $DASHBOARD_USER@$DASHBOARD_HOST
+
+# For LXD VM: lxc exec creates a shell, so tunnel via the VM's IP instead
+# lxc exec $VM_NAME -- cat /opt/craft-dashboard/.env | grep DATABASE_URL
+```
+
+The DB username is `craft_dashboard` and the password is `DB_PASSWORD` from
+`provisioning/secrets.env`. Add this to your `.env`:
+
+```
+DATABASE_URL=postgresql+asyncpg://craft_dashboard:<DB_PASSWORD>@localhost/craft_dashboard
+```
+
 ```
 # evaluate all open issues (daily cron mode)
 uv run scripts/run_llm.py --open-only
@@ -75,8 +100,25 @@ uv run scripts/run_llm.py --open-only --limit 40
 uv run scripts/run_llm.py --backend local
 ```
 
-On the server, this runs as `run-llm` at 6 AM UTC (4 hours after collection
-so the data is fresh).
+On the server, this runs as the `run-llm` systemd service at 6 AM UTC (4 hours
+after collection so the data is fresh).
+
+To run it manually on the server:
+
+```fish
+lxc exec $VM_NAME -- sudo systemctl restart run-llm
+lxc exec $VM_NAME -- sudo journalctl -u run-llm -f
+```
+
+Or run the script directly on the server:
+
+```fish
+lxc exec $VM_NAME -- sudo -u craft-dashboard bash -c \
+  'cd /opt/craft-dashboard && source .env && \
+   .venv/bin/python scripts/run_llm.py --open-only --limit 40 -v'
+```
+
+To view cron job logs, see [Check logs](#check-logs) below.
 
 The evaluator hashes issue content and skips unchanged issues, so daily runs
 only process newly changed issues and cost very little.
