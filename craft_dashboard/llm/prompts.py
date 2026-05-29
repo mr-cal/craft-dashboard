@@ -1,9 +1,10 @@
 """Prompt templates for LLM evaluation of issues and PRs."""
 
 _SUMMARY_SYSTEM = (
-    "You are a concise technical writer. Summarize the following GitHub "
-    "issue or pull request in 1-2 sentences. Focus on what the issue is "
-    "about and its current status. Do not include markdown formatting."
+    "You are a concise technical writer. Write a single sentence of at most "
+    "256 characters summarising the current state of the following GitHub issue "
+    "or pull request. Include what it is about, how old it is, and its current "
+    "activity level. Do not include markdown formatting."
 )
 
 _EVALUATION_SYSTEM = """\
@@ -14,7 +15,6 @@ Respond with valid JSON matching this schema:
 {
   "scores": {
     "staleness": <0-100, how stale/inactive is this>,
-    "relevance": <0-100, how relevant is this to the project>,
     "duplicateness": <0-100, how likely is this a duplicate>,
     "complexity": <0-100, how complex is this>,
     <additional scores based on type>
@@ -26,7 +26,6 @@ close_outdated, needs_triage, needs_review, needs_rebase, keep_open>",
 
 Score guidelines:
 - staleness: 0 = very active, 100 = completely dead (no activity in months)
-- relevance: 0 = not relevant, 100 = critically important
 - duplicateness: 0 = unique, 100 = clearly a duplicate
 - complexity: 0 = trivial, 100 = extremely complex
 """
@@ -99,6 +98,11 @@ def build_summary_prompt(
     body: str | None,
     issue_type: str,
     labels: list[str],
+    age_days: int = 0,
+    last_activity_days: int = 0,
+    comment_count: int = 0,
+    author: str = "unknown",
+    is_maintainer: bool = False,
     comments: list[dict] | None = None,
 ) -> list[dict[str, str]]:
     """Build a prompt for summarizing an issue or PR.
@@ -108,6 +112,11 @@ def build_summary_prompt(
         body: Issue/PR body text.
         issue_type: 'issue' or 'pull_request'.
         labels: List of label names.
+        age_days: Days since creation.
+        last_activity_days: Days since last update.
+        comment_count: Number of comments.
+        author: Author username.
+        is_maintainer: Whether the author is a project maintainer.
         comments: Recent comments to include (optional).
 
     Returns:
@@ -122,6 +131,10 @@ def build_summary_prompt(
         f"Type: {type_label}\n"
         f"Title: {title}\n"
         f"Labels: {label_str}\n"
+        f"Author: {author} ({'maintainer' if is_maintainer else 'external contributor'})\n"
+        f"Age: {age_days} days\n"
+        f"Last activity: {last_activity_days} days ago\n"
+        f"Comment count: {comment_count}\n"
         f"Body:\n{(body or '(no body)')[:3000]}"
         f"{comments_text}"
     )

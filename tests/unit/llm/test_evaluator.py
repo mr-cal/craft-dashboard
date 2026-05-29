@@ -42,7 +42,7 @@ class TestParseEvaluationResponse:
         """Parse valid JSON evaluation response."""
         content = json.dumps(
             {
-                "scores": {"staleness": 85, "relevance": 30},
+                "scores": {"staleness": 85},
                 "suggested_action": "close_stale",
                 "suggested_action_reason": "No activity for 6 months.",
             }
@@ -250,7 +250,77 @@ class TestEvaluateIssueWithComments:
         mock_sum.assert_called_once()
         call_kwargs = mock_sum.call_args.kwargs
         assert call_kwargs["comments"] == comments
+        assert call_kwargs["age_days"] == 5
+        assert call_kwargs["last_activity_days"] == 1
+        assert call_kwargs["comment_count"] == 1
+        assert call_kwargs["author"] == "user"
 
-        mock_eval.assert_called_once()
-        eval_kwargs = mock_eval.call_args.kwargs
-        assert eval_kwargs["comments"] == comments
+
+class TestSummarizeStripsThinkBlocks:
+    """Tests that _summarize strips <think> blocks from model responses."""
+
+    @pytest.mark.asyncio
+    async def test_strips_think_block_from_summary(self) -> None:
+        """<think>...</think> blocks from thinking models are stripped."""
+        mock_response = OpenRouterResponse(
+            content="<think>reasoning...</think>\nA 10-day-old bug report with no activity.",
+            total_tokens=30,
+            prompt_tokens=15,
+            completion_tokens=15,
+        )
+        mock_client = MagicMock()
+        mock_client.chat = AsyncMock(return_value=mock_response)
+
+        evaluator = IssueEvaluator(
+            client=mock_client,
+            summary_model="test-sum",
+            evaluation_model="test-eval",
+        )
+
+        summary, _ = await evaluator._summarize(
+            title="Bug",
+            body="Body",
+            issue_type="issue",
+            labels=[],
+            age_days=10,
+            last_activity_days=10,
+            author="user",
+            is_maintainer=False,
+            comment_count=0,
+        )
+
+        assert "<think>" not in summary
+        assert "reasoning" not in summary
+        assert "10-day-old bug report" in summary
+
+    @pytest.mark.asyncio
+    async def test_summary_with_only_think_block_returns_empty(self) -> None:
+        """When the entire response is a think block, the summary is empty."""
+        mock_response = OpenRouterResponse(
+            content="<think>I ran out of tokens while reasoning...</think>",
+            total_tokens=30,
+            prompt_tokens=15,
+            completion_tokens=15,
+        )
+        mock_client = MagicMock()
+        mock_client.chat = AsyncMock(return_value=mock_response)
+
+        evaluator = IssueEvaluator(
+            client=mock_client,
+            summary_model="test-sum",
+            evaluation_model="test-eval",
+        )
+
+        summary, _ = await evaluator._summarize(
+            title="Bug",
+            body="Body",
+            issue_type="issue",
+            labels=[],
+            age_days=5,
+            last_activity_days=5,
+            author="user",
+            is_maintainer=False,
+            comment_count=0,
+        )
+
+        assert summary == ""
