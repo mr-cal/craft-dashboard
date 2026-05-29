@@ -11,6 +11,9 @@ Usage:
     uv run scripts/run_llm.py --open-only              # open issues only (cron mode)
     uv run scripts/run_llm.py --project snapcraft
     uv run scripts/run_llm.py --limit 100
+    uv run scripts/run_llm.py --force                  # re-evaluate all (ignore hash)
+    uv run scripts/run_llm.py --issue charmcraft#2687  # specific issue (implies --force)
+    uv run scripts/run_llm.py --issue "charmcraft#100-200,snapcraft#50"
 
 Environment variables:
     DATABASE_URL: PostgreSQL connection URL
@@ -52,6 +55,8 @@ async def _evaluate_issues(
     project_filter: str = "",
     limit: int = 0,
     open_only: bool = False,
+    force: bool = False,
+    issue_filters: list[tuple[str, int, int]] | None = None,
 ) -> dict[str, int]:
     """Evaluate issues/PRs that need re-evaluation.
 
@@ -65,6 +70,8 @@ async def _evaluate_issues(
         project_filter: Optional project name filter.
         limit: Max issues to evaluate (0 = unlimited).
         open_only: If True, only evaluate open issues.
+        force: If True, re-evaluate all matched issues (ignore content hash).
+        issue_filters: Optional list of (project_name, min_id, max_id) tuples for --issue filtering.
 
     Returns:
         Stats dict with evaluated, skipped, errored counts.
@@ -102,15 +109,28 @@ async def _evaluate_issues(
         if project_filter:
             query = query.where(Project.name == project_filter)
 
-        if limit > 0:
-            query = query.limit(limit)
+        # Apply --issue filters if specified
+        if issue_filters:
+            from sqlalchemy import and_, or_
+
+            conditions = []
+            for project_name, min_id, max_id in issue_filters:
+                conditions.append(
+                    and_(
+                        Project.name == project_name,
+                        Issue.external_id >= min_id,
+                        Issue.external_id <= max_id,
+                    )
+                )
+            query = query.where(or_(*conditions))
 
         result = await session.execute(query)
         rows = result.all()
 
     for row in rows:
         issue = row[0]
-        existing_hash = row.issue_data_hash
+        # If --force is used, pass None to skip hash check
+        existing_hash = None if force else row.issue_data_hash
         labels = issue.labels if isinstance(issue.labels, list) else []
 
         now = datetime.now(tz=UTC)
@@ -211,11 +231,73 @@ async def _evaluate_issues(
             result["summary"],
         )
 
+        # Check limit after successful evaluation (not after skips)
+        if limit > 0 and stats["evaluated"] >= limit:
+            logger.info("Reached evaluation limit of %d", limit)
+            break
+
     return stats
 
 
+def _parse_issue_filter(issue_spec: str) -> list[tuple[str, int, int]]:
+    """Parse --issue argument into list of (project, min_id, max_id) tuples.
+
+    Examples:
+        "charmcraft#2687" -> [("charmcraft", 2687, 2687)]
+        "charmcraft#100-200" -> [("charmcraft", 100, 200)]
+        "charmcraft#2687,snapcraft#100-200" -> [("charmcraft", 2687, 2687), ("snapcraft", 100, 200)]
+
+    Args:
+        issue_spec: Comma-separated issue references.
+
+    Returns:
+        List of (project_name, min_external_id, max_external_id) tuples.
+
+    """
+    if not issue_spec:
+        return []
+
+    filters = []
+    for item in issue_spec.split(","):
+        part = item.strip()
+        if "#" not in part:
+            logger.error(
+                "Invalid issue format: %s (expected project#id or project#min-max)",
+                part,
+            )
+            continue
+
+        project_name, id_part = part.split("#", 1)
+        project_name = project_name.strip()
+
+        if "-" in id_part:
+            # Range: charmcraft#100-200
+            try:
+                min_id_str, max_id_str = id_part.split("-", 1)
+                min_id = int(min_id_str.strip())
+                max_id = int(max_id_str.strip())
+                filters.append((project_name, min_id, max_id))
+            except ValueError as e:
+                logger.error("Invalid issue range: %s (%s)", part, e)  # noqa: TRY400
+        else:
+            # Single issue: charmcraft#2687
+            try:
+                issue_id = int(id_part.strip())
+                filters.append((project_name, issue_id, issue_id))
+            except ValueError as e:
+                logger.error("Invalid issue ID: %s (%s)", part, e)  # noqa: TRY400
+
+    return filters
+
+
 async def _main(
-    project: str, limit: int, backend: str, open_only: bool, verbose: bool
+    project: str,
+    limit: int,
+    backend: str,
+    open_only: bool,
+    verbose: bool,
+    force: bool,
+    issue: str,
 ) -> None:
     """Run LLM evaluation."""
     settings = Settings()
@@ -254,12 +336,25 @@ async def _main(
         summary_model=summary_model,
         evaluation_model=evaluation_model,
     )
+
+    # Parse --issue filters and imply --force when --issue is used
+    issue_filters = None
+    if issue:
+        issue_filters = _parse_issue_filter(issue)
+        if not issue_filters:
+            logger.error("No valid issue filters parsed from: %s", issue)
+            sys.exit(1)
+        # When --issue is specified, always force re-evaluation
+        force = True
+        logger.info("Filtering to specific issues (force=True): %s", issue_filters)
+
     logger.info(
-        "Using %s backend (summary=%s, eval=%s, open_only=%s)",
+        "Using %s backend (summary=%s, eval=%s, open_only=%s, force=%s)",
         settings.llm_backend,
         summary_model,
         evaluation_model,
         open_only,
+        force,
     )
 
     try:
@@ -270,6 +365,8 @@ async def _main(
             project_filter=project,
             limit=limit,
             open_only=open_only,
+            force=force,
+            issue_filters=issue_filters,
         )
         logger.info(
             "Evaluation complete: %d evaluated, %d skipped, %d errors, %d total tokens",
@@ -304,8 +401,25 @@ async def _main(
     default=False,
     help="Enable debug logging (LLM prompts, token counts). Overrides LOG_LEVEL.",
 )
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Force re-evaluation of all matched issues (ignore content hash check).",
+)
+@click.option(
+    "--issue",
+    default="",
+    help="Evaluate specific issues (e.g., charmcraft#2687,snapcraft#100-200). Implies --force.",
+)
 def main(
-    project: str, limit: int, backend: str, open_only: bool, verbose: bool
+    project: str,
+    limit: int,
+    backend: str,
+    open_only: bool,
+    verbose: bool,
+    force: bool,
+    issue: str,
 ) -> None:
     """Run LLM evaluation on issues and PRs.
 
@@ -313,8 +427,11 @@ def main(
     for the daily cron job which only needs to catch changed open issues.
     Use --backend local to run against a locally-hosted OpenAI-compatible LLM server
     without spending tokens on OpenRouter.
+
+    Use --force to re-evaluate all matched issues even if content hasn't changed.
+    Use --issue to evaluate specific issues by reference (implies --force).
     """
-    asyncio.run(_main(project, limit, backend, open_only, verbose))
+    asyncio.run(_main(project, limit, backend, open_only, verbose, force, issue))
 
 
 if __name__ == "__main__":
