@@ -76,6 +76,30 @@ class TestParseEvaluationResponse:
 
         assert result is None
 
+    def test_strips_think_block_before_json(self) -> None:
+        """Thinking model <think> block is stripped before parsing JSON."""
+        content = (
+            "<think>Let me reason about this issue carefully...</think>\n"
+            '{"scores": {"staleness": 70}, "suggested_action": "keep_open", "suggested_action_reason": "Recent activity."}'
+        )
+
+        result = _parse_evaluation_response(content)
+
+        assert result is not None
+        assert result["scores"]["staleness"] == 70
+
+    def test_strips_think_block_with_braces_inside(self) -> None:
+        """Braces inside <think> block are not mistaken for JSON."""
+        content = (
+            "<think>The JSON should look like: {staleness: 99}</think>\n"
+            '{"scores": {"staleness": 10}, "suggested_action": "keep_open", "suggested_action_reason": "Fine."}'
+        )
+
+        result = _parse_evaluation_response(content)
+
+        assert result is not None
+        assert result["scores"]["staleness"] == 10
+
 
 class TestIssueEvaluator:
     """Tests for IssueEvaluator."""

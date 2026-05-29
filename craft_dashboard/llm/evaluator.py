@@ -32,8 +32,9 @@ def _needs_reevaluation(
 def _parse_evaluation_response(content: str) -> dict | None:
     """Parse the LLM evaluation response as JSON.
 
-    Handles responses that may be wrapped in markdown code fences or contain
-    surrounding text.
+    Handles responses that may be wrapped in markdown code fences, contain
+    surrounding text, or include <think>...</think> reasoning blocks from
+    thinking models (e.g. Qwen3).
 
     Args:
         content: Raw LLM response content.
@@ -45,6 +46,10 @@ def _parse_evaluation_response(content: str) -> dict | None:
     import re
 
     cleaned = content.strip()
+
+    # Strip <think>...</think> reasoning blocks emitted by thinking models.
+    # The actual response follows the closing tag.
+    cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL).strip()
 
     # Try direct parse first
     try:
@@ -244,6 +249,7 @@ class IssueEvaluator:
             logger.debug("Skipping evaluation (content unchanged): %s", title)
             return None
 
+        logger.info("Evaluating: %s", title)
         summary, summary_tokens = await self._summarize(
             title=title,
             body=body,
