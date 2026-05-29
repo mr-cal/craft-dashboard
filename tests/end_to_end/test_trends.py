@@ -308,13 +308,17 @@ class TestDateRange:
 
     const initial = await getLabels();
 
-    // Set a narrower date range
+    // Set a narrower date range and click Apply
     const startInput = await page.$('#date-start');
     const endInput = await page.$('#date-end');
     if (startInput && endInput) {
-      await page.evaluate((el) => { el.value = '2024-06-01'; el.dispatchEvent(new Event('change')); }, startInput);
-      await page.evaluate((el) => { el.value = '2024-06-15'; el.dispatchEvent(new Event('change')); }, endInput);
-      await new Promise(r => setTimeout(r, 800));
+      await page.evaluate((el) => { el.value = '2024-06-01'; }, startInput);
+      await page.evaluate((el) => { el.value = '2024-06-15'; }, endInput);
+      const applyBtn = await page.$('#btn-date-apply');
+      if (applyBtn) {
+        await applyBtn.click();
+        await new Promise(r => setTimeout(r, 800));
+      }
     }
 
     const filtered = await getLabels();
