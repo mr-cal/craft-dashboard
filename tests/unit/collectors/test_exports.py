@@ -26,7 +26,7 @@ def test_dependencies_exports() -> None:
 
 def test_snapshots_exports() -> None:
     assert hasattr(snapshots, "__all__")
-    assert snapshots.__all__ == ["compute_snapshot_counts", "generate_snapshot"]
+    assert snapshots.__all__ == ["compute_snapshot_counts", "generate_snapshot", "backfill_missing_snapshots"]
 
 
 def test_launchpad_exports() -> None:

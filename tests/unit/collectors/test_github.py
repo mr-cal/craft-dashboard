@@ -215,12 +215,18 @@ class TestCollectIssuesExceptionHandling:
         due_count_result = MagicMock()
         due_count_result.scalar_one.return_value = 1
 
+        total_count_result = MagicMock()
+        total_count_result.scalar_one.return_value = 1
+
+        oldest_fetch_result = MagicMock()
+        oldest_fetch_result.scalar_one_or_none.return_value = None  # fresh project
+
         existing_result = MagicMock()
         existing_result.scalar_one_or_none.return_value = None
 
         session = AsyncMock()
         session.execute = AsyncMock(
-            side_effect=[due_count_result, existing_result, None]
+            side_effect=[due_count_result, total_count_result, oldest_fetch_result, existing_result, None]
         )
         session.commit = AsyncMock()
         return session

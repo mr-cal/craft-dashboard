@@ -270,7 +270,8 @@ class GitHubCollector:
             project_id: The database ID of the project.
             session: An async SQLAlchemy session.
             limit: Maximum number of issues to fetch per repo (0 = all).
-            refresh_age_days: Skip issues fetched within this many days.
+            refresh_age_days: Issues last fetched more than this many days ago
+                are considered stale and eligible for re-fetching.
 
         Returns:
             The number of issues upserted.
@@ -286,21 +287,28 @@ class GitHubCollector:
 
         # Count how many existing issues are due for refresh
         cutoff = datetime.now(tz=UTC) - timedelta(days=refresh_age_days)
+        stale_where = sa.and_(
+            Issue.project_id == project_id,
+            Issue.source == "github",
+            sa.or_(
+                Issue.last_fetched_at == None,  # noqa: E711 — SQLAlchemy requires == for IS NULL SQL generation
+                Issue.last_fetched_at < cutoff,
+            ),
+        )
         due_count_result = await session.execute(
-            sa.select(sa.func.count())
-            .select_from(Issue)
-            .where(
-                Issue.project_id == project_id,
-                Issue.source == "github",
-                sa.or_(
-                    Issue.last_fetched_at == None,  # noqa: E711 — SQLAlchemy requires == for IS NULL SQL generation
-                    Issue.last_fetched_at < cutoff,
-                ),
-            )
+            sa.select(sa.func.count()).select_from(Issue).where(stale_where)
         )
         due_count = due_count_result.scalar_one()
 
-        if due_count == 0:
+        # Also check whether this project has any issues at all (fresh-project detection).
+        total_result = await session.execute(
+            sa.select(sa.func.count())
+            .select_from(Issue)
+            .where(Issue.project_id == project_id, Issue.source == "github")
+        )
+        total_count = total_result.scalar_one()
+
+        if due_count == 0 and total_count > 0:
             logger.info(
                 "  %s/%s: no issues due for refresh, skipping", self.org, repo_name
             )
@@ -308,9 +316,27 @@ class GitHubCollector:
 
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
 
-        # Use 'since' parameter to avoid paginating through all old issues.
-        # Only fetch issues updated after the refresh cutoff, plus a 1-day buffer.
-        since_date = cutoff - timedelta(days=1)
+        # Use 'since' based on the oldest last_fetched_at of due issues so we
+        # never miss a state transition that happened while the system was offline.
+        # Cap at 90 days to bound the amount of data fetched on a long outage.
+        _max_lookback = datetime.now(tz=UTC) - timedelta(days=90)
+        oldest_fetch_result = await session.execute(
+            sa.select(sa.func.min(Issue.last_fetched_at))
+            .select_from(Issue)
+            .where(stale_where)
+        )
+        oldest_fetch = oldest_fetch_result.scalar_one_or_none()
+        if oldest_fetch is not None:
+            oldest_fetch_tz = (
+                oldest_fetch.replace(tzinfo=UTC)
+                if oldest_fetch.tzinfo is None
+                else oldest_fetch
+            )
+            since_date = max(oldest_fetch_tz - timedelta(days=1), _max_lookback)
+        else:
+            # Fresh project with no issues yet — fetch the last 90 days.
+            since_date = _max_lookback
+
         gh_issues = repo.get_issues(
             state="all", sort="updated", direction="desc", since=since_date
         )
@@ -337,7 +363,10 @@ class GitHubCollector:
 
             issue_type, state = _classify_issue(gh_issue)
 
-            # Check if this issue was recently fetched
+            # Skip if the issue hasn't changed since we last fetched it.
+            # Use updated_at comparison rather than a fixed age window so that
+            # state transitions (e.g. open → closed) that happened after our
+            # last fetch are never silently ignored.
             existing = await session.execute(
                 sa.select(Issue.last_fetched_at).where(
                     Issue.project_id == project_id,
@@ -346,19 +375,23 @@ class GitHubCollector:
                 )
             )
             last_fetched = existing.scalar_one_or_none()
-            if last_fetched is not None:
+            if last_fetched is not None and gh_issue.updated_at is not None:
                 fetched_tz = (
                     last_fetched.replace(tzinfo=UTC)
                     if last_fetched.tzinfo is None
                     else last_fetched
                 )
-                age = (datetime.now(tz=UTC) - fetched_tz).days
-                if age < refresh_age_days:
+                issue_updated_at = (
+                    gh_issue.updated_at.replace(tzinfo=UTC)
+                    if gh_issue.updated_at.tzinfo is None
+                    else gh_issue.updated_at
+                )
+                if issue_updated_at <= fetched_tz:
                     logger.debug(
-                        "  Skipping %s#%d (fetched %d days ago)",
+                        "  Skipping %s#%d (unchanged since %s)",
                         repo_name,
                         gh_issue.number,
-                        age,
+                        fetched_tz.strftime("%Y-%m-%d"),
                     )
                     skipped += 1
                     continue
@@ -435,7 +468,7 @@ class GitHubCollector:
 
         await session.commit()
         logger.info(
-            "Collected %d issues from %s/%s (%d skipped, recently fetched)",
+            "Collected %d issues from %s/%s (%d skipped, unchanged since last fetch)",
             count,
             self.org,
             repo_name,

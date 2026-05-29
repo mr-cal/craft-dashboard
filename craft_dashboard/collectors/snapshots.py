@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-__all__ = ["compute_snapshot_counts", "generate_snapshot"]
+__all__ = ["compute_snapshot_counts", "generate_snapshot", "backfill_missing_snapshots"]
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +212,141 @@ def compute_snapshot_counts(
     return counts
 
 
+def _filter_issues_for_date(
+    issues: list[dict],
+    snapshot_date: date,
+) -> list[dict]:
+    """Return a view of *issues* as they existed on *snapshot_date*.
+
+    Uses ``created_at`` and ``closed_at`` timestamps to determine each
+    issue's state on the given historical date, rather than the current DB
+    state.  This makes historical snapshots accurate even when the DB was
+    temporarily out of sync with GitHub.
+
+    * Issues not yet created on ``snapshot_date`` are excluded.
+    * Issues open on ``snapshot_date`` are returned with ``state="open"``.
+    * Issues closed *exactly* on ``snapshot_date`` are returned with their
+      original state (``"closed"`` or ``"merged"``).
+    * Issues already closed before ``snapshot_date`` are excluded.
+    * Issues with ``closed_at=None`` are treated as still open (we cannot
+      determine a historical close date without the timestamp).
+
+    Args:
+        issues: List of issue dicts (as produced by ``generate_snapshot``).
+        snapshot_date: The historical date to compute the snapshot for.
+
+    Returns:
+        Filtered and state-adjusted list of issue dicts.
+
+    """
+    result: list[dict] = []
+    for issue in issues:
+        created_at = issue.get("created_at")
+        closed_at = issue.get("closed_at")
+
+        if created_at is None:
+            continue
+
+        created = created_at.date() if hasattr(created_at, "date") else created_at
+        closed = closed_at.date() if (closed_at and hasattr(closed_at, "date")) else None
+
+        if created > snapshot_date:
+            continue  # not created yet on this date
+
+        if closed is None or closed > snapshot_date:
+            # Open on this date — override state so compute_snapshot_counts
+            # counts it correctly regardless of the current DB state.
+            result.append({**issue, "state": "open"})
+        elif closed == snapshot_date:
+            # Closed on exactly this date — preserve original state ("closed"/"merged")
+            result.append(issue)
+        # else: already closed before snapshot_date — exclude
+
+    return result
+
+
+async def backfill_missing_snapshots(
+    project_id: int,
+    issues: list[dict],
+    session: AsyncSession,
+    maintainers: set[str],
+    bots: set[str] | None = None,
+) -> int:
+    """Generate snapshots for any dates missing between the last snapshot and today.
+
+    Uses temporal reasoning (``created_at`` / ``closed_at``) rather than the
+    current DB state so that historical data is accurate even after an outage
+    or delayed collection run.
+
+    Args:
+        project_id: The database ID of the project.
+        issues: All issue dicts for the project (already loaded from DB).
+        session: An async SQLAlchemy session.
+        maintainers: Set of maintainer usernames.
+        bots: Optional set of configured bot usernames.
+
+    Returns:
+        The number of missing snapshots that were backfilled.
+
+    """
+    from sqlalchemy import func, select  # noqa: PLC0415
+    from sqlalchemy.dialects.postgresql import insert  # noqa: PLC0415
+
+    from craft_dashboard.models.snapshot import Snapshot  # noqa: PLC0415
+
+    today_val = date.today()
+
+    # Find the most recent snapshot date before today
+    last_snapshot = await session.scalar(
+        select(func.max(Snapshot.snapshot_date)).where(
+            Snapshot.project_id == project_id,
+            Snapshot.snapshot_date < today_val,
+        )
+    )
+
+    if last_snapshot is None:
+        return 0  # Nothing to backfill from
+
+    filled = 0
+    current = last_snapshot + timedelta(days=1)
+    while current < today_val:
+        # Only generate if this date has no snapshot yet
+        exists = await session.scalar(
+            select(func.count()).where(
+                Snapshot.project_id == project_id,
+                Snapshot.snapshot_date == current,
+            )
+        )
+        if not exists:
+            historical_issues = _filter_issues_for_date(issues, current)
+            counts = compute_snapshot_counts(
+                historical_issues, maintainers, today=current, bots=bots
+            )
+            stmt = insert(Snapshot).values(
+                project_id=project_id,
+                snapshot_date=current,
+                **counts,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["project_id", "snapshot_date"],
+                set_=counts,
+            )
+            await session.execute(stmt)
+            filled += 1
+
+        current += timedelta(days=1)
+
+    if filled:
+        await session.commit()
+        logger.info(
+            "Backfilled %d missing snapshots for project_id=%d (up to %s)",
+            filled,
+            project_id,
+            today_val,
+        )
+    return filled
+
+
 async def generate_snapshot(
     project_id: int,
     session: AsyncSession,
@@ -221,6 +356,8 @@ async def generate_snapshot(
     """Generate a daily snapshot for a project.
 
     Queries current open issues/PRs and upserts a snapshot row for today.
+    Also backfills any dates that were missed since the last snapshot using
+    temporal reasoning so the trends chart never has gaps.
 
     Args:
         project_id: The database ID of the project.
@@ -282,6 +419,9 @@ async def generate_snapshot(
     await session.commit()
 
     logger.info("Generated snapshot for project_id=%d on %s", project_id, today_val)
+
+    # Backfill any dates the collector skipped (e.g. after an outage)
+    await backfill_missing_snapshots(project_id, issues, session, maintainers, bots=bots)
 
 
 async def generate_cross_project_snapshot(
