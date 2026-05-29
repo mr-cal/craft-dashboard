@@ -36,6 +36,7 @@ SEED_TIMEOUT = 30  # seconds
 
 # Path to the repository root
 REPO_ROOT = Path(__file__).resolve().parents[2]
+ANSIBLE_PLAYBOOK = str(REPO_ROOT / ".venv" / "bin" / "ansible-playbook")
 
 
 def _run(cmd: list[str], *, check: bool = True, timeout: int = 120) -> str:
@@ -130,7 +131,7 @@ def _deploy_to_vm(vm_name: str) -> str:
 
         subprocess.run(
             [
-                "ansible-playbook",
+                ANSIBLE_PLAYBOOK,
                 "playbook.yml",
                 "--skip-tags",
                 "ssl",
@@ -180,20 +181,20 @@ def e2e_vm() -> str:
                 "--vm",
                 "--ephemeral",
                 "-c",
-                "limits.cpu=2",
+                "limits.cpu=1",
                 "-c",
-                "limits.memory=4GB",
+                "limits.memory=2GB",
             ],
             timeout=120,
         )
         # Wait for the VM to get an IP
-        deadline = time.time() + 120
+        deadline = time.time() + 180
         while time.time() < deadline:
             if _get_vm_ip(name):
                 break
-            time.sleep(2)
+            time.sleep(5)
         else:
-            raise RuntimeError(f"VM {name} did not get an IP within 120s")
+            raise RuntimeError(f"VM {name} did not get an IP within 180s")
 
         # Wait for cloud-init to finish
         with contextlib.suppress(subprocess.CalledProcessError):

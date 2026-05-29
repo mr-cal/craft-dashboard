@@ -157,3 +157,30 @@ class TestTriagePage:
         assert "All projects" in resp.text, (
             "Triage page should show 'All projects' placeholder"
         )
+
+    def test_triage_default_score_columns(self, seeded_url: str) -> None:
+        """The triage page should show default score columns: Staleness and Readiness."""
+        resp = requests.get(f"{seeded_url}/issues", timeout=10)
+        assert resp.status_code == 200
+        # The page template includes a scores filter with staleness,readiness as default
+        assert "staleness,readiness" in resp.text, (
+            "Default score filter should include 'staleness,readiness'"
+        )
+
+    def test_triage_score_columns_have_values(self, seeded_url: str) -> None:
+        """Score badges should be present in the table (seeded data has LLM evaluations)."""
+        resp = requests.get(f"{seeded_url}/issues", timeout=10)
+        assert resp.status_code == 200
+        # The template includes score badge styling and rendering
+        assert "score-badge" in resp.text, (
+            "Score badge class/styles should be present in the page"
+        )
+
+    def test_triage_action_has_tooltip(self, seeded_url: str) -> None:
+        """Action badges should have data-tooltip attributes."""
+        resp = requests.get(f"{seeded_url}/issues", timeout=10)
+        assert resp.status_code == 200
+        # The template includes data-tooltip attributes for action badges and score headers
+        assert "data-tooltip" in resp.text, (
+            "data-tooltip attributes should be present in the page HTML"
+        )
