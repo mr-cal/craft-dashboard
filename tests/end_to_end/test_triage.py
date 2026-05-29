@@ -160,27 +160,63 @@ class TestTriagePage:
 
     def test_triage_default_score_columns(self, seeded_url: str) -> None:
         """The triage page should show default score columns: Staleness and Readiness."""
-        resp = requests.get(f"{seeded_url}/issues", timeout=10)
-        assert resp.status_code == 200
-        # The page template includes a scores filter with staleness,readiness as default
-        assert "staleness,readiness" in resp.text, (
-            "Default score filter should include 'staleness,readiness'"
+        script = make_script("""\
+    await page.goto(`${BASE}/issues`, {waitUntil: 'networkidle0', timeout: 30000});
+    await new Promise(r => setTimeout(r, 2000));
+
+    const headers = await page.evaluate(() => {
+      const ths = document.querySelectorAll('table thead th');
+      return Array.from(ths).map(th => th.textContent.trim());
+    });
+
+    console.log(JSON.stringify({
+      headers: headers,
+      has_staleness: headers.some(h => h.toLowerCase().includes('staleness')),
+      has_readiness: headers.some(h => h.toLowerCase().includes('readiness')),
+    }));
+""")
+        result = run_puppeteer(script, base_url=seeded_url, timeout=20)
+        assert result["has_staleness"], (
+            f"Expected 'Staleness' column, got headers: {result['headers']}"
+        )
+        assert result["has_readiness"], (
+            f"Expected 'Readiness' column, got headers: {result['headers']}"
         )
 
     def test_triage_score_columns_have_values(self, seeded_url: str) -> None:
         """Score badges should be present in the table (seeded data has LLM evaluations)."""
-        resp = requests.get(f"{seeded_url}/issues", timeout=10)
-        assert resp.status_code == 200
-        # The template includes score badge styling and rendering
-        assert "score-badge" in resp.text, (
-            "Score badge class/styles should be present in the page"
-        )
+        script = make_script("""\
+    await page.goto(`${BASE}/issues`, {waitUntil: 'networkidle0', timeout: 30000});
+    await new Promise(r => setTimeout(r, 2000));
+
+    const scoreBadges = await page.evaluate(() => {
+      const badges = document.querySelectorAll('.score-badge');
+      return badges.length;
+    });
+
+    console.log(JSON.stringify({
+      score_badge_count: scoreBadges,
+    }));
+""")
+        result = run_puppeteer(script, base_url=seeded_url, timeout=20)
+        assert result["score_badge_count"] > 0, "Expected score badges in the table"
 
     def test_triage_action_has_tooltip(self, seeded_url: str) -> None:
         """Action badges should have data-tooltip attributes."""
-        resp = requests.get(f"{seeded_url}/issues", timeout=10)
-        assert resp.status_code == 200
-        # The template includes data-tooltip attributes for action badges and score headers
-        assert "data-tooltip" in resp.text, (
-            "data-tooltip attributes should be present in the page HTML"
+        script = make_script("""\
+    await page.goto(`${BASE}/issues`, {waitUntil: 'networkidle0', timeout: 30000});
+    await new Promise(r => setTimeout(r, 2000));
+
+    const tooltipCount = await page.evaluate(() => {
+      const elements = document.querySelectorAll('[data-tooltip]');
+      return elements.length;
+    });
+
+    console.log(JSON.stringify({
+      tooltip_count: tooltipCount,
+    }));
+""")
+        result = run_puppeteer(script, base_url=seeded_url, timeout=20)
+        assert result["tooltip_count"] > 0, (
+            "Expected data-tooltip attributes on page elements"
         )
