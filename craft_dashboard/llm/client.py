@@ -185,7 +185,9 @@ class LocalLLMClient:
     Retries on timeout/network errors only.
     """
 
-    def __init__(self, base_url: str = LOCAL_LLM_BASE_URL, api_key: str = "", ca_cert: str = "") -> None:
+    def __init__(
+        self, base_url: str = LOCAL_LLM_BASE_URL, api_key: str = "", ca_cert: str = ""
+    ) -> None:
         """Initialize the local LLM client.
 
         Args:

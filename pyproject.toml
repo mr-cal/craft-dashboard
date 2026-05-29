@@ -101,6 +101,7 @@ exclude_also = [
 line-length = 88
 target-version = "py312"
 src = ["craft_dashboard", "tests"]
+exclude = ["craft_dashboard/_version.py"]
 
 [tool.ruff.lint]
 select = [
