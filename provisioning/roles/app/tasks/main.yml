@@ -59,8 +59,7 @@
     - Restart collect-data
 
 - name: Run database migrations
-  ansible.builtin.shell: |
-    {{ app_venv }}/bin/alembic upgrade head
+  ansible.builtin.command: "{{ app_venv }}/bin/alembic upgrade head"
   args:
     chdir: "{{ app_dir }}"
   environment: "{{ app_env }}"
