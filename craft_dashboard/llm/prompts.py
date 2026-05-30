@@ -31,7 +31,7 @@ open-source projects: issues under 1 month old are fresh (0-10), 1-3 months \
 is mildly stale (10-30), 3-6 months is moderately stale (30-60), and only \
 issues with no activity for 6+ months should score above 60. PRs go stale \
 faster than issues — a PR with no activity for 2+ weeks is already mildly \
-stale, and 2+ months with no review or update is very stale. Also consider \
+stale, and 4+ months with no review or update is very stale. Also consider \
 whether the issue is still relevant to the current version of the software \
 (a bug report against an old, superseded version is more stale).
 - duplicateness: 0 = unique, 100 = clearly a duplicate
