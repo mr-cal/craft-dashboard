@@ -254,10 +254,13 @@ function updateMedianAgeChart() {
   const unifiedDates = getUnifiedDates(selected);
   medianAgeChart.data.labels = unifiedDates;
   
-  const dataKey = view === "internal" ? "median_age_internal"
-                : view === "external" ? "nm_median_age"
-                : view === "bots" ? "median_age_bots"
-                : "median_age";
+  const dataKey = getMedianAgeDataKey();
+  if (!dataKey) {
+    medianAgeChart.data.labels = [];
+    medianAgeChart.data.datasets = [];
+    medianAgeChart.update();
+    return;
+  }
   
   medianAgeChart.data.datasets = selected.map((name) => {
     const rawData = alignData(name, dataKey, unifiedDates);
@@ -377,6 +380,8 @@ function updateSnapshotCharts() {
   }
   
   // Open Issues/PRs Chart
+  const types = getSelectedTypes();
+
   const issueKey = view === "bots" ? "bots_open_issues"
     : view === "external" ? "nm_open_issues"
     : view === "internal" ? "internal_open_issues"
@@ -387,22 +392,26 @@ function updateSnapshotCharts() {
     : "open_prs";
   
   snapshotOpenChart.data.labels = labels;
-  snapshotOpenChart.data.datasets = [
-    {
+  const openDatasets = [];
+  if (types.issues) {
+    openDatasets.push({
       label: "Issues",
       data: selected.map(name => snapshot[name][issueKey]),
       backgroundColor: CHART_COLORS.issues,
       borderColor: CHART_COLORS.issues,
       borderWidth: 1,
-    },
-    {
+    });
+  }
+  if (types.prs) {
+    openDatasets.push({
       label: "PRs",
       data: selected.map(name => snapshot[name][prKey]),
       backgroundColor: CHART_COLORS.prs,
       borderColor: CHART_COLORS.prs,
       borderWidth: 1,
-    },
-  ];
+    });
+  }
+  snapshotOpenChart.data.datasets = openDatasets;
   
   // Median Age Chart
   const issueAgeKey = view === "external" ? "nm_median_issue_age"
@@ -415,22 +424,26 @@ function updateSnapshotCharts() {
     : "median_pr_age";
   
   snapshotAgeChart.data.labels = labels;
-  snapshotAgeChart.data.datasets = [
-    {
+  const ageDatasets = [];
+  if (types.issues) {
+    ageDatasets.push({
       label: "Issue Age",
       data: selected.map(name => snapshot[name][issueAgeKey]),
       backgroundColor: CHART_COLORS.issues,
       borderColor: CHART_COLORS.issues,
       borderWidth: 1,
-    },
-    {
+    });
+  }
+  if (types.prs) {
+    ageDatasets.push({
       label: "PR Age",
       data: selected.map(name => snapshot[name][prAgeKey]),
       backgroundColor: CHART_COLORS.prs,
       borderColor: CHART_COLORS.prs,
       borderWidth: 1,
-    },
-  ];
+    });
+  }
+  snapshotAgeChart.data.datasets = ageDatasets;
   
   // Closed Last Year Chart
   const closedIssueKey = view === "external" ? "nm_closed_issues_year"
@@ -443,22 +456,26 @@ function updateSnapshotCharts() {
     : "closed_prs_year";
   
   snapshotClosedChart.data.labels = labels;
-  snapshotClosedChart.data.datasets = [
-    {
+  const closedDatasets = [];
+  if (types.issues) {
+    closedDatasets.push({
       label: "Issues",
       data: selected.map(name => snapshot[name][closedIssueKey]),
       backgroundColor: CHART_COLORS.issues,
       borderColor: CHART_COLORS.issues,
       borderWidth: 1,
-    },
-    {
+    });
+  }
+  if (types.prs) {
+    closedDatasets.push({
       label: "PRs",
       data: selected.map(name => snapshot[name][closedPrKey]),
       backgroundColor: CHART_COLORS.prs,
       borderColor: CHART_COLORS.prs,
       borderWidth: 1,
-    },
-  ];
+    });
+  }
+  snapshotClosedChart.data.datasets = closedDatasets;
   
   // Adjust chart height based on number of bars (like starcraft-stats)
   const numDatasets = snapshotOpenChart.data.datasets.length;
@@ -494,13 +511,53 @@ function getCurrentView() {
   return "all";
 }
 
+function getSelectedTypes() {
+  const hiddenInput = document.querySelector('input[name="trend-type"]');
+  const selected = hiddenInput ? hiddenInput.value.split(",").filter(Boolean) : ["issue", "pull_request"];
+  return {
+    issues: selected.includes("issue"),
+    prs: selected.includes("pull_request"),
+  };
+}
+
 function getDataKey(baseKey) {
   const view = getCurrentView();
   if (view === "none") return null;
-  if (view === "external") return baseKey + "_external";
-  if (view === "internal") return baseKey + "_internal";
-  if (view === "bots") return baseKey + "_bots";
-  return baseKey; // "all"
+
+  const types = getSelectedTypes();
+  if (!types.issues && !types.prs) return null;
+
+  // Determine type suffix: "" for both, "_issues" for issue only, "_prs" for PR only
+  let typeSuffix = "";
+  if (types.issues && !types.prs) typeSuffix = "_issues";
+  else if (!types.issues && types.prs) typeSuffix = "_prs";
+
+  // Determine view suffix
+  let viewSuffix = "";
+  if (view === "external") viewSuffix = "_external";
+  else if (view === "internal") viewSuffix = "_internal";
+  else if (view === "bots") viewSuffix = "_bots";
+
+  return baseKey + typeSuffix + viewSuffix;
+}
+
+function getMedianAgeDataKey() {
+  const view = getCurrentView();
+  if (view === "none") return null;
+
+  const types = getSelectedTypes();
+  if (!types.issues && !types.prs) return null;
+
+  // Median age keys have inconsistent naming: nm_ prefix for external,
+  // and type goes in the middle (median_issue_age vs median_age).
+  let typeInfix = "";
+  if (types.issues && !types.prs) typeInfix = "_issue";
+  else if (!types.issues && types.prs) typeInfix = "_pr";
+
+  if (view === "external") return "nm_median" + typeInfix + "_age";
+  if (view === "internal") return "median" + typeInfix + "_age_internal";
+  if (view === "bots") return "median" + typeInfix + "_age_bots";
+  return "median" + typeInfix + "_age";
 }
 
 function onViewChange() {
@@ -546,27 +603,42 @@ function applyDateFilter() {
       filteredProjects[name] = {
         dates: [],
         open_issues: [],
+        open_prs: [],
         open_issues_external: [],
+        open_prs_external: [],
+        open_issues_internal: [],
+        open_prs_internal: [],
         open_issues_bots: [],
+        open_prs_bots: [],
         open: [],
         open_external: [],
         open_internal: [],
         open_bots: [],
         median_issue_age: [],
+        median_pr_age: [],
         median_issue_age_internal: [],
+        median_pr_age_internal: [],
         nm_median_issue_age: [],
+        nm_median_pr_age: [],
         median_issue_age_bots: [],
+        median_pr_age_bots: [],
         median_age: [],
         median_age_internal: [],
         nm_median_age: [],
         median_age_bots: [],
         closed_issues: [],
+        closed_prs: [],
         closed_issues_external: [],
+        closed_prs_external: [],
+        closed_issues_internal: [],
+        closed_prs_internal: [],
         closed_issues_bots: [],
+        closed_prs_bots: [],
         closed: [],
         closed_external: [],
         closed_internal: [],
         closed_bots: [],
+        open_bugs: [],
       };
     } else {
       // Slice dates and all data arrays

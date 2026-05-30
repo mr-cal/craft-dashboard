@@ -26,6 +26,8 @@ _SCALAR_KEYS = [
     "open_prs",
     "open_issues_external",
     "open_prs_external",
+    "open_issues_internal",
+    "open_prs_internal",
     "open_issues_bots",
     "open_prs_bots",
     "open",
@@ -36,6 +38,8 @@ _SCALAR_KEYS = [
     "closed_prs",
     "closed_issues_external",
     "closed_prs_external",
+    "closed_issues_internal",
+    "closed_prs_internal",
     "closed_issues_bots",
     "closed_prs_bots",
     "closed",
@@ -44,6 +48,9 @@ _SCALAR_KEYS = [
     "closed_bots",
     "open_bugs",
 ]
+# State-based keys are forward-filled in the all-projects aggregate
+# when a project is missing data for a date.
+_FORWARD_FILL_KEYS = frozenset(k for k in _SCALAR_KEYS if k.startswith("open"))
 _MEDIAN_AGE_KEYS = [
     "median_issue_age",
     "median_pr_age",
@@ -217,21 +224,23 @@ async def releases_page(
         )
 
     # Only show the latest minor version per major version per project.
-    # e.g. if charmcraft has branches 4.0, 4.1, 4.2, only show 4.2.
+    # e.g. if charmcraft has branches hotfix/4.0, hotfix/4.1, hotfix/4.2,
+    # only show hotfix/4.2.
     filtered: list[dict[str, object]] = []
     # Group by (project, major_version)
     best: dict[tuple[str, str], dict[str, object]] = {}
     non_versioned: list[dict[str, object]] = []
     for rel in releases:
         branch = str(rel["branch"])
-        parts = branch.split(".")
+        version_str = branch.removeprefix("hotfix/")
+        parts = version_str.split(".")
         min_version_parts = 2
         if len(parts) >= min_version_parts and parts[0].isdigit():
             major = parts[0]
             group_key = (str(rel["project_name"]), major)
             existing = best.get(group_key)
-            if existing is None or _version_key(branch) > _version_key(
-                str(existing["branch"])
+            if existing is None or _version_key(version_str) > _version_key(
+                str(existing["branch"]).removeprefix("hotfix/")
             ):
                 best[group_key] = rel
         else:
@@ -299,13 +308,22 @@ def _build_all_projects_aggregate(
         **{k: [] for k in _MEDIAN_AGE_KEYS},
     }
 
+    # Track last known values per project for forward-fill.
+    # State-based keys (open counts) carry forward when a project
+    # is missing data for a date; event-based keys (closed) use 0.
+    last_known: dict[str, dict[str, int]] = {}
+
     for d in all_dates_sorted:
         for k in _SCALAR_KEYS:
             total = 0
             for name, data in projects.items():
                 idx = proj_by_date[name].get(d)
                 if idx is not None:
-                    total += data[k][idx]
+                    val = data[k][idx]
+                    last_known.setdefault(name, {})[k] = val
+                    total += val
+                elif k in _FORWARD_FILL_KEYS:
+                    total += last_known.get(name, {}).get(k, 0)
             all_projects[k].append(total)
 
         if db_median_by_date and d in db_median_by_date:
@@ -486,6 +504,8 @@ async def trends_all_data(
                 "open_prs": [],
                 "open_issues_external": [],
                 "open_prs_external": [],
+                "open_issues_internal": [],
+                "open_prs_internal": [],
                 "open_issues_bots": [],
                 "open_prs_bots": [],
                 "open": [],
@@ -508,6 +528,8 @@ async def trends_all_data(
                 "closed_prs": [],
                 "closed_issues_external": [],
                 "closed_prs_external": [],
+                "closed_issues_internal": [],
+                "closed_prs_internal": [],
                 "closed_issues_bots": [],
                 "closed_prs_bots": [],
                 "closed": [],
@@ -521,6 +543,8 @@ async def trends_all_data(
         projects[name]["open_prs"].append(row.open_prs)
         projects[name]["open_issues_external"].append(row.open_issues_external)
         projects[name]["open_prs_external"].append(row.open_prs_external)
+        projects[name]["open_issues_internal"].append(row.open_issues_internal)
+        projects[name]["open_prs_internal"].append(row.open_prs_internal)
         projects[name]["open_issues_bots"].append(row.open_issues_bots)
         projects[name]["open_prs_bots"].append(row.open_prs_bots)
         projects[name]["open"].append(row.open_issues + row.open_prs)
@@ -549,6 +573,8 @@ async def trends_all_data(
         projects[name]["closed_prs"].append(row.closed_prs)
         projects[name]["closed_issues_external"].append(row.closed_issues_external)
         projects[name]["closed_prs_external"].append(row.closed_prs_external)
+        projects[name]["closed_issues_internal"].append(row.closed_issues_internal)
+        projects[name]["closed_prs_internal"].append(row.closed_prs_internal)
         projects[name]["closed_issues_bots"].append(row.closed_issues_bots)
         projects[name]["closed_prs_bots"].append(row.closed_prs_bots)
         projects[name]["closed"].append(row.closed_issues + row.closed_prs)

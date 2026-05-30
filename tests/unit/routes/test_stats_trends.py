@@ -35,6 +35,8 @@ _TIME_SERIES_KEYS = {
     "open_prs",
     "open_issues_external",
     "open_prs_external",
+    "open_issues_internal",
+    "open_prs_internal",
     "open_issues_bots",
     "open_prs_bots",
     "open",
@@ -57,6 +59,8 @@ _TIME_SERIES_KEYS = {
     "closed_prs",
     "closed_issues_external",
     "closed_prs_external",
+    "closed_issues_internal",
+    "closed_prs_internal",
     "closed_issues_bots",
     "closed_prs_bots",
     "closed",
@@ -220,6 +224,8 @@ class TestTrendsAllDataSingleProject:
             "open_prs": [4],
             "open_issues_external": [6],
             "open_prs_external": [2],
+            "open_issues_internal": [4],
+            "open_prs_internal": [1],
             "open_issues_bots": [1],
             "open_prs_bots": [1],
             "open": [15],
@@ -242,6 +248,8 @@ class TestTrendsAllDataSingleProject:
             "closed_prs": [8],
             "closed_issues_external": [2],
             "closed_prs_external": [3],
+            "closed_issues_internal": [4],
+            "closed_prs_internal": [2],
             "closed_issues_bots": [1],
             "closed_prs_bots": [2],
             "closed": [15],
@@ -375,6 +383,8 @@ class TestTrendsAllProjectsTimeSeries:
         assert all_projects["open_prs"] == [10]
         assert all_projects["open_issues_external"] == [5]
         assert all_projects["open_prs_external"] == [7]
+        assert all_projects["open_issues_internal"] == [2]
+        assert all_projects["open_prs_internal"] == [3]
         assert all_projects["open_issues_bots"] == [3]
         assert all_projects["open_prs_bots"] == [3]
         assert all_projects["open"] == [17]
@@ -385,6 +395,8 @@ class TestTrendsAllProjectsTimeSeries:
         assert all_projects["closed_prs"] == [15]
         assert all_projects["closed_issues_external"] == [6]
         assert all_projects["closed_prs_external"] == [8]
+        assert all_projects["closed_issues_internal"] == [4]
+        assert all_projects["closed_prs_internal"] == [4]
         assert all_projects["closed_issues_bots"] == [3]
         assert all_projects["closed_prs_bots"] == [3]
         assert all_projects["closed"] == [28]
@@ -534,6 +546,8 @@ class TestBuildAllProjectsAggregate:
                 open_prs=[3, 4],
                 open_issues_external=[5, 6],
                 open_prs_external=[7, 8],
+                open_issues_internal=[1, 1],
+                open_prs_internal=[0, 1],
                 open_issues_bots=[1, 0],
                 open_prs_bots=[0, 1],
                 open=[4, 6],
@@ -556,6 +570,8 @@ class TestBuildAllProjectsAggregate:
                 closed_prs=[11, 12],
                 closed_issues_external=[13, 14],
                 closed_prs_external=[15, 16],
+                closed_issues_internal=[3, 4],
+                closed_prs_internal=[5, 6],
                 closed_issues_bots=[1, 2],
                 closed_prs_bots=[3, 4],
                 closed=[20, 22],
@@ -570,6 +586,8 @@ class TestBuildAllProjectsAggregate:
                 open_prs=[9, 10],
                 open_issues_external=[11, 12],
                 open_prs_external=[13, 14],
+                open_issues_internal=[2, 3],
+                open_prs_internal=[4, 5],
                 open_issues_bots=[2, 3],
                 open_prs_bots=[4, 5],
                 open=[16, 18],
@@ -592,6 +610,8 @@ class TestBuildAllProjectsAggregate:
                 closed_prs=[19, 20],
                 closed_issues_external=[21, 22],
                 closed_prs_external=[23, 24],
+                closed_issues_internal=[7, 8],
+                closed_prs_internal=[9, 10],
                 closed_issues_bots=[5, 6],
                 closed_prs_bots=[7, 8],
                 closed=[36, 38],
@@ -604,27 +624,33 @@ class TestBuildAllProjectsAggregate:
 
         assert _build_all_projects_aggregate(projects) == {
             "dates": ["2024-05-20", "2024-05-21", "2024-05-22"],
-            "open_issues": [1, 9, 8],
-            "open_prs": [3, 13, 10],
-            "open_issues_external": [5, 17, 12],
-            "open_prs_external": [7, 21, 14],
+            # Forward-fill: on 2024-05-22 alpha carries its 2024-05-21 open values
+            "open_issues": [1, 9, 10],
+            "open_prs": [3, 13, 14],
+            "open_issues_external": [5, 17, 18],
+            "open_prs_external": [7, 21, 22],
+            "open_issues_internal": [1, 3, 4],
+            "open_prs_internal": [0, 5, 6],
             "open_issues_bots": [1, 2, 3],
-            "open_prs_bots": [0, 5, 5],
-            "open": [4, 22, 18],
-            "open_external": [12, 38, 26],
-            "open_internal": [2, 12, 10],
-            "open_bots": [1, 7, 8],
+            "open_prs_bots": [0, 5, 6],
+            "open": [4, 22, 24],
+            "open_external": [12, 38, 40],
+            "open_internal": [2, 12, 13],
+            "open_bots": [1, 7, 9],
+            # Closed keys: no forward-fill (event counts)
             "closed_issues": [9, 27, 18],
             "closed_prs": [11, 31, 20],
             "closed_issues_external": [13, 35, 22],
             "closed_prs_external": [15, 39, 24],
+            "closed_issues_internal": [3, 11, 8],
+            "closed_prs_internal": [5, 15, 10],
             "closed_issues_bots": [1, 7, 6],
             "closed_prs_bots": [3, 11, 8],
             "closed": [20, 58, 38],
             "closed_external": [28, 74, 46],
             "closed_internal": [18, 44, 26],
             "closed_bots": [4, 18, 14],
-            "open_bugs": [5, 15, 10],
+            "open_bugs": [5, 15, 16],
             # Weighted by open item count (alpha: open_i+open_p, beta: open_i+open_p)
             # 2024-05-20: only alpha (weight=4) → alpha values
             # 2024-05-21: alpha (weight=6) + beta (weight=16) → weighted avg

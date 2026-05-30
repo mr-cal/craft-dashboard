@@ -201,7 +201,8 @@ class TestReleasesPage:
     ) -> None:
         """Only the latest minor version per major version should be shown.
 
-        e.g. if charmcraft has 4.0, 4.1, 4.2 branches, only 4.2 should appear.
+        e.g. if charmcraft has hotfix/4.0, hotfix/4.1, hotfix/4.2 branches,
+        only hotfix/4.2 should appear.
         """
 
         async def _seed() -> None:
@@ -241,7 +242,7 @@ class TestReleasesPage:
                     {
                         "project_id": project.id,
                         "version": "4.0.0",
-                        "branch": "4.0",
+                        "branch": "hotfix/4.0",
                         "released_at": datetime(2024, 1, 1, tzinfo=UTC),
                         "is_hotfix": False,
                         "metadata": "{}",
@@ -249,7 +250,7 @@ class TestReleasesPage:
                     {
                         "project_id": project.id,
                         "version": "4.1.0",
-                        "branch": "4.1",
+                        "branch": "hotfix/4.1",
                         "released_at": datetime(2024, 2, 1, tzinfo=UTC),
                         "is_hotfix": False,
                         "metadata": "{}",
@@ -257,7 +258,7 @@ class TestReleasesPage:
                     {
                         "project_id": project.id,
                         "version": "4.2.0",
-                        "branch": "4.2",
+                        "branch": "hotfix/4.2",
                         "released_at": datetime(2024, 3, 1, tzinfo=UTC),
                         "is_hotfix": False,
                         "metadata": "{}",
@@ -265,7 +266,7 @@ class TestReleasesPage:
                     {
                         "project_id": project.id,
                         "version": "3.5.0",
-                        "branch": "3.5",
+                        "branch": "hotfix/3.5",
                         "released_at": datetime(2024, 1, 15, tzinfo=UTC),
                         "is_hotfix": False,
                         "metadata": "{}",
@@ -286,12 +287,12 @@ class TestReleasesPage:
 
         response = test_client.get("/stats/releases")
         assert response.status_code == 200
-        # 4.2 should be shown (latest minor of major 4)
+        # hotfix/4.2 should be shown (latest minor of major 4)
         assert "4.2.0" in response.text
-        # 4.0 and 4.1 should NOT be shown
+        # hotfix/4.0 and hotfix/4.1 should NOT be shown
         assert "4.0.0" not in response.text
         assert "4.1.0" not in response.text
-        # 3.5 should be shown (only release for major 3)
+        # hotfix/3.5 should be shown (only release for major 3)
         assert "3.5.0" in response.text
         # main branch (non-versioned) should be shown
         assert "5.0.0" in response.text
