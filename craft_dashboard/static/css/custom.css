@@ -129,11 +129,6 @@ body.is-paper {
   background: #f99b11;
 }
 
-.system-status-short-label {
-  font-size: 0.72rem;
-  font-weight: 600;
-}
-
 .issue-detail-layout {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

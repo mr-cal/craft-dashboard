@@ -8,9 +8,9 @@ from craft_dashboard.llm.client import (
     LLMResponse,
     LocalLLMClient,
     OpenRouterClient,
-    QuotaExhaustedError,
     create_llm_client,
 )
+from craft_dashboard.llm.exceptions import LLMQuotaError
 from craft_dashboard.settings import Settings
 
 
@@ -33,20 +33,20 @@ class TestOpenRouterClient:
         assert client.base_url == "https://custom.api/v1"
 
 
-class TestQuotaExhaustedError:
-    """Tests for QuotaExhaustedError detection."""
+class TestQuotaError:
+    """Tests for quota error detection."""
 
     @pytest.mark.asyncio
     async def test_raises_quota_error_on_402(self) -> None:
-        """HTTP 402 response raises QuotaExhaustedError, not HTTPStatusError."""
+        """HTTP 402 response raises LLMQuotaError, not HTTPStatusError."""
         mock_response = httpx.Response(402, request=httpx.Request("POST", "http://x"))
 
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = mock_response
             client = OpenRouterClient(api_key="test")
 
-            with pytest.raises(QuotaExhaustedError):
-                await client.chat(
+            with pytest.raises(LLMQuotaError):
+                await client.complete(
                     model="test/model", messages=[{"role": "user", "content": "hi"}]
                 )
 

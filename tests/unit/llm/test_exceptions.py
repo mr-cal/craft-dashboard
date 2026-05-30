@@ -1,6 +1,5 @@
 """Tests for the LLM exception hierarchy."""
 
-from craft_dashboard.llm.client import QuotaExhaustedError
 from craft_dashboard.llm.exceptions import (
     LLMError,
     LLMQuotaError,
@@ -26,10 +25,3 @@ class TestLLMExceptions:
         assert isinstance(LLMTimeoutError("timeout"), LLMError)
         assert isinstance(LLMValidationError("invalid"), LLMError)
         assert isinstance(LLMRateLimitError("slow down"), LLMError)
-
-    def test_quota_exhausted_error_alias_remains_available(self) -> None:
-        """Legacy QuotaExhaustedError remains an alias for backward compatibility."""
-        error = QuotaExhaustedError("quota")
-
-        assert isinstance(error, LLMQuotaError)
-        assert QuotaExhaustedError is LLMQuotaError

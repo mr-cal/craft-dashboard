@@ -25,8 +25,6 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 HTTP_TOO_MANY_REQUESTS = 429
 HTTP_PAYMENT_REQUIRED = 402
 
-QuotaExhaustedError = LLMQuotaError
-
 
 @dataclass
 class LLMResponse:
@@ -50,9 +48,6 @@ class LLMResponse:
             total_tokens=usage.get("total_tokens", 0),
             model=data.get("model", ""),
         )
-
-
-OpenRouterResponse = LLMResponse
 
 
 @runtime_checkable
@@ -169,24 +164,6 @@ class OpenRouterClient:
         )
         return result
 
-    async def chat(
-        self,
-        *,
-        model: str,
-        messages: list[dict[str, str]],
-        temperature: float = 0.3,
-        max_tokens: int = 1024,
-        response_format: dict | None = None,
-    ) -> LLMResponse:
-        """Backward-compatible alias for complete()."""
-        return await self.complete(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format=response_format,
-        )
-
 
 LOCAL_LLM_BASE_URL = "http://localhost:11434/v1"
 
@@ -277,24 +254,6 @@ class LocalLLMClient:
             result.completion_tokens,
         )
         return result
-
-    async def chat(
-        self,
-        *,
-        model: str,
-        messages: list[dict[str, str]],
-        temperature: float = 0.3,
-        max_tokens: int = 1024,
-        response_format: dict | None = None,
-    ) -> LLMResponse:
-        """Backward-compatible alias for complete()."""
-        return await self.complete(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format=response_format,
-        )
 
 
 def create_llm_client(settings: Settings) -> LLMClient:
