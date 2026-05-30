@@ -35,10 +35,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from craft_dashboard.config import load_config
 from craft_dashboard.database import get_engine, get_session_factory
-from craft_dashboard.llm.client import (
-    QuotaExhaustedError,
-    create_llm_client,
-)
+from craft_dashboard.llm.client import QuotaExhaustedError, create_llm_client
 from craft_dashboard.llm.evaluator import IssueEvaluator
 from craft_dashboard.settings import Settings
 

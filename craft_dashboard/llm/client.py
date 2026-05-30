@@ -14,6 +14,8 @@ from tenacity import (
     wait_exponential,
 )
 
+from craft_dashboard.llm.exceptions import LLMQuotaError
+
 if TYPE_CHECKING:
     from craft_dashboard.settings import Settings
 
@@ -24,8 +26,7 @@ HTTP_TOO_MANY_REQUESTS = 429
 HTTP_PAYMENT_REQUIRED = 402
 
 
-class QuotaExhaustedError(Exception):
-    """Raised when the OpenRouter daily quota is exhausted (HTTP 402)."""
+QuotaExhaustedError = LLMQuotaError
 
 
 @dataclass
@@ -157,7 +158,7 @@ class OpenRouterClient:
         )
 
         if response.status_code == HTTP_PAYMENT_REQUIRED:
-            raise QuotaExhaustedError(
+            raise LLMQuotaError(
                 "OpenRouter daily quota exhausted. "
                 "Evaluation will resume tomorrow after reset."
             )
