@@ -1,5 +1,8 @@
 """Application settings loaded from environment variables."""
 
+from __future__ import annotations
+
+from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings
@@ -40,6 +43,39 @@ class Settings(BaseSettings):
 
     # How many days before re-fetching an issue from GitHub
     refresh_age_days: int = 7
+
+    @property
+    def summary_model(self) -> str:
+        """Return the summary model for the selected LLM backend."""
+        if self.llm_backend == "local":
+            return self.local_llm_summary_model
+        return self.openrouter_summary_model
+
+    @property
+    def evaluation_model(self) -> str:
+        """Return the evaluation model for the selected LLM backend."""
+        if self.llm_backend == "local":
+            return self.local_llm_evaluation_model
+        return self.openrouter_evaluation_model
+
+    @property
+    def config_path(self) -> Path:
+        """Return the validated path to the dashboard config file."""
+        config_path = Path(self.config_file)
+        if not config_path.exists():
+            raise ValueError(f"config_file does not exist: {self.config_file}")
+        return config_path
+
+    @classmethod
+    def validate_config(cls, settings: Settings) -> None:
+        """Validate derived configuration requirements for the active backend."""
+        if settings.llm_backend == "openrouter" and not settings.openrouter_api_key:
+            raise ValueError(
+                "OPENROUTER_API_KEY is required when LLM_BACKEND=openrouter"
+            )
+        if settings.llm_backend == "local" and not settings.local_llm_url:
+            raise ValueError("LOCAL_LLM_URL is required when LLM_BACKEND=local")
+        _ = settings.config_path
 
     def validate_required_secrets(self) -> list[str]:
         """Return a list of warning messages for missing secrets."""

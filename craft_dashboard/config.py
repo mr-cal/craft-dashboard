@@ -1,9 +1,17 @@
 """Configuration loading for craft-dashboard."""
 
-import pathlib
+from __future__ import annotations
+
 import tomllib
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+SCHEDULE_DAY_MIN = 0
+SCHEDULE_DAY_MAX = 6
 
 
 class DashboardConfig(BaseModel):
@@ -13,14 +21,38 @@ class DashboardConfig(BaseModel):
     craft_libraries: list[str] = Field(default_factory=list)
     craft_projects: list[str] = Field(default_factory=list)
     refresh_interval_days: int = 7
+    schedule_days: list[int] = Field(default_factory=list)
     launchpad_projects: list[str] = Field(default_factory=list)
     maintainers: list[str] = Field(default_factory=list)
     launchpad_maintainers: list[str] = Field(default_factory=list)
     bots: list[str] = Field(default_factory=list)
     hotfix_min_versions: dict[str, str] = Field(default_factory=dict)
 
+    @classmethod
+    def validate(cls, value: object) -> DashboardConfig:
+        """Validate cross-field dashboard configuration requirements."""
+        config = cls.model_validate(value)
+        configured_projects = (
+            config.craft_applications
+            + config.craft_libraries
+            + config.craft_projects
+            + config.launchpad_projects
+        )
+        if not configured_projects:
+            raise ValueError("At least one project must be configured")
+        if not config.maintainers:
+            raise ValueError("Maintainers list must not be empty")
+        invalid_days = [
+            day
+            for day in config.schedule_days
+            if day < SCHEDULE_DAY_MIN or day > SCHEDULE_DAY_MAX
+        ]
+        if invalid_days:
+            raise ValueError("schedule days must be between 0 and 6")
+        return config
 
-def load_config(config_path: pathlib.Path) -> DashboardConfig:
+
+def load_config(config_path: Path) -> DashboardConfig:
     """Load configuration from a TOML file.
 
     Args:
@@ -46,5 +78,8 @@ def load_config(config_path: pathlib.Path) -> DashboardConfig:
     # Handle nested sections
     if "hotfix_min_versions" in normalized:
         normalized["hotfix_min_versions"] = dict(normalized["hotfix_min_versions"])
+    if "schedule" in normalized and isinstance(normalized["schedule"], dict):
+        schedule = normalized.pop("schedule")
+        normalized["schedule_days"] = schedule.get("days", [])
 
     return DashboardConfig(**normalized)

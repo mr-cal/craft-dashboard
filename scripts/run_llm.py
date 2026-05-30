@@ -415,12 +415,8 @@ async def _main(  # noqa: PLR0913
     client = create_llm_client(settings)
 
     # Select model names based on backend
-    if settings.llm_backend == "local":
-        summary_model = settings.local_llm_summary_model
-        evaluation_model = settings.local_llm_evaluation_model
-    else:
-        summary_model = settings.openrouter_summary_model
-        evaluation_model = settings.openrouter_evaluation_model
+    summary_model = settings.summary_model
+    evaluation_model = settings.evaluation_model
 
     evaluator = IssueEvaluator(
         client=client,
