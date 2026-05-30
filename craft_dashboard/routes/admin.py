@@ -186,6 +186,7 @@ async def trigger_re_evaluation(
             / "scripts"
             / "run_llm.py"
         ),
+        "evaluate",
     ]
     if params.project:
         cmd.extend(["--project", params.project])

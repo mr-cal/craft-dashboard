@@ -44,7 +44,7 @@ collect:  ## Run data collection (all sources)
 
 .PHONY: llm
 llm:  ## Run LLM evaluation (open issues only)
-	uv run scripts/run_llm.py --open-only
+	uv run scripts/run_llm.py evaluate --open-only
 
 .PHONY: migrate-csv
 migrate-csv:  ## One-time CSV migration from starcraft-stats
