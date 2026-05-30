@@ -102,6 +102,7 @@ async def _main(  # noqa: PLR0913
     stale_days: int,
     dry_run: bool,
     strict_validation: bool,
+    no_resume: bool,
 ) -> None:
     """Run LLM evaluation."""
     settings = Settings()
@@ -165,6 +166,7 @@ async def _main(  # noqa: PLR0913
             dry_run=dry_run,
             llm_backend=settings.llm_backend,
             strict_validation=strict_validation,
+            resume=not no_resume,
         )
         logger.info(
             "Evaluation complete: %d evaluated, %d skipped, %d errors, %d total tokens",
@@ -242,6 +244,12 @@ def cli(ctx: click.Context) -> None:
     default=False,
     help="Stop the run on the first LLM validation failure instead of skipping it.",
 )
+@click.option(
+    "--no-resume",
+    is_flag=True,
+    default=False,
+    help="Ignore any saved checkpoint and start a fresh evaluation run.",
+)
 def evaluate_cmd(  # noqa: PLR0913
     project: str,
     limit: int,
@@ -254,6 +262,7 @@ def evaluate_cmd(  # noqa: PLR0913
     stale_days: int,
     dry_run: bool,
     strict_validation: bool,
+    no_resume: bool,
 ) -> None:
     """Run LLM evaluation on issues and PRs."""
     asyncio.run(
@@ -269,6 +278,7 @@ def evaluate_cmd(  # noqa: PLR0913
             stale_days,
             dry_run,
             strict_validation,
+            no_resume,
         )
     )
 

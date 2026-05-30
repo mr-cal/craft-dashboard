@@ -14,6 +14,13 @@ from craft_dashboard.llm.exceptions import (
     LLMTimeoutError,
     LLMValidationError,
 )
+from scripts.llm.checkpoint import (
+    EvaluationCheckpoint,
+    clear_checkpoint,
+    compute_filter_hash,
+    load_checkpoint,
+    save_checkpoint,
+)
 from scripts.llm.queries import IssueFilter, fetch_issue_evaluation_targets
 from scripts.llm.storage import store_evaluation_result
 from scripts.llm.validation import validate_evaluation_result
@@ -119,9 +126,19 @@ async def _evaluate_issues(  # noqa: PLR0913
     dry_run: bool = False,
     llm_backend: str = "openrouter",
     strict_validation: bool = False,
+    resume: bool = True,
 ) -> EvaluationStats | DryRunEvaluationStats:
     """Evaluate matched issues and persist any new results."""
     stats = {"evaluated": 0, "skipped": 0, "errored": 0, "total_tokens": 0}
+    filter_hash = compute_filter_hash(
+        project_filter=project_filter,
+        limit=limit,
+        open_only=open_only,
+        force=force,
+        issue_filters=issue_filters,
+        incomplete=incomplete,
+        stale_days=stale_days,
+    )
     targets = await fetch_issue_evaluation_targets(
         session_factory,
         project_filter=project_filter,
@@ -131,6 +148,33 @@ async def _evaluate_issues(  # noqa: PLR0913
         stale_days=stale_days,
     )
 
+    completed_issue_ids: set[int] = set()
+    checkpoint = load_checkpoint(filter_hash) if resume else None
+    if checkpoint is not None:
+        target_ids = {target.issue.id for target in targets}
+        completed_issue_ids = {
+            issue_id
+            for issue_id in checkpoint.completed_issue_ids
+            if issue_id in target_ids
+        }
+        if completed_issue_ids:
+            logger.info(
+                "Resuming evaluation with %d completed issues from checkpoint",
+                len(completed_issue_ids),
+            )
+            stats["skipped"] = len(completed_issue_ids)
+            targets = [
+                target
+                for target in targets
+                if target.issue.id not in completed_issue_ids
+            ]
+
+    if limit > 0:
+        remaining_limit = max(limit - len(completed_issue_ids), 0)
+        targets = targets[:remaining_limit]
+
+    total_to_eval = stats["skipped"] + len(targets)
+
     if dry_run:
         logger.info("DRY RUN: %d issues would be evaluated", len(targets))
         return {
@@ -138,9 +182,15 @@ async def _evaluate_issues(  # noqa: PLR0913
             "would_evaluate": len(targets),
         }
 
-    total_to_eval = len(targets)
-    logger.info("Starting evaluation of %d issues", total_to_eval)
+    if total_to_eval == 0:
+        logger.info("No issues remaining to evaluate")
+        if resume:
+            clear_checkpoint()
+        return stats
 
+    logger.info("Starting evaluation of %d issues", len(targets))
+
+    quota_exhausted = False
     for idx, target in enumerate(targets, start=1):
         issue = target.issue
         existing_hash = None if force else target.issue_data_hash
@@ -194,6 +244,7 @@ async def _evaluate_issues(  # noqa: PLR0913
                 "LLM quota exhausted. Stopping evaluation. %d evaluated so far.",
                 stats["evaluated"],
             )
+            quota_exhausted = True
             break
         except Exception:
             logger.exception("Error evaluating issue %s", issue.title)
@@ -241,6 +292,15 @@ async def _evaluate_issues(  # noqa: PLR0913
 
         stats["evaluated"] += 1
         stats["total_tokens"] += result["tokens_used"]
+        completed_issue_ids.add(issue.id)
+        if resume:
+            save_checkpoint(
+                EvaluationCheckpoint(
+                    filter_hash=filter_hash,
+                    completed_issue_ids=sorted(completed_issue_ids),
+                    timestamp=datetime.now(tz=UTC).isoformat(),
+                )
+            )
         logger.info(
             "[%d/%d] Evaluated %s (%s, %d tokens): %s",
             stats["evaluated"],
@@ -259,5 +319,8 @@ async def _evaluate_issues(  # noqa: PLR0913
         if limit > 0 and stats["evaluated"] >= limit:
             logger.info("Reached evaluation limit of %d", limit)
             break
+
+    if resume and not quota_exhausted and stats["errored"] == 0:
+        clear_checkpoint()
 
     return stats

@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -13,6 +13,7 @@ from craft_dashboard.llm.exceptions import (
     LLMValidationError,
 )
 from craft_dashboard.models.issue import Issue
+from scripts.llm.checkpoint import EvaluationCheckpoint
 from scripts.llm.orchestrator import _evaluate_issues
 from scripts.llm.queries import IssueEvaluationTarget
 
@@ -87,6 +88,7 @@ class TestEvaluateIssues:
             evaluator=evaluator,
             maintainers={"alice"},
             dry_run=True,
+            resume=False,
         )
 
         assert stats == {
@@ -137,6 +139,7 @@ class TestEvaluateIssues:
             evaluator=evaluator,
             maintainers={"alice"},
             llm_backend="local",
+            resume=False,
         )
 
         assert stats == {"evaluated": 1, "skipped": 1, "errored": 0, "total_tokens": 77}
@@ -200,6 +203,7 @@ class TestEvaluateIssues:
             session_factory=object(),
             evaluator=evaluator,
             maintainers=set(),
+            resume=False,
         )
 
         assert stats == {"evaluated": 0, "skipped": 0, "errored": 1, "total_tokens": 0}
@@ -243,6 +247,7 @@ class TestEvaluateIssues:
                 evaluator=evaluator,
                 maintainers=set(),
                 strict_validation=True,
+                resume=False,
             )
 
         assert evaluator.evaluate_issue.await_count == 1
@@ -283,6 +288,7 @@ class TestEvaluateIssues:
             session_factory=object(),
             evaluator=evaluator,
             maintainers=set(),
+            resume=False,
         )
 
         assert stats == {"evaluated": 1, "skipped": 0, "errored": 0, "total_tokens": 77}
@@ -342,12 +348,117 @@ class TestEvaluateIssues:
             session_factory=object(),
             evaluator=evaluator,
             maintainers=set(),
+            resume=False,
         )
 
         assert stats == {"evaluated": 1, "skipped": 0, "errored": 1, "total_tokens": 77}
         assert evaluator.evaluate_issue.await_count == 4
         store_result.assert_awaited_once()
         assert store_result.await_args.kwargs["issue_id"] == 2
+
+    @pytest.mark.asyncio
+    async def test_resumes_from_checkpoint_and_clears_it_on_success(
+        self, monkeypatch
+    ) -> None:
+        targets = [
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=1),
+                project_name="charmcraft",
+                issue_data_hash=None,
+            ),
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=2),
+                project_name="snapcraft",
+                issue_data_hash=None,
+            ),
+        ]
+        evaluator = SimpleNamespace(
+            evaluate_issue=AsyncMock(return_value=_valid_result(issue_hash="hash-2")),
+            evaluation_model="eval-model",
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
+            AsyncMock(return_value=targets),
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.compute_filter_hash",
+            lambda **_: "filter-hash",
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.load_checkpoint",
+            lambda filter_hash: EvaluationCheckpoint(
+                filter_hash=filter_hash,
+                completed_issue_ids=[1],
+                timestamp="2025-01-01T00:00:00+00:00",
+            ),
+        )
+        save_checkpoint = MagicMock()
+        clear_checkpoint = MagicMock()
+        monkeypatch.setattr("scripts.llm.orchestrator.save_checkpoint", save_checkpoint)
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.clear_checkpoint", clear_checkpoint
+        )
+        store_result = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.store_evaluation_result", store_result
+        )
+
+        stats = await _evaluate_issues(
+            session_factory=object(),
+            evaluator=evaluator,
+            maintainers=set(),
+            project_filter="snapcraft",
+            limit=2,
+            open_only=True,
+            incomplete=True,
+            stale_days=7,
+        )
+
+        assert stats == {"evaluated": 1, "skipped": 1, "errored": 0, "total_tokens": 77}
+        assert evaluator.evaluate_issue.await_count == 1
+        assert evaluator.evaluate_issue.await_args.kwargs["title"] == "Issue 2"
+        save_checkpoint.assert_called_once()
+        checkpoint = save_checkpoint.call_args.args[0]
+        assert checkpoint.completed_issue_ids == [1, 2]
+        clear_checkpoint.assert_called_once()
+        store_result.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_no_resume_ignores_existing_checkpoint(self, monkeypatch) -> None:
+        target = IssueEvaluationTarget(
+            issue=_make_issue(issue_id=1),
+            project_name="charmcraft",
+            issue_data_hash=None,
+        )
+        evaluator = SimpleNamespace(
+            evaluate_issue=AsyncMock(return_value=_valid_result(issue_hash="hash-1")),
+            evaluation_model="eval-model",
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
+            AsyncMock(return_value=[target]),
+        )
+        load_checkpoint = MagicMock()
+        monkeypatch.setattr("scripts.llm.orchestrator.load_checkpoint", load_checkpoint)
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.compute_filter_hash",
+            lambda **_: "filter-hash",
+        )
+        monkeypatch.setattr("scripts.llm.orchestrator.save_checkpoint", MagicMock())
+        monkeypatch.setattr("scripts.llm.orchestrator.clear_checkpoint", MagicMock())
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.store_evaluation_result", AsyncMock()
+        )
+
+        stats = await _evaluate_issues(
+            session_factory=object(),
+            evaluator=evaluator,
+            maintainers=set(),
+            resume=False,
+        )
+
+        assert stats == {"evaluated": 1, "skipped": 0, "errored": 0, "total_tokens": 77}
+        load_checkpoint.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_stops_when_quota_is_exhausted(self, monkeypatch) -> None:
@@ -380,6 +491,7 @@ class TestEvaluateIssues:
             session_factory=object(),
             evaluator=evaluator,
             maintainers=set(),
+            resume=False,
         )
 
         assert stats == {"evaluated": 0, "skipped": 0, "errored": 0, "total_tokens": 0}

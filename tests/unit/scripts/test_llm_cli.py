@@ -30,13 +30,14 @@ class TestClearEvaluationsCommand:
 
 
 class TestEvaluateCommand:
-    def test_help_lists_strict_validation_flag(self) -> None:
+    def test_help_lists_validation_and_resume_flags(self) -> None:
         runner = CliRunner()
 
         result = runner.invoke(cli, ["evaluate", "--help"])
 
         assert result.exit_code == 0
         assert "--strict-validation" in result.output
+        assert "--no-resume" in result.output
 
     @pytest.mark.asyncio
     async def test_clear_main_confirms_before_deleting(self, monkeypatch) -> None:
