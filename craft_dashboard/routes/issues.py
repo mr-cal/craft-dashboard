@@ -104,6 +104,7 @@ async def _query_issues(
     _bots: list[str] | None = None,
     search: str = "",
     items_per_page: int = DEFAULT_PER_PAGE,
+    llm_status: str = "",
 ) -> tuple[list[dict], int]:
     """Query issues with filters and return (issues, total_pages)."""
     query = (
@@ -159,6 +160,21 @@ async def _query_issues(
             or_(
                 Issue.title.ilike(search_pattern),
                 Issue.external_id == search,
+            )
+        )
+
+    if llm_status == "no_llm":
+        query = query.where(LLMEvaluation.id.is_(None))
+    elif llm_status == "partial_llm":
+        # Has an evaluation but missing summary, action, or scores
+        query = query.where(
+            LLMEvaluation.id.is_not(None)
+            & (
+                LLMEvaluation.summary.is_(None)
+                | (LLMEvaluation.summary == "")
+                | LLMEvaluation.suggested_action.is_(None)
+                | (LLMEvaluation.suggested_action == "")
+                | LLMEvaluation.scores.is_(None)
             )
         )
 
@@ -247,6 +263,7 @@ async def issue_list(
     search: str = Query("", alias="search"),
     per_page: int = Query(DEFAULT_PER_PAGE, alias="per_page"),
     scores: str = Query(DEFAULT_SCORES, alias="scores"),
+    llm_status: str = Query("", alias="llm_status"),
 ) -> HTMLResponse:
     """Render the issue triage list page."""
     templates: Jinja2Templates = request.app.state.templates
@@ -268,6 +285,7 @@ async def issue_list(
         page=page,
         search=search,
         items_per_page=effective_per_page,
+        llm_status=llm_status,
     )
     page = min(page, total_pages)
 
@@ -298,6 +316,7 @@ async def issue_list(
             "filter_scores": scores,
             "active_scores": active_scores,
             "all_scores": ALL_SCORES,
+            "filter_llm_status": llm_status,
         },
     )
 
@@ -317,6 +336,7 @@ async def issue_table_partial(
     search: str = Query("", alias="search"),
     per_page: int = Query(DEFAULT_PER_PAGE, alias="per_page"),
     scores: str = Query(DEFAULT_SCORES, alias="scores"),
+    llm_status: str = Query("", alias="llm_status"),
 ) -> HTMLResponse:
     """Return just the issue table partial (for HTMX swapping)."""
     templates: Jinja2Templates = request.app.state.templates
@@ -338,6 +358,7 @@ async def issue_table_partial(
         page=page,
         search=search,
         items_per_page=effective_per_page,
+        llm_status=llm_status,
     )
     page = min(page, total_pages)
 
@@ -360,5 +381,6 @@ async def issue_table_partial(
             "filter_scores": scores,
             "active_scores": active_scores,
             "all_scores": ALL_SCORES,
+            "filter_llm_status": llm_status,
         },
     )

@@ -84,8 +84,8 @@ table[role="grid"] col.col-issue     { width: 100px; }
 table[role="grid"] col.col-title     { width: auto; }
 table[role="grid"] col.col-author    { width: 90px; }
 table[role="grid"] col.col-age       { width: 50px; }
-table[role="grid"] col.col-score     { width: 60px; }
-table[role="grid"] col.col-action    { width: 90px; }
+table[role="grid"] col.col-score     { width: 80px; }
+table[role="grid"] col.col-action    { width: 110px; }
 table[role="grid"] col.col-summary   { width: auto; }
 
 /* Column resize handle */
@@ -100,12 +100,17 @@ table[role="grid"] th .col-resize-handle {
   bottom: 0;
   width: 4px;
   cursor: col-resize;
-  background: transparent;
+  background: #d9d9d9;
+  transition: background 0.15s;
 }
 
 table[role="grid"] th .col-resize-handle:hover,
 table[role="grid"] th .col-resize-handle.resizing {
   background: #0066cc;
+}
+
+table[role="grid"] th:hover .col-resize-handle {
+  background: #999;
 }
 
 /* Active sort header highlight */

@@ -196,6 +196,7 @@
       <option value="1000" {% if per_page == 1000 %}selected{% endif %}>All</option>
     </select>
   </div>
+  <input type="hidden" name="llm_status" value="{{ filter_llm_status or '' }}" />
 </div>
 
 <div id="loading-indicator" class="htmx-indicator" style="text-align:center;padding:1rem;">

@@ -5,7 +5,9 @@ _SUMMARY_SYSTEM = (
     "256 characters summarising the following GitHub issue or pull request. "
     "Focus on what it is about and its current state (e.g. under discussion, "
     "waiting for review, stalled, has a proposed fix). "
-    "Do not include markdown formatting."
+    "Do not include markdown formatting. "
+    "Do not start with boilerplate like 'This issue', 'This pull request', "
+    "'This PR', or 'The issue'. Get straight to the point."
 )
 
 _EVALUATION_SYSTEM = """\

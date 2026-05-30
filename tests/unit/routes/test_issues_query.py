@@ -978,3 +978,78 @@ class TestQueryIssuesLLMScores:
         scored_issues = [i for i in issues if i["readiness"] is not None]
         assert scored_issues[-1]["external_id"] == "101"
         assert scored_issues[-1]["readiness"] == 0.9
+
+
+class TestLLMStatusFilter:
+    """Tests for the llm_status filter parameter."""
+
+    async def test_no_llm_filter_returns_unevaluated_issues(
+        self, test_db_session
+    ) -> None:
+        """llm_status=no_llm should return only issues without LLM evaluations."""
+        await _seed_projects_and_issues(test_db_session)
+        await test_db_session.commit()
+
+        # All seeded issues have no LLM evaluations
+        issues, _ = await _query_issues(test_db_session, llm_status="no_llm")
+        assert len(issues) > 0
+
+        # Now add an evaluation for one issue
+        issue_result = await test_db_session.execute(
+            select(Issue).where(Issue.external_id == "1")
+        )
+        issue = issue_result.scalar_one()
+        test_db_session.add(
+            LLMEvaluation(
+                issue_id=issue.id,
+                model_name="test",
+                summary="A summary",
+                suggested_action="keep_open",
+                suggested_action_reason="reason",
+                scores={"staleness": 0.5},
+                latest=True,
+            )
+        )
+        await test_db_session.commit()
+
+        issues_after, _ = await _query_issues(test_db_session, llm_status="no_llm")
+        ids = [i["external_id"] for i in issues_after]
+        assert "1" not in ids
+
+    async def test_partial_llm_filter_returns_incomplete_evaluations(
+        self, test_db_session
+    ) -> None:
+        """llm_status=partial_llm should return issues with incomplete LLM data."""
+        await _seed_projects_and_issues(test_db_session)
+        await test_db_session.commit()
+
+        issue_result = await test_db_session.execute(
+            select(Issue).where(Issue.external_id == "1")
+        )
+        issue = issue_result.scalar_one()
+        # Add evaluation with missing summary
+        test_db_session.add(
+            LLMEvaluation(
+                issue_id=issue.id,
+                model_name="test",
+                summary="",
+                suggested_action="keep_open",
+                suggested_action_reason="reason",
+                scores={"staleness": 0.5},
+                latest=True,
+            )
+        )
+        await test_db_session.commit()
+
+        issues, _ = await _query_issues(test_db_session, llm_status="partial_llm")
+        ids = [i["external_id"] for i in issues]
+        assert "1" in ids
+
+    async def test_empty_llm_status_returns_all(self, test_db_session) -> None:
+        """Empty llm_status should not filter anything."""
+        await _seed_projects_and_issues(test_db_session)
+        await test_db_session.commit()
+
+        all_issues, _ = await _query_issues(test_db_session, llm_status="")
+        no_filter, _ = await _query_issues(test_db_session)
+        assert len(all_issues) == len(no_filter)
