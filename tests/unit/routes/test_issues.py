@@ -240,6 +240,27 @@ class TestIssueList:
         assert 'addEventListener("toast"' in response.text
         assert "htmx:responseError" in response.text
 
+    def test_issues_page_includes_column_visibility_picker(self) -> None:
+        """Issues page includes the client-side column visibility controls."""
+        app = create_app()
+        app.dependency_overrides[get_db_session] = _override_issue_db_session
+
+        with (
+            patch.object(IssueRepository, "search", return_value=EMPTY_QUERY_RESULT),
+            patch.object(
+                IssueRepository, "get_project_names", return_value=["snapcraft"]
+            ),
+        ):
+            with TestClient(app) as client:
+                response = client.get("/issues")
+
+        assert response.status_code == 200
+        assert ">Columns<" in response.text
+        assert 'id="columns-hidden"' in response.text
+        assert 'src="/static/js/issue-columns.js"' in response.text
+        assert 'data-col="issue"' in response.text
+        assert 'data-col="summary"' in response.text
+
 
 class TestIssueTablePartial:
     """Tests for the issue table partial route."""

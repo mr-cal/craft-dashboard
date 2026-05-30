@@ -20,20 +20,20 @@
   </p>
   <table role="grid" aria-label="Issues and pull requests">
     <colgroup>
-      <col class="col-issue">
-      <col class="col-title">
-      <col class="col-author">
-      <col class="col-age">
+      <col class="col-issue" data-col="issue">
+      <col class="col-title" data-col="title">
+      <col class="col-author" data-col="author">
+      <col class="col-age" data-col="age">
       {% for _ in active_scores %}<col class="col-score">{% endfor %}
-      <col class="col-action">
-      <col class="col-summary">
+      <col class="col-action" data-col="action">
+      <col class="col-summary" data-col="summary">
     </colgroup>
     <thead>
       <tr>
-        {% macro sort_header(label, field, tooltip="") %}
+        {% macro sort_header(label, field, tooltip="", column_name="") %}
         {% set is_asc = sort_by == field %}
         {% set is_desc = sort_by == ("-" ~ field) %}
-        <th {% if tooltip %}data-tooltip="{{ tooltip }}" tabindex="0"{% endif %}
+        <th {% if column_name %}data-col="{{ column_name }}"{% endif %} {% if tooltip %}data-tooltip="{{ tooltip }}" tabindex="0"{% endif %}
             {% if is_asc %}aria-sort="ascending"{% elif is_desc %}aria-sort="descending"{% else %}aria-sort="none"{% endif %}>
           <a href="#"
              hx-get="/issues/table"
@@ -51,28 +51,28 @@
           </a>
         </th>
         {% endmacro %}
-        {{ sort_header("Issue", "number") }}
-        {{ sort_header("Title", "title") }}
-        {{ sort_header("Author", "author") }}
-        {{ sort_header("Age", "age") }}
+        {{ sort_header("Issue", "number", column_name="issue") }}
+        {{ sort_header("Title", "title", column_name="title") }}
+        {{ sort_header("Author", "author", column_name="author") }}
+        {{ sort_header("Age", "age", column_name="age") }}
         {% for score_key in active_scores %}
         {{ sort_header(score_labels.get(score_key, score_key), score_key, score_tooltips.get(score_key, "")) }}
         {% endfor %}
-        <th>Action</th>
-        <th>Summary</th>
+        <th data-col="action">Action</th>
+        <th data-col="summary">Summary</th>
       </tr>
     </thead>
     <tbody>
       {% for issue in issues %}
       <tr>
-        <td style="white-space:nowrap;">
+        <td data-col="issue" style="white-space:nowrap;">
           {{ issue.project_name }}{% if issue.source == "launchpad" %}-lp{% endif %}<br>
           {{ "pr" if issue.issue_type == "pull_request" else "issue" }}
           <a href="{{ issue.url }}" target="_blank" rel="noopener">#{{ issue.external_id }}</a>
         </td>
-        <td>{{ issue.title|truncate(80) }}</td>
-        <td>{{ issue.author or "unknown" }}</td>
-        <td>{{ (issue.age_days ~ "d") if issue.age_days is not none else "?" }}</td>
+        <td data-col="title">{{ issue.title|truncate(80) }}</td>
+        <td data-col="author">{{ issue.author or "unknown" }}</td>
+        <td data-col="age">{{ (issue.age_days ~ "d") if issue.age_days is not none else "?" }}</td>
         {% for score_key in active_scores %}
         <td>
           {% set sv = issue.get(score_key) if issue.get is defined else issue[score_key] %}
@@ -85,12 +85,12 @@
           {% endif %}
         </td>
         {% endfor %}
-        <td>
+        <td data-col="action">
           {% if issue.suggested_action %}
           <span class="action-badge" aria-label="Suggested action: {{ issue.suggested_action|replace('_', ' ') }}">{{ issue.suggested_action|replace("_", " ") }}</span>
           {% endif %}
         </td>
-        <td class="summary-cell">{{ (issue.summary or "")|truncate(350) }}</td>
+        <td class="summary-cell" data-col="summary">{{ (issue.summary or "")|truncate(350) }}</td>
       </tr>
       {% else %}
       <tr>

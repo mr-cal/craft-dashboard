@@ -166,6 +166,27 @@
            hx-trigger="change" />
   </div>
 
+  <div class="filter-group">
+    <label>Columns</label>
+    <div class="multiselect" data-name="visible_columns" data-hidden="columns-hidden">
+      <div class="multiselect__input-wrap" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-label="Select visible columns">
+        <span class="multiselect__placeholder">All columns</span>
+        <div class="multiselect__chips"></div>
+      </div>
+      <div class="multiselect__dropdown u-hide">
+        <div class="multiselect__options" role="listbox">
+          {% for key, label in [("issue", "Issue"), ("title", "Title"), ("author", "Author"), ("age", "Age"), ("action", "Action"), ("summary", "Summary")] %}
+          <label class="multiselect__option" role="option">
+            <input type="checkbox" value="{{ key }}" checked />
+            <span>{{ label }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    <input type="hidden" id="columns-hidden" value="issue,title,author,age,action,summary" />
+  </div>
+
   <input type="hidden" name="source" value="{{ filter_source or '' }}" />
   <input type="hidden" name="sort" value="{{ sort_by or 'staleness' }}" />
 
@@ -209,6 +230,7 @@
 
 {% block scripts %}
 <script src="/static/js/issues-filters.js"></script>
+<script src="/static/js/issue-columns.js"></script>
 <script src="/static/js/multiselect.js"></script>
 <script src="/static/js/table-interact.js"></script>
 {% endblock %}

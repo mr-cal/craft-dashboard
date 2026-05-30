@@ -540,3 +540,7 @@ table {
     transform: translateY(0);
   }
 }
+
+.col-hidden {
+  display: none !important;
+}
