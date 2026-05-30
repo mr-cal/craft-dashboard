@@ -99,7 +99,10 @@ class TestComputeIssueHashEdgeCases:
 class TestFetchPrDetailsReviewLogic:
     def test_all_approved(self) -> None:
         pr = _make_pr(
-            reviews=[_make_review("alice", "APPROVED"), _make_review("bob", "APPROVED")]
+            reviews=[
+                _make_review("sergio-cazzolato", "APPROVED"),
+                _make_review("craft-contributor", "APPROVED"),
+            ]
         )
 
         result = _fetch_pr_details(pr)
@@ -110,8 +113,8 @@ class TestFetchPrDetailsReviewLogic:
     def test_changes_requested_overrides_approval(self) -> None:
         pr = _make_pr(
             reviews=[
-                _make_review("alice", "APPROVED"),
-                _make_review("bob", "CHANGES_REQUESTED"),
+                _make_review("sergio-cazzolato", "APPROVED"),
+                _make_review("craft-contributor", "CHANGES_REQUESTED"),
             ]
         )
 
@@ -123,9 +126,9 @@ class TestFetchPrDetailsReviewLogic:
     def test_latest_review_per_reviewer_wins(self) -> None:
         pr = _make_pr(
             reviews=[
-                _make_review("alice", "CHANGES_REQUESTED"),
-                _make_review("alice", "APPROVED"),
-                _make_review("bob", "APPROVED"),
+                _make_review("craft-contributor", "CHANGES_REQUESTED"),
+                _make_review("craft-contributor", "APPROVED"),
+                _make_review("sergio-cazzolato", "APPROVED"),
             ]
         )
 
@@ -135,7 +138,7 @@ class TestFetchPrDetailsReviewLogic:
         assert result["review_count"] == 2
 
     def test_commented_reviews_are_ignored(self) -> None:
-        pr = _make_pr(reviews=[_make_review("alice", "COMMENTED")])
+        pr = _make_pr(reviews=[_make_review("craft-contributor", "COMMENTED")])
 
         result = _fetch_pr_details(pr)
 
@@ -143,7 +146,7 @@ class TestFetchPrDetailsReviewLogic:
         assert result["review_count"] == 0
 
     def test_dismissed_reviews_are_ignored(self) -> None:
-        pr = _make_pr(reviews=[_make_review("alice", "DISMISSED")])
+        pr = _make_pr(reviews=[_make_review("sergio-cazzolato", "DISMISSED")])
 
         result = _fetch_pr_details(pr)
 

@@ -81,14 +81,16 @@
     init();
   }
 
-  document.body.addEventListener("htmx:afterSwap", function (e) {
-    const table = e.detail.target.querySelector('table[role="grid"]');
-    if (table) {
+  // After HTMX swaps (outerHTML), the target element is replaced so we must
+  // search the document for the new table rather than looking inside the
+  // (now-detached) swap target.
+  document.body.addEventListener("htmx:afterSettle", function () {
+    document.querySelectorAll('table[role="grid"]').forEach(function (table) {
+      // Skip tables that are already initialized
+      if (table.dataset.interactInit) return;
+      table.dataset.interactInit = "1";
       initColumnResize(table);
       initRowExpand(table);
-    } else if (e.detail.target.matches('table[role="grid"]')) {
-      initColumnResize(e.detail.target);
-      initRowExpand(e.detail.target);
-    }
+    });
   });
 })();

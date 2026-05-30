@@ -38,3 +38,4 @@ provisioning/secrets.env
 
 # uv
 uv.lock
+logs.txt

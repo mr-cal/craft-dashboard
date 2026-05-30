@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 class _IssueSession:
     async def execute(self, _query):
-        return [SimpleNamespace(name="test-project")]
+        return [SimpleNamespace(name="snapcraft")]
 
 
 async def _override_issue_db_session():

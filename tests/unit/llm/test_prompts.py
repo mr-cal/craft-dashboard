@@ -13,10 +13,10 @@ class TestBuildSummaryPrompt:
     def test_returns_messages_list(self) -> None:
         """Returns a list of message dicts."""
         messages = build_summary_prompt(
-            title="Bug: crash on startup",
-            body="The app crashes when I open it.",
+            title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            body="When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
             issue_type="issue",
-            labels=["bug"],
+            labels=["bug", "priority-high"],
         )
 
         assert isinstance(messages, list)
@@ -27,44 +27,44 @@ class TestBuildSummaryPrompt:
     def test_includes_issue_content(self) -> None:
         """The user message includes the issue title and body."""
         messages = build_summary_prompt(
-            title="Feature request: dark mode",
-            body="Please add dark mode support.",
+            title="Add support for core24 base",
+            body="Please add support for `base: core24` so new snaps can target Ubuntu 24.04.",
             issue_type="issue",
-            labels=["enhancement"],
+            labels=["enhancement", "snapcraft"],
         )
 
         user_msg = messages[1]["content"]
-        assert "Feature request: dark mode" in user_msg
-        assert "dark mode support" in user_msg
+        assert "Add support for core24 base" in user_msg
+        assert "base: core24" in user_msg
 
     def test_includes_state_context(self) -> None:
         """The user message includes age, activity, and author state."""
         messages = build_summary_prompt(
-            title="Bug: crash",
-            body="It crashes.",
+            title="charmcraft deploy times out on large bundles",
+            body="Deploying a large bundle stalls while charmcraft waits for the controller response.",
             issue_type="issue",
-            labels=["bug"],
+            labels=["needs-triage"],
             age_days=120,
-            last_activity_days=30,
-            comment_count=5,
-            author="alice",
+            last_activity_days=45,
+            comment_count=14,
+            author="sergio-cazzolato",
             is_maintainer=True,
         )
 
         user_msg = messages[1]["content"]
         assert "120" in user_msg
-        assert "30" in user_msg
-        assert "5" in user_msg
-        assert "alice" in user_msg
+        assert "45" in user_msg
+        assert "14" in user_msg
+        assert "sergio-cazzolato" in user_msg
         assert "maintainer" in user_msg
 
     def test_system_prompt_mentions_256_characters(self) -> None:
         """The system prompt instructs the model to stay under 256 characters."""
         messages = build_summary_prompt(
-            title="Bug",
-            body="Body",
+            title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            body="When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
             issue_type="issue",
-            labels=[],
+            labels=["bug", "priority-high"],
         )
 
         assert "256" in messages[0]["content"]
@@ -77,31 +77,31 @@ class TestBuildSummaryPromptWithComments:
         """Comments section appears in the user message."""
         comments = [
             {
-                "author": "alice",
-                "body": "Is this still relevant?",
+                "author": "jdoe-canonical",
+                "body": "I can still reproduce this on Ubuntu 24.04 with `snapcraft pack --use-lxd`.",
                 "created_at": "2024-01-01T00:00:00+00:00",
                 "type": "comment",
             },
         ]
         messages = build_summary_prompt(
-            title="Bug: crash on startup",
-            body="App crashes.",
+            title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            body="When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
             issue_type="issue",
-            labels=["bug"],
+            labels=["bug", "priority-high"],
             comments=comments,
         )
 
         user_msg = messages[1]["content"]
-        assert "alice" in user_msg
-        assert "Is this still relevant?" in user_msg
+        assert "jdoe-canonical" in user_msg
+        assert "snapcraft pack --use-lxd" in user_msg
 
     def test_no_comments_omits_section(self) -> None:
         """When no comments provided, the comments section is absent."""
         messages = build_summary_prompt(
-            title="Bug",
-            body="Body",
+            title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            body="When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
             issue_type="issue",
-            labels=[],
+            labels=["bug", "priority-high"],
             comments=[],
         )
 
@@ -110,10 +110,10 @@ class TestBuildSummaryPromptWithComments:
     def test_comments_default_empty(self) -> None:
         """comments parameter defaults to empty list (backward compat)."""
         messages = build_summary_prompt(
-            title="Bug",
-            body="Body",
+            title="Add support for core24 base",
+            body="Please add support for `base: core24` so new snaps can target Ubuntu 24.04.",
             issue_type="issue",
-            labels=[],
+            labels=["enhancement", "snapcraft"],
         )
 
         assert isinstance(messages, list)
@@ -125,15 +125,15 @@ class TestBuildEvaluationPrompt:
     def test_returns_messages_list(self) -> None:
         """Returns a list of message dicts."""
         messages = build_evaluation_prompt(
-            title="Old PR",
-            body="This PR was opened a year ago.",
+            title="fix: handle empty manifest gracefully",
+            body="Guard against empty manifest data when rendering snap metadata during pack.",
             issue_type="pull_request",
-            labels=[],
-            age_days=365,
-            last_activity_days=180,
-            author="some-user",
+            labels=["bug", "snapcraft"],
+            age_days=120,
+            last_activity_days=45,
+            author="craft-contributor",
             is_maintainer=False,
-            comment_count=2,
+            comment_count=6,
         )
 
         assert isinstance(messages, list)
@@ -142,13 +142,13 @@ class TestBuildEvaluationPrompt:
     def test_pr_specific_scores(self) -> None:
         """PR evaluation prompt mentions readiness score."""
         messages = build_evaluation_prompt(
-            title="Add feature X",
-            body="Implements feature X.",
+            title="Add support for core24 base",
+            body="Implements `base: core24` support for snapcraft project definitions.",
             issue_type="pull_request",
-            labels=[],
-            age_days=30,
+            labels=["enhancement", "snapcraft"],
+            age_days=45,
             last_activity_days=5,
-            author="dev",
+            author="sergio-cazzolato",
             is_maintainer=True,
             comment_count=10,
         )
@@ -159,13 +159,13 @@ class TestBuildEvaluationPrompt:
     def test_issue_specific_scores(self) -> None:
         """Issue evaluation prompt mentions support_request score."""
         messages = build_evaluation_prompt(
-            title="How do I install?",
-            body="I can't figure out how to install this.",
+            title="How do I debug charmcraft remote-build failures?",
+            body="I cannot tell whether `charmcraft remote-build` is failing in Launchpad or during upload.",
             issue_type="issue",
-            labels=[],
-            age_days=10,
-            last_activity_days=10,
-            author="new-user",
+            labels=["needs-triage"],
+            age_days=45,
+            last_activity_days=12,
+            author="craft-contributor",
             is_maintainer=False,
             comment_count=0,
         )
@@ -181,28 +181,28 @@ class TestBuildEvaluationPromptWithContext:
         """Comments section appears in evaluation prompt."""
         comments = [
             {
-                "author": "bob",
-                "body": "LGTM",
+                "author": "sergio-cazzolato",
+                "body": "Please add a regression test for the empty manifest case.",
                 "created_at": "2024-06-01T00:00:00+00:00",
                 "type": "review_comment",
             },
         ]
         messages = build_evaluation_prompt(
-            title="Fix: error handling",
-            body="Fixed it.",
+            title="fix: handle empty manifest gracefully",
+            body="Guard against empty manifest data when rendering snap metadata during pack.",
             issue_type="pull_request",
-            labels=[],
-            age_days=5,
-            last_activity_days=1,
-            author="dev",
+            labels=["bug", "snapcraft"],
+            age_days=45,
+            last_activity_days=2,
+            author="craft-contributor",
             is_maintainer=False,
             comment_count=1,
             comments=comments,
         )
 
         user_msg = messages[1]["content"]
-        assert "bob" in user_msg
-        assert "LGTM" in user_msg
+        assert "sergio-cazzolato" in user_msg
+        assert "regression test for the empty manifest case" in user_msg
 
     def test_includes_pr_details(self) -> None:
         """PR review, CI, and diff details appear in evaluation prompt."""
@@ -218,13 +218,13 @@ class TestBuildEvaluationPromptWithContext:
             "diff_files_changed": 5,
         }
         messages = build_evaluation_prompt(
-            title="feat: new feature",
-            body="Added stuff.",
+            title="Add support for core24 base",
+            body="Implements `base: core24` support for snapcraft project definitions.",
             issue_type="pull_request",
-            labels=[],
-            age_days=10,
-            last_activity_days=2,
-            author="dev",
+            labels=["enhancement", "snapcraft"],
+            age_days=45,
+            last_activity_days=4,
+            author="sergio-cazzolato",
             is_maintainer=False,
             comment_count=2,
             pr_details=pr_details,
@@ -239,13 +239,13 @@ class TestBuildEvaluationPromptWithContext:
     def test_no_pr_details_for_issue(self) -> None:
         """PR details section is absent for plain issues."""
         messages = build_evaluation_prompt(
-            title="Bug",
-            body="Body",
+            title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            body="When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
             issue_type="issue",
-            labels=[],
-            age_days=5,
-            last_activity_days=1,
-            author="user",
+            labels=["bug", "priority-high"],
+            age_days=45,
+            last_activity_days=3,
+            author="jdoe-canonical",
             is_maintainer=False,
             comment_count=0,
         )
@@ -257,13 +257,13 @@ class TestBuildEvaluationPromptWithContext:
     def test_backward_compat_no_new_params(self) -> None:
         """Existing callers without comments/pr_details still work."""
         messages = build_evaluation_prompt(
-            title="Bug",
-            body="Body",
+            title="charmcraft deploy times out on large bundles",
+            body="Deploying a large bundle stalls while charmcraft waits for the controller response.",
             issue_type="issue",
-            labels=[],
-            age_days=5,
-            last_activity_days=1,
-            author="user",
+            labels=["needs-triage"],
+            age_days=45,
+            last_activity_days=12,
+            author="craft-contributor",
             is_maintainer=False,
             comment_count=0,
         )
@@ -279,7 +279,7 @@ class TestFormatCommentsEdgeCases:
         """Missing 'author' key falls back to 'unknown'."""
         comments = [
             {
-                "body": "hello",
+                "body": "Please confirm whether this still reproduces on core24.",
                 "created_at": "2024-01-01T00:00:00+00:00",
                 "type": "comment",
             }
@@ -287,27 +287,27 @@ class TestFormatCommentsEdgeCases:
         result = _format_comments(comments)
 
         assert "unknown" in result
-        assert "hello" in result
+        assert "Please confirm whether this still reproduces on core24." in result
 
     def test_missing_body_key(self) -> None:
         """Missing 'body' key falls back to '(no comment)'."""
         comments = [
             {
-                "author": "alice",
+                "author": "craft-contributor",
                 "created_at": "2024-01-01T00:00:00+00:00",
                 "type": "comment",
             }
         ]
         result = _format_comments(comments)
 
-        assert "alice" in result
+        assert "craft-contributor" in result
         assert "(no comment)" in result
 
     def test_none_body(self) -> None:
         """None body falls back to '(no comment)'."""
         comments = [
             {
-                "author": "alice",
+                "author": "sergio-cazzolato",
                 "body": None,
                 "created_at": "2024-01-01T00:00:00+00:00",
                 "type": "comment",
@@ -320,9 +320,14 @@ class TestFormatCommentsEdgeCases:
     def test_none_created_at(self) -> None:
         """None created_at produces empty date field without crash."""
         comments = [
-            {"author": "alice", "body": "hi", "created_at": None, "type": "comment"}
+            {
+                "author": "jdoe-canonical",
+                "body": "Needs a reproducer from core24 users.",
+                "created_at": None,
+                "type": "comment",
+            }
         ]
         result = _format_comments(comments)
 
-        assert "alice" in result
-        assert "hi" in result
+        assert "jdoe-canonical" in result
+        assert "Needs a reproducer from core24 users." in result

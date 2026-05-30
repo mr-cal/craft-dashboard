@@ -1,5 +1,6 @@
 """Issue and PR triage routes."""
 
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -153,13 +154,29 @@ async def _query_issues(
     query = _apply_author_role_filter(query, author_role)
 
     if search:
-        search_pattern = f"%{search}%"
-        query = query.where(
-            or_(
-                Issue.title.ilike(search_pattern),
-                Issue.external_id == search,
+        # Support "project_name number" or "project_name #number" searches
+        # e.g. "charmcraft 998" or "charmcraft #998"
+        compound_match = re.match(r"^(\S+)\s+#?(\d+)$", search.strip())
+        if compound_match:
+            search_project = compound_match.group(1)
+            search_number = compound_match.group(2)
+            query = query.where(
+                or_(
+                    # Match as project + issue number
+                    (Project.name.ilike(f"%{search_project}%"))
+                    & (Issue.external_id == search_number),
+                    # Also match as title search in case it's not a project name
+                    Issue.title.ilike(f"%{search}%"),
+                )
             )
-        )
+        else:
+            search_pattern = f"%{search}%"
+            query = query.where(
+                or_(
+                    Issue.title.ilike(search_pattern),
+                    Issue.external_id == search,
+                )
+            )
 
     if llm_status == "no_llm":
         query = query.where(LLMEvaluation.id.is_(None))

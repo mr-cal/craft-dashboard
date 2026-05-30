@@ -117,7 +117,7 @@ class TestGitHubCollector:
         )
 
         assert collector.is_maintainer("mr-cal") is True
-        assert collector.is_maintainer("some-user") is False
+        assert collector.is_maintainer("craft-contributor") is False
 
     def test_is_maintainer_empty_list(self) -> None:
         """is_maintainer returns False when no maintainers configured."""
@@ -132,8 +132,10 @@ class TestFetchIssueComments:
     def test_returns_last_10_comments(self) -> None:
         """Returns at most 10 comments, most recent last."""
         mock_comment = MagicMock()
-        mock_comment.user.login = "alice"
-        mock_comment.body = "looks good"
+        mock_comment.user.login = "craft-contributor"
+        mock_comment.body = (
+            "Still fails on core24 when using `snapcraft pack --use-lxd`."
+        )
         mock_comment.created_at = datetime(2024, 3, 1, tzinfo=UTC)
 
         gh_issue = MagicMock()
@@ -142,15 +144,18 @@ class TestFetchIssueComments:
         result = _fetch_issue_comments(gh_issue)
 
         assert len(result) == 10
-        assert result[0]["author"] == "alice"
-        assert result[0]["body"] == "looks good"
+        assert result[0]["author"] == "craft-contributor"
+        assert (
+            result[0]["body"]
+            == "Still fails on core24 when using `snapcraft pack --use-lxd`."
+        )
         assert result[0]["created_at"] == "2024-03-01T00:00:00+00:00"
         assert result[0]["type"] == "comment"
 
     def test_truncates_long_body(self) -> None:
         """Comment bodies are truncated to 1000 chars."""
         mock_comment = MagicMock()
-        mock_comment.user.login = "bob"
+        mock_comment.user.login = "sergio-cazzolato"
         mock_comment.body = "x" * 2000
         mock_comment.created_at = datetime(2024, 3, 1, tzinfo=UTC)
 
@@ -194,19 +199,19 @@ class TestCollectIssuesExceptionHandling:
         label.name = "bug"
 
         user = MagicMock()
-        user.login = "alice"
+        user.login = "craft-contributor"
 
         gh_issue = MagicMock()
         gh_issue.number = 123
-        gh_issue.title = "Test issue"
-        gh_issue.body = "Body"
+        gh_issue.title = "snapcraft pack fails with LXD backend on Ubuntu 24.04"
+        gh_issue.body = "When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error."
         gh_issue.state = "open"
         gh_issue.user = user
         gh_issue.labels = [label]
         gh_issue.created_at = datetime(2024, 1, 1, tzinfo=UTC)
         gh_issue.updated_at = datetime(2024, 1, 2, tzinfo=UTC)
         gh_issue.closed_at = None
-        gh_issue.html_url = "https://github.com/canonical/repo/issues/123"
+        gh_issue.html_url = "https://github.com/canonical/snapcraft/issues/123"
         gh_issue.pull_request = MagicMock() if is_pr else None
         return gh_issue
 
@@ -342,7 +347,7 @@ class TestFetchPRDetails:
     def test_approved_pr(self) -> None:
         """Returns review_status='approved' when latest unique reviewer approved."""
         mock_review = MagicMock()
-        mock_review.user.login = "reviewer1"
+        mock_review.user.login = "sergio-cazzolato"
         mock_review.state = "APPROVED"
 
         last_commit = MagicMock()
@@ -369,7 +374,9 @@ class TestFetchPRDetails:
         reviews = []
         for state in ["APPROVED", "CHANGES_REQUESTED"]:
             r = MagicMock()
-            r.user.login = f"reviewer_{state}"
+            r.user.login = (
+                "sergio-cazzolato" if state == "APPROVED" else "craft-contributor"
+            )
             r.state = state
             reviews.append(r)
 

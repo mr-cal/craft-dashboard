@@ -53,6 +53,9 @@ class LLMEvaluation(Base):
     suggested_action_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     scores: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    llm_backend: Mapped[str | None] = mapped_column(String(50), nullable=True)
     evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

@@ -123,17 +123,21 @@ class TestComputeContentHash:
     def test_new_comment_triggers_reevaluation(self) -> None:
         """Adding a new comment changes the content hash."""
         hash_no_comments = _compute_content_hash(
-            "title", "body", "open", ["bug"], comments=[]
+            "snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            "When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
+            "open",
+            ["bug", "priority-high"],
+            comments=[],
         )
         hash_with_comment = _compute_content_hash(
-            "title",
-            "body",
+            "snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            "When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
             "open",
-            ["bug"],
+            ["bug", "priority-high"],
             comments=[
                 {
-                    "author": "alice",
-                    "body": "Is this fixed?",
+                    "author": "jdoe-canonical",
+                    "body": "I can still reproduce this on Ubuntu 24.04 with `snapcraft pack --use-lxd`.",
                     "created_at": "2024-01-01T00:00:00+00:00",
                     "type": "comment",
                 }
@@ -146,21 +150,44 @@ class TestComputeContentHash:
         """Same comments produce same hash."""
         comments = [
             {
-                "author": "alice",
-                "body": "hi",
+                "author": "craft-contributor",
+                "body": "I can still reproduce this with a clean core24 base.",
                 "created_at": "2024-01-01T00:00:00+00:00",
                 "type": "comment",
             }
         ]
-        hash1 = _compute_content_hash("t", "b", "open", [], comments=comments)
-        hash2 = _compute_content_hash("t", "b", "open", [], comments=comments)
+        hash1 = _compute_content_hash(
+            "charmcraft deploy times out on large bundles",
+            "Deploying a large bundle stalls while charmcraft waits for the controller response.",
+            "open",
+            ["needs-triage"],
+            comments=comments,
+        )
+        hash2 = _compute_content_hash(
+            "charmcraft deploy times out on large bundles",
+            "Deploying a large bundle stalls while charmcraft waits for the controller response.",
+            "open",
+            ["needs-triage"],
+            comments=comments,
+        )
 
         assert hash1 == hash2
 
     def test_comments_default_empty(self) -> None:
         """Hash is stable when comments kwarg is omitted."""
-        h1 = _compute_content_hash("t", "b", "open", [])
-        h2 = _compute_content_hash("t", "b", "open", [], comments=None)
+        h1 = _compute_content_hash(
+            "Add support for core24 base",
+            "Please add support for `base: core24` so new snaps can target Ubuntu 24.04.",
+            "open",
+            ["enhancement", "snapcraft"],
+        )
+        h2 = _compute_content_hash(
+            "Add support for core24 base",
+            "Please add support for `base: core24` so new snaps can target Ubuntu 24.04.",
+            "open",
+            ["enhancement", "snapcraft"],
+            comments=None,
+        )
 
         assert h1 == h2
 
@@ -168,22 +195,34 @@ class TestComputeContentHash:
         """Same comments in different order produce same hash."""
         comments_a = [
             {
-                "author": "alice",
-                "body": "first",
+                "author": "jdoe-canonical",
+                "body": "The failure started after switching this project to core24.",
                 "created_at": "2024-01-01T00:00:00+00:00",
                 "type": "comment",
             },
             {
-                "author": "bob",
-                "body": "second",
+                "author": "craft-contributor",
+                "body": "I can reproduce the same LXD error on a fresh noble container.",
                 "created_at": "2024-01-02T00:00:00+00:00",
                 "type": "comment",
             },
         ]
         comments_b = list(reversed(comments_a))
 
-        hash_a = _compute_content_hash("t", "b", "open", [], comments=comments_a)
-        hash_b = _compute_content_hash("t", "b", "open", [], comments=comments_b)
+        hash_a = _compute_content_hash(
+            "snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            "When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
+            "open",
+            ["bug", "priority-high"],
+            comments=comments_a,
+        )
+        hash_b = _compute_content_hash(
+            "snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            "When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
+            "open",
+            ["bug", "priority-high"],
+            comments=comments_b,
+        )
 
         assert hash_a == hash_b
 
@@ -220,8 +259,8 @@ class TestEvaluateIssueWithComments:
 
         comments = [
             {
-                "author": "alice",
-                "body": "hi",
+                "author": "craft-contributor",
+                "body": "Still seeing this on snapcraft 8.4 with the LXD backend.",
                 "created_at": "2024-01-01T00:00:00+00:00",
                 "type": "comment",
             }
@@ -235,13 +274,13 @@ class TestEvaluateIssueWithComments:
             mock_eval.return_value = [{"role": "user", "content": "test"}]
 
             await evaluator.evaluate_issue(
-                title="Bug",
-                body="Body",
+                title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
+                body="When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
                 issue_type="issue",
-                labels=[],
-                age_days=5,
-                last_activity_days=1,
-                author="user",
+                labels=["bug", "priority-high"],
+                age_days=45,
+                last_activity_days=3,
+                author="jdoe-canonical",
                 is_maintainer=False,
                 comment_count=1,
                 comments=comments,
@@ -250,10 +289,10 @@ class TestEvaluateIssueWithComments:
         mock_sum.assert_called_once()
         call_kwargs = mock_sum.call_args.kwargs
         assert call_kwargs["comments"] == comments
-        assert call_kwargs["age_days"] == 5
-        assert call_kwargs["last_activity_days"] == 1
+        assert call_kwargs["age_days"] == 45
+        assert call_kwargs["last_activity_days"] == 3
         assert call_kwargs["comment_count"] == 1
-        assert call_kwargs["author"] == "user"
+        assert call_kwargs["author"] == "jdoe-canonical"
 
 
 class TestSummarizeStripsThinkBlocks:
@@ -277,14 +316,14 @@ class TestSummarizeStripsThinkBlocks:
             evaluation_model="test-eval",
         )
 
-        summary, _ = await evaluator._summarize(
-            title="Bug",
-            body="Body",
+        summary, _, _, _ = await evaluator._summarize(
+            title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            body="When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
             issue_type="issue",
-            labels=[],
-            age_days=10,
-            last_activity_days=10,
-            author="user",
+            labels=["bug", "priority-high"],
+            age_days=120,
+            last_activity_days=45,
+            author="craft-contributor",
             is_maintainer=False,
             comment_count=0,
         )
@@ -311,14 +350,14 @@ class TestSummarizeStripsThinkBlocks:
             evaluation_model="test-eval",
         )
 
-        summary, _ = await evaluator._summarize(
-            title="Bug",
-            body="Body",
+        summary, _, _, _ = await evaluator._summarize(
+            title="charmcraft deploy times out on large bundles",
+            body="Deploying a large bundle stalls while charmcraft waits for the controller response.",
             issue_type="issue",
-            labels=[],
-            age_days=5,
-            last_activity_days=5,
-            author="user",
+            labels=["needs-triage"],
+            age_days=45,
+            last_activity_days=12,
+            author="craft-contributor",
             is_maintainer=False,
             comment_count=0,
         )

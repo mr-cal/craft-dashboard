@@ -70,9 +70,9 @@ class TestIssueModel:
             source="github",
             external_id="1",
             issue_type="issue",
-            title="test",
+            title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
             state="open",
-            labels=["bug", "enhancement"],
+            labels=["bug", "priority-high"],
             last_fetched_at=datetime.now(tz=UTC),
         )
 

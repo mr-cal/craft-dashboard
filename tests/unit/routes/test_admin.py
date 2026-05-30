@@ -25,7 +25,16 @@ class _EmptyResult:
         return iter(())
 
     def one(self):
-        return SimpleNamespace(total_evaluations=0, total_tokens=0)
+        return SimpleNamespace(
+            total_evaluations=0,
+            total_tokens=0,
+            total_prompt_tokens=0,
+            total_completion_tokens=0,
+            recent_evaluations=0,
+            recent_tokens=0,
+            recent_prompt_tokens=0,
+            recent_completion_tokens=0,
+        )
 
 
 class _ScalarResult:

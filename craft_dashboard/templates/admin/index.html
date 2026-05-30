@@ -30,18 +30,45 @@
 <hr class="p-rule" />
 
 <h3>LLM Token Usage</h3>
+<h4>Last 7 Days</h4>
 <table>
   <thead>
     <tr>
-      <th>Total Evaluations</th>
-      <th>Total Tokens Used</th>
-      <th>Avg Tokens per Evaluation</th>
+      <th>Evaluations</th>
+      <th>Total Tokens</th>
+      <th>Input Tokens</th>
+      <th>Output Tokens</th>
+      <th>Avg Tokens per Eval</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>{{ "{:,}".format(recent_evaluations) }}</td>
+      <td>{{ "{:,}".format(recent_tokens) }}</td>
+      <td>{{ "{:,}".format(recent_prompt_tokens) }}</td>
+      <td>{{ "{:,}".format(recent_completion_tokens) }}</td>
+      <td>{{ "{:,.0f}".format(recent_tokens / recent_evaluations) if recent_evaluations > 0 else "N/A" }}</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Lifetime</h4>
+<table>
+  <thead>
+    <tr>
+      <th>Evaluations</th>
+      <th>Total Tokens</th>
+      <th>Input Tokens</th>
+      <th>Output Tokens</th>
+      <th>Avg Tokens per Eval</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td>{{ "{:,}".format(total_evaluations) }}</td>
       <td>{{ "{:,}".format(total_tokens) }}</td>
+      <td>{{ "{:,}".format(total_prompt_tokens) }}</td>
+      <td>{{ "{:,}".format(total_completion_tokens) }}</td>
       <td>{{ "{:,.0f}".format(total_tokens / total_evaluations) if total_evaluations > 0 else "N/A" }}</td>
     </tr>
   </tbody>

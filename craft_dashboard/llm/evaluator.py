@@ -143,11 +143,11 @@ class IssueEvaluator:
         is_maintainer: bool,
         comment_count: int,
         comments: list[dict] | None = None,
-    ) -> tuple[str, int]:
+    ) -> tuple[str, int, int, int]:
         """Generate a summary using the cheap model.
 
         Returns:
-            Tuple of (summary text, tokens used).
+            Tuple of (summary text, total tokens, prompt tokens, completion tokens).
 
         """
         import re
@@ -175,7 +175,12 @@ class IssueEvaluator:
         content = re.sub(
             r"<think>.*?</think>", "", response.content, flags=re.DOTALL
         ).strip()
-        return content, response.total_tokens
+        return (
+            content,
+            response.total_tokens,
+            response.prompt_tokens,
+            response.completion_tokens,
+        )
 
     async def _score(
         self,
@@ -191,11 +196,11 @@ class IssueEvaluator:
         comment_count: int,
         comments: list[dict] | None = None,
         pr_details: dict | None = None,
-    ) -> tuple[dict | None, int]:
+    ) -> tuple[dict | None, int, int, int]:
         """Score the issue using the more capable model.
 
         Returns:
-            Tuple of (parsed evaluation dict or None, tokens used).
+            Tuple of (parsed evaluation dict or None, total tokens, prompt tokens, completion tokens).
 
         """
         eval_messages = build_evaluation_prompt(
@@ -220,7 +225,12 @@ class IssueEvaluator:
         parsed = _parse_evaluation_response(response.content)
         if parsed is None:
             logger.warning("Could not parse evaluation for: %s", title)
-        return parsed, response.total_tokens
+        return (
+            parsed,
+            response.total_tokens,
+            response.prompt_tokens,
+            response.completion_tokens,
+        )
 
     async def evaluate_issue(
         self,
@@ -268,7 +278,12 @@ class IssueEvaluator:
             return None
 
         logger.debug("Evaluating: %s", title)
-        summary, summary_tokens = await self._summarize(
+        (
+            summary,
+            summary_tokens,
+            summary_prompt,
+            summary_completion,
+        ) = await self._summarize(
             title=title,
             body=body,
             issue_type=issue_type,
@@ -281,7 +296,7 @@ class IssueEvaluator:
             comments=comments,
         )
 
-        parsed, eval_tokens = await self._score(
+        parsed, eval_tokens, eval_prompt, eval_completion = await self._score(
             title=title,
             body=body,
             issue_type=issue_type,
@@ -305,5 +320,7 @@ class IssueEvaluator:
             if parsed
             else None,
             "tokens_used": total_tokens,
+            "prompt_tokens": summary_prompt + eval_prompt,
+            "completion_tokens": summary_completion + eval_completion,
             "issue_data_hash": current_hash,
         }

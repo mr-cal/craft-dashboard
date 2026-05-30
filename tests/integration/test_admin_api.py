@@ -330,6 +330,8 @@ class TestAdminLogsIntegration:
             "collect-data",
             "-u",
             "craft-dashboard",
+            "-u",
+            "run-llm",
             "-n",
             "100",
             "--no-pager",

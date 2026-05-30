@@ -60,6 +60,7 @@ async def _evaluate_issues(  # noqa: PLR0913
     incomplete: bool = False,
     stale_days: int = 0,
     dry_run: bool = False,
+    llm_backend: str = "openrouter",
 ) -> dict[str, int]:
     """Evaluate issues/PRs that need re-evaluation.
 
@@ -78,6 +79,7 @@ async def _evaluate_issues(  # noqa: PLR0913
         incomplete: If True, only evaluate issues with incomplete LLM data.
         stale_days: Only evaluate issues older than N days (0 = disabled).
         dry_run: If True, show count without evaluating.
+        llm_backend: The LLM backend used ("openrouter" or "local").
 
     Returns:
         Stats dict with evaluated, skipped, errored counts.
@@ -233,6 +235,16 @@ async def _evaluate_issues(  # noqa: PLR0913
         except Exception:
             logger.exception("Error evaluating issue %s", issue.title)
             stats["errored"] += 1
+            processed = stats["evaluated"] + stats["skipped"] + stats["errored"]
+            if processed % 10 == 0:
+                logger.info(
+                    "Progress [%d/%d]: %d evaluated, %d skipped, %d errors",
+                    processed,
+                    total_to_eval,
+                    stats["evaluated"],
+                    stats["skipped"],
+                    stats["errored"],
+                )
             continue
 
         if result is None:
@@ -240,6 +252,16 @@ async def _evaluate_issues(  # noqa: PLR0913
                 "Skipped %s (content unchanged): %s", issue_ref, issue.title[:60]
             )
             stats["skipped"] += 1
+            processed = stats["evaluated"] + stats["skipped"] + stats["errored"]
+            if processed % 10 == 0:
+                logger.info(
+                    "Progress [%d/%d]: %d evaluated, %d skipped, %d errors",
+                    processed,
+                    total_to_eval,
+                    stats["evaluated"],
+                    stats["skipped"],
+                    stats["errored"],
+                )
             continue
 
         # Upsert evaluation: mark previous evaluation as not-latest, then insert new one
@@ -266,6 +288,9 @@ async def _evaluate_issues(  # noqa: PLR0913
                     suggested_action_reason=result["suggested_action_reason"],
                     scores=result["scores"],
                     tokens_used=result["tokens_used"],
+                    prompt_tokens=result["prompt_tokens"],
+                    completion_tokens=result["completion_tokens"],
+                    llm_backend=llm_backend,
                     evaluated_at=datetime.now(tz=UTC),
                     issue_data_hash=result["issue_data_hash"],
                     latest=True,
@@ -284,6 +309,17 @@ async def _evaluate_issues(  # noqa: PLR0913
             result["tokens_used"],
             issue.title[:60],
         )
+
+        processed = stats["evaluated"] + stats["skipped"] + stats["errored"]
+        if processed % 10 == 0:
+            logger.info(
+                "Progress [%d/%d]: %d evaluated, %d skipped, %d errors",
+                processed,
+                total_to_eval,
+                stats["evaluated"],
+                stats["skipped"],
+                stats["errored"],
+            )
 
         # Check limit after successful evaluation (not after skips)
         if limit > 0 and stats["evaluated"] >= limit:
@@ -431,6 +467,7 @@ async def _main(  # noqa: PLR0913
             incomplete=incomplete,
             stale_days=stale_days,
             dry_run=dry_run,
+            llm_backend=settings.llm_backend,
         )
         logger.info(
             "Evaluation complete: %d evaluated, %d skipped, %d errors, %d total tokens",

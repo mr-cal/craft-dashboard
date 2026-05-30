@@ -49,17 +49,17 @@ async def _seed_projects_and_issues(session) -> None:
                 source="github",
                 external_id="1",
                 issue_type="issue",
-                title="Alpha bug",
-                body="body",
+                title="Add support for core24 base",
+                body="Support `base: core24` in snapcraft projects targeting Ubuntu 24.04.",
                 state="open",
-                author="alice",
+                author="sergio-cazzolato",
                 author_is_maintainer=True,
                 author_is_bot=False,
                 labels=[],
                 created_at=now - timedelta(days=10),
                 updated_at=now - timedelta(days=1),
                 closed_at=None,
-                url="https://example.test/snapcraft/1",
+                url="https://github.com/canonical/snapcraft/issues/1234",
                 metadata_={},
                 comments=[],
                 last_fetched_at=now,
@@ -69,17 +69,17 @@ async def _seed_projects_and_issues(session) -> None:
                 source="github",
                 external_id="2",
                 issue_type="issue",
-                title="Beta bug",
-                body="body",
+                title="Snap refresh fails when revision pinned",
+                body="Refreshing a snapped app fails when `snap refresh --revision` targets a pinned revision.",
                 state="open",
-                author="bob",
+                author="craft-contributor",
                 author_is_maintainer=False,
                 author_is_bot=False,
                 labels=[],
                 created_at=now - timedelta(days=5),
                 updated_at=now - timedelta(days=2),
                 closed_at=None,
-                url="https://example.test/snapcraft/2",
+                url="https://github.com/canonical/snapcraft/issues/1235",
                 metadata_={},
                 comments=[],
                 last_fetched_at=now,
@@ -89,17 +89,17 @@ async def _seed_projects_and_issues(session) -> None:
                 source="github",
                 external_id="3",
                 issue_type="pull_request",
-                title="Gamma PR",
-                body="body",
+                title="fix: handle empty manifest gracefully",
+                body="Avoid a traceback when snap metadata is rendered from an empty manifest during pack.",
                 state="open",
-                author="carol",
+                author="craft-contributor",
                 author_is_maintainer=False,
                 author_is_bot=False,
                 labels=[],
                 created_at=now - timedelta(days=1),
                 updated_at=now - timedelta(hours=12),
                 closed_at=None,
-                url="https://example.test/snapcraft/3",
+                url="https://github.com/canonical/snapcraft/pull/1236",
                 metadata_={},
                 comments=[],
                 last_fetched_at=now,
@@ -109,17 +109,17 @@ async def _seed_projects_and_issues(session) -> None:
                 source="github",
                 external_id="4",
                 issue_type="issue",
-                title="Delta bug",
-                body="body",
+                title="charmcraft deploy times out on large bundles",
+                body="Deploying a large bundle stalls while charmcraft waits for the controller response.",
                 state="open",
-                author="dave",
+                author="craft-contributor",
                 author_is_maintainer=False,
                 author_is_bot=False,
                 labels=[],
                 created_at=now - timedelta(days=20),
                 updated_at=now - timedelta(days=3),
                 closed_at=None,
-                url="https://example.test/charmcraft/4",
+                url="https://github.com/canonical/charmcraft/issues/4321",
                 metadata_={},
                 comments=[],
                 last_fetched_at=now,
@@ -144,17 +144,17 @@ async def _seed_author_role_issues(session) -> None:
                 source="github",
                 external_id="10",
                 issue_type="issue",
-                title="Maintainer issue",
-                body="body",
+                title="Add support for core24 base",
+                body="Support `base: core24` in snapcraft projects targeting Ubuntu 24.04.",
                 state="open",
-                author="alice",
+                author="sergio-cazzolato",
                 author_is_maintainer=True,
                 author_is_bot=False,
                 labels=[],
                 created_at=now - timedelta(days=3),
                 updated_at=now - timedelta(days=1),
                 closed_at=None,
-                url="https://example.test/issues/10",
+                url="https://github.com/canonical/snapcraft/issues/2234",
                 metadata_={},
                 comments=[],
                 last_fetched_at=now,
@@ -164,17 +164,17 @@ async def _seed_author_role_issues(session) -> None:
                 source="github",
                 external_id="11",
                 issue_type="issue",
-                title="Contributor issue",
-                body="body",
+                title="Snap refresh fails when revision pinned",
+                body="Refreshing a snapped app fails when `snap refresh --revision` targets a pinned revision.",
                 state="open",
-                author="bob",
+                author="craft-contributor",
                 author_is_maintainer=False,
                 author_is_bot=False,
                 labels=[],
                 created_at=now - timedelta(days=2),
                 updated_at=now - timedelta(days=1),
                 closed_at=None,
-                url="https://example.test/issues/11",
+                url="https://github.com/canonical/snapcraft/issues/2235",
                 metadata_={},
                 comments=[],
                 last_fetched_at=now,
@@ -184,8 +184,8 @@ async def _seed_author_role_issues(session) -> None:
                 source="github",
                 external_id="12",
                 issue_type="issue",
-                title="Bot issue",
-                body="body",
+                title="chore: refresh core24 test dependencies",
+                body="Automated dependency refresh for the core24 integration test matrix.",
                 state="open",
                 author="renovate[bot]",
                 author_is_maintainer=False,
@@ -194,7 +194,7 @@ async def _seed_author_role_issues(session) -> None:
                 created_at=now - timedelta(days=1),
                 updated_at=now - timedelta(hours=12),
                 closed_at=None,
-                url="https://example.test/issues/12",
+                url="https://github.com/canonical/snapcraft/pull/2236",
                 metadata_={},
                 comments=[],
                 last_fetched_at=now,
@@ -219,17 +219,17 @@ async def _seed_author_role_column_issues(session) -> None:
                 source="github",
                 external_id="13",
                 issue_type="issue",
-                title="Maintainer issue",
-                body="body",
+                title="Add support for core24 base",
+                body="Support `base: core24` in snapcraft projects targeting Ubuntu 24.04.",
                 state="open",
-                author="alice",
+                author="sergio-cazzolato",
                 author_is_maintainer=True,
                 author_is_bot=False,
                 labels=[],
                 created_at=now - timedelta(days=3),
                 updated_at=now - timedelta(days=1),
                 closed_at=None,
-                url="https://example.test/issues/13",
+                url="https://github.com/canonical/snapcraft/issues/3234",
                 metadata_={},
                 comments=[],
                 last_fetched_at=now,
@@ -239,17 +239,17 @@ async def _seed_author_role_column_issues(session) -> None:
                 source="github",
                 external_id="14",
                 issue_type="issue",
-                title="Contributor issue",
-                body="body",
+                title="Snap refresh fails when revision pinned",
+                body="Refreshing a snapped app fails when `snap refresh --revision` targets a pinned revision.",
                 state="open",
-                author="bob",
+                author="craft-contributor",
                 author_is_maintainer=False,
                 author_is_bot=False,
                 labels=[],
                 created_at=now - timedelta(days=2),
                 updated_at=now - timedelta(days=1),
                 closed_at=None,
-                url="https://example.test/issues/14",
+                url="https://github.com/canonical/snapcraft/issues/3235",
                 metadata_={},
                 comments=[],
                 last_fetched_at=now,
@@ -259,17 +259,17 @@ async def _seed_author_role_column_issues(session) -> None:
                 source="github",
                 external_id="15",
                 issue_type="issue",
-                title="Bot issue",
-                body="body",
+                title="chore: refresh spread dependencies",
+                body="Automated dependency refresh for spread and integration jobs.",
                 state="open",
-                author="dependabot",
+                author="renovate[bot]",
                 author_is_maintainer=False,
                 author_is_bot=True,
                 labels=[],
                 created_at=now - timedelta(days=1),
                 updated_at=now - timedelta(hours=12),
                 closed_at=None,
-                url="https://example.test/issues/15",
+                url="https://github.com/canonical/snapcraft/pull/3236",
                 metadata_={},
                 comments=[],
                 last_fetched_at=now,
@@ -294,17 +294,17 @@ async def _seed_sorted_issues(session) -> None:
                 source="github",
                 external_id="20",
                 issue_type="issue",
-                title="Zulu title",
-                body="body",
+                title="Snap refresh fails when revision pinned",
+                body="Refreshing a snapped app fails when `snap refresh --revision` targets a pinned revision.",
                 state="open",
-                author="alice",
+                author="craft-contributor",
                 author_is_maintainer=False,
                 author_is_bot=False,
                 labels=[],
                 created_at=now - timedelta(days=1),
                 updated_at=now - timedelta(hours=6),
                 closed_at=None,
-                url="https://example.test/issues/20",
+                url="https://github.com/canonical/snapcraft/issues/4234",
                 metadata_={},
                 comments=[],
                 last_fetched_at=now,
@@ -314,17 +314,17 @@ async def _seed_sorted_issues(session) -> None:
                 source="github",
                 external_id="21",
                 issue_type="issue",
-                title="Alpha title",
-                body="body",
+                title="Add support for core24 base",
+                body="Support `base: core24` in snapcraft projects targeting Ubuntu 24.04.",
                 state="open",
-                author="bob",
+                author="sergio-cazzolato",
                 author_is_maintainer=False,
                 author_is_bot=False,
                 labels=[],
                 created_at=now - timedelta(days=10),
                 updated_at=now - timedelta(days=1),
                 closed_at=None,
-                url="https://example.test/issues/21",
+                url="https://github.com/canonical/snapcraft/issues/4235",
                 metadata_={},
                 comments=[],
                 last_fetched_at=now,
@@ -349,17 +349,17 @@ async def _seed_issue_types(session) -> None:
                 source="github",
                 external_id="30",
                 issue_type="issue",
-                title="Regular issue",
-                body="body",
+                title="Snap refresh fails when revision pinned",
+                body="Refreshing a snapped app fails when `snap refresh --revision` targets a pinned revision.",
                 state="open",
-                author="alice",
+                author="craft-contributor",
                 author_is_maintainer=False,
                 author_is_bot=False,
                 labels=[],
                 created_at=now - timedelta(days=2),
                 updated_at=now - timedelta(days=1),
                 closed_at=None,
-                url="https://example.test/issues/30",
+                url="https://github.com/canonical/snapcraft/issues/5234",
                 metadata_={},
                 comments=[],
                 last_fetched_at=now,
@@ -369,17 +369,17 @@ async def _seed_issue_types(session) -> None:
                 source="github",
                 external_id="31",
                 issue_type="pull_request",
-                title="Regular PR",
-                body="body",
+                title="fix: handle empty manifest gracefully",
+                body="Avoid a traceback when snap metadata is rendered from an empty manifest during pack.",
                 state="open",
-                author="bob",
+                author="sergio-cazzolato",
                 author_is_maintainer=False,
                 author_is_bot=False,
                 labels=[],
                 created_at=now - timedelta(days=1),
                 updated_at=now - timedelta(hours=18),
                 closed_at=None,
-                url="https://example.test/issues/31",
+                url="https://github.com/canonical/snapcraft/pull/5235",
                 metadata_={},
                 comments=[],
                 last_fetched_at=now,
@@ -476,7 +476,7 @@ class TestQueryIssuesAuthorRole:
         )
 
         assert len(issues) == 1
-        assert [issue["author"] for issue in issues] == ["alice"]
+        assert [issue["author"] for issue in issues] == ["sergio-cazzolato"]
 
     async def test_contributor_filter_returns_only_contributor(
         self, test_db_session
@@ -488,7 +488,7 @@ class TestQueryIssuesAuthorRole:
         )
 
         assert len(issues) == 1
-        assert [issue["author"] for issue in issues] == ["bob"]
+        assert [issue["author"] for issue in issues] == ["craft-contributor"]
 
     async def test_bot_filter_returns_only_bot(self, test_db_session) -> None:
         await _seed_author_role_issues(test_db_session)
@@ -514,7 +514,10 @@ class TestQueryIssuesAuthorRole:
         )
 
         assert len(issues) == 2
-        assert {issue["author"] for issue in issues} == {"alice", "bob"}
+        assert {issue["author"] for issue in issues} == {
+            "sergio-cazzolato",
+            "craft-contributor",
+        }
 
 
 class TestQueryIssuesAuthorRoleColumn:
@@ -529,7 +532,7 @@ class TestQueryIssuesAuthorRoleColumn:
             sort_by="title",
         )
 
-        assert [issue["author"] for issue in issues] == ["dependabot"]
+        assert [issue["author"] for issue in issues] == ["renovate[bot]"]
 
     async def test_bot_filter_excludes_non_bot_maintainer(
         self, test_db_session
@@ -542,7 +545,7 @@ class TestQueryIssuesAuthorRoleColumn:
             sort_by="title",
         )
 
-        assert "alice" not in {issue["author"] for issue in issues}
+        assert "sergio-cazzolato" not in {issue["author"] for issue in issues}
 
     async def test_contributor_filter_matches_non_bot_contributor(
         self, test_db_session
@@ -555,7 +558,7 @@ class TestQueryIssuesAuthorRoleColumn:
             sort_by="title",
         )
 
-        assert [issue["author"] for issue in issues] == ["bob"]
+        assert [issue["author"] for issue in issues] == ["craft-contributor"]
 
 
 class TestApplyAuthorRoleFilter:
@@ -571,7 +574,7 @@ class TestApplyAuthorRoleFilter:
 
         authors = list((await test_db_session.execute(query)).scalars())
 
-        assert authors == ["alice", "dependabot"]
+        assert authors == ["renovate[bot]", "sergio-cazzolato"]
 
     async def test_empty_author_role_leaves_query_unfiltered(
         self, test_db_session
@@ -584,7 +587,7 @@ class TestApplyAuthorRoleFilter:
 
         authors = list((await test_db_session.execute(query)).scalars())
 
-        assert authors == ["alice", "bob", "dependabot"]
+        assert authors == ["craft-contributor", "renovate[bot]", "sergio-cazzolato"]
 
 
 class TestQueryIssuesSearch:
@@ -593,11 +596,11 @@ class TestQueryIssuesSearch:
         await _seed_projects_and_issues(test_db_session)
 
         issues, *_ = await _query_issues(
-            test_db_session, search="Alpha", sort_by="title"
+            test_db_session, search="core24", sort_by="title"
         )
 
         assert len(issues) == 1
-        assert issues[0]["title"] == "Alpha bug"
+        assert issues[0]["title"] == "Add support for core24 base"
 
     async def test_search_by_external_id(self, test_db_session) -> None:
         """Search filter matches issues by external_id."""
@@ -661,7 +664,10 @@ class TestQueryIssuesSort:
 
         issues, *_ = await _query_issues(test_db_session, sort_by="title")
 
-        assert [issue["title"] for issue in issues] == ["Alpha title", "Zulu title"]
+        assert [issue["title"] for issue in issues] == [
+            "Add support for core24 base",
+            "Snap refresh fails when revision pinned",
+        ]
 
     async def test_reverse_title_sort_returns_reverse_alphabetical_order(
         self, test_db_session
@@ -670,14 +676,20 @@ class TestQueryIssuesSort:
 
         issues, *_ = await _query_issues(test_db_session, sort_by="-title")
 
-        assert [issue["title"] for issue in issues] == ["Zulu title", "Alpha title"]
+        assert [issue["title"] for issue in issues] == [
+            "Snap refresh fails when revision pinned",
+            "Add support for core24 base",
+        ]
 
     async def test_age_sort_returns_oldest_first(self, test_db_session) -> None:
         await _seed_sorted_issues(test_db_session)
 
         issues, *_ = await _query_issues(test_db_session, sort_by="age")
 
-        assert [issue["title"] for issue in issues] == ["Alpha title", "Zulu title"]
+        assert [issue["title"] for issue in issues] == [
+            "Add support for core24 base",
+            "Snap refresh fails when revision pinned",
+        ]
 
 
 class TestQueryIssuesIssueType:
@@ -720,17 +732,17 @@ async def _seed_issues_with_scores(session) -> None:
         source="github",
         external_id="100",
         issue_type="issue",
-        title="Stale issue",
-        body="body",
+        title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
+        body="When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
         state="open",
-        author="alice",
+        author="craft-contributor",
         author_is_maintainer=False,
         author_is_bot=False,
         labels=[],
         created_at=now - timedelta(days=30),
         updated_at=now - timedelta(days=30),
         closed_at=None,
-        url="https://example.test/issues/100",
+        url="https://github.com/canonical/snapcraft/issues/6100",
         metadata_={},
         comments=[],
         last_fetched_at=now,
@@ -741,9 +753,9 @@ async def _seed_issues_with_scores(session) -> None:
     eval_stale = LLMEvaluation(
         issue_id=issue_stale.id,
         model_name="test-model",
-        summary="Very stale issue",
+        summary="Stale LXD regression report without recent maintainer follow-up",
         suggested_action="close",
-        suggested_action_reason="No activity",
+        suggested_action_reason="No activity since the Ubuntu 24.04 migration",
         scores={
             "staleness": 0.95,
             "duplicateness": 0.1,
@@ -761,17 +773,17 @@ async def _seed_issues_with_scores(session) -> None:
         source="github",
         external_id="101",
         issue_type="issue",
-        title="Ready issue",
-        body="body",
+        title="Add support for core24 base",
+        body="Please add support for `base: core24` so new snaps can target Ubuntu 24.04.",
         state="open",
-        author="bob",
+        author="sergio-cazzolato",
         author_is_maintainer=False,
         author_is_bot=False,
         labels=[],
         created_at=now - timedelta(days=1),
         updated_at=now - timedelta(hours=1),
         closed_at=None,
-        url="https://example.test/issues/101",
+        url="https://github.com/canonical/snapcraft/issues/6101",
         metadata_={},
         comments=[],
         last_fetched_at=now,
@@ -782,9 +794,9 @@ async def _seed_issues_with_scores(session) -> None:
     eval_ready = LLMEvaluation(
         issue_id=issue_ready.id,
         model_name="test-model",
-        summary="Ready to work on",
+        summary="Clear enhancement request with maintainers aligned on core24 support",
         suggested_action="work",
-        suggested_action_reason="Good first issue",
+        suggested_action_reason="Implementation scope is clear and unblocked",
         scores={
             "staleness": 0.1,
             "duplicateness": 0.05,
@@ -802,17 +814,17 @@ async def _seed_issues_with_scores(session) -> None:
         source="github",
         external_id="102",
         issue_type="issue",
-        title="Complex issue",
-        body="body",
+        title="Refactor manifest parsing for multi-arch builds",
+        body="Rework manifest parsing so multi-architecture builds share a consistent metadata pipeline.",
         state="open",
-        author="carol",
+        author="jdoe-canonical",
         author_is_maintainer=False,
         author_is_bot=False,
         labels=[],
         created_at=now - timedelta(days=5),
         updated_at=now - timedelta(days=2),
         closed_at=None,
-        url="https://example.test/issues/102",
+        url="https://github.com/canonical/snapcraft/issues/6102",
         metadata_={},
         comments=[],
         last_fetched_at=now,
@@ -823,9 +835,9 @@ async def _seed_issues_with_scores(session) -> None:
     eval_complex = LLMEvaluation(
         issue_id=issue_complex.id,
         model_name="test-model",
-        summary="Complex architecture change",
+        summary="Large refactor touching manifest parsing and multi-arch build logic",
         suggested_action="investigate",
-        suggested_action_reason="Requires deep analysis",
+        suggested_action_reason="Touches multiple build stages and architecture-specific paths",
         scores={
             "staleness": 0.4,
             "duplicateness": 0.15,
@@ -843,17 +855,17 @@ async def _seed_issues_with_scores(session) -> None:
         source="github",
         external_id="103",
         issue_type="issue",
-        title="Unscored issue",
-        body="body",
+        title="charmcraft deploy times out on large bundles",
+        body="Deploying a large bundle stalls while charmcraft waits for the controller response.",
         state="open",
-        author="dave",
+        author="craft-contributor",
         author_is_maintainer=False,
         author_is_bot=False,
         labels=[],
         created_at=now - timedelta(days=3),
         updated_at=now - timedelta(days=1),
         closed_at=None,
-        url="https://example.test/issues/103",
+        url="https://github.com/canonical/charmcraft/issues/6103",
         metadata_={},
         comments=[],
         last_fetched_at=now,
@@ -894,7 +906,10 @@ class TestQueryIssuesLLMScores:
         assert scored_issue["support_request"] == 0.2
         assert scored_issue["readiness"] == 0.2
         assert scored_issue["suggested_action"] == "close"
-        assert scored_issue["suggested_action_reason"] == "No activity"
+        assert (
+            scored_issue["suggested_action_reason"]
+            == "No activity since the Ubuntu 24.04 migration"
+        )
 
     async def test_query_handles_missing_scores(self, test_db_session) -> None:
         """_query_issues should handle issues without LLM evaluations."""

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
 
 _ADMIN_SESSION_COOKIE = "admin_session"
-_LOG_SERVICE_UNITS = ["collect-data", "craft-dashboard"]
+_LOG_SERVICE_UNITS = ["collect-data", "craft-dashboard", "run-llm"]
 
 
 class AdminActionResponse(BaseModel):
@@ -156,16 +156,36 @@ async def admin_page(
             }
         )
 
-    # Get LLM evaluation token usage stats
+    # Get LLM evaluation token usage stats (lifetime)
     token_stats_result = await session.execute(
         select(
             func.count(LLMEvaluation.id).label("total_evaluations"),
             func.sum(LLMEvaluation.tokens_used).label("total_tokens"),
+            func.sum(LLMEvaluation.prompt_tokens).label("total_prompt_tokens"),
+            func.sum(LLMEvaluation.completion_tokens).label("total_completion_tokens"),
         )
     )
     token_row = token_stats_result.one()
     total_evaluations = token_row.total_evaluations or 0
     total_tokens = token_row.total_tokens or 0
+    total_prompt_tokens = token_row.total_prompt_tokens or 0
+    total_completion_tokens = token_row.total_completion_tokens or 0
+
+    # Get 7-day token usage stats
+    seven_days_ago = now - timedelta(days=7)
+    recent_stats_result = await session.execute(
+        select(
+            func.count(LLMEvaluation.id).label("recent_evaluations"),
+            func.sum(LLMEvaluation.tokens_used).label("recent_tokens"),
+            func.sum(LLMEvaluation.prompt_tokens).label("recent_prompt_tokens"),
+            func.sum(LLMEvaluation.completion_tokens).label("recent_completion_tokens"),
+        ).where(LLMEvaluation.evaluated_at >= seven_days_ago)
+    )
+    recent_row = recent_stats_result.one()
+    recent_evaluations = recent_row.recent_evaluations or 0
+    recent_tokens = recent_row.recent_tokens or 0
+    recent_prompt_tokens = recent_row.recent_prompt_tokens or 0
+    recent_completion_tokens = recent_row.recent_completion_tokens or 0
 
     return templates.TemplateResponse(
         request,
@@ -175,6 +195,12 @@ async def admin_page(
             "schedule_days": schedule_days,
             "total_evaluations": total_evaluations,
             "total_tokens": total_tokens,
+            "total_prompt_tokens": total_prompt_tokens,
+            "total_completion_tokens": total_completion_tokens,
+            "recent_evaluations": recent_evaluations,
+            "recent_tokens": recent_tokens,
+            "recent_prompt_tokens": recent_prompt_tokens,
+            "recent_completion_tokens": recent_completion_tokens,
         },
     )
 
@@ -432,9 +458,14 @@ async def admin_logs(
             timeout=10,
         )
         stdout, _ = await proc.communicate()
-        output = stdout.decode() if stdout else "(no logs)"
-        return PlainTextResponse(
-            html.escape(output) if output != "(no logs)" else output
-        )
+        output = stdout.decode().strip() if stdout else ""
+        if not output or output == "-- No entries --":
+            return PlainTextResponse(
+                f"(no journal entries found for units: {', '.join(_LOG_SERVICE_UNITS)})\n"
+                "Hint: logs are only available when running as systemd services on the deployed server."
+            )
+        return PlainTextResponse(html.escape(output))
     except (TimeoutError, FileNotFoundError):
-        return PlainTextResponse("(journalctl not available)")
+        return PlainTextResponse(
+            "(journalctl not available — logs are only accessible on the deployed server)"
+        )
