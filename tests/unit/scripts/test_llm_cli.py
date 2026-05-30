@@ -28,6 +28,16 @@ class TestClearEvaluationsCommand:
         assert "--project" in result.output
         assert "--yes" in result.output
 
+
+class TestEvaluateCommand:
+    def test_help_lists_strict_validation_flag(self) -> None:
+        runner = CliRunner()
+
+        result = runner.invoke(cli, ["evaluate", "--help"])
+
+        assert result.exit_code == 0
+        assert "--strict-validation" in result.output
+
     @pytest.mark.asyncio
     async def test_clear_main_confirms_before_deleting(self, monkeypatch) -> None:
         count_evaluations = AsyncMock(return_value=3)

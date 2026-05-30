@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from craft_dashboard.llm.exceptions import LLMQuotaError
+from craft_dashboard.llm.exceptions import LLMQuotaError, LLMValidationError
 from craft_dashboard.models.issue import Issue
 from scripts.llm.orchestrator import _evaluate_issues
 from scripts.llm.queries import IssueEvaluationTarget
@@ -93,10 +93,16 @@ class TestEvaluateIssues:
             evaluate_issue=AsyncMock(
                 side_effect=[
                     {
-                        "summary": "Summary",
+                        "summary": "Issue still looks actionable because the report has clear details.",
                         "suggested_action": "keep_open",
-                        "suggested_action_reason": "Recent comments",
-                        "scores": {"priority": 3},
+                        "suggested_action_reason": "Recent comments keep the report active.",
+                        "scores": {
+                            "staleness": 10,
+                            "duplicateness": 0,
+                            "complexity": 30,
+                            "support_request": 5,
+                            "readiness": 90,
+                        },
                         "tokens_used": 77,
                         "prompt_tokens": 30,
                         "completion_tokens": 47,
@@ -139,6 +145,109 @@ class TestEvaluateIssues:
         second_call = evaluator.evaluate_issue.await_args_list[1].kwargs
         assert second_call["existing_hash"] == "same-hash"
         assert second_call["pr_details"] == {"merged": True}
+
+    @pytest.mark.asyncio
+    async def test_skips_invalid_results_without_storing(
+        self, monkeypatch, caplog
+    ) -> None:
+        target = IssueEvaluationTarget(
+            issue=_make_issue(issue_id=1),
+            project_name="charmcraft",
+            issue_data_hash=None,
+        )
+        evaluator = SimpleNamespace(
+            evaluate_issue=AsyncMock(
+                return_value={
+                    "summary": "too short",
+                    "suggested_action": "keep_open",
+                    "suggested_action_reason": "Looks fine",
+                    "scores": {
+                        "staleness": 10,
+                        "duplicateness": 0,
+                        "complexity": 30,
+                        "support_request": 5,
+                        "readiness": 90,
+                    },
+                    "tokens_used": 10,
+                    "prompt_tokens": 4,
+                    "completion_tokens": 6,
+                    "issue_data_hash": "hash-1",
+                }
+            ),
+            evaluation_model="eval-model",
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
+            AsyncMock(return_value=[target]),
+        )
+        store_result = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.store_evaluation_result", store_result
+        )
+
+        caplog.set_level("WARNING")
+        stats = await _evaluate_issues(
+            session_factory=object(),
+            evaluator=evaluator,
+            maintainers=set(),
+        )
+
+        assert stats == {"evaluated": 0, "skipped": 0, "errored": 1, "total_tokens": 0}
+        store_result.assert_not_awaited()
+        assert "Validation failed for issue" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_strict_validation_stops_the_run(self, monkeypatch) -> None:
+        targets = [
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=1),
+                project_name="charmcraft",
+                issue_data_hash=None,
+            ),
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=2),
+                project_name="snapcraft",
+                issue_data_hash=None,
+            ),
+        ]
+        evaluator = SimpleNamespace(
+            evaluate_issue=AsyncMock(
+                side_effect=[
+                    {
+                        "summary": "too short",
+                        "suggested_action": "keep_open",
+                        "suggested_action_reason": "Looks fine",
+                        "scores": {
+                            "staleness": 10,
+                            "duplicateness": 0,
+                            "complexity": 30,
+                            "support_request": 5,
+                            "readiness": 90,
+                        },
+                        "tokens_used": 10,
+                        "prompt_tokens": 4,
+                        "completion_tokens": 6,
+                        "issue_data_hash": "hash-1",
+                    },
+                    None,
+                ]
+            ),
+            evaluation_model="eval-model",
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
+            AsyncMock(return_value=targets),
+        )
+
+        with pytest.raises(LLMValidationError):
+            await _evaluate_issues(
+                session_factory=object(),
+                evaluator=evaluator,
+                maintainers=set(),
+                strict_validation=True,
+            )
+
+        assert evaluator.evaluate_issue.await_count == 1
 
     @pytest.mark.asyncio
     async def test_stops_when_quota_is_exhausted(self, monkeypatch) -> None:

@@ -6,9 +6,10 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict
 
-from craft_dashboard.llm.exceptions import LLMQuotaError
+from craft_dashboard.llm.exceptions import LLMQuotaError, LLMValidationError
 from scripts.llm.queries import IssueFilter, fetch_issue_evaluation_targets
 from scripts.llm.storage import store_evaluation_result
+from scripts.llm.validation import validate_evaluation_result
 
 if TYPE_CHECKING:
     from craft_dashboard.llm.evaluator import IssueEvaluator
@@ -60,6 +61,7 @@ async def _evaluate_issues(  # noqa: PLR0913
     stale_days: int = 0,
     dry_run: bool = False,
     llm_backend: str = "openrouter",
+    strict_validation: bool = False,
 ) -> EvaluationStats | DryRunEvaluationStats:
     """Evaluate matched issues and persist any new results."""
     stats = {"evaluated": 0, "skipped": 0, "errored": 0, "total_tokens": 0}
@@ -145,6 +147,20 @@ async def _evaluate_issues(  # noqa: PLR0913
                 "Skipped %s (content unchanged): %s", issue_ref, issue.title[:60]
             )
             stats["skipped"] += 1
+            _log_progress(
+                stats,
+                processed=stats["evaluated"] + stats["skipped"] + stats["errored"],
+                total_to_eval=total_to_eval,
+            )
+            continue
+
+        try:
+            validate_evaluation_result(result, issue_type=issue.issue_type)
+        except LLMValidationError:
+            logger.warning("Validation failed for issue %s", issue_ref, exc_info=True)
+            stats["errored"] += 1
+            if strict_validation:
+                raise
             _log_progress(
                 stats,
                 processed=stats["evaluated"] + stats["skipped"] + stats["errored"],
