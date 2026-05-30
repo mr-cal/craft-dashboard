@@ -1,7 +1,7 @@
 """Tests for the issue repository."""
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.project import Project
@@ -369,6 +369,113 @@ class TestComputeAgeDays:
             "craft_dashboard.repositories.issue_repository.datetime", FrozenDateTime
         ):
             assert _compute_age_days(created_at) == 30
+
+
+class _DetailQueryResult:
+    def __init__(self, row=None, evaluations=None):
+        self._row = row
+        self._evaluations = evaluations or []
+
+    def first(self):
+        return self._row
+
+    def scalars(self):
+        return iter(self._evaluations)
+
+
+class _DetailRow:
+    def __init__(
+        self,
+        issue,
+        *,
+        project_name,
+        summary,
+        suggested_action,
+        suggested_action_reason,
+        scores,
+    ):
+        self._issue = issue
+        self.project_name = project_name
+        self.summary = summary
+        self.suggested_action = suggested_action
+        self.suggested_action_reason = suggested_action_reason
+        self.scores = scores
+
+    def __getitem__(self, index):
+        if index == 0:
+            return self._issue
+        raise IndexError(index)
+
+
+class TestGetIssueDetail:
+    async def test_returns_issue_with_current_evaluation_and_history(self) -> None:
+        issue = make_issue(
+            project_id=1,
+            external_id="321",
+            title="Support core24 builds end to end",
+            body="Steps to reproduce\n1. Build\n2. Observe failure",
+            author="sergio-cazzolato",
+            labels=["bug", "core24"],
+            created_at=FIXED_NOW - timedelta(days=5),
+            updated_at=FIXED_NOW - timedelta(days=1),
+            url="https://github.com/canonical/snapcraft/issues/321",
+        )
+        latest = make_evaluation(
+            issue_id=issue.id,
+            model_name="gpt-4.1",
+            summary="Regression in the core24 build pipeline.",
+            suggested_action="needs_review",
+            suggested_action_reason="Recent failures need maintainer attention.",
+            scores={"staleness": 0.2, "complexity": 0.7},
+            evaluated_at=FIXED_NOW - timedelta(hours=1),
+            latest=True,
+        )
+        earlier = make_evaluation(
+            issue_id=issue.id,
+            model_name="gpt-4o-mini",
+            summary="Earlier summary.",
+            suggested_action="keep_open",
+            suggested_action_reason="Still active.",
+            scores={"staleness": 0.1},
+            evaluated_at=FIXED_NOW - timedelta(days=1),
+            latest=False,
+        )
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                _DetailQueryResult(
+                    _DetailRow(
+                        issue,
+                        project_name="snapcraft",
+                        summary=latest.summary,
+                        suggested_action=latest.suggested_action,
+                        suggested_action_reason=latest.suggested_action_reason,
+                        scores=latest.scores,
+                    )
+                ),
+                _DetailQueryResult(evaluations=[latest, earlier]),
+            ]
+        )
+
+        detail = await IssueRepository(session).get_issue_detail("snapcraft", "321")
+
+        assert detail is not None
+        assert detail["project_name"] == "snapcraft"
+        assert detail["title"] == "Support core24 builds end to end"
+        assert detail["summary"] == "Regression in the core24 build pipeline."
+        assert detail["suggested_action"] == "needs_review"
+        assert [entry["model_name"] for entry in detail["evaluation_history"]] == [
+            "gpt-4.1",
+            "gpt-4o-mini",
+        ]
+
+    async def test_returns_none_when_issue_does_not_exist(self) -> None:
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=_DetailQueryResult())
+
+        detail = await IssueRepository(session).get_issue_detail("snapcraft", "999")
+
+        assert detail is None
 
 
 class TestQueryIssuesFilters:

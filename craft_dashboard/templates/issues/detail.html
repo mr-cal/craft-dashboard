@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}{{ issue.title }} - craft-dashboard{% endblock %}
+{% block content %}
+<p><a href="/issues">&larr; Back to issue list</a></p>
+
+<h2>{{ issue.title }}</h2>
+<p>
+  <a href="{{ original_issue_url }}" target="_blank" rel="noopener">View original {{ issue.source|capitalize }} issue</a>
+</p>
+
+<div class="issue-detail-layout">
+  <section class="issue-detail-card">
+    <h3>Metadata</h3>
+    <dl class="issue-detail-meta">
+      <dt>Project</dt><dd>{{ issue.project_name }}</dd>
+      <dt>Number</dt><dd>#{{ issue.external_id }}</dd>
+      <dt>Type</dt><dd>{{ issue.issue_type|replace("_", " ") }}</dd>
+      <dt>State</dt><dd>{{ issue.state }}</dd>
+      <dt>Author</dt><dd>{{ issue.author or "unknown" }}</dd>
+      <dt>Labels</dt>
+      <dd>
+        {% if issue.labels %}
+          {% for label in issue.labels %}
+          <span class="p-label">{{ label }}</span>
+          {% endfor %}
+        {% else %}
+          —
+        {% endif %}
+      </dd>
+      <dt>Created</dt><dd>{{ issue.created_at or "—" }}</dd>
+      <dt>Updated</dt><dd>{{ issue.updated_at or "—" }}</dd>
+      <dt>Closed</dt><dd>{{ issue.closed_at or "—" }}</dd>
+    </dl>
+  </section>
+
+  <section class="issue-detail-card">
+    <h3>Current evaluation</h3>
+    {% if current_evaluation %}
+    <p>{{ current_evaluation.summary or "No summary available." }}</p>
+    <p><strong>Suggested action:</strong> {{ (current_evaluation.suggested_action or "—")|replace("_", " ") }}</p>
+    {% if current_evaluation.suggested_action_reason %}
+    <p><strong>Reason:</strong> {{ current_evaluation.suggested_action_reason }}</p>
+    {% endif %}
+    <div class="issue-detail-scores">
+      {% for score_key, score_value in (current_evaluation.scores or {}).items() %}
+      <span class="issue-detail-score"><strong>{{ score_key|replace("_", " ")|title }}:</strong> {{ score_value }}</span>
+      {% else %}
+      <span>No scores available.</span>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p>No evaluation has been recorded for this issue yet.</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="issue-detail-card">
+  <h3>Issue body</h3>
+  <pre class="issue-detail-body">{{ issue.body or "No description provided." }}</pre>
+</section>
+
+<section class="issue-detail-card">
+  <h3>Evaluation history</h3>
+  {% if evaluation_history %}
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Model</th>
+        <th>Scores</th>
+        <th>Action</th>
+        <th>Summary</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for evaluation in evaluation_history %}
+      <tr>
+        <td>{{ evaluation.evaluated_at or "—" }}</td>
+        <td>{{ evaluation.model_name or evaluation.llm_backend or "—" }}</td>
+        <td>
+          {% if evaluation.scores %}
+            {% for score_key, score_value in evaluation.scores.items() %}
+            <div>{{ score_key|replace("_", " ")|title }}: {{ score_value }}</div>
+            {% endfor %}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>{{ (evaluation.suggested_action or "—")|replace("_", " ") }}</td>
+        <td>{{ evaluation.summary or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No evaluation history available.</p>
+  {% endif %}
+</section>
+{% endblock %}

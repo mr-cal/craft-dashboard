@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Integer as SAInteger
 from sqlalchemy import cast, func, or_, select
@@ -72,11 +72,90 @@ def _apply_author_role_filter(query: Select, author_role: str) -> Select:
     return query
 
 
+def _serialize_evaluation(evaluation: LLMEvaluation) -> dict[str, Any]:
+    """Serialize an evaluation for template rendering."""
+    return {
+        "id": evaluation.id,
+        "summary": evaluation.summary,
+        "suggested_action": evaluation.suggested_action,
+        "suggested_action_reason": evaluation.suggested_action_reason,
+        "scores": evaluation.scores or {},
+        "evaluated_at": evaluation.evaluated_at,
+        "model_name": evaluation.model_name,
+        "tokens_used": evaluation.tokens_used,
+        "prompt_tokens": evaluation.prompt_tokens,
+        "completion_tokens": evaluation.completion_tokens,
+        "llm_backend": evaluation.llm_backend,
+        "latest": evaluation.latest,
+    }
+
+
 class IssueRepository:
     """Repository for issue-related read queries."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def get_issue_detail(
+        self, project_name: str, external_id: str
+    ) -> dict[str, Any] | None:
+        """Get a single issue with its evaluation history."""
+        issue_row = (
+            await self.session.execute(
+                select(
+                    Issue,
+                    Project.name.label("project_name"),
+                    LLMEvaluation.summary,
+                    LLMEvaluation.suggested_action,
+                    LLMEvaluation.suggested_action_reason,
+                    LLMEvaluation.scores,
+                )
+                .join(Project, Issue.project_id == Project.id)
+                .outerjoin(
+                    LLMEvaluation,
+                    (LLMEvaluation.issue_id == Issue.id)
+                    & LLMEvaluation.latest.is_(True),
+                )
+                .where(Project.name == project_name)
+                .where(Issue.external_id == external_id)
+            )
+        ).first()
+        if issue_row is None:
+            return None
+
+        issue = issue_row[0]
+        evaluations = list(
+            (
+                await self.session.execute(
+                    select(LLMEvaluation)
+                    .where(LLMEvaluation.issue_id == issue.id)
+                    .order_by(LLMEvaluation.evaluated_at.desc())
+                )
+            ).scalars()
+        )
+        return {
+            "id": issue.id,
+            "project_name": issue_row.project_name,
+            "source": issue.source,
+            "external_id": issue.external_id,
+            "title": issue.title,
+            "body": issue.body,
+            "state": issue.state,
+            "author": issue.author,
+            "labels": list(issue.labels or []),
+            "issue_type": issue.issue_type,
+            "created_at": issue.created_at,
+            "updated_at": issue.updated_at,
+            "closed_at": issue.closed_at,
+            "url": issue.url,
+            "summary": issue_row.summary,
+            "suggested_action": issue_row.suggested_action,
+            "suggested_action_reason": issue_row.suggested_action_reason,
+            "scores": issue_row.scores or {},
+            "evaluation_history": [
+                _serialize_evaluation(evaluation) for evaluation in evaluations
+            ],
+        }
 
     async def search(self, filters: IssueFilters) -> IssueQueryResult:
         """Query issues with filters."""

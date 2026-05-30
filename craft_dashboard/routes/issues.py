@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.exceptions import HTTPException
 
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.views import IssueFilters, IssueView
@@ -149,6 +150,19 @@ class IssueSort(StrEnum):
     number = "number"
 
 
+def _build_original_issue_url(issue: dict[str, Any]) -> str:
+    """Build the upstream issue URL from issue data."""
+    if issue["source"] == "launchpad":
+        return (
+            f"https://bugs.launchpad.net/{issue['project_name']}/+bug/"
+            f"{issue['external_id']}"
+        )
+    return (
+        f"https://github.com/canonical/{issue['project_name']}/issues/"
+        f"{issue['external_id']}"
+    )
+
+
 @router.get("", response_class=HTMLResponse)
 async def issue_list(
     request: Request,
@@ -240,6 +254,35 @@ async def issue_table_partial(
         request,
         "issues/partials/issue_table.html",
         cast(dict[str, Any], dict(context)),
+    )
+
+
+@router.get("/{project}/{number}", response_class=HTMLResponse)
+async def issue_detail(
+    request: Request,
+    project: str,
+    number: str,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    """Render the issue detail page with evaluation history."""
+    templates: Jinja2Templates = request.app.state.templates
+    repo = IssueRepository(session)
+    issue = await repo.get_issue_detail(project, number)
+    if issue is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
+    evaluation_history = cast(list[dict[str, Any]], issue["evaluation_history"])
+    current_evaluation = evaluation_history[0] if evaluation_history else None
+
+    return templates.TemplateResponse(
+        request,
+        "issues/detail.html",
+        {
+            "issue": issue,
+            "current_evaluation": current_evaluation,
+            "evaluation_history": evaluation_history,
+            "original_issue_url": _build_original_issue_url(issue),
+        },
     )
 
 
