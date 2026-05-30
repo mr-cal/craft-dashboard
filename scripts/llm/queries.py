@@ -74,9 +74,14 @@ def _build_issue_query(
                 LLMEvaluation.issue_id.is_(None),
                 LLMEvaluation.summary.is_(None),
                 LLMEvaluation.summary == "",
-                LLMEvaluation.suggested_action.is_(None),
-                LLMEvaluation.suggested_action == "",
-                LLMEvaluation.scores.is_(None),
+                and_(
+                    Issue.state == "open",
+                    or_(
+                        LLMEvaluation.suggested_action.is_(None),
+                        LLMEvaluation.suggested_action == "",
+                        LLMEvaluation.scores.is_(None),
+                    ),
+                ),
             )
         )
 

@@ -6,7 +6,11 @@ import logging
 from typing import Any, TypedDict
 
 from craft_dashboard.llm.client import LLMClient
-from craft_dashboard.llm.prompts import build_evaluation_prompt, build_summary_prompt
+from craft_dashboard.llm.prompts import (
+    build_closed_summary_prompt,
+    build_evaluation_prompt,
+    build_summary_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +166,7 @@ class IssueEvaluator:
         title: str,
         body: str | None,
         issue_type: str,
+        state: str,
         labels: list[str],
         age_days: int,
         last_activity_days: int,
@@ -178,18 +183,33 @@ class IssueEvaluator:
         """
         import re
 
-        summary_messages = build_summary_prompt(
-            title=title,
-            body=body,
-            issue_type=issue_type,
-            labels=labels,
-            age_days=age_days,
-            last_activity_days=last_activity_days,
-            author=author,
-            is_maintainer=is_maintainer,
-            comment_count=comment_count,
-            comments=comments,
-        )
+        if state in {"closed", "merged"}:
+            summary_messages = build_closed_summary_prompt(
+                title=title,
+                body=body,
+                issue_type=issue_type,
+                state=state,
+                labels=labels,
+                age_days=age_days,
+                last_activity_days=last_activity_days,
+                author=author,
+                is_maintainer=is_maintainer,
+                comment_count=comment_count,
+                comments=comments,
+            )
+        else:
+            summary_messages = build_summary_prompt(
+                title=title,
+                body=body,
+                issue_type=issue_type,
+                labels=labels,
+                age_days=age_days,
+                last_activity_days=last_activity_days,
+                author=author,
+                is_maintainer=is_maintainer,
+                comment_count=comment_count,
+                comments=comments,
+            )
         # Allow enough tokens for thinking models (e.g. Qwen3) to reason
         # before producing the actual summary.
         response = await self.client.complete(
@@ -264,6 +284,7 @@ class IssueEvaluator:
         title: str,
         body: str | None,
         issue_type: str,
+        state: str,
         labels: list[str],
         age_days: int,
         last_activity_days: int,
@@ -280,6 +301,7 @@ class IssueEvaluator:
             title: Issue/PR title.
             body: Issue/PR body text.
             issue_type: 'issue' or 'pull_request'.
+            state: Current issue or PR state.
             labels: List of label names.
             age_days: Days since creation.
             last_activity_days: Days since last update.
@@ -295,8 +317,9 @@ class IssueEvaluator:
 
         """
         label_names = labels if isinstance(labels, list) else []
+        normalized_state = state.lower()
         current_hash = _compute_content_hash(
-            title, body, "open", label_names, comments=comments
+            title, body, normalized_state, label_names, comments=comments
         )
 
         if not _needs_reevaluation(existing_hash, current_hash):
@@ -313,6 +336,7 @@ class IssueEvaluator:
             title=title,
             body=body,
             issue_type=issue_type,
+            state=normalized_state,
             labels=label_names,
             age_days=age_days,
             last_activity_days=last_activity_days,
@@ -321,6 +345,18 @@ class IssueEvaluator:
             comment_count=comment_count,
             comments=comments,
         )
+
+        if normalized_state in {"closed", "merged"}:
+            return {
+                "summary": summary,
+                "scores": {},
+                "suggested_action": None,
+                "suggested_action_reason": None,
+                "tokens_used": summary_tokens,
+                "prompt_tokens": summary_prompt,
+                "completion_tokens": summary_completion,
+                "issue_data_hash": current_hash,
+            }
 
         parsed, eval_tokens, eval_prompt, eval_completion = await self._score(
             title=title,

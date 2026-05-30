@@ -37,7 +37,9 @@ def _require_non_empty_string(value: object, *, field_name: str) -> str:
     return value.strip()
 
 
-def validate_evaluation_result(result: dict[str, object], *, issue_type: str) -> None:
+def validate_evaluation_result(
+    result: dict[str, object], *, issue_type: str, state: str = "open"
+) -> None:
     """Validate a normalized evaluation result before it is persisted."""
     summary = _require_non_empty_string(result.get("summary"), field_name="Summary")
     if len(summary) < _MIN_SUMMARY_LENGTH:
@@ -48,6 +50,18 @@ def validate_evaluation_result(result: dict[str, object], *, issue_type: str) ->
     if not isinstance(scores, dict):
         msg = "scores must be a mapping"
         raise LLMValidationError(msg)
+
+    if state in {"closed", "merged"}:
+        if scores:
+            msg = "scores must be empty for closed issues"
+            raise LLMValidationError(msg)
+        if result.get("suggested_action") is not None:
+            msg = "suggested_action must be None for closed issues"
+            raise LLMValidationError(msg)
+        if result.get("suggested_action_reason") is not None:
+            msg = "suggested_action_reason must be None for closed issues"
+            raise LLMValidationError(msg)
+        return
 
     required_score_keys = _REQUIRED_SCORE_KEYS.get(issue_type)
     if required_score_keys is None:

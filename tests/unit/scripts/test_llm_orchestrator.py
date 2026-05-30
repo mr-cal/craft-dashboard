@@ -158,6 +158,51 @@ class TestEvaluateIssues:
         second_call = evaluator.evaluate_issue.await_args_list[1].kwargs
         assert second_call["existing_hash"] == "same-hash"
         assert second_call["pr_details"] == {"merged": True}
+        assert first_call["state"] == "open"
+        assert second_call["state"] == "open"
+
+    @pytest.mark.asyncio
+    async def test_accepts_closed_issue_summary_only_results(self, monkeypatch) -> None:
+        target = IssueEvaluationTarget(
+            issue=_make_issue(issue_id=1),
+            project_name="charmcraft",
+            issue_data_hash=None,
+        )
+        target.issue.state = "closed"
+        evaluator = SimpleNamespace(
+            evaluate_issue=AsyncMock(
+                return_value={
+                    "summary": "Fixed by the core24 packaging update and closed after confirmation.",
+                    "suggested_action": None,
+                    "suggested_action_reason": None,
+                    "scores": {},
+                    "tokens_used": 10,
+                    "prompt_tokens": 4,
+                    "completion_tokens": 6,
+                    "issue_data_hash": "hash-1",
+                }
+            ),
+            evaluation_model="eval-model",
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
+            AsyncMock(return_value=[target]),
+        )
+        store_result = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.store_evaluation_result", store_result
+        )
+
+        stats = await _evaluate_issues(
+            session_factory=object(),
+            evaluator=evaluator,
+            maintainers=set(),
+            resume=False,
+        )
+
+        assert stats == {"evaluated": 1, "skipped": 0, "errored": 0, "total_tokens": 10}
+        assert evaluator.evaluate_issue.await_args.kwargs["state"] == "closed"
+        store_result.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_skips_invalid_results_without_storing(

@@ -222,6 +222,7 @@ async def _evaluate_issues(  # noqa: PLR0913
             "title": issue.title,
             "body": issue.body,
             "issue_type": issue.issue_type,
+            "state": issue.state,
             "labels": labels,
             "age_days": age_days,
             "last_activity_days": last_activity_days,
@@ -269,7 +270,11 @@ async def _evaluate_issues(  # noqa: PLR0913
             continue
 
         try:
-            validate_evaluation_result(result, issue_type=issue.issue_type)
+            validate_evaluation_result(
+                result,
+                issue_type=issue.issue_type,
+                state=issue.state,
+            )
         except LLMValidationError:
             logger.warning("Validation failed for issue %s", issue_ref, exc_info=True)
             stats["errored"] += 1

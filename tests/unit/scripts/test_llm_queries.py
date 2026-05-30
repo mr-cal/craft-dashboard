@@ -42,6 +42,7 @@ class TestBuildIssueQuery:
 
         assert "llm_evaluations.issue_id IS NULL" in compiled
         assert "llm_evaluations.summary IS NULL" in compiled
+        assert "issues.state = %(state_1)s" in compiled
         assert "llm_evaluations.suggested_action = %(suggested_action_1)s" in compiled
         assert "llm_evaluations.scores IS NULL" in compiled
         assert "llm_evaluations.evaluated_at < %(evaluated_at_1)s" in compiled

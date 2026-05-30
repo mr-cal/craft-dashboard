@@ -94,3 +94,23 @@ def test_rejects_empty_action_reason() -> None:
 
     with pytest.raises(LLMValidationError, match="suggested_action_reason"):
         validate_evaluation_result(result, issue_type="issue")
+
+
+def test_accepts_closed_issue_summary_only_results() -> None:
+    result = _valid_result()
+    result["scores"] = {}
+    result["suggested_action"] = None
+    result["suggested_action_reason"] = None
+
+    validate_evaluation_result(result, issue_type="issue", state="closed")
+
+
+def test_rejects_closed_issue_without_summary() -> None:
+    result = _valid_result()
+    result["summary"] = "Too short"
+    result["scores"] = {}
+    result["suggested_action"] = None
+    result["suggested_action_reason"] = None
+
+    with pytest.raises(LLMValidationError, match="Summary"):
+        validate_evaluation_result(result, issue_type="issue", state="closed")

@@ -2,6 +2,7 @@
 
 from craft_dashboard.llm.prompts import (
     _format_comments,
+    build_closed_summary_prompt,
     build_evaluation_prompt,
     build_summary_prompt,
 )
@@ -117,6 +118,29 @@ class TestBuildSummaryPromptWithComments:
         )
 
         assert isinstance(messages, list)
+
+
+class TestBuildClosedSummaryPrompt:
+    """Tests for build_closed_summary_prompt."""
+
+    def test_includes_closed_state_and_resolution_context(self) -> None:
+        """Closed summaries mention the final state instead of live triage context."""
+        messages = build_closed_summary_prompt(
+            title="fix: handle empty manifest gracefully",
+            body="Guard against empty manifest data when rendering snap metadata during pack.",
+            issue_type="pull_request",
+            state="merged",
+            labels=["bug", "snapcraft"],
+            age_days=12,
+            last_activity_days=0,
+            comment_count=3,
+            author="craft-contributor",
+            is_maintainer=False,
+        )
+
+        assert "what happened" in messages[0]["content"].lower()
+        assert "State: merged" in messages[1]["content"]
+        assert "current state" not in messages[0]["content"].lower()
 
 
 class TestBuildEvaluationPrompt:

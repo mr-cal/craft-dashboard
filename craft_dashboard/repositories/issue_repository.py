@@ -226,9 +226,14 @@ class IssueRepository:
                 & (
                     LLMEvaluation.summary.is_(None)
                     | (LLMEvaluation.summary == "")
-                    | LLMEvaluation.suggested_action.is_(None)
-                    | (LLMEvaluation.suggested_action == "")
-                    | LLMEvaluation.scores.is_(None)
+                    | (
+                        (Issue.state == "open")
+                        & (
+                            LLMEvaluation.suggested_action.is_(None)
+                            | (LLMEvaluation.suggested_action == "")
+                            | LLMEvaluation.scores.is_(None)
+                        )
+                    )
                 )
             )
 

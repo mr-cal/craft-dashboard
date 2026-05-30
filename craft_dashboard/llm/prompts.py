@@ -10,6 +10,16 @@ _SUMMARY_SYSTEM = (
     "'This PR', or 'The issue'. Get straight to the point."
 )
 
+_CLOSED_SUMMARY_SYSTEM = (
+    "You are a concise technical writer. Write a single sentence of at most "
+    "256 characters summarising what happened with this closed GitHub issue or "
+    "pull request. Focus on the outcome: was it fixed, merged, rejected, "
+    "superseded, or abandoned? Mention any resolution or merge details. "
+    "Do not include markdown formatting. "
+    "Do not start with boilerplate like 'This issue', 'This pull request', "
+    "'This PR', or 'The issue'. Get straight to the point."
+)
+
 _EVALUATION_SYSTEM = """\
 You are an expert open-source project maintainer. Evaluate the following \
 GitHub issue or pull request and provide scores and a suggested action.
@@ -111,6 +121,40 @@ def _format_pr_details(pr_details: dict) -> str:
     )
 
 
+def _build_summary_user_content(
+    *,
+    title: str,
+    body: str | None,
+    issue_type: str,
+    labels: list[str],
+    age_days: int,
+    last_activity_days: int,
+    comment_count: int,
+    author: str,
+    is_maintainer: bool,
+    comments: list[dict] | None,
+    state: str | None = None,
+) -> str:
+    """Build shared user content for summary prompts."""
+    type_label = "Pull Request" if issue_type == "pull_request" else "Issue"
+    label_str = ", ".join(labels) if labels else "none"
+    comments_text = _format_comments(comments or [])
+    state_line = f"State: {state}\n" if state else ""
+
+    return (
+        f"Type: {type_label}\n"
+        f"{state_line}"
+        f"Title: {title}\n"
+        f"Labels: {label_str}\n"
+        f"Author: {author} ({'maintainer' if is_maintainer else 'external contributor'})\n"
+        f"Age: {age_days} days\n"
+        f"Last activity: {last_activity_days} days ago\n"
+        f"Comment count: {comment_count}\n"
+        f"Body:\n{(body or '(no body)')[:3000]}"
+        f"{comments_text}"
+    )
+
+
 def build_summary_prompt(
     *,
     title: str,
@@ -124,42 +168,57 @@ def build_summary_prompt(
     is_maintainer: bool = False,
     comments: list[dict] | None = None,
 ) -> list[dict[str, str]]:
-    """Build a prompt for summarizing an issue or PR.
-
-    Args:
-        title: Issue/PR title.
-        body: Issue/PR body text.
-        issue_type: 'issue' or 'pull_request'.
-        labels: List of label names.
-        age_days: Days since creation.
-        last_activity_days: Days since last update.
-        comment_count: Number of comments.
-        author: Author username.
-        is_maintainer: Whether the author is a project maintainer.
-        comments: Recent comments to include (optional).
-
-    Returns:
-        List of message dicts for the LLM API.
-
-    """
-    type_label = "Pull Request" if issue_type == "pull_request" else "Issue"
-    label_str = ", ".join(labels) if labels else "none"
-    comments_text = _format_comments(comments or [])
-
-    user_content = (
-        f"Type: {type_label}\n"
-        f"Title: {title}\n"
-        f"Labels: {label_str}\n"
-        f"Author: {author} ({'maintainer' if is_maintainer else 'external contributor'})\n"
-        f"Age: {age_days} days\n"
-        f"Last activity: {last_activity_days} days ago\n"
-        f"Comment count: {comment_count}\n"
-        f"Body:\n{(body or '(no body)')[:3000]}"
-        f"{comments_text}"
+    """Build a prompt for summarizing an issue or PR."""
+    user_content = _build_summary_user_content(
+        title=title,
+        body=body,
+        issue_type=issue_type,
+        labels=labels,
+        age_days=age_days,
+        last_activity_days=last_activity_days,
+        comment_count=comment_count,
+        author=author,
+        is_maintainer=is_maintainer,
+        comments=comments,
     )
 
     return [
         {"role": "system", "content": _SUMMARY_SYSTEM},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def build_closed_summary_prompt(
+    *,
+    title: str,
+    body: str | None,
+    issue_type: str,
+    state: str,
+    labels: list[str],
+    age_days: int = 0,
+    last_activity_days: int = 0,
+    comment_count: int = 0,
+    author: str = "unknown",
+    is_maintainer: bool = False,
+    comments: list[dict] | None = None,
+) -> list[dict[str, str]]:
+    """Build a prompt for summarizing a closed issue or merged PR."""
+    user_content = _build_summary_user_content(
+        title=title,
+        body=body,
+        issue_type=issue_type,
+        state=state,
+        labels=labels,
+        age_days=age_days,
+        last_activity_days=last_activity_days,
+        comment_count=comment_count,
+        author=author,
+        is_maintainer=is_maintainer,
+        comments=comments,
+    )
+
+    return [
+        {"role": "system", "content": _CLOSED_SUMMARY_SYSTEM},
         {"role": "user", "content": user_content},
     ]
 
