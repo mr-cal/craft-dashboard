@@ -1,10 +1,10 @@
-"""OpenRouter HTTP client for LLM API calls."""
+"""HTTP clients for LLM API calls."""
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import httpx
 from tenacity import (
@@ -25,38 +25,50 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 HTTP_TOO_MANY_REQUESTS = 429
 HTTP_PAYMENT_REQUIRED = 402
 
-
 QuotaExhaustedError = LLMQuotaError
 
 
 @dataclass
-class OpenRouterResponse:
-    """Parsed response from the OpenRouter API."""
+class LLMResponse:
+    """Parsed response from an LLM API."""
 
     content: str
-    total_tokens: int
     prompt_tokens: int
     completion_tokens: int
+    total_tokens: int
+    model: str
 
     @classmethod
-    def from_api_response(cls, data: dict) -> OpenRouterResponse:
-        """Parse an OpenRouter API response dict.
-
-        Args:
-            data: Raw JSON response from the API.
-
-        Returns:
-            A parsed OpenRouterResponse.
-
-        """
+    def from_api_response(cls, data: dict) -> LLMResponse:
+        """Parse an LLM API response dict."""
         content = data["choices"][0]["message"]["content"]
         usage = data.get("usage", {})
         return cls(
             content=content,
-            total_tokens=usage.get("total_tokens", 0),
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
+            total_tokens=usage.get("total_tokens", 0),
+            model=data.get("model", ""),
         )
+
+
+OpenRouterResponse = LLMResponse
+
+
+@runtime_checkable
+class LLMClient(Protocol):
+    """Shared protocol for LLM completion clients."""
+
+    async def complete(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, str]],
+        temperature: float = 0.3,
+        max_tokens: int = 1024,
+        response_format: dict | None = None,
+    ) -> LLMResponse:
+        """Return a completion response for the supplied messages."""
 
 
 def _is_retriable(exc: BaseException) -> bool:
@@ -107,7 +119,7 @@ class OpenRouterClient:
         stop=stop_after_attempt(3),
         reraise=True,
     )
-    async def chat(
+    async def complete(
         self,
         *,
         model: str,
@@ -115,28 +127,8 @@ class OpenRouterClient:
         temperature: float = 0.3,
         max_tokens: int = 1024,
         response_format: dict | None = None,
-    ) -> OpenRouterResponse:
-        """Send a chat completion request to OpenRouter.
-
-        Automatically retries on 429 (rate limited) or network errors with
-        exponential backoff (up to 3 attempts). Raises QuotaExhaustedError
-        immediately on 402 (daily quota exhausted) without retrying.
-
-        Args:
-            model: Model identifier (e.g., 'google/gemini-flash-1.5').
-            messages: List of message dicts with 'role' and 'content'.
-            temperature: Sampling temperature (0.0-2.0).
-            max_tokens: Maximum tokens in the response.
-            response_format: Optional response format spec (e.g., JSON mode).
-
-        Returns:
-            Parsed OpenRouterResponse.
-
-        Raises:
-            QuotaExhaustedError: If the daily quota is exhausted (HTTP 402).
-            httpx.HTTPStatusError: If the API returns any other error status.
-
-        """
+    ) -> LLMResponse:
+        """Send a completion request to OpenRouter."""
         payload: dict = {
             "model": model,
             "messages": messages,
@@ -166,15 +158,34 @@ class OpenRouterClient:
         response.raise_for_status()
 
         data = response.json()
-        result = OpenRouterResponse.from_api_response(data)
+        result = LLMResponse.from_api_response(data)
         logger.info(
-            "LLM call: model=%s, tokens=%d (prompt=%d, completion=%d)",
+            "LLM call: requested_model=%s, actual_model=%s, tokens=%d (prompt=%d, completion=%d)",
             model,
+            result.model or model,
             result.total_tokens,
             result.prompt_tokens,
             result.completion_tokens,
         )
         return result
+
+    async def chat(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, str]],
+        temperature: float = 0.3,
+        max_tokens: int = 1024,
+        response_format: dict | None = None,
+    ) -> LLMResponse:
+        """Backward-compatible alias for complete()."""
+        return await self.complete(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format,
+        )
 
 
 LOCAL_LLM_BASE_URL = "http://localhost:11434/v1"
@@ -226,7 +237,7 @@ class LocalLLMClient:
         stop=stop_after_attempt(3),
         reraise=True,
     )
-    async def chat(
+    async def complete(
         self,
         *,
         model: str,
@@ -234,23 +245,8 @@ class LocalLLMClient:
         temperature: float = 0.3,
         max_tokens: int = 1024,
         response_format: dict | None = None,
-    ) -> OpenRouterResponse:
-        """Send a chat completion request to the local LLM server.
-
-        Args:
-            model: Local model name (e.g., 'llama3.2', 'mistral', 'qwen2.5').
-            messages: List of message dicts with 'role' and 'content'.
-            temperature: Sampling temperature.
-            max_tokens: Maximum tokens in the response.
-            response_format: Optional response format (JSON mode if supported).
-
-        Returns:
-            Parsed OpenRouterResponse (same structure as OpenRouter).
-
-        Raises:
-            httpx.HTTPStatusError: If the server returns an error status.
-
-        """
+    ) -> LLMResponse:
+        """Send a completion request to the local LLM server."""
         payload: dict = {
             "model": model,
             "messages": messages,
@@ -271,18 +267,37 @@ class LocalLLMClient:
         response.raise_for_status()
 
         data = response.json()
-        result = OpenRouterResponse.from_api_response(data)
+        result = LLMResponse.from_api_response(data)
         logger.info(
-            "Local LLM call: model=%s, tokens=%d (prompt=%d, completion=%d)",
+            "Local LLM call: requested_model=%s, actual_model=%s, tokens=%d (prompt=%d, completion=%d)",
             model,
+            result.model or model,
             result.total_tokens,
             result.prompt_tokens,
             result.completion_tokens,
         )
         return result
 
+    async def chat(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, str]],
+        temperature: float = 0.3,
+        max_tokens: int = 1024,
+        response_format: dict | None = None,
+    ) -> LLMResponse:
+        """Backward-compatible alias for complete()."""
+        return await self.complete(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format,
+        )
 
-def create_llm_client(settings: Settings) -> OpenRouterClient | LocalLLMClient:
+
+def create_llm_client(settings: Settings) -> LLMClient:
     """Create the appropriate LLM client based on settings.llm_backend.
 
     Args:

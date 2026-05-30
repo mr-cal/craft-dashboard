@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 
-from craft_dashboard.llm.client import OpenRouterClient
+from craft_dashboard.llm.client import LLMClient
 from craft_dashboard.llm.prompts import build_evaluation_prompt, build_summary_prompt
 
 logger = logging.getLogger(__name__)
@@ -114,14 +114,14 @@ class IssueEvaluator:
 
     def __init__(
         self,
-        client: OpenRouterClient,
+        client: LLMClient,
         summary_model: str = "google/gemini-flash-1.5",
         evaluation_model: str = "anthropic/claude-sonnet-4-20250514",
     ) -> None:
         """Initialize the evaluator.
 
         Args:
-            client: OpenRouter HTTP client.
+            client: LLM completion client.
             summary_model: Model to use for summarization (cheaper).
             evaluation_model: Model to use for scoring (more capable).
 
@@ -166,7 +166,7 @@ class IssueEvaluator:
         )
         # Allow enough tokens for thinking models (e.g. Qwen3) to reason
         # before producing the actual summary.
-        response = await self.client.chat(
+        response = await self.client.complete(
             model=self.summary_model,
             messages=summary_messages,
             max_tokens=4096,
@@ -216,7 +216,7 @@ class IssueEvaluator:
             comments=comments,
             pr_details=pr_details,
         )
-        response = await self.client.chat(
+        response = await self.client.complete(
             model=self.evaluation_model,
             messages=eval_messages,
             max_tokens=4096,

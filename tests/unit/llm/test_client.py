@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 from craft_dashboard.llm.client import (
+    LLMResponse,
     LocalLLMClient,
     OpenRouterClient,
-    OpenRouterResponse,
     QuotaExhaustedError,
     create_llm_client,
 )
@@ -153,8 +153,8 @@ class TestCreateLLMClient:
         assert client.ca_cert == "/etc/ssl/local-llm/cert.pem"
 
 
-class TestOpenRouterResponse:
-    """Tests for OpenRouterResponse."""
+class TestLLMResponse:
+    """Tests for LLMResponse."""
 
     def test_from_api_response(self) -> None:
         """Parse a typical OpenRouter API response."""
@@ -173,12 +173,13 @@ class TestOpenRouterResponse:
             },
         }
 
-        response = OpenRouterResponse.from_api_response(api_data)
+        response = LLMResponse.from_api_response(api_data)
 
         assert response.content == '{"summary": "Test summary"}'
         assert response.total_tokens == 150
         assert response.prompt_tokens == 100
         assert response.completion_tokens == 50
+        assert response.model == ""
 
     def test_from_api_response_missing_usage(self) -> None:
         """Handle response with missing usage data."""
@@ -186,7 +187,8 @@ class TestOpenRouterResponse:
             "choices": [{"message": {"content": "hello"}}],
         }
 
-        response = OpenRouterResponse.from_api_response(api_data)
+        response = LLMResponse.from_api_response(api_data)
 
         assert response.content == "hello"
         assert response.total_tokens == 0
+        assert response.model == ""

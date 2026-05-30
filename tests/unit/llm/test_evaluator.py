@@ -4,7 +4,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from craft_dashboard.llm.client import OpenRouterResponse
+from craft_dashboard.llm.client import LLMResponse
 from craft_dashboard.llm.evaluator import (
     IssueEvaluator,
     _compute_content_hash,
@@ -233,21 +233,23 @@ class TestEvaluateIssueWithComments:
     @pytest.mark.asyncio
     async def test_evaluate_passes_comments_to_prompt(self) -> None:
         """Comments from call are forwarded to the prompt builders."""
-        mock_summary_response = OpenRouterResponse(
+        mock_summary_response = LLMResponse(
             content="Regression report for snapcraft failing with the LXD backend.",
             total_tokens=15,
             prompt_tokens=10,
             completion_tokens=5,
+            model="summary-model",
         )
-        mock_eval_response = OpenRouterResponse(
+        mock_eval_response = LLMResponse(
             content='{"scores": {"staleness": 10}, "suggested_action": "keep_open", "suggested_action_reason": "Maintainers are still reproducing the LXD failure."}',
             total_tokens=50,
             prompt_tokens=20,
             completion_tokens=30,
+            model="evaluation-model",
         )
 
         mock_client = MagicMock()
-        mock_client.chat = AsyncMock(
+        mock_client.complete = AsyncMock(
             side_effect=[mock_summary_response, mock_eval_response]
         )
 
@@ -301,14 +303,15 @@ class TestSummarizeStripsThinkBlocks:
     @pytest.mark.asyncio
     async def test_strips_think_block_from_summary(self) -> None:
         """<think>...</think> blocks from thinking models are stripped."""
-        mock_response = OpenRouterResponse(
+        mock_response = LLMResponse(
             content="<think>reasoning...</think>\nA 10-day-old bug report with no activity.",
             total_tokens=30,
             prompt_tokens=15,
             completion_tokens=15,
+            model="summary-model",
         )
         mock_client = MagicMock()
-        mock_client.chat = AsyncMock(return_value=mock_response)
+        mock_client.complete = AsyncMock(return_value=mock_response)
 
         evaluator = IssueEvaluator(
             client=mock_client,
@@ -335,14 +338,15 @@ class TestSummarizeStripsThinkBlocks:
     @pytest.mark.asyncio
     async def test_summary_with_only_think_block_returns_empty(self) -> None:
         """When the entire response is a think block, the summary is empty."""
-        mock_response = OpenRouterResponse(
+        mock_response = LLMResponse(
             content="<think>I ran out of tokens while reasoning...</think>",
             total_tokens=30,
             prompt_tokens=15,
             completion_tokens=15,
+            model="summary-model",
         )
         mock_client = MagicMock()
-        mock_client.chat = AsyncMock(return_value=mock_response)
+        mock_client.complete = AsyncMock(return_value=mock_response)
 
         evaluator = IssueEvaluator(
             client=mock_client,
