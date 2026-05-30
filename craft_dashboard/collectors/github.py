@@ -4,7 +4,7 @@ import hashlib
 import logging
 import time
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import github
 import sqlalchemy as sa
@@ -14,7 +14,7 @@ from github.Issue import Issue as GHIssue
 from github.PullRequest import PullRequest as GHPullRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from craft_dashboard.collectors import ISSUE_UPSERT_FIELDS
+from craft_dashboard.collectors import ISSUE_UPSERT_FIELDS, RateLimitError
 
 __all__ = ["GitHubCollector"]
 
@@ -25,6 +25,14 @@ if TYPE_CHECKING:
 
 _PROGRESS_LOG_INTERVAL_SECONDS = 30
 _HOTFIX_VERSION_COMPONENTS = 2
+
+
+class RateLimitStatus(TypedDict):
+    """Normalized GitHub core API rate limit details."""
+
+    remaining: int
+    limit: int
+    reset_at: datetime | None
 
 
 def _classify_issue(gh_issue: GHIssue) -> tuple[str, str]:
@@ -260,6 +268,43 @@ class GitHubCollector:
             "last_fetched_at": datetime.now(tz=UTC),
         }
 
+    def check_rate_limit(self) -> RateLimitStatus:
+        """Check GitHub API rate limit status."""
+        rate = cast(Any, self.gh.get_rate_limit())
+        core = rate.core
+        return {
+            "remaining": int(core.remaining),
+            "limit": int(core.limit),
+            "reset_at": cast(datetime | None, core.reset_to),
+        }
+
+    def wait_for_rate_limit(self, min_remaining: int = 100) -> None:
+        """Sleep until the core rate limit resets when quota is running low."""
+        quota = self.check_rate_limit()
+        remaining = quota["remaining"]
+        if remaining >= min_remaining:
+            return
+
+        reset_at = quota["reset_at"]
+        if reset_at is None:
+            raise RateLimitError("GitHub API rate limit reset time is unavailable")
+
+        reset_time = (
+            reset_at.replace(tzinfo=UTC) if reset_at.tzinfo is None else reset_at
+        )
+        sleep_seconds = max(0, int((reset_time - datetime.now(UTC)).total_seconds()))
+        if sleep_seconds == 0:
+            return
+
+        logger.warning(
+            "GitHub rate limit low (%d/%d remaining); sleeping for %ds until %s",
+            remaining,
+            quota["limit"],
+            sleep_seconds,
+            reset_time.isoformat(),
+        )
+        time.sleep(sleep_seconds)
+
     async def collect_issues(
         self,
         repo_name: str,
@@ -267,6 +312,7 @@ class GitHubCollector:
         session: AsyncSession,
         limit: int = 0,
         refresh_age_days: int = 7,
+        since: datetime | None = None,
     ) -> int:
         """Collect issues and PRs for a repository.
 
@@ -279,6 +325,7 @@ class GitHubCollector:
             limit: Maximum number of issues to fetch per repo (0 = all).
             refresh_age_days: Issues last fetched more than this many days ago
                 are considered stale and eligible for re-fetching.
+            since: Fetch only issues updated on or after this timestamp.
 
         Returns:
             The number of issues upserted.
@@ -315,7 +362,7 @@ class GitHubCollector:
         )
         total_count = total_result.scalar_one()
 
-        if due_count == 0 and total_count > 0:
+        if since is None and due_count == 0 and total_count > 0:
             logger.info(
                 "  %s/%s: no issues due for refresh, skipping", self.org, repo_name
             )
@@ -323,26 +370,35 @@ class GitHubCollector:
 
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
 
-        # Use 'since' based on the oldest last_fetched_at of due issues so we
-        # never miss a state transition that happened while the system was offline.
-        # Cap at 90 days to bound the amount of data fetched on a long outage.
-        _max_lookback = datetime.now(tz=UTC) - timedelta(days=90)
-        oldest_fetch_result = await session.execute(
-            sa.select(sa.func.min(Issue.last_fetched_at))
-            .select_from(Issue)
-            .where(stale_where)
-        )
-        oldest_fetch = oldest_fetch_result.scalar_one_or_none()
-        if oldest_fetch is not None:
-            oldest_fetch_tz = (
-                oldest_fetch.replace(tzinfo=UTC)
-                if oldest_fetch.tzinfo is None
-                else oldest_fetch
+        if since is not None:
+            since_date = since.replace(tzinfo=UTC) if since.tzinfo is None else since
+            logger.info(
+                "  %s/%s: using watermark since %s",
+                self.org,
+                repo_name,
+                since_date.isoformat(),
             )
-            since_date = max(oldest_fetch_tz - timedelta(days=1), _max_lookback)
         else:
-            # Fresh project with no issues yet: fetch the last 90 days.
-            since_date = _max_lookback
+            # Use 'since' based on the oldest last_fetched_at of due issues so we
+            # never miss a state transition that happened while the system was offline.
+            # Cap at 90 days to bound the amount of data fetched on a long outage.
+            _max_lookback = datetime.now(tz=UTC) - timedelta(days=90)
+            oldest_fetch_result = await session.execute(
+                sa.select(sa.func.min(Issue.last_fetched_at))
+                .select_from(Issue)
+                .where(stale_where)
+            )
+            oldest_fetch = oldest_fetch_result.scalar_one_or_none()
+            if oldest_fetch is not None:
+                oldest_fetch_tz = (
+                    oldest_fetch.replace(tzinfo=UTC)
+                    if oldest_fetch.tzinfo is None
+                    else oldest_fetch
+                )
+                since_date = max(oldest_fetch_tz - timedelta(days=1), _max_lookback)
+            else:
+                # Fresh project with no issues yet: fetch the last 90 days.
+                since_date = _max_lookback
 
         gh_issues = repo.get_issues(
             state="all", sort="updated", direction="desc", since=since_date
