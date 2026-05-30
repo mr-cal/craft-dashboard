@@ -28,10 +28,10 @@ class TestGitHubRateLimit:
         collector = GitHubCollector(token=_TOKEN, org="canonical")
         collector.gh = MagicMock()
         collector.gh.get_rate_limit.return_value = SimpleNamespace(
-            core=SimpleNamespace(
+            rate=SimpleNamespace(
                 remaining=123,
                 limit=5000,
-                reset_to=datetime(2025, 1, 10, 12, 30, tzinfo=UTC),
+                reset=datetime(2025, 1, 10, 12, 30, tzinfo=UTC),
             )
         )
 

@@ -2,7 +2,7 @@
  * Table interaction: column resize + row expand/collapse.
  *
  * Column resize: drag handles on <th> elements.
- * Row expand: click a row to expand its summary cell.
+ * Row expand: uses document-level event delegation so it survives HTMX swaps.
  */
 (function () {
   "use strict";
@@ -51,46 +51,40 @@
     });
   }
 
-  // ── Row Expand/Collapse ──
+  // ── Row Expand/Collapse (document-level delegation) ──
+  // A single listener survives HTMX swaps without re-initialization.
 
-  function initRowExpand(table) {
-    table.addEventListener("click", function (e) {
-      // Don't toggle if clicking a link or button
-      if (e.target.closest("a, button, .col-resize-handle")) return;
+  document.addEventListener("click", function (e) {
+    // Don't toggle if clicking a link, button, or resize handle
+    if (e.target.closest("a, button, .col-resize-handle")) return;
 
-      const row = e.target.closest("tbody tr");
-      if (row) {
-        row.classList.toggle("expanded");
-      }
-    });
-  }
+    var row = e.target.closest('table[role="grid"] tbody tr');
+    if (row) {
+      row.classList.toggle("expanded");
+    }
+  });
 
   // ── Init ──
 
-  function init() {
+  function initResize() {
     document.querySelectorAll('table[role="grid"]').forEach(function (table) {
+      if (table.dataset.resizeInit) return;
+      table.dataset.resizeInit = "1";
       initColumnResize(table);
-      initRowExpand(table);
     });
   }
 
-  // Run on load and after HTMX swaps
+  // Run on load
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
+    document.addEventListener("DOMContentLoaded", initResize);
   } else {
-    init();
+    initResize();
   }
 
   // After HTMX swaps (outerHTML), the target element is replaced so we must
   // search the document for the new table rather than looking inside the
   // (now-detached) swap target.
   document.body.addEventListener("htmx:afterSettle", function () {
-    document.querySelectorAll('table[role="grid"]').forEach(function (table) {
-      // Skip tables that are already initialized
-      if (table.dataset.interactInit) return;
-      table.dataset.interactInit = "1";
-      initColumnResize(table);
-      initRowExpand(table);
-    });
+    initResize();
   });
 })();

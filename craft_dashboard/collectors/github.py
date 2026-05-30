@@ -4,7 +4,7 @@ import hashlib
 import logging
 import time
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import github
 import sqlalchemy as sa
@@ -270,12 +270,14 @@ class GitHubCollector:
 
     def check_rate_limit(self) -> RateLimitStatus:
         """Check GitHub API rate limit status."""
-        rate = cast(Any, self.gh.get_rate_limit())
-        core = rate.core
+        overview = self.gh.get_rate_limit()
+        # PyGithub returns RateLimitOverview; .rate gives the core Rate object
+        # with remaining/limit/reset attributes.
+        core = overview.rate
         return {
             "remaining": int(core.remaining),
             "limit": int(core.limit),
-            "reset_at": cast(datetime | None, core.reset_to),
+            "reset_at": cast(datetime | None, core.reset),
         }
 
     def wait_for_rate_limit(self, min_remaining: int = 100) -> None:
