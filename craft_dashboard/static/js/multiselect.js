@@ -56,7 +56,10 @@
     function syncHidden() {
       const selected = getSelected();
       hiddenInput.value = selected.join(",");
-      htmx.trigger(hiddenInput, "change");
+      if (typeof htmx !== "undefined") {
+        htmx.trigger(hiddenInput, "change");
+      }
+      hiddenInput.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
     // Toggle dropdown on click

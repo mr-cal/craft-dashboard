@@ -4,29 +4,34 @@
 <h2>Stats</h2>
 {% include "stats/partials/tabs.html" %}
 
-<h3>LLM Triage Status</h3>
-<p>{{ evaluated_count }} of {{ total_open }} open issues and PRs have been evaluated by the LLM.</p>
-
-{% if action_counts %}
-<table>
-  <thead>
-    <tr>
-      <th>Suggested Action</th>
-      <th>Count</th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for action, count in action_counts.items() | sort %}
-    <tr>
-      <td><span class="action-badge">{{ action | replace("_", " ") }}</span></td>
-      <td>{{ count }}</td>
-      <td><a href="/issues?action={{ action }}">View</a></td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p>No evaluations yet. Run <code>scripts/run_llm.py</code> to triage open issues.</p>
-{% endif %}
+<div class="row--25-75">
+  <div class="col">
+    <h3>LLM Triage Status</h3>
+    <p>{{ evaluated_count }} of {{ total_open }} open issues and PRs have been evaluated.</p>
+  </div>
+  <div class="col">
+    {% if action_counts %}
+    <table>
+      <thead>
+        <tr>
+          <th>Suggested Action</th>
+          <th>Count</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for action, count in action_counts.items() | sort %}
+        <tr>
+          <td><span class="action-badge">{{ action | replace("_", " ") }}</span></td>
+          <td>{{ count }}</td>
+          <td><a href="/issues?action={{ action }}">View</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>No evaluations yet. Run <code>scripts/run_llm.py</code> to triage open issues.</p>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

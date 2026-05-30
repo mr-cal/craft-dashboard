@@ -191,9 +191,9 @@
             hx-include=".filter-bar [name]"
             hx-indicator="#loading-indicator"
             hx-push-url="false">
-      <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
-      <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
-      <option value="1000" {% if per_page == 1000 %}selected{% endif %}>1,000</option>
+      <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
+      <option value="250" {% if per_page == 250 %}selected{% endif %}>250</option>
+      <option value="1000" {% if per_page == 1000 %}selected{% endif %}>All</option>
     </select>
   </div>
 </div>
@@ -207,4 +207,5 @@
 
 {% block scripts %}
 <script src="/static/js/multiselect.js"></script>
+<script src="/static/js/table-interact.js"></script>
 {% endblock %}

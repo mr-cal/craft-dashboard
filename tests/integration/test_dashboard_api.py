@@ -430,7 +430,7 @@ class TestPaginationPreservesSourceFilter:
         )
         test_db_session.add(project)
         await test_db_session.flush()
-        for i in range(60):
+        for i in range(110):
             test_db_session.add(
                 Issue(
                     project_id=project.id,

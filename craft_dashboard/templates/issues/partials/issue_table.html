@@ -87,7 +87,7 @@
           <span class="action-badge" aria-label="Suggested action: {{ issue.suggested_action|replace('_', ' ') }}">{{ issue.suggested_action|replace("_", " ") }}</span>
           {% endif %}
         </td>
-        <td>{{ (issue.summary or "")|truncate(280) }}</td>
+        <td class="summary-cell">{{ (issue.summary or "")|truncate(350) }}</td>
       </tr>
       {% else %}
       <tr>
@@ -100,6 +100,6 @@
     </tbody>
   </table>
 
-  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&source=" ~ (filter_source or "") ~ "&state=" ~ (filter_state or "open") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&author_role=" ~ (filter_author_role or "") ~ "&sort=" ~ (sort_by or "staleness") ~ "&search=" ~ (filter_search or "") ~ "&per_page=" ~ (per_page or 50) ~ "&scores=" ~ (filter_scores or "staleness,readiness") %}
+  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&source=" ~ (filter_source or "") ~ "&state=" ~ (filter_state or "open") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&author_role=" ~ (filter_author_role or "") ~ "&sort=" ~ (sort_by or "staleness") ~ "&search=" ~ (filter_search or "") ~ "&per_page=" ~ (per_page or 100) ~ "&scores=" ~ (filter_scores or "staleness,readiness") %}
   {% include "components/pagination.html" %}
 </div>

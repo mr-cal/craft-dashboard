@@ -124,7 +124,9 @@ async def admin_page(
     project_result = await session.execute(select(Project.name).order_by(Project.name))
     project_names = [row[0] for row in project_result]
 
-    # Get 7-day schedule
+    # Get 7-day schedule with issue counts per day
+    from craft_dashboard.models.issue import Issue
+
     now = datetime.now(UTC)
     schedule_days = []
     for day_offset in range(7):
@@ -132,10 +134,14 @@ async def admin_page(
             hour=0, minute=0, second=0, microsecond=0
         )
         day_end = day_start + timedelta(days=1)
-        count_result = (
+        # Count issues belonging to projects scheduled for refresh this day
+        issue_count = (
             await session.scalar(
-                select(func.count())
-                .select_from(RefreshSchedule)
+                select(func.count(Issue.id))
+                .join(
+                    RefreshSchedule,
+                    Issue.project_id == RefreshSchedule.project_id,
+                )
                 .where(RefreshSchedule.next_refresh_at >= day_start)
                 .where(RefreshSchedule.next_refresh_at < day_end)
             )
@@ -144,7 +150,7 @@ async def admin_page(
         schedule_days.append(
             {
                 "date": day_start.strftime("%a %b %d"),
-                "count": count_result,
+                "count": issue_count,
                 "is_today": day_offset == 0,
             }
         )

@@ -477,9 +477,11 @@ function updateSnapshotCharts() {
 // ============================================================================
 
 function getCurrentView() {
-  const maintainers = document.getElementById("view-maintainers")?.checked ?? true;
-  const contributors = document.getElementById("view-contributors")?.checked ?? true;
-  const bots = document.getElementById("view-bots")?.checked ?? true;
+  const hiddenInput = document.querySelector('input[name="author-groups"]');
+  const selected = hiddenInput ? hiddenInput.value.split(",").filter(Boolean) : ["maintainers", "contributors", "bots"];
+  const maintainers = selected.includes("maintainers");
+  const contributors = selected.includes("contributors");
+  const bots = selected.includes("bots");
   
   if (!maintainers && !contributors && !bots) return "none";
   if (maintainers && contributors && bots) return "all";
@@ -672,10 +674,20 @@ populateLineChartCheckboxes("median-age-checkboxes", "median-age", updateMedianA
 populateLineChartCheckboxes("closed-checkboxes", "closed", updateClosedChart);
 populateSnapshotCheckboxes();
 
-// Initialize author group checkboxes
-["view-maintainers", "view-contributors", "view-bots"].forEach(id => {
-  document.getElementById(id)?.addEventListener("change", onViewChange);
-});
+// Initialize author group multiselect change handler
+const authorGroupsInput = document.querySelector('input[name="author-groups"]');
+if (authorGroupsInput) {
+  const observer = new MutationObserver(onViewChange);
+  observer.observe(authorGroupsInput, { attributes: true, attributeFilter: ["value"] });
+  // Also listen for change events from multiselect.js
+  authorGroupsInput.addEventListener("change", onViewChange);
+}
+
+// Initialize type filter change handler
+const trendTypeInput = document.querySelector('input[name="trend-type"]');
+if (trendTypeInput) {
+  trendTypeInput.addEventListener("change", onViewChange);
+}
 
 // Initialize date range inputs and apply default filter
 const today = new Date().toISOString().slice(0, 10);

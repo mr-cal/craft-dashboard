@@ -53,7 +53,12 @@ const tbody = document.createElement("tbody");
 for (const lib of deps.libs) {
   const tr = document.createElement("tr");
   const libCell = document.createElement("td");
-  libCell.textContent = lib;
+  const libLink = document.createElement("a");
+  libLink.href = "https://github.com/canonical/" + lib;
+  libLink.textContent = lib;
+  libLink.target = "_blank";
+  libLink.rel = "noopener";
+  libCell.appendChild(libLink);
   tr.appendChild(libCell);
 
   for (const [appIndex, [, branches]] of Object.entries(appGroups).entries()) {

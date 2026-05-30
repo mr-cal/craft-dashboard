@@ -17,42 +17,70 @@
   </div>
 </div>
 
-<!-- Author Groups Section -->
+<!-- Filters Section -->
 <div class="p-strip is-shallow">
   <div class="row">
-    <div class="col-12">
-      <h3 class="p-heading--5">Author Groups</h3>
-      <div style="display:flex;gap:0.5rem;flex-direction:column;">
-        <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;">
-          <input type="checkbox" id="view-maintainers" checked />
-          <span>Maintainers</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;">
-          <input type="checkbox" id="view-contributors" checked />
-          <span>Contributors</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;">
-          <input type="checkbox" id="view-bots" checked />
-          <span>Bots</span>
-        </label>
-      </div>
-    </div>
-  </div>
-</div>
+    <div class="col-12" style="display:flex;flex-wrap:wrap;gap:1.5rem;align-items:flex-end;">
 
-<div class="row"><hr class="p-rule" /></div>
-
-<!-- Date Range Filter -->
-<div class="p-strip is-shallow">
-  <div class="row">
-    <div class="col-12">
-      <h3 class="p-heading--5">Date Range</h3>
-      <div style="display:flex;gap:1rem;align-items:center;">
-        <label>From: <input type="date" id="date-start" /></label>
-        <label>To: <input type="date" id="date-end" /></label>
-        <button class="p-button--neutral is-small" id="btn-date-apply">Apply</button>
-        <button class="p-button--neutral is-small" id="btn-date-reset">Reset</button>
+      <!-- Author Groups -->
+      <div class="filter-group">
+        <label>Author Groups</label>
+        <div class="multiselect" data-name="author-groups" data-hidden="author-groups-hidden">
+          <div class="multiselect__input-wrap" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-label="Select author groups">
+            <span class="multiselect__placeholder">All groups</span>
+            <div class="multiselect__chips"></div>
+          </div>
+          <div class="multiselect__dropdown u-hide">
+            <div class="multiselect__options" role="listbox">
+              <label class="multiselect__option" role="option">
+                <input type="checkbox" value="maintainers" checked /> Maintainers
+              </label>
+              <label class="multiselect__option" role="option">
+                <input type="checkbox" value="contributors" checked /> Contributors
+              </label>
+              <label class="multiselect__option" role="option">
+                <input type="checkbox" value="bots" checked /> Bots
+              </label>
+            </div>
+          </div>
+          <input type="hidden" id="author-groups-hidden" name="author-groups" value="maintainers,contributors,bots" />
+        </div>
       </div>
+
+      <!-- Type Filter -->
+      <div class="filter-group">
+        <label>Type</label>
+        <div class="multiselect" data-name="trend-type" data-hidden="trend-type-hidden">
+          <div class="multiselect__input-wrap" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-label="Select types">
+            <span class="multiselect__placeholder">All types</span>
+            <div class="multiselect__chips"></div>
+          </div>
+          <div class="multiselect__dropdown u-hide">
+            <div class="multiselect__options" role="listbox">
+              <label class="multiselect__option" role="option">
+                <input type="checkbox" value="issue" checked /> Issues
+              </label>
+              <label class="multiselect__option" role="option">
+                <input type="checkbox" value="pull_request" checked /> PRs
+              </label>
+            </div>
+          </div>
+          <input type="hidden" id="trend-type-hidden" name="trend-type" value="issue,pull_request" />
+        </div>
+      </div>
+
+      <!-- Date Range -->
+      <div class="filter-group">
+        <label>Date Range</label>
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+          <input type="date" id="date-start" />
+          <span>to</span>
+          <input type="date" id="date-end" />
+          <button class="p-button--neutral is-small" id="btn-date-apply">Apply</button>
+          <button class="p-button--neutral is-small" id="btn-date-reset">Reset</button>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -146,5 +174,6 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/multiselect.js"></script>
 <script type="module" src="/static/js/trends.js?v={{ cache_bust }}"></script>
 {% endblock %}

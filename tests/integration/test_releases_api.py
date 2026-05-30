@@ -195,3 +195,103 @@ class TestReleasesPage:
         assert response.status_code == 200
         assert "2.0.0" in response.text
         assert "1.0.0" not in response.text
+
+    def test_only_latest_minor_per_major_shown(
+        self, test_client: TestClient, test_db_session: AsyncSession
+    ) -> None:
+        """Only the latest minor version per major version should be shown.
+
+        e.g. if charmcraft has 4.0, 4.1, 4.2 branches, only 4.2 should appear.
+        """
+
+        async def _seed() -> None:
+            project = Project(
+                name="charmcraft",
+                category="application",
+                github_org="canonical",
+            )
+            test_db_session.add(project)
+            await test_db_session.flush()
+            await test_db_session.execute(text("DROP TABLE releases"))
+            await test_db_session.execute(
+                text(
+                    """
+                    CREATE TABLE releases (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        project_id INTEGER NOT NULL,
+                        version VARCHAR(100) NOT NULL,
+                        branch VARCHAR(255),
+                        released_at DATETIME,
+                        is_hotfix BOOLEAN NOT NULL DEFAULT 0,
+                        metadata TEXT
+                    )
+                    """
+                )
+            )
+            await test_db_session.execute(
+                text(
+                    """
+                    INSERT INTO releases
+                        (project_id, version, branch, released_at, is_hotfix, metadata)
+                    VALUES
+                        (:project_id, :version, :branch, :released_at, :is_hotfix, :metadata)
+                    """
+                ),
+                [
+                    {
+                        "project_id": project.id,
+                        "version": "4.0.0",
+                        "branch": "4.0",
+                        "released_at": datetime(2024, 1, 1, tzinfo=UTC),
+                        "is_hotfix": False,
+                        "metadata": "{}",
+                    },
+                    {
+                        "project_id": project.id,
+                        "version": "4.1.0",
+                        "branch": "4.1",
+                        "released_at": datetime(2024, 2, 1, tzinfo=UTC),
+                        "is_hotfix": False,
+                        "metadata": "{}",
+                    },
+                    {
+                        "project_id": project.id,
+                        "version": "4.2.0",
+                        "branch": "4.2",
+                        "released_at": datetime(2024, 3, 1, tzinfo=UTC),
+                        "is_hotfix": False,
+                        "metadata": "{}",
+                    },
+                    {
+                        "project_id": project.id,
+                        "version": "3.5.0",
+                        "branch": "3.5",
+                        "released_at": datetime(2024, 1, 15, tzinfo=UTC),
+                        "is_hotfix": False,
+                        "metadata": "{}",
+                    },
+                    {
+                        "project_id": project.id,
+                        "version": "5.0.0",
+                        "branch": "main",
+                        "released_at": datetime(2024, 4, 1, tzinfo=UTC),
+                        "is_hotfix": False,
+                        "metadata": "{}",
+                    },
+                ],
+            )
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = test_client.get("/stats/releases")
+        assert response.status_code == 200
+        # 4.2 should be shown (latest minor of major 4)
+        assert "4.2.0" in response.text
+        # 4.0 and 4.1 should NOT be shown
+        assert "4.0.0" not in response.text
+        assert "4.1.0" not in response.text
+        # 3.5 should be shown (only release for major 3)
+        assert "3.5.0" in response.text
+        # main branch (non-versioned) should be shown
+        assert "5.0.0" in response.text

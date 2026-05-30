@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from craft_dashboard.app import create_app
 from craft_dashboard.dependencies import get_db_session
+from craft_dashboard.routes.stats import _version_key
 from fastapi.testclient import TestClient
 
 
@@ -96,3 +97,21 @@ class TestStatsRoutes:
             response = client.get("/stats")
 
         assert response.status_code in (301, 302, 307)
+
+
+class TestVersionKey:
+    """Unit tests for the _version_key helper function."""
+
+    def test_simple_version(self) -> None:
+        assert _version_key("4.2") == (4, 2)
+
+    def test_three_part_version(self) -> None:
+        assert _version_key("4.2.1") == (4, 2, 1)
+
+    def test_ordering(self) -> None:
+        assert _version_key("4.2") > _version_key("4.1")
+        assert _version_key("4.10") > _version_key("4.2")
+        assert _version_key("5.0") > _version_key("4.99")
+
+    def test_non_numeric_part(self) -> None:
+        assert _version_key("main") == (0,)

@@ -151,6 +151,17 @@ async def dependencies_data(
     return {"libs": libs, "apps": apps}
 
 
+def _version_key(branch: str) -> tuple[int, ...]:
+    """Convert a version branch like '4.2' to a comparable tuple (4, 2)."""
+    parts = []
+    for p in branch.split("."):
+        try:
+            parts.append(int(p))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts)
+
+
 @router.get("/releases", response_class=HTMLResponse)
 async def releases_page(
     request: Request,
@@ -205,10 +216,34 @@ async def releases_page(
             }
         )
 
+    # Only show the latest minor version per major version per project.
+    # e.g. if charmcraft has branches 4.0, 4.1, 4.2, only show 4.2.
+    filtered: list[dict[str, object]] = []
+    # Group by (project, major_version)
+    best: dict[tuple[str, str], dict[str, object]] = {}
+    non_versioned: list[dict[str, object]] = []
+    for rel in releases:
+        branch = str(rel["branch"])
+        parts = branch.split(".")
+        min_version_parts = 2
+        if len(parts) >= min_version_parts and parts[0].isdigit():
+            major = parts[0]
+            group_key = (str(rel["project_name"]), major)
+            existing = best.get(group_key)
+            if existing is None or _version_key(branch) > _version_key(
+                str(existing["branch"])
+            ):
+                best[group_key] = rel
+        else:
+            non_versioned.append(rel)
+    filtered = non_versioned + list(best.values())
+    # Sort by project name then branch
+    filtered.sort(key=lambda r: (str(r["project_name"]), str(r["branch"])))
+
     return templates.TemplateResponse(
         request,
         "stats/releases.html",
-        {"releases": releases},
+        {"releases": filtered},
     )
 
 

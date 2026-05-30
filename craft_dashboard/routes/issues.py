@@ -21,8 +21,8 @@ if TYPE_CHECKING:
 
 router = APIRouter(prefix="/issues")
 
-VALID_PER_PAGE = {10, 50, 1000}
-DEFAULT_PER_PAGE = 50
+VALID_PER_PAGE = {100, 250, 1000}
+DEFAULT_PER_PAGE = 100
 
 ALL_SCORES = {
     "staleness": "Staleness",

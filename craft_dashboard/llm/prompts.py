@@ -29,7 +29,11 @@ Score guidelines:
 - staleness: 0 = very active, 100 = completely dead. Consider the pace of \
 open-source projects: issues under 1 month old are fresh (0-10), 1-3 months \
 is mildly stale (10-30), 3-6 months is moderately stale (30-60), and only \
-issues with no activity for 6+ months should score above 60.
+issues with no activity for 6+ months should score above 60. PRs go stale \
+faster than issues — a PR with no activity for 2+ weeks is already mildly \
+stale, and 2+ months with no review or update is very stale. Also consider \
+whether the issue is still relevant to the current version of the software \
+(a bug report against an old, superseded version is more stale).
 - duplicateness: 0 = unique, 100 = clearly a duplicate
 - complexity: 0 = trivial, 100 = extremely complex
 """
@@ -37,11 +41,20 @@ issues with no activity for 6+ months should score above 60.
 _ISSUE_EXTRA_SCORES = """
 For issues, also include:
 - "support_request": <0-100, how likely this is a support/help request rather than a bug or feature>
+- "readiness": <0-100, how ready is this issue to be worked on. Consider: \
+does it have a clear description of the problem or feature request? Are there \
+steps to reproduce (for bugs)? Is there enough context and information for a \
+developer to start working on it without needing to ask many clarifying \
+questions? An issue with no description or vague requirements is not ready.>
 """
 
 _PR_EXTRA_SCORES = """
 For pull requests, also include:
-- "readiness": <0-100, how ready is this PR for review and merge>
+- "readiness": <0-100, how ready is this PR for review and merge. Consider: \
+does it have a clear description? Are CI checks passing? Are there unresolved \
+or unanswered review comments? Is the diff in reviewable shape (not WIP, not \
+too large without explanation)? A PR with failing CI, unresolved comments, or \
+no description is not ready.>
 """
 
 
