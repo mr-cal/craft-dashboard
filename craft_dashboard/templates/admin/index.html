@@ -76,6 +76,48 @@
 
 <hr class="p-rule" />
 
+<h3>Collection Health</h3>
+{% if collection_runs %}
+<table>
+  <thead>
+    <tr>
+      <th>Source</th>
+      <th>Status</th>
+      <th>Projects</th>
+      <th>Issues</th>
+      <th>Duration</th>
+      <th>Errors</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for run in collection_runs %}
+    <tr>
+      <td>{{ run.source }}</td>
+      <td>{{ run.status }}</td>
+      <td>{{ run.projects_processed }}</td>
+      <td>{{ run.issues_collected }}</td>
+      <td>{{ "{:.1f}s".format(run.duration_seconds) if run.duration_seconds is not none else "—" }}</td>
+      <td>
+        {% if run.errors %}
+        <ul style="margin: 0; padding-left: 1rem;">
+          {% for error in run.errors %}
+          <li>{{ error.project or error.source or "run" }}: {{ error.error }}</li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        —
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="font-size:0.875rem;color:#666;">No collection runs recorded yet.</p>
+{% endif %}
+
+<hr class="p-rule" />
+
 <h3>Admin Actions</h3>
 <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
   <label for="admin-token" id="admin-token-label">Admin Token:</label>

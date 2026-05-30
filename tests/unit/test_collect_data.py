@@ -335,6 +335,16 @@ class TestMainLogging:
         )
         monkeypatch.setattr(
             collect_data,
+            "_create_collection_run",
+            AsyncMock(return_value=SimpleNamespace(id=1)),
+        )
+        monkeypatch.setattr(
+            collect_data,
+            "_finish_collection_run",
+            AsyncMock(),
+        )
+        monkeypatch.setattr(
+            collect_data,
             "_collect_github",
             AsyncMock(
                 return_value=collect_data.CollectionStats(

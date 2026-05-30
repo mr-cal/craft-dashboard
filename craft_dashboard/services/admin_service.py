@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, TypedDict
 
 from sqlalchemy import func, select
 
+from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
@@ -39,6 +40,19 @@ class ScheduleDayCount(TypedDict):
     date: str
     count: int
     is_today: bool
+
+
+class CollectionRunSummary(TypedDict):
+    """Recent collection run summary shown on the admin dashboard."""
+
+    source: str
+    started_at: datetime
+    finished_at: datetime | None
+    status: str
+    projects_processed: int
+    issues_collected: int
+    duration_seconds: float | None
+    errors: list[dict]
 
 
 class AdminService:
@@ -137,6 +151,28 @@ class AdminService:
             .order_by(Project.display_order)
         )
         return [row.name for row in project_result]
+
+    async def get_recent_collection_runs(
+        self, limit: int = 10
+    ) -> list[CollectionRunSummary]:
+        """Get the most recent collection runs with health statistics."""
+        result = await self.session.execute(
+            select(CollectionRun).order_by(CollectionRun.started_at.desc()).limit(limit)
+        )
+        runs = list(result.scalars())
+        return [
+            {
+                "source": run.source,
+                "started_at": run.started_at,
+                "finished_at": run.finished_at,
+                "status": run.status,
+                "projects_processed": run.projects_processed,
+                "issues_collected": run.issues_collected,
+                "duration_seconds": run.duration_seconds,
+                "errors": run.errors or [],
+            }
+            for run in runs
+        ]
 
     async def update_schedule(self, project: str, days: list[int]) -> None:
         """Update the refresh schedule for a project."""
