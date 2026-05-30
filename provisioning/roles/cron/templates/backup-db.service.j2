@@ -13,6 +13,6 @@ ExecStartPost=/bin/bash -c '\
   echo "Backup restore test passed: $BACKUP" || \
   echo "WARNING: Backup restore test FAILED: $BACKUP"; \
   dropdb --if-exists {{ db_name }}_restore_test'
-ExecStartPost=/bin/bash -c 'find {{ app_dir }}/backups -name "*.sql.gz" -mtime +7 -delete'
+ExecStartPost=/bin/bash -c 'find {{ app_dir }}/backups -name "*.sql.gz" -mtime +14 -delete'
 StandardOutput=journal
 StandardError=journal
