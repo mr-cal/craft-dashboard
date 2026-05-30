@@ -1,11 +1,12 @@
 """Tests for the Issue model."""
 
 import ast
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, get_args, get_origin
 
 from craft_dashboard.models.issue import Issue
+
+from tests.factories import make_issue
 
 
 class TestIssueModel:
@@ -65,15 +66,9 @@ class TestIssueModel:
 
     def test_labels_is_list_type(self) -> None:
         """Issue.labels should be typed as list, not dict."""
-        issue = Issue(
-            project_id=1,
-            source="github",
-            external_id="1",
-            issue_type="issue",
+        issue = make_issue(
             title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
-            state="open",
             labels=["bug", "priority-high"],
-            last_fetched_at=datetime.now(tz=UTC),
         )
 
         assert isinstance(issue.labels, list)

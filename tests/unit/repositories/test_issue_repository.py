@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from craft_dashboard.models.issue import Issue
-from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.views import IssueFilters, IssueQueryResult, IssueView
 from craft_dashboard.repositories.issue_repository import (
@@ -14,6 +13,8 @@ from craft_dashboard.repositories.issue_repository import (
 )
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
+
+from tests.factories import make_evaluation, make_issue, make_project
 
 if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"
@@ -32,103 +33,67 @@ class FrozenDateTime(datetime):
         return cls.frozen_now.astimezone(tz)
 
 
+FIXED_NOW = FrozenDateTime.frozen_now
+
+
 async def _query(session, **kwargs):
     result = await IssueRepository(session).search(IssueFilters(**kwargs))
     return result.issues, result.total_count, result.total_pages
 
 
-async def _seed_projects_and_issues(session) -> None:
-    snapcraft = Project(
-        name="snapcraft", category="app", github_org="canonical", display_order=1
-    )
-    charmcraft = Project(
-        name="charmcraft", category="app", github_org="canonical", display_order=2
-    )
-    session.add_all([snapcraft, charmcraft])
+async def _add_project(session, **kwargs) -> Project:
+    project = make_project(category="app", **kwargs)
+    session.add(project)
     await session.flush()
+    return project
 
-    now = datetime(2025, 1, 31, 12, 0, tzinfo=UTC)
+
+async def _seed_projects_and_issues(session) -> None:
+    snapcraft = await _add_project(session, name="snapcraft")
+    charmcraft = await _add_project(session, name="charmcraft", display_order=2)
     session.add_all(
         [
-            Issue(
+            make_issue(
                 project_id=snapcraft.id,
-                source="github",
                 external_id="1",
-                issue_type="issue",
                 title="Add support for core24 base",
                 body="Support `base: core24` in snapcraft projects targeting Ubuntu 24.04.",
-                state="open",
                 author="sergio-cazzolato",
                 author_is_maintainer=True,
-                author_is_bot=False,
-                labels=[],
-                created_at=now - timedelta(days=10),
-                updated_at=now - timedelta(days=1),
-                closed_at=None,
+                created_at=FIXED_NOW - timedelta(days=10),
+                updated_at=FIXED_NOW - timedelta(days=1),
                 url="https://github.com/canonical/snapcraft/issues/1234",
-                metadata_={},
-                comments=[],
-                last_fetched_at=now,
             ),
-            Issue(
+            make_issue(
                 project_id=snapcraft.id,
-                source="github",
                 external_id="2",
-                issue_type="issue",
                 title="Snap refresh fails when revision pinned",
                 body="Refreshing a snapped app fails when `snap refresh --revision` targets a pinned revision.",
-                state="open",
                 author="craft-contributor",
-                author_is_maintainer=False,
-                author_is_bot=False,
-                labels=[],
-                created_at=now - timedelta(days=5),
-                updated_at=now - timedelta(days=2),
-                closed_at=None,
+                created_at=FIXED_NOW - timedelta(days=5),
+                updated_at=FIXED_NOW - timedelta(days=2),
                 url="https://github.com/canonical/snapcraft/issues/2235",
-                metadata_={},
-                comments=[],
-                last_fetched_at=now,
             ),
-            Issue(
+            make_issue(
                 project_id=snapcraft.id,
-                source="github",
                 external_id="3",
                 issue_type="pull_request",
                 title="fix: handle empty manifest gracefully",
                 body="Avoid a traceback when snap metadata is rendered from an empty manifest during pack.",
-                state="open",
                 author="craft-contributor",
-                author_is_maintainer=False,
-                author_is_bot=False,
-                labels=[],
-                created_at=now - timedelta(days=1),
-                updated_at=now - timedelta(hours=12),
-                closed_at=None,
+                created_at=FIXED_NOW - timedelta(days=1),
+                updated_at=FIXED_NOW - timedelta(hours=12),
                 url="https://github.com/canonical/snapcraft/pull/2236",
-                metadata_={},
-                comments=[],
-                last_fetched_at=now,
             ),
-            Issue(
+            make_issue(
                 project_id=charmcraft.id,
-                source="github",
                 external_id="4",
-                issue_type="issue",
                 title="charmcraft deploy times out on large bundles",
                 body="Deploying a large bundle stalls while charmcraft waits for the controller response.",
-                state="open",
                 author="craft-contributor",
-                author_is_maintainer=False,
-                author_is_bot=False,
-                labels=[],
-                created_at=now - timedelta(days=20),
-                updated_at=now - timedelta(days=3),
-                closed_at=None,
+                created_at=FIXED_NOW - timedelta(days=20),
+                updated_at=FIXED_NOW - timedelta(days=3),
                 url="https://github.com/canonical/charmcraft/issues/4324",
-                metadata_={},
-                comments=[],
-                last_fetched_at=now,
             ),
         ]
     )
@@ -136,74 +101,40 @@ async def _seed_projects_and_issues(session) -> None:
 
 
 async def _seed_author_role_issues(session) -> None:
-    project = Project(
-        name="snapcraft", category="app", github_org="canonical", display_order=1
-    )
-    session.add(project)
-    await session.flush()
-
-    now = datetime(2025, 1, 31, 12, 0, tzinfo=UTC)
+    project = await _add_project(session, name="snapcraft")
     session.add_all(
         [
-            Issue(
+            make_issue(
                 project_id=project.id,
-                source="github",
                 external_id="10",
-                issue_type="issue",
                 title="Add support for core24 base",
                 body="Support `base: core24` in snapcraft projects targeting Ubuntu 24.04.",
-                state="open",
                 author="sergio-cazzolato",
                 author_is_maintainer=True,
-                author_is_bot=False,
-                labels=[],
-                created_at=now - timedelta(days=3),
-                updated_at=now - timedelta(days=1),
-                closed_at=None,
+                created_at=FIXED_NOW - timedelta(days=3),
+                updated_at=FIXED_NOW - timedelta(days=1),
                 url="https://github.com/canonical/snapcraft/issues/2234",
-                metadata_={},
-                comments=[],
-                last_fetched_at=now,
             ),
-            Issue(
+            make_issue(
                 project_id=project.id,
-                source="github",
                 external_id="11",
-                issue_type="issue",
                 title="Snap refresh fails when revision pinned",
                 body="Refreshing a snapped app fails when `snap refresh --revision` targets a pinned revision.",
-                state="open",
                 author="craft-contributor",
-                author_is_maintainer=False,
-                author_is_bot=False,
-                labels=[],
-                created_at=now - timedelta(days=2),
-                updated_at=now - timedelta(days=1),
-                closed_at=None,
+                created_at=FIXED_NOW - timedelta(days=2),
+                updated_at=FIXED_NOW - timedelta(days=1),
                 url="https://github.com/canonical/snapcraft/issues/2235",
-                metadata_={},
-                comments=[],
-                last_fetched_at=now,
             ),
-            Issue(
+            make_issue(
                 project_id=project.id,
-                source="github",
                 external_id="12",
-                issue_type="issue",
                 title="chore: refresh core24 test dependencies",
                 body="Automated dependency refresh for the core24 integration test matrix.",
-                state="open",
                 author="renovate[bot]",
-                author_is_maintainer=False,
                 author_is_bot=True,
-                labels=[],
-                created_at=now - timedelta(days=1),
-                updated_at=now - timedelta(hours=12),
-                closed_at=None,
+                created_at=FIXED_NOW - timedelta(days=1),
+                updated_at=FIXED_NOW - timedelta(hours=12),
                 url="https://github.com/canonical/snapcraft/pull/2236",
-                metadata_={},
-                comments=[],
-                last_fetched_at=now,
             ),
         ]
     )
@@ -211,74 +142,40 @@ async def _seed_author_role_issues(session) -> None:
 
 
 async def _seed_author_role_column_issues(session) -> None:
-    project = Project(
-        name="snapcraft", category="app", github_org="canonical", display_order=1
-    )
-    session.add(project)
-    await session.flush()
-
-    now = datetime(2025, 1, 31, 12, 0, tzinfo=UTC)
+    project = await _add_project(session, name="snapcraft")
     session.add_all(
         [
-            Issue(
+            make_issue(
                 project_id=project.id,
-                source="github",
                 external_id="13",
-                issue_type="issue",
                 title="Add support for core24 base",
                 body="Support `base: core24` in snapcraft projects targeting Ubuntu 24.04.",
-                state="open",
                 author="sergio-cazzolato",
                 author_is_maintainer=True,
-                author_is_bot=False,
-                labels=[],
-                created_at=now - timedelta(days=3),
-                updated_at=now - timedelta(days=1),
-                closed_at=None,
+                created_at=FIXED_NOW - timedelta(days=3),
+                updated_at=FIXED_NOW - timedelta(days=1),
                 url="https://github.com/canonical/snapcraft/issues/3234",
-                metadata_={},
-                comments=[],
-                last_fetched_at=now,
             ),
-            Issue(
+            make_issue(
                 project_id=project.id,
-                source="github",
                 external_id="14",
-                issue_type="issue",
                 title="Snap refresh fails when revision pinned",
                 body="Refreshing a snapped app fails when `snap refresh --revision` targets a pinned revision.",
-                state="open",
                 author="craft-contributor",
-                author_is_maintainer=False,
-                author_is_bot=False,
-                labels=[],
-                created_at=now - timedelta(days=2),
-                updated_at=now - timedelta(days=1),
-                closed_at=None,
+                created_at=FIXED_NOW - timedelta(days=2),
+                updated_at=FIXED_NOW - timedelta(days=1),
                 url="https://github.com/canonical/snapcraft/issues/3235",
-                metadata_={},
-                comments=[],
-                last_fetched_at=now,
             ),
-            Issue(
+            make_issue(
                 project_id=project.id,
-                source="github",
                 external_id="15",
-                issue_type="issue",
                 title="chore: refresh spread dependencies",
                 body="Automated dependency refresh for spread and integration jobs.",
-                state="open",
                 author="renovate[bot]",
-                author_is_maintainer=False,
                 author_is_bot=True,
-                labels=[],
-                created_at=now - timedelta(days=1),
-                updated_at=now - timedelta(hours=12),
-                closed_at=None,
+                created_at=FIXED_NOW - timedelta(days=1),
+                updated_at=FIXED_NOW - timedelta(hours=12),
                 url="https://github.com/canonical/snapcraft/pull/3236",
-                metadata_={},
-                comments=[],
-                last_fetched_at=now,
             ),
         ]
     )
@@ -286,54 +183,28 @@ async def _seed_author_role_column_issues(session) -> None:
 
 
 async def _seed_sorted_issues(session) -> None:
-    project = Project(
-        name="snapcraft", category="app", github_org="canonical", display_order=1
-    )
-    session.add(project)
-    await session.flush()
-
-    now = datetime(2025, 1, 31, 12, 0, tzinfo=UTC)
+    project = await _add_project(session, name="snapcraft")
     session.add_all(
         [
-            Issue(
+            make_issue(
                 project_id=project.id,
-                source="github",
                 external_id="20",
-                issue_type="issue",
                 title="Snap refresh fails when revision pinned",
                 body="Refreshing a snapped app fails when `snap refresh --revision` targets a pinned revision.",
-                state="open",
                 author="craft-contributor",
-                author_is_maintainer=False,
-                author_is_bot=False,
-                labels=[],
-                created_at=now - timedelta(days=1),
-                updated_at=now - timedelta(hours=6),
-                closed_at=None,
+                created_at=FIXED_NOW - timedelta(days=1),
+                updated_at=FIXED_NOW - timedelta(hours=6),
                 url="https://github.com/canonical/snapcraft/issues/4234",
-                metadata_={},
-                comments=[],
-                last_fetched_at=now,
             ),
-            Issue(
+            make_issue(
                 project_id=project.id,
-                source="github",
                 external_id="21",
-                issue_type="issue",
                 title="Add support for core24 base",
                 body="Support `base: core24` in snapcraft projects targeting Ubuntu 24.04.",
-                state="open",
                 author="sergio-cazzolato",
-                author_is_maintainer=False,
-                author_is_bot=False,
-                labels=[],
-                created_at=now - timedelta(days=10),
-                updated_at=now - timedelta(days=1),
-                closed_at=None,
+                created_at=FIXED_NOW - timedelta(days=10),
+                updated_at=FIXED_NOW - timedelta(days=1),
                 url="https://github.com/canonical/snapcraft/issues/4235",
-                metadata_={},
-                comments=[],
-                last_fetched_at=now,
             ),
         ]
     )
@@ -341,57 +212,135 @@ async def _seed_sorted_issues(session) -> None:
 
 
 async def _seed_issue_types(session) -> None:
-    project = Project(
-        name="snapcraft", category="app", github_org="canonical", display_order=1
-    )
-    session.add(project)
-    await session.flush()
-
-    now = datetime(2025, 1, 31, 12, 0, tzinfo=UTC)
+    project = await _add_project(session, name="snapcraft")
     session.add_all(
         [
-            Issue(
+            make_issue(
                 project_id=project.id,
-                source="github",
                 external_id="30",
-                issue_type="issue",
                 title="Snap refresh fails when revision pinned",
                 body="Refreshing a snapped app fails when `snap refresh --revision` targets a pinned revision.",
-                state="open",
                 author="craft-contributor",
-                author_is_maintainer=False,
-                author_is_bot=False,
-                labels=[],
-                created_at=now - timedelta(days=2),
-                updated_at=now - timedelta(days=1),
-                closed_at=None,
+                created_at=FIXED_NOW - timedelta(days=2),
+                updated_at=FIXED_NOW - timedelta(days=1),
                 url="https://github.com/canonical/snapcraft/issues/5234",
-                metadata_={},
-                comments=[],
-                last_fetched_at=now,
             ),
-            Issue(
+            make_issue(
                 project_id=project.id,
-                source="github",
                 external_id="31",
                 issue_type="pull_request",
                 title="fix: handle empty manifest gracefully",
                 body="Avoid a traceback when snap metadata is rendered from an empty manifest during pack.",
-                state="open",
                 author="sergio-cazzolato",
-                author_is_maintainer=False,
-                author_is_bot=False,
-                labels=[],
-                created_at=now - timedelta(days=1),
-                updated_at=now - timedelta(hours=18),
-                closed_at=None,
+                created_at=FIXED_NOW - timedelta(days=1),
+                updated_at=FIXED_NOW - timedelta(hours=18),
                 url="https://github.com/canonical/snapcraft/pull/5235",
-                metadata_={},
-                comments=[],
-                last_fetched_at=now,
             ),
         ]
     )
+    await session.commit()
+
+
+async def _seed_issues_with_scores(session) -> None:
+    project = await _add_project(session, name="snapcraft")
+
+    issue_stale = make_issue(
+        project_id=project.id,
+        external_id="100",
+        title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
+        body="When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
+        author="craft-contributor",
+        created_at=FIXED_NOW - timedelta(days=30),
+        updated_at=FIXED_NOW - timedelta(days=30),
+        url="https://github.com/canonical/snapcraft/issues/6100",
+    )
+    session.add(issue_stale)
+    await session.flush()
+    session.add(
+        make_evaluation(
+            issue_id=issue_stale.id,
+            summary="Stale LXD regression report without recent maintainer follow-up",
+            suggested_action="close",
+            suggested_action_reason="No activity since the Ubuntu 24.04 migration",
+            scores={
+                "staleness": 0.95,
+                "duplicateness": 0.1,
+                "complexity": 0.3,
+                "support_request": 0.2,
+                "readiness": 0.2,
+            },
+        )
+    )
+
+    issue_ready = make_issue(
+        project_id=project.id,
+        external_id="101",
+        title="Add support for core24 base",
+        body="Please add support for `base: core24` so new snaps can target Ubuntu 24.04.",
+        author="sergio-cazzolato",
+        created_at=FIXED_NOW - timedelta(days=1),
+        updated_at=FIXED_NOW - timedelta(hours=1),
+        url="https://github.com/canonical/snapcraft/issues/6101",
+    )
+    session.add(issue_ready)
+    await session.flush()
+    session.add(
+        make_evaluation(
+            issue_id=issue_ready.id,
+            summary="Clear enhancement request with maintainers aligned on core24 support",
+            suggested_action="work",
+            suggested_action_reason="Implementation scope is clear and unblocked",
+            scores={
+                "staleness": 0.1,
+                "duplicateness": 0.05,
+                "complexity": 0.2,
+                "support_request": 0.05,
+                "readiness": 0.9,
+            },
+        )
+    )
+
+    issue_complex = make_issue(
+        project_id=project.id,
+        external_id="102",
+        title="Refactor manifest parsing for multi-arch builds",
+        body="Rework manifest parsing so multi-architecture builds share a consistent metadata pipeline.",
+        author="jdoe-canonical",
+        created_at=FIXED_NOW - timedelta(days=5),
+        updated_at=FIXED_NOW - timedelta(days=2),
+        url="https://github.com/canonical/snapcraft/issues/6102",
+    )
+    session.add(issue_complex)
+    await session.flush()
+    session.add(
+        make_evaluation(
+            issue_id=issue_complex.id,
+            summary="Large refactor touching manifest parsing and multi-arch build logic",
+            suggested_action="investigate",
+            suggested_action_reason="Touches multiple build stages and architecture-specific paths",
+            scores={
+                "staleness": 0.4,
+                "duplicateness": 0.15,
+                "complexity": 0.95,
+                "support_request": 0.1,
+                "readiness": 0.5,
+            },
+        )
+    )
+
+    session.add(
+        make_issue(
+            project_id=project.id,
+            external_id="103",
+            title="charmcraft deploy times out on large bundles",
+            body="Deploying a large bundle stalls while charmcraft waits for the controller response.",
+            author="craft-contributor",
+            created_at=FIXED_NOW - timedelta(days=3),
+            updated_at=FIXED_NOW - timedelta(days=1),
+            url="https://github.com/canonical/charmcraft/issues/6103",
+        )
+    )
+
     await session.commit()
 
 
@@ -735,159 +684,104 @@ class TestQueryIssuesIssueType:
 
 async def _seed_issues_with_scores(session) -> None:
     """Seed issues with LLM evaluation scores for testing."""
-    project = Project(
-        name="snapcraft", category="app", github_org="canonical", display_order=1
-    )
-    session.add(project)
-    await session.flush()
+    project = await _add_project(session, name="snapcraft")
 
-    now = datetime(2025, 1, 31, 12, 0, tzinfo=UTC)
-
-    # Issue with high staleness, low readiness
-    issue_stale = Issue(
+    issue_stale = make_issue(
         project_id=project.id,
-        source="github",
         external_id="100",
-        issue_type="issue",
         title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
         body="When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
-        state="open",
         author="craft-contributor",
-        author_is_maintainer=False,
-        author_is_bot=False,
-        labels=[],
-        created_at=now - timedelta(days=30),
-        updated_at=now - timedelta(days=30),
-        closed_at=None,
+        created_at=FIXED_NOW - timedelta(days=30),
+        updated_at=FIXED_NOW - timedelta(days=30),
         url="https://github.com/canonical/snapcraft/issues/6100",
-        metadata_={},
-        comments=[],
-        last_fetched_at=now,
     )
     session.add(issue_stale)
     await session.flush()
-
-    eval_stale = LLMEvaluation(
-        issue_id=issue_stale.id,
-        model_name="test-model",
-        summary="Stale LXD regression report without recent maintainer follow-up",
-        suggested_action="close",
-        suggested_action_reason="No activity since the Ubuntu 24.04 migration",
-        scores={
-            "staleness": 0.95,
-            "duplicateness": 0.1,
-            "complexity": 0.3,
-            "support_request": 0.2,
-            "readiness": 0.2,
-        },
-        latest=True,
+    session.add(
+        make_evaluation(
+            issue_id=issue_stale.id,
+            summary="Stale LXD regression report without recent maintainer follow-up",
+            suggested_action="close",
+            suggested_action_reason="No activity since the Ubuntu 24.04 migration",
+            scores={
+                "staleness": 0.95,
+                "duplicateness": 0.1,
+                "complexity": 0.3,
+                "support_request": 0.2,
+                "readiness": 0.2,
+            },
+        )
     )
-    session.add(eval_stale)
 
-    # Issue with low staleness, high readiness
-    issue_ready = Issue(
+    issue_ready = make_issue(
         project_id=project.id,
-        source="github",
         external_id="101",
-        issue_type="issue",
         title="Add support for core24 base",
         body="Please add support for `base: core24` so new snaps can target Ubuntu 24.04.",
-        state="open",
         author="sergio-cazzolato",
-        author_is_maintainer=False,
-        author_is_bot=False,
-        labels=[],
-        created_at=now - timedelta(days=1),
-        updated_at=now - timedelta(hours=1),
-        closed_at=None,
+        created_at=FIXED_NOW - timedelta(days=1),
+        updated_at=FIXED_NOW - timedelta(hours=1),
         url="https://github.com/canonical/snapcraft/issues/6101",
-        metadata_={},
-        comments=[],
-        last_fetched_at=now,
     )
     session.add(issue_ready)
     await session.flush()
-
-    eval_ready = LLMEvaluation(
-        issue_id=issue_ready.id,
-        model_name="test-model",
-        summary="Clear enhancement request with maintainers aligned on core24 support",
-        suggested_action="work",
-        suggested_action_reason="Implementation scope is clear and unblocked",
-        scores={
-            "staleness": 0.1,
-            "duplicateness": 0.05,
-            "complexity": 0.2,
-            "support_request": 0.05,
-            "readiness": 0.9,
-        },
-        latest=True,
+    session.add(
+        make_evaluation(
+            issue_id=issue_ready.id,
+            summary="Clear enhancement request with maintainers aligned on core24 support",
+            suggested_action="work",
+            suggested_action_reason="Implementation scope is clear and unblocked",
+            scores={
+                "staleness": 0.1,
+                "duplicateness": 0.05,
+                "complexity": 0.2,
+                "support_request": 0.05,
+                "readiness": 0.9,
+            },
+        )
     )
-    session.add(eval_ready)
 
-    # Issue with high complexity
-    issue_complex = Issue(
+    issue_complex = make_issue(
         project_id=project.id,
-        source="github",
         external_id="102",
-        issue_type="issue",
         title="Refactor manifest parsing for multi-arch builds",
         body="Rework manifest parsing so multi-architecture builds share a consistent metadata pipeline.",
-        state="open",
         author="jdoe-canonical",
-        author_is_maintainer=False,
-        author_is_bot=False,
-        labels=[],
-        created_at=now - timedelta(days=5),
-        updated_at=now - timedelta(days=2),
-        closed_at=None,
+        created_at=FIXED_NOW - timedelta(days=5),
+        updated_at=FIXED_NOW - timedelta(days=2),
         url="https://github.com/canonical/snapcraft/issues/6102",
-        metadata_={},
-        comments=[],
-        last_fetched_at=now,
     )
     session.add(issue_complex)
     await session.flush()
-
-    eval_complex = LLMEvaluation(
-        issue_id=issue_complex.id,
-        model_name="test-model",
-        summary="Large refactor touching manifest parsing and multi-arch build logic",
-        suggested_action="investigate",
-        suggested_action_reason="Touches multiple build stages and architecture-specific paths",
-        scores={
-            "staleness": 0.4,
-            "duplicateness": 0.15,
-            "complexity": 0.95,
-            "support_request": 0.1,
-            "readiness": 0.5,
-        },
-        latest=True,
+    session.add(
+        make_evaluation(
+            issue_id=issue_complex.id,
+            summary="Large refactor touching manifest parsing and multi-arch build logic",
+            suggested_action="investigate",
+            suggested_action_reason="Touches multiple build stages and architecture-specific paths",
+            scores={
+                "staleness": 0.4,
+                "duplicateness": 0.15,
+                "complexity": 0.95,
+                "support_request": 0.1,
+                "readiness": 0.5,
+            },
+        )
     )
-    session.add(eval_complex)
 
-    # Issue without scores (no LLM evaluation)
-    issue_no_scores = Issue(
-        project_id=project.id,
-        source="github",
-        external_id="103",
-        issue_type="issue",
-        title="charmcraft deploy times out on large bundles",
-        body="Deploying a large bundle stalls while charmcraft waits for the controller response.",
-        state="open",
-        author="craft-contributor",
-        author_is_maintainer=False,
-        author_is_bot=False,
-        labels=[],
-        created_at=now - timedelta(days=3),
-        updated_at=now - timedelta(days=1),
-        closed_at=None,
-        url="https://github.com/canonical/charmcraft/issues/6103",
-        metadata_={},
-        comments=[],
-        last_fetched_at=now,
+    session.add(
+        make_issue(
+            project_id=project.id,
+            external_id="103",
+            title="charmcraft deploy times out on large bundles",
+            body="Deploying a large bundle stalls while charmcraft waits for the controller response.",
+            author="craft-contributor",
+            created_at=FIXED_NOW - timedelta(days=3),
+            updated_at=FIXED_NOW - timedelta(days=1),
+            url="https://github.com/canonical/charmcraft/issues/6103",
+        )
     )
-    session.add(issue_no_scores)
 
     await session.commit()
 
@@ -1032,14 +926,13 @@ class TestLLMStatusFilter:
         )
         issue = issue_result.scalar_one()
         test_db_session.add(
-            LLMEvaluation(
+            make_evaluation(
                 issue_id=issue.id,
                 model_name="test",
                 summary="A summary",
                 suggested_action="keep_open",
                 suggested_action_reason="reason",
                 scores={"staleness": 0.5},
-                latest=True,
             )
         )
         await test_db_session.commit()
@@ -1061,14 +954,13 @@ class TestLLMStatusFilter:
         issue = issue_result.scalar_one()
         # Add evaluation with missing summary
         test_db_session.add(
-            LLMEvaluation(
+            make_evaluation(
                 issue_id=issue.id,
                 model_name="test",
                 summary="",
                 suggested_action="keep_open",
                 suggested_action_reason="reason",
                 scores={"staleness": 0.5},
-                latest=True,
             )
         )
         await test_db_session.commit()
