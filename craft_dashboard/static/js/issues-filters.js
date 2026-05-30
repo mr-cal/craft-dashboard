@@ -6,6 +6,8 @@
   }
 
   const shareableUrlRoot = filterBar.dataset.shareableUrlRoot || "/issues";
+  const exportUrlRoot = filterBar.dataset.exportUrlRoot || "/issues/export";
+  const exportLink = document.getElementById("export-json-link");
 
   function splitValue(value) {
     return (value || "")
@@ -53,19 +55,32 @@
     });
   }
 
-  function buildShareableUrl(sourceUrl) {
+  function buildFilteredUrl(sourceUrl, targetPath) {
     const currentUrl = sourceUrl
       ? new URL(sourceUrl, window.location.origin)
       : new URL(window.location.href);
-    const shareableUrl = new URL(shareableUrlRoot, window.location.origin);
+    const filteredUrl = new URL(targetPath, window.location.origin);
 
     currentUrl.searchParams.forEach((value, key) => {
       if (value) {
-        shareableUrl.searchParams.set(key, value);
+        filteredUrl.searchParams.set(key, value);
       }
     });
 
-    return shareableUrl;
+    return filteredUrl;
+  }
+
+  function buildShareableUrl(sourceUrl) {
+    return buildFilteredUrl(sourceUrl, shareableUrlRoot);
+  }
+
+  function updateIssuesExportLink(sourceUrl) {
+    if (!exportLink) {
+      return;
+    }
+
+    const exportUrl = buildFilteredUrl(sourceUrl, exportUrlRoot);
+    exportLink.href = `${exportUrl.pathname}${exportUrl.search}`;
   }
 
   function syncBrowserUrl(event) {
@@ -81,16 +96,13 @@
       window.history.pushState({}, "", nextUrl);
     }
 
-    if (typeof window.updateIssuesExportLink === "function") {
-      window.updateIssuesExportLink();
-    }
+    updateIssuesExportLink(responseUrl);
   }
+
+  window.updateIssuesExportLink = updateIssuesExportLink;
 
   applyFiltersFromUrl(window.location.href);
-
-  if (typeof window.updateIssuesExportLink === "function") {
-    window.updateIssuesExportLink();
-  }
+  updateIssuesExportLink();
 
   document.body.addEventListener("htmx:afterSettle", syncBrowserUrl);
 })();

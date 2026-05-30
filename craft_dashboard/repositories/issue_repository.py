@@ -207,22 +207,30 @@ class IssueRepository:
             scores = row.scores or {}
             issues.append(
                 IssueView(
+                    id=issue.id,
                     project_name=row.project_name,
                     source=issue.source,
                     external_id=issue.external_id,
-                    issue_type=issue.issue_type,
                     title=issue.title,
                     author=issue.author,
+                    issue_type=issue.issue_type,
+                    state=issue.state,
                     url=issue.url,
+                    summary=row.summary,
+                    suggested_action=row.suggested_action,
+                    suggested_action_reason=row.suggested_action_reason,
+                    scores=scores,
                     age_days=_compute_age_days(issue.created_at),
+                    labels=list(issue.labels or []),
+                    created_at=issue.created_at,
+                    updated_at=issue.updated_at,
+                    author_is_maintainer=issue.author_is_maintainer,
+                    author_is_bot=issue.author_is_bot,
                     staleness=scores.get("staleness"),
                     duplicateness=scores.get("duplicateness"),
                     complexity=scores.get("complexity"),
                     support_request=scores.get("support_request"),
                     readiness=scores.get("readiness"),
-                    suggested_action=row.suggested_action,
-                    suggested_action_reason=row.suggested_action_reason,
-                    summary=row.summary,
                 )
             )
 

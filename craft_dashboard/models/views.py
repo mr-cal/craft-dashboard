@@ -1,28 +1,37 @@
 """Read-only view models for templates and query results."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
 
 
 @dataclass(frozen=True)
 class IssueView:
     """Read-only view of an issue with its evaluation data."""
 
+    id: int
     project_name: str
     source: str
     external_id: str
-    issue_type: str
     title: str
-    author: str
-    url: str
-    age_days: int | None
-    staleness: float | None
-    duplicateness: float | None
-    complexity: float | None
-    support_request: float | None
-    readiness: float | None
+    author: str | None
+    issue_type: str
+    state: str
+    url: str | None
+    summary: str | None
     suggested_action: str | None
     suggested_action_reason: str | None
-    summary: str | None
+    scores: dict[str, float | None] = field(default_factory=dict)
+    age_days: int | None = None
+    labels: list[str] = field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    author_is_maintainer: bool = False
+    author_is_bot: bool = False
+    staleness: float | None = None
+    duplicateness: float | None = None
+    complexity: float | None = None
+    support_request: float | None = None
+    readiness: float | None = None
 
     def as_dict(self) -> dict[str, object]:
         """Return a dict representation for template compatibility."""

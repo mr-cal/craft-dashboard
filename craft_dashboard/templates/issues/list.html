@@ -3,7 +3,7 @@
 {% block content %}
 <h2>Issue &amp; PR Triage</h2>
 
-<div class="filter-bar" id="issue-filters" data-shareable-url-root="/issues">
+<div class="filter-bar" id="issue-filters" data-shareable-url-root="/issues" data-export-url-root="/issues/export">
   <div class="filter-group">
     <label>Projects</label>
     <div class="multiselect" data-name="project" data-hidden="project-hidden">
@@ -217,6 +217,11 @@
       <option value="1000" {% if per_page == 1000 %}selected{% endif %}>1,000</option>
       <option value="0" {% if per_page == 0 %}selected{% endif %}>All</option>
     </select>
+  </div>
+
+  <div class="filter-group filter-group--actions">
+    <label>&nbsp;</label>
+    <a id="export-json-link" class="p-button" href="/issues/export">Export JSON</a>
   </div>
   <input type="hidden" name="llm_status" value="{{ filter_llm_status or '' }}" />
 </div>

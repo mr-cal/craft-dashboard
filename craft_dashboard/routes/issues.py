@@ -1,10 +1,12 @@
 """Issue and PR triage routes."""
 
+from dataclasses import asdict
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.dependencies import get_db_session
@@ -51,6 +53,43 @@ class IssueTemplateContext(TypedDict):
     all_scores: dict[str, str]
     filter_llm_status: str
     total_count: int
+
+
+def _normalize_per_page(per_page: int) -> int:
+    """Normalize requested page size to supported values."""
+    if per_page in VALID_PER_PAGE or per_page == PER_PAGE_ALL:
+        return per_page
+    return DEFAULT_PER_PAGE
+
+
+def _build_issue_filters(
+    *,
+    project: str,
+    source: str,
+    state: str,
+    issue_type: str,
+    action: str,
+    author_role: str,
+    sort: str,
+    page: int,
+    search: str,
+    per_page: int,
+    llm_status: str,
+) -> IssueFilters:
+    """Build normalized issue filters from route query parameters."""
+    return IssueFilters(
+        project=project,
+        source=source,
+        state=state,
+        issue_type=issue_type,
+        action=action,
+        author_role=author_role,
+        sort_by=sort,
+        page=page,
+        search=search,
+        items_per_page=_normalize_per_page(per_page),
+        llm_status=llm_status,
+    )
 
 
 async def _build_issue_context(
@@ -201,4 +240,47 @@ async def issue_table_partial(
         request,
         "issues/partials/issue_table.html",
         cast(dict[str, Any], dict(context)),
+    )
+
+
+@router.get("/export")
+async def issue_export(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    project: str = Query("", alias="project"),
+    source: str = Query("", alias="source"),
+    state: str = Query("open", alias="state"),
+    issue_type: str = Query("", alias="type"),
+    action: str = Query("", alias="action"),
+    author_role: str = Query("", alias="author_role"),
+    sort: str = Query("staleness", alias="sort"),
+    page: int = Query(1, ge=1),
+    search: str = Query("", alias="search"),
+    per_page: int = Query(DEFAULT_PER_PAGE, alias="per_page"),
+    scores: str = Query(DEFAULT_SCORES, alias="scores"),
+    llm_status: str = Query("", alias="llm_status"),
+) -> JSONResponse:
+    """Export all matching issues as JSON."""
+    del request, scores, per_page
+
+    filters = _build_issue_filters(
+        project=project,
+        source=source,
+        state=state,
+        issue_type=issue_type,
+        action=action,
+        author_role=author_role,
+        sort=sort,
+        page=page,
+        search=search,
+        per_page=PER_PAGE_ALL,
+        llm_status=llm_status,
+    )
+    repo = IssueRepository(session)
+    result = await repo.search(filters)
+    payload = jsonable_encoder([asdict(issue) for issue in result.issues])
+
+    return JSONResponse(
+        payload,
+        headers={"Content-Disposition": 'attachment; filename="issues-export.json"'},
     )
