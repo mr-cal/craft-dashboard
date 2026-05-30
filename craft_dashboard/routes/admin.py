@@ -2,6 +2,7 @@
 
 import asyncio
 import html
+import json
 import logging
 import pathlib
 import sys
@@ -81,6 +82,16 @@ def _require_admin_auth(request: Request, authorization: str = "") -> None:
     verify_admin_token(token, admin_token)
 
 
+def _build_toast_headers(message: str, toast_type: str) -> dict[str, str]:
+    """Build response headers that trigger a client-side toast."""
+    return {
+        "HX-Trigger": json.dumps(
+            {"toast": {"message": message, "type": toast_type}},
+            separators=(",", ":"),
+        )
+    }
+
+
 @router.post("/auth")
 async def admin_auth(
     request: Request,
@@ -90,7 +101,10 @@ async def admin_auth(
     _verify_origin(request)
     verify_admin_token(f"Bearer {credentials.token}", _get_admin_token(request))
 
-    response = JSONResponse({"status": "authenticated", "message": "Authenticated."})
+    response = JSONResponse(
+        {"status": "authenticated", "message": "Authenticated."},
+        headers=_build_toast_headers("Authenticated.", "success"),
+    )
     response.set_cookie(
         _ADMIN_SESSION_COOKIE,
         credentials.token,
@@ -105,7 +119,10 @@ async def admin_auth(
 async def admin_logout(request: Request) -> JSONResponse:
     """Clear the admin session cookie."""
     _verify_origin(request)
-    response = JSONResponse({"status": "logged_out", "message": "Logged out."})
+    response = JSONResponse(
+        {"status": "logged_out", "message": "Logged out."},
+        headers=_build_toast_headers("Logged out.", "info"),
+    )
     response.delete_cookie(_ADMIN_SESSION_COOKIE, path="/admin")
     return response
 
@@ -161,6 +178,7 @@ async def trigger_refresh(
     return JSONResponse(
         {"status": "refresh_queued", "message": "Data refresh has been queued."},
         status_code=202,
+        headers=_build_toast_headers("Data refresh has been queued.", "success"),
     )
 
 
@@ -223,19 +241,24 @@ async def trigger_re_evaluation(
         count = int(match.group(1)) if match else None
 
         if count is not None:
+            message = f"Dry run: {count} issues would be evaluated"
             return JSONResponse(
                 {
                     "status": "dry_run_complete",
-                    "message": f"Dry run: {count} issues would be evaluated",
+                    "message": message,
                     "count": count,
-                }
+                },
+                headers=_build_toast_headers(message, "info"),
             )
         # Fallback: show raw output
         return JSONResponse(
             {
                 "status": "dry_run_complete",
                 "message": "Dry run completed. Check logs for details.",
-            }
+            },
+            headers=_build_toast_headers(
+                "Dry run completed. Check logs for details.", "info"
+            ),
         )
     # Run in background
     asyncio.create_task(
@@ -259,12 +282,16 @@ async def trigger_re_evaluation(
         desc_parts.append("incomplete")
     desc = ", ".join(desc_parts) or "all open issues"
 
+    message = f"LLM re-evaluation queued: {desc}"
     return JSONResponse(
         {
             "status": "evaluation_queued",
-            "message": f"LLM re-evaluation queued: {desc}",
+            "message": message,
         },
         status_code=202,
+        headers=_build_toast_headers(
+            f"LLM re-evaluation has been queued for {desc}.", "success"
+        ),
     )
 
 
@@ -293,7 +320,10 @@ async def distribute_refresh_schedule(
 
     if not schedules:
         return JSONResponse(
-            {"status": "success", "message": "No schedules to distribute.", "count": 0}
+            {"status": "success", "message": "No schedules to distribute.", "count": 0},
+            headers=_build_toast_headers(
+                "Refresh schedule redistributed for 0 projects.", "success"
+            ),
         )
 
     now = datetime.now(UTC)
@@ -315,7 +345,11 @@ async def distribute_refresh_schedule(
             "status": "success",
             "message": f"Distributed {total_schedules} schedules over {refresh_age_days} days.",
             "count": total_schedules,
-        }
+        },
+        headers=_build_toast_headers(
+            f"Refresh schedule redistributed for {total_schedules} projects.",
+            "success",
+        ),
     )
 
 

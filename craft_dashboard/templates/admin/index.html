@@ -239,6 +239,8 @@ async function saveToken() {
     });
     const data = await response.json();
 
+    window.dispatchHxTriggers(response);
+
     if (response.ok) {
       setAuthenticated(true);
       await loadLogs();
@@ -247,6 +249,7 @@ async function saveToken() {
       setTokenStatus(`✗ ${data.detail || 'Authentication failed'}`, 'red');
     }
   } catch (error) {
+    showToast(error.message, 'error');
     setAuthenticated(false);
     setTokenStatus(`✗ ${error.message}`, 'red');
   } finally {
@@ -260,6 +263,7 @@ async function logout() {
 
   try {
     const response = await fetch('/admin/logout', { method: 'POST' });
+    window.dispatchHxTriggers(response);
     if (response.ok) {
       setAuthenticated(false);
       setTokenStatus('Logged out', 'gray');
@@ -269,6 +273,7 @@ async function logout() {
       setTokenStatus(`✗ ${data.detail || 'Logout failed'}`, 'red');
     }
   } catch (error) {
+    showToast(error.message, 'error');
     setTokenStatus(`✗ ${error.message}`, 'red');
   } finally {
     button.disabled = false;
@@ -285,6 +290,7 @@ async function callEndpoint(endpoint, btnId, statusId, successMsg) {
   try {
     const response = await fetch(endpoint, { method: 'POST' });
     const data = await response.json();
+    window.dispatchHxTriggers(response);
 
     if (response.ok) {
       statusDiv.innerHTML = `<span style="color: green;">✓ ${data.message || successMsg}</span>`;
@@ -296,6 +302,7 @@ async function callEndpoint(endpoint, btnId, statusId, successMsg) {
       statusDiv.innerHTML = `<span style="color: red;">✗ ${data.detail || 'Error'}</span>`;
     }
   } catch (error) {
+    showToast(error.message, 'error');
     statusDiv.innerHTML = `<span style="color: red;">✗ ${error.message}</span>`;
   } finally {
     btn.disabled = false;
@@ -344,6 +351,7 @@ async function triggerEvaluate() {
       body: JSON.stringify(params),
     });
     const data = await response.json();
+    window.dispatchHxTriggers(response);
     if (response.ok) {
       statusDiv.innerHTML = `<span style="color:green;">✓ ${data.message}</span>`;
     } else {
@@ -354,6 +362,7 @@ async function triggerEvaluate() {
       statusDiv.innerHTML = `<span style="color:red;">✗ ${data.detail || 'Error'}</span>`;
     }
   } catch (error) {
+    showToast(error.message, 'error');
     statusDiv.innerHTML = `<span style="color:red;">✗ ${error.message}</span>`;
   } finally {
     btn.disabled = false;
@@ -376,12 +385,14 @@ async function triggerDryRun() {
       body: JSON.stringify(params),
     });
     const data = await response.json();
+    window.dispatchHxTriggers(response);
     if (response.ok) {
       statusDiv.innerHTML = `<span style="color:blue;">ℹ ${data.message}</span>`;
     } else {
       statusDiv.innerHTML = `<span style="color:red;">✗ ${data.detail || 'Error'}</span>`;
     }
   } catch (error) {
+    showToast(error.message, 'error');
     statusDiv.innerHTML = `<span style="color:red;">✗ ${error.message}</span>`;
   } finally {
     btn.disabled = false;

@@ -84,16 +84,14 @@
         <a class="is-dark" href="https://github.com/mr-cal/craft-dashboard">craft-dashboard</a>
       </div>
     </footer>
-    <div id="htmx-error-toast" style="display:none;position:fixed;bottom:1rem;right:1rem;z-index:100;padding:0.75rem 1.5rem;background:var(--app-toast-error-bg);color:var(--app-toast-text);border-radius:4px;font-size:0.875rem;max-width:400px;box-shadow:var(--app-shadow);">
-      <span id="htmx-error-message"></span>
-      <button onclick="this.parentElement.style.display='none'" style="margin-left:1rem;background:none;border:none;color:var(--app-toast-text);cursor:pointer;font-size:1.1rem;">&times;</button>
-    </div>
+    <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="false"></div>
     <script>
       (function () {
         var storageKey = "theme";
         var themeToggle = document.getElementById("theme-toggle");
         var root = document.documentElement;
         var systemPreference = window.matchMedia("(prefers-color-scheme: dark)");
+        var toastContainer = document.getElementById("toast-container");
 
         function getTheme() {
           var storedTheme = window.localStorage.getItem(storageKey);
@@ -117,6 +115,71 @@
           );
         }
 
+        function dismissToast(toast) {
+          if (!toast) {
+            return;
+          }
+          toast.classList.add("is-hiding");
+          window.setTimeout(function () {
+            toast.remove();
+          }, 180);
+        }
+
+        function showToast(message, type) {
+          if (!toastContainer || !message) {
+            return;
+          }
+
+          var toastType = type || "info";
+          var toast = document.createElement("div");
+          var closeButton = document.createElement("button");
+          var text = document.createElement("span");
+          var timeoutMs = toastType === "error" ? 8000 : 3000;
+
+          toast.className = "toast toast--" + toastType;
+          text.textContent = message;
+          closeButton.type = "button";
+          closeButton.className = "toast__close";
+          closeButton.setAttribute("aria-label", "Dismiss notification");
+          closeButton.innerHTML = "&times;";
+          closeButton.addEventListener("click", function () {
+            dismissToast(toast);
+          });
+
+          toast.appendChild(text);
+          toast.appendChild(closeButton);
+          toastContainer.appendChild(toast);
+
+          window.setTimeout(function () {
+            dismissToast(toast);
+          }, timeoutMs);
+        }
+
+        function dispatchHxTriggers(response) {
+          if (!response || !response.headers) {
+            return;
+          }
+
+          var triggerHeader = response.headers.get("HX-Trigger");
+          if (!triggerHeader) {
+            return;
+          }
+
+          try {
+            var triggers = JSON.parse(triggerHeader);
+            Object.keys(triggers).forEach(function (eventName) {
+              document.body.dispatchEvent(
+                new CustomEvent(eventName, { detail: triggers[eventName] })
+              );
+            });
+          } catch (error) {
+            console.error(error);
+          }
+        }
+
+        window.showToast = showToast;
+        window.dispatchHxTriggers = dispatchHxTriggers;
+
         applyTheme(getTheme());
 
         if (themeToggle) {
@@ -135,25 +198,23 @@
             applyTheme(event.matches ? "dark" : "light");
           });
         }
-      })();
 
-      document.body.addEventListener("htmx:responseError", function(event) {
-        var toast = document.getElementById("htmx-error-toast");
-        var msg = document.getElementById("htmx-error-message");
-        var status = event.detail.xhr ? event.detail.xhr.status : 0;
-        msg.textContent = "Request failed" + (status ? " (" + status + ")" : "") + ". Please try again.";
-        toast.style.display = "flex";
-        toast.style.alignItems = "center";
-        setTimeout(function() { toast.style.display = "none"; }, 8000);
-      });
-      document.body.addEventListener("htmx:sendError", function() {
-        var toast = document.getElementById("htmx-error-toast");
-        var msg = document.getElementById("htmx-error-message");
-        msg.textContent = "Network error. Check your connection and try again.";
-        toast.style.display = "flex";
-        toast.style.alignItems = "center";
-        setTimeout(function() { toast.style.display = "none"; }, 8000);
-      });
+        document.body.addEventListener("toast", function (event) {
+          var detail = event.detail || {};
+          showToast(detail.message, detail.type);
+        });
+
+        document.body.addEventListener("htmx:responseError", function(event) {
+          var status = event.detail.xhr ? event.detail.xhr.status : 0;
+          showToast(
+            "Request failed" + (status ? " (" + status + ")" : "") + ". Please try again.",
+            "error"
+          );
+        });
+        document.body.addEventListener("htmx:sendError", function() {
+          showToast("Network error. Check your connection and try again.", "error");
+        });
+      })();
     </script>
     {% block scripts %}{% endblock %}
   </body>

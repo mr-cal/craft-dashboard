@@ -20,6 +20,8 @@
   --app-tooltip-background: #333;
   --app-tooltip-text: #fff;
   --app-toast-error-bg: #c7162b;
+  --app-toast-success-bg: #0e8420;
+  --app-toast-info-bg: #1c63d5;
   --app-toast-text: #fff;
 }
 
@@ -45,6 +47,8 @@ html.is-dark-theme {
   --app-tooltip-background: #0f131a;
   --app-tooltip-text: #fff;
   --app-toast-error-bg: #da3450;
+  --app-toast-success-bg: #22a746;
+  --app-toast-info-bg: #4788f0;
   --app-toast-text: #fff;
 }
 
@@ -469,4 +473,70 @@ table {
 .admin-form__row input[type="number"],
 .admin-form__row select {
   flex: 1;
+}
+
+.toast-container {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.75rem;
+  max-width: min(28rem, calc(100vw - 2rem));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  color: var(--app-toast-text);
+  box-shadow: var(--app-shadow);
+  animation: toast-in 0.18s ease-out;
+}
+
+.toast.is-hiding {
+  opacity: 0;
+  transform: translateY(0.35rem);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.toast--error {
+  background: var(--app-toast-error-bg);
+}
+
+.toast--success {
+  background: var(--app-toast-success-bg);
+}
+
+.toast--info {
+  background: var(--app-toast-info-bg);
+}
+
+.toast__close {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.35rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

@@ -220,6 +220,26 @@ class TestIssueList:
         assert "prefers-color-scheme: dark" in response.text
         assert "is-dark-theme" in response.text
 
+    def test_issues_page_includes_reusable_toast_system(self) -> None:
+        """Issues page includes the shared toast container and trigger hooks."""
+        app = create_app()
+        app.dependency_overrides[get_db_session] = _override_issue_db_session
+
+        with (
+            patch.object(IssueRepository, "search", return_value=EMPTY_QUERY_RESULT),
+            patch.object(
+                IssueRepository, "get_project_names", return_value=["snapcraft"]
+            ),
+        ):
+            with TestClient(app) as client:
+                response = client.get("/issues")
+
+        assert response.status_code == 200
+        assert 'id="toast-container"' in response.text
+        assert "showToast(message, type)" in response.text
+        assert 'addEventListener("toast"' in response.text
+        assert "htmx:responseError" in response.text
+
 
 class TestIssueTablePartial:
     """Tests for the issue table partial route."""

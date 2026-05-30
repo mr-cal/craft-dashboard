@@ -284,8 +284,8 @@ class TestIssuesPageMarkup:
         response = test_client.get("/issues")
 
         assert response.status_code == 200
-        assert 'id="htmx-error-toast"' in response.text
-        assert 'id="htmx-error-message"' in response.text
+        assert 'id="toast-container"' in response.text
+        assert "showToast(message, type)" in response.text
         assert 'document.body.addEventListener("htmx:responseError"' in response.text
         assert 'document.body.addEventListener("htmx:sendError"' in response.text
 

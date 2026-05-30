@@ -165,6 +165,9 @@ class TestAdminRefreshWithAuth:
 
         assert response.status_code == 202
         assert response.json()["status"] == "refresh_queued"
+        assert response.headers["HX-Trigger"] == (
+            '{"toast":{"message":"Data refresh has been queued.","type":"success"}}'
+        )
 
     def test_refresh_logs_when_queued(self, caplog) -> None:
         """POST /admin/refresh emits an audit log when work is queued."""
@@ -201,6 +204,9 @@ class TestAdminRefreshWithAuth:
 
         assert response.status_code == 202
         assert response.json()["status"] == "evaluation_queued"
+        assert response.headers["HX-Trigger"] == (
+            '{"toast":{"message":"LLM re-evaluation has been queued for all open issues.","type":"success"}}'
+        )
 
     def test_re_evaluate_logs_when_queued(self, caplog) -> None:
         """POST /admin/re-evaluate emits an audit log when work is queued."""
@@ -241,6 +247,9 @@ class TestAdminDistribute:
 
         assert response.status_code == 200
         assert response.json()["count"] == 0
+        assert response.headers["HX-Trigger"] == (
+            '{"toast":{"message":"Refresh schedule redistributed for 0 projects.","type":"success"}}'
+        )
 
     def test_distribute_logs_schedule_summary(self, caplog) -> None:
         """POST /admin/distribute logs how many schedules were redistributed."""
