@@ -1,12 +1,13 @@
 """Tests for the issue triage routes."""
 
 import re
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from craft_dashboard.app import create_app
 from craft_dashboard.dependencies import get_db_session
-from craft_dashboard.models.views import IssueFilters, IssueQueryResult
+from craft_dashboard.models.views import IssueFilters, IssueQueryResult, IssueView
 from craft_dashboard.repositories.issue_repository import IssueRepository
 from craft_dashboard.routes.issues import (
     ALL_SCORES,
@@ -219,6 +220,8 @@ class TestIssueList:
         assert 'localStorage.getItem("theme")' in response.text
         assert "prefers-color-scheme: dark" in response.text
         assert "is-dark-theme" in response.text
+        assert 'style="margin-left: auto;"' in response.text
+        assert 'id="nav-system-status"' not in response.text
 
     def test_issues_page_includes_reusable_toast_system(self) -> None:
         """Issues page includes the shared toast container and trigger hooks."""
@@ -240,8 +243,8 @@ class TestIssueList:
         assert 'addEventListener("toast"' in response.text
         assert "htmx:responseError" in response.text
 
-    def test_issues_page_includes_column_visibility_picker(self) -> None:
-        """Issues page includes the client-side column visibility controls."""
+    def test_issues_page_includes_combined_column_visibility_picker(self) -> None:
+        """Issues page combines score columns into the column visibility picker."""
         app = create_app()
         app.dependency_overrides[get_db_session] = _override_issue_db_session
 
@@ -256,7 +259,14 @@ class TestIssueList:
 
         assert response.status_code == 200
         assert ">Columns<" in response.text
+        assert ">Scores<" not in response.text
         assert 'id="columns-hidden"' in response.text
+        assert 'name="scores" id="scores-hidden"' in response.text
+        assert 'value="staleness"' in response.text
+        assert 'value="duplicateness"' in response.text
+        assert 'value="complexity"' in response.text
+        assert 'value="support_request"' in response.text
+        assert 'value="readiness"' in response.text
         assert 'src="/static/js/issue-columns.js"' in response.text
         assert 'data-col="issue"' in response.text
         assert 'data-col="summary"' in response.text
@@ -264,6 +274,94 @@ class TestIssueList:
 
 class TestIssueTablePartial:
     """Tests for the issue table partial route."""
+
+    def test_issue_table_shows_closed_and_unevaluated_states(self) -> None:
+        """Closed rows render state plus dash badges, while open unevaluated rows use question marks."""
+        app = create_app()
+        app.dependency_overrides[get_db_session] = _override_issue_db_session
+        now = datetime.now(tz=UTC)
+        context = {
+            "issues": [
+                IssueView(
+                    id=1,
+                    project_name="snapcraft",
+                    source="github",
+                    external_id="10",
+                    title="Closed regression",
+                    author="alice",
+                    issue_type="issue",
+                    state="closed",
+                    url="https://example.test/issues/10",
+                    summary="Fixed by the packaging refresh and closed after verification.",
+                    suggested_action=None,
+                    suggested_action_reason=None,
+                    scores={},
+                    age_days=12,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                IssueView(
+                    id=2,
+                    project_name="snapcraft",
+                    source="github",
+                    external_id="11",
+                    title="Open unevaluated issue",
+                    author="bob",
+                    issue_type="issue",
+                    state="open",
+                    url="https://example.test/issues/11",
+                    summary=None,
+                    suggested_action=None,
+                    suggested_action_reason=None,
+                    scores={},
+                    age_days=2,
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ],
+            "project_names": ["snapcraft"],
+            "filter_project": "",
+            "filter_source": "",
+            "filter_state": "open",
+            "filter_type": "",
+            "filter_action": "",
+            "filter_author_role": "",
+            "filter_search": "",
+            "sort_by": "number",
+            "page": 1,
+            "total_pages": 1,
+            "per_page": 100,
+            "filter_scores": "staleness,readiness",
+            "active_scores": ["staleness", "readiness"],
+            "all_scores": ALL_SCORES,
+            "filter_llm_status": "",
+            "total_count": 2,
+        }
+
+        with patch(
+            "craft_dashboard.routes.issues._build_issue_context",
+            AsyncMock(return_value=context),
+        ):
+            with TestClient(app) as client:
+                response = client.get("/issues/table")
+
+        assert response.status_code == 200
+        assert (
+            '#10</a>\n          <br><span style="color:var(--app-text-muted);font-size:0.8em;">closed</span>'
+            in response.text
+        )
+        assert (
+            response.text.count(
+                'class="score-badge" style="background:#ccc;color:#666;">-</span>'
+            )
+            >= 2
+        )
+        assert (
+            response.text.count(
+                'class="score-badge" style="background:#ccc;color:#666;">?</span>'
+            )
+            >= 2
+        )
 
     def test_issue_table_partial_uses_shared_context_builder(self) -> None:
         """The table partial route delegates context building to the shared helper."""

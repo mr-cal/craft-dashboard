@@ -47,31 +47,13 @@
               <a class="p-navigation__link" href="/">Dashboard</a>
             </li>
             <li class="p-navigation__item {% if request.url.path.startswith('/issues') %}is-selected{% endif %}">
-              <a class="p-navigation__link" href="/issues">
-                <span>Issues & PRs</span>
-                <span
-                  id="nav-system-status"
-                  class="system-status-badges"
-                  hx-get="/admin/status"
-                  hx-trigger="load, every 60s"
-                  hx-swap="none"
-                  hx-indicator="#loading-indicator"
-                  aria-label="Collection and evaluation status"
-                >
-                  <span class="system-status-indicator" data-system-status-kind="collection" title="Collection idle">
-                    <span class="system-status-dot"></span>
-                    <span class="system-status-short-label">C</span>
-                  </span>
-                  <span class="system-status-indicator" data-system-status-kind="evaluation" title="Evaluation idle">
-                    <span class="system-status-dot"></span>
-                    <span class="system-status-short-label">E</span>
-                  </span>
-                </span>
-              </a>
+              <a class="p-navigation__link" href="/issues">Issues & PRs</a>
             </li>
             <li class="p-navigation__item {% if request.url.path.startswith('/stats') %}is-selected{% endif %}">
               <a class="p-navigation__link" href="/stats/trends">Stats</a>
             </li>
+          </ul>
+          <ul class="p-navigation__items" style="margin-left: auto;">
             <li class="p-navigation__item p-navigation__item--theme-toggle">
               <button
                 id="theme-toggle"
@@ -278,7 +260,7 @@
 
         document.body.addEventListener("htmx:afterRequest", function (event) {
           var element = event.detail.elt;
-          if (!element || element.id !== "nav-system-status") {
+          if (!element || !element.hasAttribute("data-system-status-poller")) {
             return;
           }
 

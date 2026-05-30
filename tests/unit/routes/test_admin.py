@@ -345,3 +345,19 @@ class TestAdminPage:
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
         assert "Admin" in response.text
+
+    def test_admin_page_includes_system_status_panel(self) -> None:
+        """GET /admin shows the HTMX-powered system status panel."""
+        app = _create_admin_app()
+
+        with TestClient(app) as client:
+            response = client.get("/admin")
+
+        assert response.status_code == 200
+        assert "System Status" in response.text
+        assert 'hx-get="/admin/status"' in response.text
+        assert 'hx-trigger="load, every 60s"' in response.text
+        assert 'data-system-status-kind="collection"' in response.text
+        assert 'data-system-status-kind="evaluation"' in response.text
+        assert 'data-system-status-value="last_collection"' in response.text
+        assert 'data-system-status-value="last_evaluation"' in response.text

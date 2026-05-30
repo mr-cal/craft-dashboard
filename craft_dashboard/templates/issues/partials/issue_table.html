@@ -24,7 +24,7 @@
       <col class="col-title" data-col="title">
       <col class="col-author" data-col="author">
       <col class="col-age" data-col="age">
-      {% for _ in active_scores %}<col class="col-score">{% endfor %}
+      {% for score_key in active_scores %}<col class="col-score" data-col="{{ score_key }}">{% endfor %}
       <col class="col-action" data-col="action">
       <col class="col-summary" data-col="summary">
     </colgroup>
@@ -56,7 +56,7 @@
         {{ sort_header("Author", "author", column_name="author") }}
         {{ sort_header("Age", "age", column_name="age") }}
         {% for score_key in active_scores %}
-        {{ sort_header(score_labels.get(score_key, score_key), score_key, score_tooltips.get(score_key, "")) }}
+        {{ sort_header(score_labels.get(score_key, score_key), score_key, score_tooltips.get(score_key, ""), column_name=score_key) }}
         {% endfor %}
         <th data-col="action">Action</th>
         <th data-col="summary">Summary</th>
@@ -69,6 +69,7 @@
           {{ issue.project_name }}{% if issue.source == "launchpad" %}-lp{% endif %}<br>
           {{ "pr" if issue.issue_type == "pull_request" else "issue" }}
           <a href="{{ issue.url }}" target="_blank" rel="noopener">#{{ issue.external_id }}</a>
+          {% if issue.state != "open" %}<br><span style="color:var(--app-text-muted);font-size:0.8em;">{{ issue.state }}</span>{% endif %}
         </td>
         <td data-col="title">
           <a href="/issues/{{ issue.project_name }}/{{ issue.external_id }}">{{ issue.title|truncate(80) }}</a>
@@ -76,19 +77,23 @@
         <td data-col="author">{{ issue.author or "unknown" }}</td>
         <td data-col="age">{{ (issue.age_days ~ "d") if issue.age_days is not none else "?" }}</td>
         {% for score_key in active_scores %}
-        <td>
+        <td data-col="{{ score_key }}">
           {% set sv = issue.get(score_key) if issue.get is defined else issue[score_key] %}
-          {% if sv is not none %}
+          {% if issue.state in ("closed", "merged") %}
+          <span class="score-badge" style="background:#ccc;color:#666;">-</span>
+          {% elif sv is not none %}
           {% set score_value = sv %}
           {% set score_name = score_labels.get(score_key, score_key) %}
           {% include "components/score_badge.html" %}
           {% else %}
-          <span class="score-badge" style="background:#ccc;color:#666;">-</span>
+          <span class="score-badge" style="background:#ccc;color:#666;">?</span>
           {% endif %}
         </td>
         {% endfor %}
         <td data-col="action">
-          {% if issue.suggested_action %}
+          {% if issue.state in ("closed", "merged") %}
+          <span style="color:var(--app-text-muted);">-</span>
+          {% elif issue.suggested_action %}
           <span class="action-badge" aria-label="Suggested action: {{ issue.suggested_action|replace('_', ' ') }}">{{ issue.suggested_action|replace("_", " ") }}</span>
           {% endif %}
         </td>

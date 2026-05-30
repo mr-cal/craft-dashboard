@@ -1,7 +1,23 @@
 (function () {
   const storageKey = "visible_columns";
-  const defaultColumns = ["issue", "title", "author", "age", "action", "summary"];
+  const scoreColumns = [
+    "staleness",
+    "duplicateness",
+    "complexity",
+    "support_request",
+    "readiness",
+  ];
+  const defaultColumns = [
+    "issue",
+    "title",
+    "author",
+    "age",
+    ...scoreColumns.filter((column) => ["staleness", "readiness"].includes(column)),
+    "action",
+    "summary",
+  ];
   const hiddenInput = document.getElementById("columns-hidden");
+  const scoresInput = document.getElementById("scores-hidden");
 
   if (!hiddenInput) {
     return;
@@ -33,6 +49,24 @@
       });
   }
 
+  function syncScoreColumns(visibleColumns) {
+    if (!scoresInput) {
+      return;
+    }
+
+    const nextScores = scoreColumns.filter((column) => visibleColumns.has(column));
+    const nextValue = nextScores.join(",");
+    if (scoresInput.value === nextValue) {
+      return;
+    }
+
+    scoresInput.value = nextValue;
+    if (typeof htmx !== "undefined") {
+      htmx.trigger(scoresInput, "change");
+    }
+    scoresInput.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
   function applyVisibleColumns() {
     const visibleColumns = new Set(splitColumns(hiddenInput.value));
 
@@ -41,6 +75,7 @@
     });
 
     window.localStorage.setItem(storageKey, hiddenInput.value);
+    syncScoreColumns(visibleColumns);
   }
 
   setPickerState(getInitialColumns());

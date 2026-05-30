@@ -3,8 +3,39 @@
 {% block content %}
 <h2>Admin</h2>
 
+<section class="card" style="margin-bottom: 1.5rem;">
+  <h3 style="margin-top: 0;">System Status</h3>
+  <div
+    class="issue-page-status"
+    data-system-status-poller
+    hx-get="/admin/status"
+    hx-trigger="load, every 60s"
+    hx-swap="none"
+    hx-indicator="#loading-indicator"
+  >
+    <div class="system-status-badges" aria-label="Collection and evaluation status">
+      <span class="system-status-indicator" data-system-status-kind="collection" title="Collection idle">
+        <span class="system-status-dot"></span>
+        <span>Collection</span>
+      </span>
+      <span class="system-status-indicator" data-system-status-kind="evaluation" title="Evaluation idle">
+        <span class="system-status-dot"></span>
+        <span>Evaluation</span>
+      </span>
+    </div>
+    <span>
+      Last collection:
+      <strong data-system-status-value="last_collection">Never</strong>
+    </span>
+    <span>
+      Last evaluation:
+      <strong data-system-status-value="last_evaluation">Never</strong>
+    </span>
+  </div>
+</section>
+
 <h3>Project Refresh Schedule (Next 7 Days)</h3>
-<p style="font-size:0.875rem;color:#666;">Number of issues scheduled for data collection each day.</p>
+<p style="font-size:0.875rem;color:var(--app-text-muted);">Number of issues scheduled for data collection each day.</p>
 <table>
   <thead>
     <tr>
@@ -113,7 +144,7 @@
   </tbody>
 </table>
 {% else %}
-<p style="font-size:0.875rem;color:#666;">No collection runs recorded yet.</p>
+<p style="font-size:0.875rem;color:var(--app-text-muted);">No collection runs recorded yet.</p>
 {% endif %}
 
 <hr class="p-rule" />
@@ -200,7 +231,7 @@
 <hr class="p-rule" />
 <h3>Service Logs</h3>
 <button class="p-button--neutral" id="logs-btn" onclick="loadLogs()">Refresh Logs</button>
-<pre id="logs-output" style="max-height: 400px; overflow-y: auto; font-size: 0.75rem; background: #f5f5f5; padding: 1rem; white-space: pre-wrap; margin-top: 1rem;">(click Refresh Logs to load)</pre>
+<pre id="logs-output" style="max-height: 400px; overflow-y: auto; font-size: 0.75rem; background: var(--app-surface-muted); border: 1px solid var(--app-border); padding: 1rem; white-space: pre-wrap; margin-top: 1rem;">(click Refresh Logs to load)</pre>
 
 <script>
 function setTokenStatus(message, color) {

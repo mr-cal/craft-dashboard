@@ -64,6 +64,8 @@ class TestStatsRoutes:
             in response.text
         )
         assert 'id="trends-loading"' in response.text
+        assert 'class="p-tabs__link is-active"' in response.text
+        assert 'src="/static/js/trends.js?v=' in response.text
         assert (
             'aria-label="Line chart showing open issues over time for selected projects"'
             in response.text

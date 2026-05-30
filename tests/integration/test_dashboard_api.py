@@ -237,7 +237,7 @@ class TestIssuesPageMarkup:
             if element["tag"] == "label" and _has_class(element, "multiselect__option")
         ]
 
-        assert len(input_wraps) == 7
+        assert len(input_wraps) == 6
         assert all(
             element["attrs"].get("role") == "combobox" for element in input_wraps
         )
@@ -251,11 +251,10 @@ class TestIssuesPageMarkup:
             "Select author roles",
             "Select states",
             "Select actions",
-            "Select score columns",
             "Select types",
             "Select visible columns",
         }
-        assert len(option_lists) == 7
+        assert len(option_lists) == 6
         assert all(
             element["attrs"].get("role") == "listbox" for element in option_lists
         )

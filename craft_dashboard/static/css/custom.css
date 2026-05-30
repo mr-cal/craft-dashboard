@@ -52,6 +52,50 @@ html.is-dark-theme {
   --app-toast-text: #fff;
 }
 
+html.is-dark-theme h1,
+html.is-dark-theme h2,
+html.is-dark-theme h3,
+html.is-dark-theme h4,
+html.is-dark-theme h5,
+html.is-dark-theme h6,
+html.is-dark-theme th,
+html.is-dark-theme td,
+html.is-dark-theme label,
+html.is-dark-theme legend {
+  color: var(--app-text);
+}
+
+html.is-dark-theme a {
+  color: #cfe8ff;
+}
+
+html.is-dark-theme input,
+html.is-dark-theme select,
+html.is-dark-theme textarea {
+  color: var(--app-text);
+  background: var(--app-surface);
+  border-color: var(--app-border);
+}
+
+html.is-dark-theme button:not(.theme-toggle),
+html.is-dark-theme .p-button {
+  border-color: var(--app-border);
+}
+
+html.is-dark-theme table[role="grid"] th,
+html.is-dark-theme table[role="grid"] td {
+  border-color: var(--app-border);
+}
+
+html.is-dark-theme .p-tabs__link {
+  color: var(--app-text);
+}
+
+html.is-dark-theme .p-tabs__link:hover,
+html.is-dark-theme .p-tabs__link.is-active {
+  color: var(--app-text);
+}
+
 html,
 body,
 body.is-paper {
@@ -230,7 +274,7 @@ table[role="grid"] tr.expanded td.summary-cell {
 table[role="grid"] col.col-issue     { width: 100px; }
 table[role="grid"] col.col-title     { width: auto; }
 table[role="grid"] col.col-author    { width: 90px; }
-table[role="grid"] col.col-age       { width: 50px; }
+table[role="grid"] col.col-age       { width: 60px; }
 table[role="grid"] col.col-score     { width: 80px; }
 table[role="grid"] col.col-action    { width: 110px; }
 table[role="grid"] col.col-summary   { width: auto; }

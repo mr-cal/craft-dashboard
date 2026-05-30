@@ -18,6 +18,60 @@ const { projects, order, snapshot } = await response.json();
 // Store full data and filtered data
 let allProjects = projects;
 let filteredProjects = projects;
+const rootElement = document.documentElement;
+const registeredCharts = [];
+
+function getThemeColors() {
+  const themeName = rootElement.dataset.theme;
+  const isDark = document.documentElement.classList.contains("is-dark-theme") || themeName === "dark";
+  const textColor = isDark ? "#f3f3f3" : "#111";
+  const gridColor = isDark ? "#4b5563" : "#e5e5e5";
+  return { isDark, textColor, gridColor };
+}
+
+function applyChartDefaults() {
+  const { textColor, gridColor } = getThemeColors();
+  Chart.defaults.color = textColor;
+  Chart.defaults.borderColor = gridColor;
+  return { textColor, gridColor };
+}
+
+function applyScaleTheme(scales, themeColors) {
+  Object.values(scales || {}).forEach((scale) => {
+    if (!scale) {
+      return;
+    }
+
+    scale.grid = { ...(scale.grid || {}), color: themeColors.gridColor };
+    scale.border = { ...(scale.border || {}), color: themeColors.gridColor };
+    scale.ticks = { ...(scale.ticks || {}), color: themeColors.textColor };
+    if (scale.title) {
+      scale.title = { ...scale.title, color: themeColors.textColor };
+    }
+  });
+}
+
+function applyChartTheme(chart) {
+  const themeColors = applyChartDefaults();
+  applyScaleTheme(chart.options.scales, themeColors);
+
+  if (chart.options.plugins?.legend?.labels) {
+    chart.options.plugins.legend.labels.color = themeColors.textColor;
+  }
+
+  if (chart.options.plugins?.tooltip) {
+    chart.options.plugins.tooltip.titleColor = themeColors.textColor;
+    chart.options.plugins.tooltip.bodyColor = themeColors.textColor;
+    chart.options.plugins.tooltip.borderColor = themeColors.gridColor;
+    chart.options.plugins.tooltip.backgroundColor = themeColors.isDark ? "#111827" : "#ffffff";
+  }
+}
+
+function registerChart(chart) {
+  applyChartTheme(chart);
+  registeredCharts.push(chart);
+  return chart;
+}
 
 // ============================================================================
 // Utility functions
@@ -97,7 +151,8 @@ function createCheckboxItem(container, { id, label, checked, onChange, color }) 
 }
 
 function createLineChart(canvasId, yLabel) {
-  return new Chart(document.getElementById(canvasId), {
+  const themeColors = applyChartDefaults();
+  return registerChart(new Chart(document.getElementById(canvasId), {
     type: "line",
     data: { labels: [], datasets: [] },
     options: {
@@ -109,6 +164,10 @@ function createLineChart(canvasId, yLabel) {
         tooltip: {
           mode: "index",
           intersect: false,
+          titleColor: themeColors.textColor,
+          bodyColor: themeColors.textColor,
+          borderColor: themeColors.gridColor,
+          backgroundColor: themeColors.isDark ? "#111827" : "#ffffff",
           callbacks: {
             label: function(context) {
               const val = context.parsed.y;
@@ -119,21 +178,30 @@ function createLineChart(canvasId, yLabel) {
         }
       },
       scales: {
-        x: { display: true, title: { display: true, text: "Date" } },
+        x: {
+          display: true,
+          title: { display: true, text: "Date", color: themeColors.textColor },
+          ticks: { color: themeColors.textColor },
+          grid: { color: themeColors.gridColor },
+          border: { color: themeColors.gridColor },
+        },
         y: { 
           display: true, 
           beginAtZero: true, 
-          title: { display: true, text: yLabel }, 
-          ticks: { precision: 0 } 
+          title: { display: true, text: yLabel, color: themeColors.textColor }, 
+          ticks: { precision: 0, color: themeColors.textColor },
+          grid: { color: themeColors.gridColor },
+          border: { color: themeColors.gridColor },
         },
       },
       interaction: { mode: "nearest", axis: "x", intersect: false },
     },
-  });
+  }));
 }
 
 function createBarChart(canvasId, xLabel) {
   const ctx = document.getElementById(canvasId);
+  const themeColors = applyChartDefaults();
 
   // Wrap canvas in a positioned div (like starcraft-stats)
   const wrapper = document.createElement("div");
@@ -142,7 +210,7 @@ function createBarChart(canvasId, xLabel) {
   ctx.parentNode.insertBefore(wrapper, ctx);
   wrapper.appendChild(ctx);
 
-  const chart = new Chart(ctx, {
+  const chart = registerChart(new Chart(ctx, {
     type: "bar",
     data: { labels: [], datasets: [] },
     options: {
@@ -150,20 +218,38 @@ function createBarChart(canvasId, xLabel) {
       responsive: true,
       maintainAspectRatio: false,
       plugins: { 
-        legend: { display: true, position: "bottom" },
-        tooltip: { mode: "index", intersect: false } 
+        legend: {
+          display: true,
+          position: "bottom",
+          labels: { color: themeColors.textColor },
+        },
+        tooltip: {
+          mode: "index",
+          intersect: false,
+          titleColor: themeColors.textColor,
+          bodyColor: themeColors.textColor,
+          borderColor: themeColors.gridColor,
+          backgroundColor: themeColors.isDark ? "#111827" : "#ffffff",
+        },
       },
       scales: {
         x: { 
           display: true, 
           beginAtZero: true, 
-          title: { display: true, text: xLabel },
-          ticks: { precision: 0 } 
+          title: { display: true, text: xLabel, color: themeColors.textColor },
+          ticks: { precision: 0, color: themeColors.textColor },
+          grid: { color: themeColors.gridColor },
+          border: { color: themeColors.gridColor },
         },
-        y: { display: true },
+        y: {
+          display: true,
+          ticks: { color: themeColors.textColor },
+          grid: { color: themeColors.gridColor },
+          border: { color: themeColors.gridColor },
+        },
       },
     },
-  });
+  }));
 
   return { chart, wrapper };
 }
@@ -729,6 +815,19 @@ const issuesChart = createLineChart("issues-chart", "Open Issues & PRs (4-week a
 const medianAgeChart = createLineChart("median-age-chart", "Median Age (days, 4-week avg)");
 const closedChart = createLineChart("closed-chart", "Closed per Week (4-week avg)");
 
+const themeObserver = new MutationObserver((mutations) => {
+  if (!mutations.some((mutation) => mutation.attributeName === "class" || mutation.attributeName === "data-theme")) {
+    return;
+  }
+
+  registeredCharts.forEach((chart) => {
+    applyChartTheme(chart);
+    chart.update("none");
+  });
+});
+
+themeObserver.observe(rootElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
+
 const BAR_HEIGHT_PX = 28;
 const CHART_BASE_HEIGHT_PX = 80;
 
@@ -784,7 +883,7 @@ document.getElementById("trends-loading").style.display = "none";
   document.querySelectorAll("canvas").forEach(c => {
     const ctx = c.getContext("2d");
     ctx.font = "14px sans-serif";
-    ctx.fillStyle = "#666";
+    ctx.fillStyle = getThemeColors().textColor;
     ctx.textAlign = "center";
     ctx.fillText("Failed to load data", c.width / 2, c.height / 2);
   });

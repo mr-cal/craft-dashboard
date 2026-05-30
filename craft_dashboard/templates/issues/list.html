@@ -148,33 +148,6 @@
   </div>
 
   <div class="filter-group">
-    <label>Scores</label>
-    <div class="multiselect" data-name="scores" data-hidden="scores-hidden">
-      <div class="multiselect__input-wrap" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-label="Select score columns">
-        <span class="multiselect__placeholder">Select scores...</span>
-        <div class="multiselect__chips"></div>
-      </div>
-      <div class="multiselect__dropdown u-hide">
-        <div class="multiselect__options" role="listbox">
-          {% for key, label in (all_scores or {}).items() %}
-          <label class="multiselect__option" role="option">
-            <input type="checkbox" value="{{ key }}" {% if key in (filter_scores or "staleness,readiness").split(",") %}checked{% endif %} />
-            <span>{{ label }}</span>
-          </label>
-          {% endfor %}
-        </div>
-      </div>
-    </div>
-    <input type="hidden" name="scores" id="scores-hidden" value="{{ filter_scores or 'staleness,readiness' }}"
-           hx-get="/issues/table"
-           hx-target="#issue-table"
-           hx-swap="outerHTML"
-           hx-include=".filter-bar [name]"
-           hx-indicator="#loading-indicator"
-           hx-trigger="change" />
-  </div>
-
-  <div class="filter-group">
     <label>Columns</label>
     <div class="multiselect" data-name="visible_columns" data-hidden="columns-hidden">
       <div class="multiselect__input-wrap" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-label="Select visible columns">
@@ -183,7 +156,19 @@
       </div>
       <div class="multiselect__dropdown u-hide">
         <div class="multiselect__options" role="listbox">
-          {% for key, label in [("issue", "Issue"), ("title", "Title"), ("author", "Author"), ("age", "Age"), ("action", "Action"), ("summary", "Summary")] %}
+          {% for key, label in [("issue", "Issue"), ("title", "Title"), ("author", "Author"), ("age", "Age")] %}
+          <label class="multiselect__option" role="option">
+            <input type="checkbox" value="{{ key }}" checked />
+            <span>{{ label }}</span>
+          </label>
+          {% endfor %}
+          {% for key, label in (all_scores or {}).items() %}
+          <label class="multiselect__option" role="option">
+            <input type="checkbox" value="{{ key }}" {% if key in (filter_scores or "staleness,readiness").split(",") %}checked{% endif %} />
+            <span>{{ label }}</span>
+          </label>
+          {% endfor %}
+          {% for key, label in [("action", "Action"), ("summary", "Summary")] %}
           <label class="multiselect__option" role="option">
             <input type="checkbox" value="{{ key }}" checked />
             <span>{{ label }}</span>
@@ -192,7 +177,16 @@
         </div>
       </div>
     </div>
-    <input type="hidden" id="columns-hidden" value="issue,title,author,age,action,summary" />
+    <input type="hidden"
+           id="columns-hidden"
+           value="issue,title,author,age{% if active_scores %},{{ active_scores | join(',') }}{% endif %},action,summary" />
+    <input type="hidden" name="scores" id="scores-hidden" value="{{ filter_scores if filter_scores is not none else 'staleness,readiness' }}"
+           hx-get="/issues/table"
+           hx-target="#issue-table"
+           hx-swap="outerHTML"
+           hx-include=".filter-bar [name]"
+           hx-indicator="#loading-indicator"
+           hx-trigger="change" />
   </div>
 
   <input type="hidden" name="source" value="{{ filter_source or '' }}" />

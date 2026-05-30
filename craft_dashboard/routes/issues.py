@@ -104,12 +104,15 @@ async def _build_issue_context(
     result = await repo.search(filters)
     project_names = await repo.get_project_names()
 
+    normalized_scores = scores.strip()
     active_scores: list[str] = [
         score_name.strip()
         for score_name in scores.split(",")
         if score_name.strip() in ALL_SCORES
     ]
-    if not active_scores:
+    if not normalized_scores:
+        active_scores = []
+    elif not active_scores:
         active_scores = cast(list[str], DEFAULT_SCORES.split(","))
 
     context: IssueTemplateContext = {
