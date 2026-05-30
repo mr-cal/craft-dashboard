@@ -185,6 +185,39 @@ class TestIssuesPageWithData:
         assert "first dashboard issue" not in response.text
         assert "No issues found matching the current filters." in response.text
 
+    def test_issues_table_with_comma_separated_projects(
+        self, test_client: TestClient, seeded: None
+    ) -> None:
+        """Comma-separated project values (from multiselect) should not 422."""
+        response = test_client.get(
+            "/issues/table", params={"project": "snapcraft,charmcraft"}
+        )
+
+        assert response.status_code == 200
+
+    def test_issues_table_with_all_filter_params(
+        self, test_client: TestClient, seeded: None
+    ) -> None:
+        """All filter params together should not 422."""
+        response = test_client.get(
+            "/issues/table",
+            params={
+                "project": "snapcraft",
+                "source": "",
+                "state": "open",
+                "type": "",
+                "action": "",
+                "author_role": "",
+                "sort": "staleness",
+                "search": "",
+                "per_page": "100",
+                "scores": "staleness,readiness",
+                "llm_status": "",
+            },
+        )
+
+        assert response.status_code == 200
+
     def test_issues_empty_db(self, test_client: TestClient) -> None:
         response = test_client.get("/issues")
 
