@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from craft_dashboard.app import create_app
 from craft_dashboard.dependencies import get_db_session
+from craft_dashboard.models.views import IssueQueryResult
 from craft_dashboard.routes import issues as issues_routes
 from fastapi.testclient import TestClient
 
@@ -19,6 +20,9 @@ async def _override_issue_db_session():
     yield _IssueSession()
 
 
+EMPTY_QUERY_RESULT = IssueQueryResult(issues=[], total_count=0, total_pages=1, page=1)
+
+
 class TestIssueList:
     """Tests for the issue list route."""
 
@@ -27,7 +31,9 @@ class TestIssueList:
         app = create_app()
         app.dependency_overrides[get_db_session] = _override_issue_db_session
 
-        with patch.object(issues_routes, "_query_issues", return_value=([], 0, 1)):
+        with patch.object(
+            issues_routes, "_query_issues", return_value=EMPTY_QUERY_RESULT
+        ):
             with TestClient(app) as client:
                 response = client.get("/issues")
 
@@ -39,7 +45,9 @@ class TestIssueList:
         app = create_app()
         app.dependency_overrides[get_db_session] = _override_issue_db_session
 
-        with patch.object(issues_routes, "_query_issues", return_value=([], 0, 1)):
+        with patch.object(
+            issues_routes, "_query_issues", return_value=EMPTY_QUERY_RESULT
+        ):
             with TestClient(app) as client:
                 response = client.get("/issues")
 
@@ -51,7 +59,9 @@ class TestIssueList:
         app = create_app()
         app.dependency_overrides[get_db_session] = _override_issue_db_session
 
-        with patch.object(issues_routes, "_query_issues", return_value=([], 0, 1)):
+        with patch.object(
+            issues_routes, "_query_issues", return_value=EMPTY_QUERY_RESULT
+        ):
             with TestClient(app) as client:
                 response = client.get("/issues")
 

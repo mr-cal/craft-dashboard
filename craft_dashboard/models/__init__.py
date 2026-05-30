@@ -8,6 +8,7 @@ from craft_dashboard.models.project import Project
 from craft_dashboard.models.refresh_schedule import RefreshSchedule
 from craft_dashboard.models.release import Release
 from craft_dashboard.models.snapshot import Snapshot
+from craft_dashboard.models.views import IssueFilters, IssueQueryResult, IssueView
 
 __all__ = [
     "Base",
@@ -18,4 +19,7 @@ __all__ = [
     "RefreshSchedule",
     "Release",
     "Snapshot",
+    "IssueFilters",
+    "IssueQueryResult",
+    "IssueView",
 ]

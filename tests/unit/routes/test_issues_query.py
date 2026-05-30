@@ -6,6 +6,7 @@ from unittest.mock import patch
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
+from craft_dashboard.models.views import IssueFilters, IssueQueryResult, IssueView
 from craft_dashboard.routes.issues import (
     _apply_author_role_filter,
     _compute_age_days,
@@ -29,6 +30,11 @@ class FrozenDateTime(datetime):
         if tz is None:
             return cls.frozen_now.replace(tzinfo=None)
         return cls.frozen_now.astimezone(tz)
+
+
+async def _query(session, **kwargs):
+    result = await _query_issues(session, IssueFilters(**kwargs))
+    return result.issues, result.total_count, result.total_pages
 
 
 async def _seed_projects_and_issues(session) -> None:
@@ -411,10 +417,23 @@ class TestComputeAgeDays:
 
 
 class TestQueryIssuesFilters:
+    async def test_returns_issue_query_result_with_issue_views(
+        self, test_db_session
+    ) -> None:
+        await _seed_projects_and_issues(test_db_session)
+
+        result = await _query_issues(test_db_session, IssueFilters(sort_by="title"))
+
+        assert isinstance(result, IssueQueryResult)
+        assert result.total_count == 4
+        assert result.total_pages == 1
+        assert result.page == 1
+        assert isinstance(result.issues[0], IssueView)
+
     async def test_no_filter_returns_all_open_issues(self, test_db_session) -> None:
         await _seed_projects_and_issues(test_db_session)
 
-        issues, _, total_pages = await _query_issues(test_db_session, sort_by="title")
+        issues, _, total_pages = await _query(test_db_session, sort_by="title")
 
         assert len(issues) == 4
         assert total_pages == 1
@@ -424,19 +443,17 @@ class TestQueryIssuesFilters:
     ) -> None:
         await _seed_projects_and_issues(test_db_session)
 
-        issues, *_ = await _query_issues(
-            test_db_session, project="snapcraft", sort_by="title"
-        )
+        issues, *_ = await _query(test_db_session, project="snapcraft", sort_by="title")
 
         assert len(issues) == 3
-        assert {issue["project_name"] for issue in issues} == {"snapcraft"}
+        assert {issue.project_name for issue in issues} == {"snapcraft"}
 
     async def test_multiple_projects_filter_returns_all_matches(
         self, test_db_session
     ) -> None:
         await _seed_projects_and_issues(test_db_session)
 
-        issues, *_ = await _query_issues(
+        issues, *_ = await _query(
             test_db_session, project="snapcraft,charmcraft", sort_by="title"
         )
 
@@ -445,21 +462,17 @@ class TestQueryIssuesFilters:
     async def test_source_filter_returns_github_issues(self, test_db_session) -> None:
         await _seed_projects_and_issues(test_db_session)
 
-        issues, *_ = await _query_issues(
-            test_db_session, source="github", sort_by="title"
-        )
+        issues, *_ = await _query(test_db_session, source="github", sort_by="title")
 
         assert len(issues) == 4
-        assert {issue["source"] for issue in issues} == {"github"}
+        assert {issue.source for issue in issues} == {"github"}
 
     async def test_pagination_returns_single_page_of_results(
         self, test_db_session
     ) -> None:
         await _seed_projects_and_issues(test_db_session)
 
-        issues, _, total_pages = await _query_issues(
-            test_db_session, page=1, sort_by="title"
-        )
+        issues, _, total_pages = await _query(test_db_session, page=1, sort_by="title")
 
         assert len(issues) == 4
         assert total_pages == 1
@@ -471,50 +484,50 @@ class TestQueryIssuesAuthorRole:
     ) -> None:
         await _seed_author_role_issues(test_db_session)
 
-        issues, *_ = await _query_issues(
+        issues, *_ = await _query(
             test_db_session, author_role="maintainer", sort_by="title"
         )
 
         assert len(issues) == 1
-        assert [issue["author"] for issue in issues] == ["sergio-cazzolato"]
+        assert [issue.author for issue in issues] == ["sergio-cazzolato"]
 
     async def test_contributor_filter_returns_only_contributor(
         self, test_db_session
     ) -> None:
         await _seed_author_role_issues(test_db_session)
 
-        issues, *_ = await _query_issues(
+        issues, *_ = await _query(
             test_db_session, author_role="contributor", sort_by="title"
         )
 
         assert len(issues) == 1
-        assert [issue["author"] for issue in issues] == ["craft-contributor"]
+        assert [issue.author for issue in issues] == ["craft-contributor"]
 
     async def test_bot_filter_returns_only_bot(self, test_db_session) -> None:
         await _seed_author_role_issues(test_db_session)
 
-        issues, *_ = await _query_issues(
+        issues, *_ = await _query(
             test_db_session,
             author_role="bot",
             sort_by="title",
         )
 
         assert len(issues) == 1
-        assert [issue["author"] for issue in issues] == ["renovate[bot]"]
+        assert [issue.author for issue in issues] == ["renovate[bot]"]
 
     async def test_multiple_author_roles_return_combined_matches(
         self, test_db_session
     ) -> None:
         await _seed_author_role_issues(test_db_session)
 
-        issues, *_ = await _query_issues(
+        issues, *_ = await _query(
             test_db_session,
             author_role="maintainer,contributor",
             sort_by="title",
         )
 
         assert len(issues) == 2
-        assert {issue["author"] for issue in issues} == {
+        assert {issue.author for issue in issues} == {
             "sergio-cazzolato",
             "craft-contributor",
         }
@@ -526,39 +539,39 @@ class TestQueryIssuesAuthorRoleColumn:
     ) -> None:
         await _seed_author_role_column_issues(test_db_session)
 
-        issues, *_ = await _query_issues(
+        issues, *_ = await _query(
             test_db_session,
             author_role="bot",
             sort_by="title",
         )
 
-        assert [issue["author"] for issue in issues] == ["renovate[bot]"]
+        assert [issue.author for issue in issues] == ["renovate[bot]"]
 
     async def test_bot_filter_excludes_non_bot_maintainer(
         self, test_db_session
     ) -> None:
         await _seed_author_role_column_issues(test_db_session)
 
-        issues, *_ = await _query_issues(
+        issues, *_ = await _query(
             test_db_session,
             author_role="bot",
             sort_by="title",
         )
 
-        assert "sergio-cazzolato" not in {issue["author"] for issue in issues}
+        assert "sergio-cazzolato" not in {issue.author for issue in issues}
 
     async def test_contributor_filter_matches_non_bot_contributor(
         self, test_db_session
     ) -> None:
         await _seed_author_role_column_issues(test_db_session)
 
-        issues, *_ = await _query_issues(
+        issues, *_ = await _query(
             test_db_session,
             author_role="contributor",
             sort_by="title",
         )
 
-        assert [issue["author"] for issue in issues] == ["craft-contributor"]
+        assert [issue.author for issue in issues] == ["craft-contributor"]
 
 
 class TestApplyAuthorRoleFilter:
@@ -595,9 +608,7 @@ class TestQueryIssuesSearch:
         """Search filter matches issues by title."""
         await _seed_projects_and_issues(test_db_session)
 
-        issues, *_ = await _query_issues(
-            test_db_session, search="core24", sort_by="title"
-        )
+        issues, *_ = await _query(test_db_session, search="core24", sort_by="title")
 
         assert len(issues) == 1
         assert issues[0]["title"] == "Add support for core24 base"
@@ -606,7 +617,7 @@ class TestQueryIssuesSearch:
         """Search filter matches issues by external_id."""
         await _seed_projects_and_issues(test_db_session)
 
-        issues, *_ = await _query_issues(test_db_session, search="4", sort_by="title")
+        issues, *_ = await _query(test_db_session, search="4", sort_by="title")
 
         # external_id "4" matches charmcraft issue
         assert any(i["external_id"] == "4" for i in issues)
@@ -615,7 +626,7 @@ class TestQueryIssuesSearch:
         """Search filter with no matching term returns empty."""
         await _seed_projects_and_issues(test_db_session)
 
-        issues, *_ = await _query_issues(
+        issues, *_ = await _query(
             test_db_session, search="nonexistent-xyz", sort_by="title"
         )
 
@@ -627,7 +638,7 @@ class TestQueryIssuesPerPage:
         """items_per_page parameter limits the number of returned issues."""
         await _seed_projects_and_issues(test_db_session)
 
-        issues, _, total_pages = await _query_issues(
+        issues, _, total_pages = await _query(
             test_db_session, items_per_page=2, sort_by="title"
         )
 
@@ -638,7 +649,7 @@ class TestQueryIssuesPerPage:
         """Page 2 with items_per_page=2 returns remaining issues."""
         await _seed_projects_and_issues(test_db_session)
 
-        issues, _, total_pages = await _query_issues(
+        issues, _, total_pages = await _query(
             test_db_session, items_per_page=2, page=2, sort_by="title"
         )
 
@@ -653,7 +664,7 @@ class TestQueryIssuesSortValidation:
         """An invalid sort field falls back to staleness sort."""
         await _seed_projects_and_issues(test_db_session)
 
-        issues, *_ = await _query_issues(test_db_session, sort_by="invalid_field")
+        issues, *_ = await _query(test_db_session, sort_by="invalid_field")
 
         assert len(issues) == 4
 
@@ -662,9 +673,9 @@ class TestQueryIssuesSort:
     async def test_title_sort_returns_alphabetical_order(self, test_db_session) -> None:
         await _seed_sorted_issues(test_db_session)
 
-        issues, *_ = await _query_issues(test_db_session, sort_by="title")
+        issues, *_ = await _query(test_db_session, sort_by="title")
 
-        assert [issue["title"] for issue in issues] == [
+        assert [issue.title for issue in issues] == [
             "Add support for core24 base",
             "Snap refresh fails when revision pinned",
         ]
@@ -674,9 +685,9 @@ class TestQueryIssuesSort:
     ) -> None:
         await _seed_sorted_issues(test_db_session)
 
-        issues, *_ = await _query_issues(test_db_session, sort_by="-title")
+        issues, *_ = await _query(test_db_session, sort_by="-title")
 
-        assert [issue["title"] for issue in issues] == [
+        assert [issue.title for issue in issues] == [
             "Snap refresh fails when revision pinned",
             "Add support for core24 base",
         ]
@@ -684,9 +695,9 @@ class TestQueryIssuesSort:
     async def test_age_sort_returns_oldest_first(self, test_db_session) -> None:
         await _seed_sorted_issues(test_db_session)
 
-        issues, *_ = await _query_issues(test_db_session, sort_by="age")
+        issues, *_ = await _query(test_db_session, sort_by="age")
 
-        assert [issue["title"] for issue in issues] == [
+        assert [issue.title for issue in issues] == [
             "Add support for core24 base",
             "Snap refresh fails when revision pinned",
         ]
@@ -696,24 +707,22 @@ class TestQueryIssuesIssueType:
     async def test_issue_type_issue_filters_to_issues(self, test_db_session) -> None:
         await _seed_issue_types(test_db_session)
 
-        issues, *_ = await _query_issues(
-            test_db_session, issue_type="issue", sort_by="title"
-        )
+        issues, *_ = await _query(test_db_session, issue_type="issue", sort_by="title")
 
         assert len(issues) == 1
-        assert [issue["issue_type"] for issue in issues] == ["issue"]
+        assert [issue.issue_type for issue in issues] == ["issue"]
 
     async def test_issue_type_pull_request_filters_to_prs(
         self, test_db_session
     ) -> None:
         await _seed_issue_types(test_db_session)
 
-        issues, *_ = await _query_issues(
+        issues, *_ = await _query(
             test_db_session, issue_type="pull_request", sort_by="title"
         )
 
         assert len(issues) == 1
-        assert [issue["issue_type"] for issue in issues] == ["pull_request"]
+        assert [issue.issue_type for issue in issues] == ["pull_request"]
 
 
 async def _seed_issues_with_scores(session) -> None:
@@ -882,11 +891,11 @@ class TestQueryIssuesLLMScores:
         """_query_issues should return all LLM score fields for issues."""
         await _seed_issues_with_scores(test_db_session)
 
-        issues, *_ = await _query_issues(test_db_session, sort_by="staleness")
+        issues, *_ = await _query(test_db_session, sort_by="staleness")
 
         # Find the issue with scores
         scored_issue = next(
-            (issue for issue in issues if issue["external_id"] == "100"), None
+            (issue for issue in issues if issue.external_id == "100"), None
         )
         assert scored_issue is not None
 
@@ -900,14 +909,14 @@ class TestQueryIssuesLLMScores:
         assert "suggested_action_reason" in scored_issue
 
         # Verify score values
-        assert scored_issue["staleness"] == 0.95
-        assert scored_issue["duplicateness"] == 0.1
-        assert scored_issue["complexity"] == 0.3
-        assert scored_issue["support_request"] == 0.2
-        assert scored_issue["readiness"] == 0.2
-        assert scored_issue["suggested_action"] == "close"
+        assert scored_issue.staleness == 0.95
+        assert scored_issue.duplicateness == 0.1
+        assert scored_issue.complexity == 0.3
+        assert scored_issue.support_request == 0.2
+        assert scored_issue.readiness == 0.2
+        assert scored_issue.suggested_action == "close"
         assert (
-            scored_issue["suggested_action_reason"]
+            scored_issue.suggested_action_reason
             == "No activity since the Ubuntu 24.04 migration"
         )
 
@@ -915,28 +924,28 @@ class TestQueryIssuesLLMScores:
         """_query_issues should handle issues without LLM evaluations."""
         await _seed_issues_with_scores(test_db_session)
 
-        issues, *_ = await _query_issues(test_db_session, sort_by="title")
+        issues, *_ = await _query(test_db_session, sort_by="title")
 
         # Find the issue without scores
         unscored_issue = next(
-            (issue for issue in issues if issue["external_id"] == "103"), None
+            (issue for issue in issues if issue.external_id == "103"), None
         )
         assert unscored_issue is not None
 
         # Verify score fields are None
-        assert unscored_issue["staleness"] is None
-        assert unscored_issue["duplicateness"] is None
-        assert unscored_issue["complexity"] is None
-        assert unscored_issue["support_request"] is None
-        assert unscored_issue["readiness"] is None
-        assert unscored_issue["suggested_action"] is None
-        assert unscored_issue["suggested_action_reason"] is None
+        assert unscored_issue.staleness is None
+        assert unscored_issue.duplicateness is None
+        assert unscored_issue.complexity is None
+        assert unscored_issue.support_request is None
+        assert unscored_issue.readiness is None
+        assert unscored_issue.suggested_action is None
+        assert unscored_issue.suggested_action_reason is None
 
     async def test_sort_by_staleness_score(self, test_db_session) -> None:
         """Sort by staleness should order by staleness score descending."""
         await _seed_issues_with_scores(test_db_session)
 
-        issues, *_ = await _query_issues(test_db_session, sort_by="staleness")
+        issues, *_ = await _query(test_db_session, sort_by="staleness")
 
         # First issue should be the one with highest staleness
         assert issues[0]["external_id"] == "100"
@@ -946,7 +955,7 @@ class TestQueryIssuesLLMScores:
         """Sort by readiness should order by readiness score descending."""
         await _seed_issues_with_scores(test_db_session)
 
-        issues, *_ = await _query_issues(test_db_session, sort_by="readiness")
+        issues, *_ = await _query(test_db_session, sort_by="readiness")
 
         # First issue should be the one with highest readiness
         assert issues[0]["external_id"] == "101"
@@ -956,7 +965,7 @@ class TestQueryIssuesLLMScores:
         """Sort by complexity should order by complexity score descending."""
         await _seed_issues_with_scores(test_db_session)
 
-        issues, *_ = await _query_issues(test_db_session, sort_by="complexity")
+        issues, *_ = await _query(test_db_session, sort_by="complexity")
 
         # First issue should be the one with highest complexity
         assert issues[0]["external_id"] == "102"
@@ -966,7 +975,7 @@ class TestQueryIssuesLLMScores:
         """Sort by duplicateness should order by duplicateness score descending."""
         await _seed_issues_with_scores(test_db_session)
 
-        issues, *_ = await _query_issues(test_db_session, sort_by="duplicateness")
+        issues, *_ = await _query(test_db_session, sort_by="duplicateness")
 
         # First issue should be the one with highest duplicateness
         assert issues[0]["external_id"] == "102"
@@ -976,7 +985,7 @@ class TestQueryIssuesLLMScores:
         """Sort by support_request should order by support_request score descending."""
         await _seed_issues_with_scores(test_db_session)
 
-        issues, *_ = await _query_issues(test_db_session, sort_by="support_request")
+        issues, *_ = await _query(test_db_session, sort_by="support_request")
 
         # First issue should be the one with highest support_request
         assert issues[0]["external_id"] == "100"
@@ -986,7 +995,7 @@ class TestQueryIssuesLLMScores:
         """Reverse sort by readiness should order by readiness score ascending."""
         await _seed_issues_with_scores(test_db_session)
 
-        issues, *_ = await _query_issues(test_db_session, sort_by="-readiness")
+        issues, *_ = await _query(test_db_session, sort_by="-readiness")
 
         # Last scored issue should be the one with highest readiness
         # (issues with no scores come first with 0)
@@ -1006,7 +1015,7 @@ class TestLLMStatusFilter:
         await test_db_session.commit()
 
         # All seeded issues have no LLM evaluations
-        issues, *_ = await _query_issues(test_db_session, llm_status="no_llm")
+        issues, *_ = await _query(test_db_session, llm_status="no_llm")
         assert len(issues) > 0
 
         # Now add an evaluation for one issue
@@ -1027,7 +1036,7 @@ class TestLLMStatusFilter:
         )
         await test_db_session.commit()
 
-        issues_after, *_ = await _query_issues(test_db_session, llm_status="no_llm")
+        issues_after, *_ = await _query(test_db_session, llm_status="no_llm")
         ids = [i["external_id"] for i in issues_after]
         assert "1" not in ids
 
@@ -1056,7 +1065,7 @@ class TestLLMStatusFilter:
         )
         await test_db_session.commit()
 
-        issues, *_ = await _query_issues(test_db_session, llm_status="partial_llm")
+        issues, *_ = await _query(test_db_session, llm_status="partial_llm")
         ids = [i["external_id"] for i in issues]
         assert "1" in ids
 
@@ -1065,6 +1074,6 @@ class TestLLMStatusFilter:
         await _seed_projects_and_issues(test_db_session)
         await test_db_session.commit()
 
-        all_issues, *_ = await _query_issues(test_db_session, llm_status="")
-        no_filter, *_ = await _query_issues(test_db_session)
+        all_issues, *_ = await _query(test_db_session, llm_status="")
+        no_filter, *_ = await _query(test_db_session)
         assert len(all_issues) == len(no_filter)

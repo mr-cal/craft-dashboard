@@ -15,6 +15,7 @@ from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
+from craft_dashboard.models.views import IssueFilters, IssueQueryResult, IssueView
 
 if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
@@ -93,22 +94,9 @@ def _apply_author_role_filter(query: Select, author_role: str) -> Select:
 
 
 async def _query_issues(
-    session: AsyncSession,
-    *,
-    project: str = "",
-    source: str = "",
-    state: str = "open",
-    issue_type: str = "",
-    action: str = "",
-    author_role: str = "",
-    sort_by: str = "staleness",
-    page: int = 1,
-    _bots: list[str] | None = None,
-    search: str = "",
-    items_per_page: int = DEFAULT_PER_PAGE,
-    llm_status: str = "",
-) -> tuple[list[dict], int, int]:
-    """Query issues with filters and return (issues, total_count, total_pages)."""
+    session: AsyncSession, filters: IssueFilters
+) -> IssueQueryResult:
+    """Query issues with filters and return typed results."""
     query = (
         select(
             Issue,
@@ -125,42 +113,38 @@ async def _query_issues(
         )
     )
 
-    if state:
-        state_list = [s.strip() for s in state.split(",") if s.strip()]
+    if filters.state:
+        state_list = [s.strip() for s in filters.state.split(",") if s.strip()]
         if len(state_list) == 1:
             query = query.where(Issue.state == state_list[0])
         elif state_list:
             query = query.where(Issue.state.in_(state_list))
 
-    if project:
-        project_list = [p.strip() for p in project.split(",") if p.strip()]
+    if filters.project:
+        project_list = [p.strip() for p in filters.project.split(",") if p.strip()]
         if len(project_list) == 1:
             query = query.where(Project.name == project_list[0])
         elif project_list:
             query = query.where(Project.name.in_(project_list))
-    if source:
-        query = query.where(Issue.source == source)
-    if issue_type:
-        type_list = [t.strip() for t in issue_type.split(",") if t.strip()]
+    if filters.source:
+        query = query.where(Issue.source == filters.source)
+    if filters.issue_type:
+        type_list = [t.strip() for t in filters.issue_type.split(",") if t.strip()]
         if len(type_list) == 1:
             query = query.where(Issue.issue_type == type_list[0])
         elif type_list:
             query = query.where(Issue.issue_type.in_(type_list))
-    if action:
-        action_list = [a.strip() for a in action.split(",") if a.strip()]
+    if filters.action:
+        action_list = [a.strip() for a in filters.action.split(",") if a.strip()]
         if len(action_list) == 1:
             query = query.where(LLMEvaluation.suggested_action == action_list[0])
         elif action_list:
             query = query.where(LLMEvaluation.suggested_action.in_(action_list))
-    query = _apply_author_role_filter(query, author_role)
+    query = _apply_author_role_filter(query, filters.author_role)
 
-    if search:
-        # Split search into tokens and match each token against any field.
-        # Every token must match at least one field (AND across tokens).
-        # Fields searched: project name, issue number, title, author, summary.
-        tokens = search.strip().split()
+    if filters.search:
+        tokens = filters.search.strip().split()
         for token in tokens:
-            # Strip leading '#' so "#998" matches issue number 998
             clean = token.lstrip("#")
             conditions: list[ColumnElement[bool]] = [
                 Issue.title.ilike(f"%{token}%"),
@@ -168,15 +152,13 @@ async def _query_issues(
                 Project.name.ilike(f"%{token}%"),
                 LLMEvaluation.summary.ilike(f"%{token}%"),
             ]
-            # If token looks numeric, also match issue number exactly
             if clean.isdigit():
                 conditions.append(Issue.external_id == clean)
             query = query.where(or_(*conditions))
 
-    if llm_status == "no_llm":
+    if filters.llm_status == "no_llm":
         query = query.where(LLMEvaluation.id.is_(None))
-    elif llm_status == "partial_llm":
-        # Has an evaluation but missing summary, action, or scores
+    elif filters.llm_status == "partial_llm":
         query = query.where(
             LLMEvaluation.id.is_not(None)
             & (
@@ -190,16 +172,17 @@ async def _query_issues(
 
     count_query = select(func.count()).select_from(query.subquery())
     total = await session.scalar(count_query) or 0
-    # items_per_page=0 means "show all"
-    if items_per_page <= 0:
+    if filters.items_per_page <= 0:
         total_pages = 1
         page = 1
     else:
-        total_pages = max(1, (total + items_per_page - 1) // items_per_page)
-        page = min(page, total_pages)
+        total_pages = max(
+            1, (total + filters.items_per_page - 1) // filters.items_per_page
+        )
+        page = min(filters.page, total_pages)
 
-    sort_field = sort_by.lstrip("-")
-    sort_desc = sort_by.startswith("-")
+    sort_field = filters.sort_by.lstrip("-")
+    sort_desc = filters.sort_by.startswith("-")
 
     if sort_field not in _VALID_SORT_FIELDS:
         sort_field = "staleness"
@@ -230,9 +213,9 @@ async def _query_issues(
             else func.coalesce(LLMEvaluation.scores[sort_field].as_float(), 0).asc()
         )
 
-    if items_per_page > 0:
-        offset = (page - 1) * items_per_page
-        query = query.offset(offset).limit(items_per_page)
+    if filters.items_per_page > 0:
+        offset = (page - 1) * filters.items_per_page
+        query = query.offset(offset).limit(filters.items_per_page)
 
     result = await session.execute(query)
 
@@ -241,27 +224,32 @@ async def _query_issues(
         issue = row[0]
         scores = row.scores or {}
         issues.append(
-            {
-                "project_name": row.project_name,
-                "source": issue.source,
-                "external_id": issue.external_id,
-                "issue_type": issue.issue_type,
-                "title": issue.title,
-                "author": issue.author,
-                "url": issue.url,
-                "age_days": _compute_age_days(issue.created_at),
-                "staleness": scores.get("staleness"),
-                "duplicateness": scores.get("duplicateness"),
-                "complexity": scores.get("complexity"),
-                "support_request": scores.get("support_request"),
-                "readiness": scores.get("readiness"),
-                "suggested_action": row.suggested_action,
-                "suggested_action_reason": row.suggested_action_reason,
-                "summary": row.summary,
-            }
+            IssueView(
+                project_name=row.project_name,
+                source=issue.source,
+                external_id=issue.external_id,
+                issue_type=issue.issue_type,
+                title=issue.title,
+                author=issue.author,
+                url=issue.url,
+                age_days=_compute_age_days(issue.created_at),
+                staleness=scores.get("staleness"),
+                duplicateness=scores.get("duplicateness"),
+                complexity=scores.get("complexity"),
+                support_request=scores.get("support_request"),
+                readiness=scores.get("readiness"),
+                suggested_action=row.suggested_action,
+                suggested_action_reason=row.suggested_action_reason,
+                summary=row.summary,
+            )
         )
 
-    return issues, total, total_pages
+    return IssueQueryResult(
+        issues=issues,
+        total_count=total,
+        total_pages=total_pages,
+        page=page,
+    )
 
 
 @router.get("", response_class=HTMLResponse)
@@ -293,11 +281,10 @@ async def issue_list(
     if not active_scores:
         active_scores = DEFAULT_SCORES.split(",")
 
-    issues, total_count, total_pages = await _query_issues(
-        session,
-        state=state,
+    filters = IssueFilters(
         project=project,
         source=source,
+        state=state,
         issue_type=issue_type,
         action=action,
         author_role=author_role,
@@ -307,7 +294,7 @@ async def issue_list(
         items_per_page=effective_per_page,
         llm_status=llm_status,
     )
-    page = min(page, total_pages)
+    result = await _query_issues(session, filters)
 
     project_result = await session.execute(
         select(Project.name)
@@ -320,7 +307,7 @@ async def issue_list(
         request,
         "issues/list.html",
         {
-            "issues": issues,
+            "issues": result.issues,
             "project_names": project_names,
             "filter_project": project,
             "filter_source": source,
@@ -330,14 +317,14 @@ async def issue_list(
             "filter_author_role": author_role,
             "filter_search": search,
             "sort_by": sort,
-            "page": page,
-            "total_pages": total_pages,
+            "page": result.page,
+            "total_pages": result.total_pages,
             "per_page": effective_per_page,
             "filter_scores": scores,
             "active_scores": active_scores,
             "all_scores": ALL_SCORES,
             "filter_llm_status": llm_status,
-            "total_count": total_count,
+            "total_count": result.total_count,
         },
     )
 
@@ -371,11 +358,10 @@ async def issue_table_partial(
     if not active_scores:
         active_scores = DEFAULT_SCORES.split(",")
 
-    issues, total_count, total_pages = await _query_issues(
-        session,
-        state=state,
+    filters = IssueFilters(
         project=project,
         source=source,
+        state=state,
         issue_type=issue_type,
         action=action,
         author_role=author_role,
@@ -385,13 +371,13 @@ async def issue_table_partial(
         items_per_page=effective_per_page,
         llm_status=llm_status,
     )
-    page = min(page, total_pages)
+    result = await _query_issues(session, filters)
 
     return templates.TemplateResponse(
         request,
         "issues/partials/issue_table.html",
         {
-            "issues": issues,
+            "issues": result.issues,
             "filter_project": project,
             "filter_source": source,
             "filter_state": state,
@@ -400,13 +386,13 @@ async def issue_table_partial(
             "filter_author_role": author_role,
             "filter_search": search,
             "sort_by": sort,
-            "page": page,
-            "total_pages": total_pages,
+            "page": result.page,
+            "total_pages": result.total_pages,
             "per_page": effective_per_page,
             "filter_scores": scores,
             "active_scores": active_scores,
             "all_scores": ALL_SCORES,
             "filter_llm_status": llm_status,
-            "total_count": total_count,
+            "total_count": result.total_count,
         },
     )
