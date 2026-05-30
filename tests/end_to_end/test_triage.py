@@ -220,3 +220,121 @@ class TestTriagePage:
         assert result["tooltip_count"] > 0, (
             "Expected data-tooltip attributes on page elements"
         )
+
+    def test_triage_row_expand_on_initial_load(self, seeded_url: str) -> None:
+        """Clicking a table row should toggle the 'expanded' class."""
+        script = make_script("""\
+    await page.goto(`${BASE}/issues`, {waitUntil: 'networkidle0', timeout: 30000});
+    await new Promise(r => setTimeout(r, 1500));
+
+    // Click the summary cell of the first row
+    const result = await page.evaluate(() => {
+      const firstRow = document.querySelector('table[role="grid"] tbody tr');
+      if (!firstRow) return { error: 'no rows found' };
+
+      const summaryCell = firstRow.querySelector('.summary-cell');
+      if (!summaryCell) return { error: 'no summary cell found' };
+
+      summaryCell.click();
+      const expandedAfterClick = firstRow.classList.contains('expanded');
+
+      summaryCell.click();
+      const collapsedAfterSecondClick = !firstRow.classList.contains('expanded');
+
+      return {
+        expanded_after_click: expandedAfterClick,
+        collapsed_after_second_click: collapsedAfterSecondClick,
+      };
+    });
+
+    console.log(JSON.stringify(result));
+""")
+        result = run_puppeteer(script, base_url=seeded_url, timeout=20)
+        assert "error" not in result, f"Row expand failed: {result.get('error')}"
+        assert result["expanded_after_click"], "Row should expand on first click"
+        assert result["collapsed_after_second_click"], (
+            "Row should collapse on second click"
+        )
+
+    def test_triage_row_expand_after_filter_change(self, seeded_url: str) -> None:
+        """Row expand should still work after HTMX swaps the table."""
+        script = make_script("""\
+    await page.goto(`${BASE}/issues`, {waitUntil: 'networkidle0', timeout: 30000});
+    await new Promise(r => setTimeout(r, 1500));
+
+    // Trigger a filter change via per-page select to cause HTMX swap
+    await page.evaluate(() => {
+      const perPageSelect = document.querySelector('select[name="per_page"]');
+      if (perPageSelect) {
+        // Change to 250 then back to trigger a swap
+        perPageSelect.value = '250';
+        perPageSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    // Wait for HTMX swap to complete
+    await new Promise(r => setTimeout(r, 2500));
+
+    // Now try clicking a row to expand
+    const result = await page.evaluate(() => {
+      const firstRow = document.querySelector('table[role="grid"] tbody tr');
+      if (!firstRow) return { error: 'no rows after filter change' };
+
+      const summaryCell = firstRow.querySelector('.summary-cell');
+      if (!summaryCell) return { error: 'no summary cell after filter change' };
+
+      summaryCell.click();
+      const expandedAfterClick = firstRow.classList.contains('expanded');
+
+      summaryCell.click();
+      const collapsedAfterSecondClick = !firstRow.classList.contains('expanded');
+
+      return {
+        expanded_after_click: expandedAfterClick,
+        collapsed_after_second_click: collapsedAfterSecondClick,
+      };
+    });
+
+    console.log(JSON.stringify(result));
+""")
+        result = run_puppeteer(script, base_url=seeded_url, timeout=30)
+        assert "error" not in result, f"Row expand failed: {result.get('error')}"
+        assert result["expanded_after_click"], (
+            "Row should expand after HTMX filter swap"
+        )
+        assert result["collapsed_after_second_click"], (
+            "Row should collapse on second click after swap"
+        )
+
+    def test_triage_row_expand_after_search(self, seeded_url: str) -> None:
+        """Row expand should work after search filters the table."""
+        script = make_script("""\
+    await page.goto(`${BASE}/issues`, {waitUntil: 'networkidle0', timeout: 30000});
+    await new Promise(r => setTimeout(r, 1500));
+
+    // Type in search to trigger HTMX swap
+    const searchInput = await page.$('input[name="search"], input[type="search"]');
+    if (searchInput) {
+      await searchInput.type('a');
+      await new Promise(r => setTimeout(r, 2500));
+    }
+
+    // Try expanding a row
+    const result = await page.evaluate(() => {
+      const firstRow = document.querySelector('table[role="grid"] tbody tr');
+      if (!firstRow) return { error: 'no rows after search' };
+
+      const summaryCell = firstRow.querySelector('.summary-cell');
+      if (!summaryCell) return { error: 'no summary cell after search' };
+
+      summaryCell.click();
+      const expandedAfterClick = firstRow.classList.contains('expanded');
+      return { expanded_after_click: expandedAfterClick };
+    });
+
+    console.log(JSON.stringify(result));
+""")
+        result = run_puppeteer(script, base_url=seeded_url, timeout=30)
+        assert "error" not in result, f"Row expand failed: {result.get('error')}"
+        assert result["expanded_after_click"], (
+            "Row should expand after search filter swap"
+        )
