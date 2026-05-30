@@ -63,6 +63,16 @@ def _normalize_per_page(per_page: int) -> int:
     return DEFAULT_PER_PAGE
 
 
+def _parse_per_page(value: str) -> int:
+    """Parse per_page query string, returning DEFAULT_PER_PAGE for invalid values."""
+    if not value:
+        return DEFAULT_PER_PAGE
+    try:
+        return int(value)
+    except ValueError:
+        return DEFAULT_PER_PAGE
+
+
 def _build_issue_filters(
     *,
     project: str,
@@ -179,17 +189,13 @@ async def issue_list(
     sort: str = Query("staleness", alias="sort"),
     page: int = Query(1, ge=1),
     search: str = Query("", alias="search"),
-    per_page: int = Query(DEFAULT_PER_PAGE, alias="per_page"),
+    per_page: str = Query("", alias="per_page"),
     scores: str = Query(DEFAULT_SCORES, alias="scores"),
     llm_status: str = Query("", alias="llm_status"),
 ) -> HTMLResponse:
     """Render the issue triage list page."""
     templates: Jinja2Templates = request.app.state.templates
-    effective_per_page = (
-        per_page
-        if per_page in VALID_PER_PAGE or per_page == PER_PAGE_ALL
-        else DEFAULT_PER_PAGE
-    )
+    effective_per_page = _normalize_per_page(_parse_per_page(per_page))
 
     filters = IssueFilters(
         project=project,
@@ -226,17 +232,13 @@ async def issue_table_partial(
     sort: str = Query("staleness", alias="sort"),
     page: int = Query(1, ge=1),
     search: str = Query("", alias="search"),
-    per_page: int = Query(DEFAULT_PER_PAGE, alias="per_page"),
+    per_page: str = Query("", alias="per_page"),
     scores: str = Query(DEFAULT_SCORES, alias="scores"),
     llm_status: str = Query("", alias="llm_status"),
 ) -> HTMLResponse:
     """Return just the issue table partial (for HTMX swapping)."""
     templates: Jinja2Templates = request.app.state.templates
-    effective_per_page = (
-        per_page
-        if per_page in VALID_PER_PAGE or per_page == PER_PAGE_ALL
-        else DEFAULT_PER_PAGE
-    )
+    effective_per_page = _normalize_per_page(_parse_per_page(per_page))
 
     filters = IssueFilters(
         project=project,
@@ -302,7 +304,7 @@ async def issue_export(
     sort: str = Query("staleness", alias="sort"),
     page: int = Query(1, ge=1),
     search: str = Query("", alias="search"),
-    per_page: int = Query(DEFAULT_PER_PAGE, alias="per_page"),
+    per_page: str = Query("", alias="per_page"),
     scores: str = Query(DEFAULT_SCORES, alias="scores"),
     llm_status: str = Query("", alias="llm_status"),
 ) -> JSONResponse:

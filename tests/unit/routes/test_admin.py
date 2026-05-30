@@ -359,5 +359,3 @@ class TestAdminPage:
         assert 'hx-trigger="load, every 60s"' in response.text
         assert 'data-system-status-kind="collection"' in response.text
         assert 'data-system-status-kind="evaluation"' in response.text
-        assert 'data-system-status-value="last_collection"' in response.text
-        assert 'data-system-status-value="last_evaluation"' in response.text

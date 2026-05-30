@@ -6,7 +6,6 @@
 <section class="card" style="margin-bottom: 1.5rem;">
   <h3 style="margin-top: 0;">System Status</h3>
   <div
-    class="issue-page-status"
     data-system-status-poller
     hx-get="/admin/status"
     hx-trigger="load, every 60s"
@@ -23,21 +22,13 @@
         <span>Evaluation</span>
       </span>
     </div>
-    <span>
-      Last collection:
-      <strong data-system-status-value="last_collection">Never</strong>
-    </span>
-    <span>
-      Last evaluation:
-      <strong data-system-status-value="last_evaluation">Never</strong>
-    </span>
   </div>
   {% if collection_runs %}
-  <h4 style="margin-top: 1rem;">Recent Runs</h4>
-  <table>
+  <table style="margin-top: 1rem;">
     <thead>
       <tr>
         <th>Source</th>
+        <th>Started</th>
         <th>Status</th>
         <th>Projects</th>
         <th>Issues</th>
@@ -49,6 +40,7 @@
       {% for run in collection_runs %}
       <tr>
         <td>{{ run.source }}</td>
+        <td>{{ run.started_at.strftime("%Y-%m-%d %H:%M") if run.started_at else "—" }}</td>
         <td>{{ run.status }}</td>
         <td>{{ run.projects_processed }}</td>
         <td>{{ run.issues_collected }}</td>
@@ -68,6 +60,8 @@
       {% endfor %}
     </tbody>
   </table>
+  {% else %}
+  <p style="color: var(--app-text-muted); margin-top: 1rem;">No recent collection runs.</p>
   {% endif %}
 </section>
 

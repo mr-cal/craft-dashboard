@@ -50,8 +50,10 @@
         return;
       }
 
-      const fallbackValue = field.defaultValue || field.getAttribute("value") || "";
-      field.value = url.searchParams.get(field.name) ?? fallbackValue;
+      const paramValue = url.searchParams.get(field.name);
+      if (paramValue !== null && paramValue !== "") {
+        field.value = paramValue;
+      }
     });
   }
 
