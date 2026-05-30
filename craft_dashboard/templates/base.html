@@ -47,7 +47,27 @@
               <a class="p-navigation__link" href="/">Dashboard</a>
             </li>
             <li class="p-navigation__item {% if request.url.path.startswith('/issues') %}is-selected{% endif %}">
-              <a class="p-navigation__link" href="/issues">Issues & PRs</a>
+              <a class="p-navigation__link" href="/issues">
+                <span>Issues & PRs</span>
+                <span
+                  id="nav-system-status"
+                  class="system-status-badges"
+                  hx-get="/admin/status"
+                  hx-trigger="load, every 60s"
+                  hx-swap="none"
+                  hx-indicator="#loading-indicator"
+                  aria-label="Collection and evaluation status"
+                >
+                  <span class="system-status-indicator" data-system-status-kind="collection" title="Collection idle">
+                    <span class="system-status-dot"></span>
+                    <span class="system-status-short-label">C</span>
+                  </span>
+                  <span class="system-status-indicator" data-system-status-kind="evaluation" title="Evaluation idle">
+                    <span class="system-status-dot"></span>
+                    <span class="system-status-short-label">E</span>
+                  </span>
+                </span>
+              </a>
             </li>
             <li class="p-navigation__item {% if request.url.path.startswith('/stats') %}is-selected{% endif %}">
               <a class="p-navigation__link" href="/stats/trends">Stats</a>
@@ -177,8 +197,60 @@
           }
         }
 
+        function formatStatusTimestamp(value) {
+          if (!value) {
+            return "Never";
+          }
+
+          var date = new Date(value);
+          if (Number.isNaN(date.getTime())) {
+            return value;
+          }
+
+          return date.toLocaleString([], {
+            dateStyle: "medium",
+            timeStyle: "short",
+          });
+        }
+
+        function updateStatusIndicator(kind, running) {
+          document
+            .querySelectorAll('[data-system-status-kind="' + kind + '"]')
+            .forEach(function (element) {
+              var dot = element.querySelector(".system-status-dot");
+              var statusText = running ? "running" : "idle";
+              if (dot) {
+                dot.classList.toggle("is-running", running);
+              }
+              element.setAttribute(
+                "title",
+                kind.charAt(0).toUpperCase() + kind.slice(1) + " " + statusText
+              );
+            });
+        }
+
+        function updateStatusValue(key, value) {
+          document
+            .querySelectorAll('[data-system-status-value="' + key + '"]')
+            .forEach(function (element) {
+              element.textContent = formatStatusTimestamp(value);
+            });
+        }
+
+        function applySystemStatus(payload) {
+          if (!payload) {
+            return;
+          }
+
+          updateStatusIndicator("collection", Boolean(payload.collection_running));
+          updateStatusIndicator("evaluation", Boolean(payload.evaluation_running));
+          updateStatusValue("last_collection", payload.last_collection);
+          updateStatusValue("last_evaluation", payload.last_evaluation);
+        }
+
         window.showToast = showToast;
         window.dispatchHxTriggers = dispatchHxTriggers;
+        window.applySystemStatus = applySystemStatus;
 
         applyTheme(getTheme());
 
@@ -202,6 +274,19 @@
         document.body.addEventListener("toast", function (event) {
           var detail = event.detail || {};
           showToast(detail.message, detail.type);
+        });
+
+        document.body.addEventListener("htmx:afterRequest", function (event) {
+          var element = event.detail.elt;
+          if (!element || element.id !== "nav-system-status") {
+            return;
+          }
+
+          try {
+            applySystemStatus(JSON.parse(event.detail.xhr.responseText || "{}"));
+          } catch (error) {
+            console.error(error);
+          }
         });
 
         document.body.addEventListener("htmx:responseError", function(event) {

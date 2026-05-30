@@ -55,6 +55,25 @@ class CollectionRunSummary(TypedDict):
     errors: list[dict]
 
 
+class SystemStatus(TypedDict):
+    """Live collection and evaluation status payload."""
+
+    collection_running: bool
+    evaluation_running: bool
+    last_collection: datetime | None
+    last_evaluation: datetime | None
+
+
+_EVALUATION_SOURCES = {"llm", "evaluation"}
+
+
+def _ensure_utc(value: datetime | None) -> datetime | None:
+    """Attach UTC to naive timestamps returned by SQLite tests."""
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=UTC)
+
+
 class AdminService:
     """Service for admin dashboard data access."""
 
@@ -173,6 +192,34 @@ class AdminService:
             }
             for run in runs
         ]
+
+    async def get_system_status(self) -> SystemStatus:
+        """Get current system status (running processes, last run times)."""
+        running_sources = set(
+            await self.session.scalars(
+                select(CollectionRun.source).where(CollectionRun.status == "running")
+            )
+        )
+        last_collection = await self.session.scalar(
+            select(
+                func.max(
+                    func.coalesce(CollectionRun.finished_at, CollectionRun.started_at)
+                )
+            ).where(~CollectionRun.source.in_(_EVALUATION_SOURCES))
+        )
+        last_evaluation = await self.session.scalar(
+            select(func.max(LLMEvaluation.evaluated_at))
+        )
+        return {
+            "collection_running": any(
+                source not in _EVALUATION_SOURCES for source in running_sources
+            ),
+            "evaluation_running": any(
+                source in _EVALUATION_SOURCES for source in running_sources
+            ),
+            "last_collection": _ensure_utc(last_collection),
+            "last_evaluation": _ensure_utc(last_evaluation),
+        }
 
     async def update_schedule(self, project: str, days: list[int]) -> None:
         """Update the refresh schedule for a project."""

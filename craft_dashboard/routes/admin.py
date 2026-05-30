@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Header, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -125,6 +126,18 @@ async def admin_logout(request: Request) -> JSONResponse:
     )
     response.delete_cookie(_ADMIN_SESSION_COOKIE, path="/admin")
     return response
+
+
+@router.get("/status", response_class=JSONResponse)
+async def collection_status(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> JSONResponse:
+    """Return current collection/evaluation status."""
+    admin_service = AdminService(session)
+    status_payload = await admin_service.get_system_status()
+    request.state.system_status = status_payload
+    return JSONResponse(jsonable_encoder(status_payload))
 
 
 @router.get("", response_class=HTMLResponse)

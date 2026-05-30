@@ -3,6 +3,14 @@
 {% block content %}
 <h2>Issue &amp; PR Triage</h2>
 
+<div class="issue-page-status issue-detail-card">
+  <strong>System status</strong>
+  <div class="issue-page-status__meta">
+    <span>Last collection: <span data-system-status-value="last_collection">Never</span></span>
+    <span>Last evaluation: <span data-system-status-value="last_evaluation">Never</span></span>
+  </div>
+</div>
+
 <div class="filter-bar" id="issue-filters" data-shareable-url-root="/issues" data-export-url-root="/issues/export">
   <div class="filter-group">
     <label>Projects</label>
