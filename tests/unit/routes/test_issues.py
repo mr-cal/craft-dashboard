@@ -200,6 +200,26 @@ class TestIssueList:
         assert hx_get_count > 0
         assert hx_indicator_count == hx_get_count
 
+    def test_issues_page_includes_dark_mode_toggle_and_bootstrap_script(self) -> None:
+        """Issues page includes theme controls and early bootstrap logic."""
+        app = create_app()
+        app.dependency_overrides[get_db_session] = _override_issue_db_session
+
+        with (
+            patch.object(IssueRepository, "search", return_value=EMPTY_QUERY_RESULT),
+            patch.object(
+                IssueRepository, "get_project_names", return_value=["snapcraft"]
+            ),
+        ):
+            with TestClient(app) as client:
+                response = client.get("/issues")
+
+        assert response.status_code == 200
+        assert 'id="theme-toggle"' in response.text
+        assert 'localStorage.getItem("theme")' in response.text
+        assert "prefers-color-scheme: dark" in response.text
+        assert "is-dark-theme" in response.text
+
 
 class TestIssueTablePartial:
     """Tests for the issue table partial route."""

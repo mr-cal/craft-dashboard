@@ -1,3 +1,60 @@
+:root {
+  color-scheme: light;
+  --app-background: #f7f7f7;
+  --app-surface: #fff;
+  --app-surface-muted: #f8f9fa;
+  --app-text: #111;
+  --app-text-muted: #666;
+  --app-border: #cdcdcd;
+  --app-border-strong: #e5e5e5;
+  --app-filter-background: #fff;
+  --app-sort-active: #f0f5ff;
+  --app-row-hover: #f5f5f5;
+  --app-chip-background: #e5e5e5;
+  --app-chip-text: #333;
+  --app-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --app-score-high: #dc3545;
+  --app-score-medium: #ffc107;
+  --app-score-low: #28a745;
+  --app-action-background: #6c757d;
+  --app-tooltip-background: #333;
+  --app-tooltip-text: #fff;
+  --app-toast-error-bg: #c7162b;
+  --app-toast-text: #fff;
+}
+
+html.is-dark-theme {
+  color-scheme: dark;
+  --app-background: #13161b;
+  --app-surface: #1b1f27;
+  --app-surface-muted: #232834;
+  --app-text: #f3f3f3;
+  --app-text-muted: #c7c7c7;
+  --app-border: #4b5563;
+  --app-border-strong: #3c4657;
+  --app-filter-background: #1b1f27;
+  --app-sort-active: #22344f;
+  --app-row-hover: #252b36;
+  --app-chip-background: #394150;
+  --app-chip-text: #f5f5f5;
+  --app-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  --app-score-high: #ff6b7a;
+  --app-score-medium: #ffd166;
+  --app-score-low: #6ddf8d;
+  --app-action-background: #596273;
+  --app-tooltip-background: #0f131a;
+  --app-tooltip-text: #fff;
+  --app-toast-error-bg: #da3450;
+  --app-toast-text: #fff;
+}
+
+html,
+body,
+body.is-paper {
+  background: var(--app-background);
+  color: var(--app-text);
+}
+
 /* Override grid max-width */
 @supports (display: grid) {
   .p-navigation__row--25-75,
@@ -21,21 +78,21 @@
 }
 
 .not-used {
-  color: #aaa;
+  color: var(--app-text-muted);
   font-style: italic;
 }
 
 .outdated {
-  color: #c7162b;
+  color: var(--app-toast-error-bg);
   font-weight: 600;
 }
 
 .app-group-start {
-  border-left: 2px solid #e5e5e5;
+  border-left: 2px solid var(--app-border-strong);
 }
 
 .app-group-header {
-  border-left: 2px solid #e5e5e5;
+  border-left: 2px solid var(--app-border-strong);
 }
 
 /* ── Issue table: compact columns ── */
@@ -100,7 +157,7 @@ table[role="grid"] th .col-resize-handle {
   bottom: 0;
   width: 4px;
   cursor: col-resize;
-  background: #d9d9d9;
+  background: var(--app-border-strong);
   transition: background 0.15s;
 }
 
@@ -110,17 +167,25 @@ table[role="grid"] th .col-resize-handle.resizing {
 }
 
 table[role="grid"] th:hover .col-resize-handle {
-  background: #999;
+  background: var(--app-text-muted);
 }
 
 /* Active sort header highlight */
 table[role="grid"] th:has(a.is-active) {
-  background-color: #f0f5ff;
+  background-color: var(--app-sort-active);
+}
+
+table tbody tr {
+  background-color: var(--app-surface);
+}
+
+table tbody tr:nth-child(even) {
+  background-color: var(--app-surface-muted);
 }
 
 /* Row hover highlight (global for all tables) */
 table tbody tr:hover {
-  background-color: #f5f5f5;
+  background-color: var(--app-row-hover);
 }
 
 .score-badge {
@@ -131,26 +196,26 @@ table tbody tr:hover {
 }
 
 .score-high {
-  background-color: #dc3545;
-  color: white;
+  background-color: var(--app-score-high);
+  color: #fff;
 }
 
 .score-medium {
-  background-color: #ffc107;
-  color: black;
+  background-color: var(--app-score-medium);
+  color: #111;
 }
 
 .score-low {
-  background-color: #28a745;
-  color: white;
+  background-color: var(--app-score-low);
+  color: #fff;
 }
 
 .action-badge {
   display: inline-block;
   padding: 0.15rem 0.5rem;
   font-size: 0.8rem;
-  background-color: #6c757d;
-  color: white;
+  background-color: var(--app-action-background);
+  color: #fff;
 }
 
 .filter-bar {
@@ -159,6 +224,11 @@ table tbody tr:hover {
   align-items: flex-start;
   flex-wrap: wrap;
   margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  background: var(--app-filter-background);
+  box-shadow: var(--app-shadow);
 }
 
 .filter-bar select[name="type"] {
@@ -176,6 +246,7 @@ table tbody tr:hover {
 .filter-group label {
   font-size: 0.875rem;
   font-weight: bold;
+  color: var(--app-text);
 }
 
 /* Custom multi-select dropdown */
@@ -192,9 +263,9 @@ table tbody tr:hover {
 .multiselect__input-wrap {
   width: 100%;
   min-height: 2.4rem;
-  border: 1px solid #cdcdcd;
+  border: 1px solid var(--app-border);
   border-radius: 4px;
-  background: #fff;
+  background: var(--app-surface);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -216,7 +287,7 @@ table tbody tr:hover {
 }
 
 .multiselect__placeholder {
-  color: #666;
+  color: var(--app-text-muted);
   font-size: 0.875rem;
 }
 
@@ -229,8 +300,8 @@ table tbody tr:hover {
 .multiselect__chip {
   display: inline-flex;
   align-items: center;
-  background: #e5e5e5;
-  color: #333;
+  background: var(--app-chip-background);
+  color: var(--app-chip-text);
   border-radius: 999px;
   padding: 0.05rem 0.4rem;
   font-size: 0.8rem;
@@ -245,11 +316,11 @@ table tbody tr:hover {
   font-size: 1rem;
   line-height: 1;
   padding: 0;
-  color: #666;
+  color: var(--app-text-muted);
 }
 
 .multiselect__chip-remove:hover {
-  color: #333;
+  color: var(--app-text);
 }
 
 .multiselect__dropdown {
@@ -257,11 +328,11 @@ table tbody tr:hover {
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-  background: #fff;
-  border: 1px solid #cdcdcd;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
   border-radius: 4px;
   padding: 0.25rem;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--app-shadow);
   z-index: 60;
 }
 
@@ -284,7 +355,7 @@ table tbody tr:hover {
 }
 
 .multiselect__option:hover {
-  background: #f5f5f5;
+  background: var(--app-row-hover);
 }
 
 .multiselect__option input {
@@ -304,6 +375,26 @@ th a.is-active {
   color: #0066cc !important;
 }
 
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-width: 3rem;
+}
+
+.theme-toggle__icon--sun {
+  display: none;
+}
+
+html.is-dark-theme .theme-toggle__icon--sun {
+  display: inline;
+}
+
+html.is-dark-theme .theme-toggle__icon--moon {
+  display: none;
+}
+
 /* Tooltip for score column headers */
 [data-tooltip] {
   position: relative;
@@ -315,8 +406,8 @@ th a.is-active {
   bottom: calc(100% + 4px);
   left: 50%;
   transform: translateX(-50%);
-  background: #333;
-  color: #fff;
+  background: var(--app-tooltip-background);
+  color: var(--app-tooltip-text);
   padding: 0.4rem 0.6rem;
   border-radius: 4px;
   font-size: 0.78rem;

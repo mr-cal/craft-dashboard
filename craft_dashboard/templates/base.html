@@ -4,6 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}craft-dashboard{% endblock %}</title>
+    <script>
+      (function () {
+        var storedTheme = window.localStorage.getItem("theme");
+        var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        var useDarkTheme = storedTheme === "dark" || (!storedTheme && prefersDark);
+        document.documentElement.classList.toggle("is-dark-theme", useDarkTheme);
+        document.documentElement.dataset.theme = useDarkTheme ? "dark" : "light";
+      })();
+    </script>
     <link
       rel="stylesheet"
       href="https://assets.ubuntu.com/v1/vanilla_framework_version_4_44_0_min.css"
@@ -43,6 +52,18 @@
             <li class="p-navigation__item {% if request.url.path.startswith('/stats') %}is-selected{% endif %}">
               <a class="p-navigation__link" href="/stats/trends">Stats</a>
             </li>
+            <li class="p-navigation__item p-navigation__item--theme-toggle">
+              <button
+                id="theme-toggle"
+                class="p-navigation__link theme-toggle"
+                type="button"
+                aria-label="Switch to dark theme"
+                aria-pressed="false"
+              >
+                <span class="theme-toggle__icon theme-toggle__icon--sun" aria-hidden="true">☀</span>
+                <span class="theme-toggle__icon theme-toggle__icon--moon" aria-hidden="true">☾</span>
+              </button>
+            </li>
           </ul>
         </nav>
       </div>
@@ -63,11 +84,59 @@
         <a class="is-dark" href="https://github.com/mr-cal/craft-dashboard">craft-dashboard</a>
       </div>
     </footer>
-    <div id="htmx-error-toast" style="display:none;position:fixed;bottom:1rem;right:1rem;z-index:100;padding:0.75rem 1.5rem;background:#c7162b;color:white;border-radius:4px;font-size:0.875rem;max-width:400px;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+    <div id="htmx-error-toast" style="display:none;position:fixed;bottom:1rem;right:1rem;z-index:100;padding:0.75rem 1.5rem;background:var(--app-toast-error-bg);color:var(--app-toast-text);border-radius:4px;font-size:0.875rem;max-width:400px;box-shadow:var(--app-shadow);">
       <span id="htmx-error-message"></span>
-      <button onclick="this.parentElement.style.display='none'" style="margin-left:1rem;background:none;border:none;color:white;cursor:pointer;font-size:1.1rem;">&times;</button>
+      <button onclick="this.parentElement.style.display='none'" style="margin-left:1rem;background:none;border:none;color:var(--app-toast-text);cursor:pointer;font-size:1.1rem;">&times;</button>
     </div>
     <script>
+      (function () {
+        var storageKey = "theme";
+        var themeToggle = document.getElementById("theme-toggle");
+        var root = document.documentElement;
+        var systemPreference = window.matchMedia("(prefers-color-scheme: dark)");
+
+        function getTheme() {
+          var storedTheme = window.localStorage.getItem(storageKey);
+          if (storedTheme === "dark" || storedTheme === "light") {
+            return storedTheme;
+          }
+          return systemPreference.matches ? "dark" : "light";
+        }
+
+        function applyTheme(theme) {
+          var isDarkTheme = theme === "dark";
+          root.classList.toggle("is-dark-theme", isDarkTheme);
+          root.dataset.theme = theme;
+          if (!themeToggle) {
+            return;
+          }
+          themeToggle.setAttribute("aria-pressed", String(isDarkTheme));
+          themeToggle.setAttribute(
+            "aria-label",
+            isDarkTheme ? "Switch to light theme" : "Switch to dark theme"
+          );
+        }
+
+        applyTheme(getTheme());
+
+        if (themeToggle) {
+          themeToggle.addEventListener("click", function () {
+            var nextTheme = root.classList.contains("is-dark-theme") ? "light" : "dark";
+            window.localStorage.setItem(storageKey, nextTheme);
+            applyTheme(nextTheme);
+          });
+        }
+
+        if (systemPreference.addEventListener) {
+          systemPreference.addEventListener("change", function (event) {
+            if (window.localStorage.getItem(storageKey)) {
+              return;
+            }
+            applyTheme(event.matches ? "dark" : "light");
+          });
+        }
+      })();
+
       document.body.addEventListener("htmx:responseError", function(event) {
         var toast = document.getElementById("htmx-error-toast");
         var msg = document.getElementById("htmx-error-message");
