@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from craft_dashboard.routes.issues import _compute_age_days
+from craft_dashboard.repositories.issue_repository import _compute_age_days
 
 
 class TestComputeAgeDays:

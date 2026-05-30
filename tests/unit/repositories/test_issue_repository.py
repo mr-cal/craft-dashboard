@@ -1,4 +1,4 @@
-"""Tests for issue query helpers."""
+"""Tests for the issue repository."""
 
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
@@ -7,10 +7,10 @@ from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.views import IssueFilters, IssueQueryResult, IssueView
-from craft_dashboard.routes.issues import (
+from craft_dashboard.repositories.issue_repository import (
+    IssueRepository,
     _apply_author_role_filter,
     _compute_age_days,
-    _query_issues,
 )
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
@@ -33,7 +33,7 @@ class FrozenDateTime(datetime):
 
 
 async def _query(session, **kwargs):
-    result = await _query_issues(session, IssueFilters(**kwargs))
+    result = await IssueRepository(session).search(IssueFilters(**kwargs))
     return result.issues, result.total_count, result.total_pages
 
 
@@ -400,19 +400,25 @@ class TestComputeAgeDays:
         assert _compute_age_days(None) is None
 
     def test_today_returns_zero(self) -> None:
-        with patch("craft_dashboard.routes.issues.datetime", FrozenDateTime):
+        with patch(
+            "craft_dashboard.repositories.issue_repository.datetime", FrozenDateTime
+        ):
             assert _compute_age_days(FrozenDateTime.frozen_now) == 0
 
     def test_thirty_days_ago_returns_thirty(self) -> None:
         created_at = FrozenDateTime.frozen_now - timedelta(days=30)
 
-        with patch("craft_dashboard.routes.issues.datetime", FrozenDateTime):
+        with patch(
+            "craft_dashboard.repositories.issue_repository.datetime", FrozenDateTime
+        ):
             assert _compute_age_days(created_at) == 30
 
     def test_naive_datetime_is_handled(self) -> None:
         created_at = datetime(2025, 1, 1, 12, 0)
 
-        with patch("craft_dashboard.routes.issues.datetime", FrozenDateTime):
+        with patch(
+            "craft_dashboard.repositories.issue_repository.datetime", FrozenDateTime
+        ):
             assert _compute_age_days(created_at) == 30
 
 
@@ -422,7 +428,9 @@ class TestQueryIssuesFilters:
     ) -> None:
         await _seed_projects_and_issues(test_db_session)
 
-        result = await _query_issues(test_db_session, IssueFilters(sort_by="title"))
+        result = await IssueRepository(test_db_session).search(
+            IssueFilters(sort_by="title")
+        )
 
         assert isinstance(result, IssueQueryResult)
         assert result.total_count == 4

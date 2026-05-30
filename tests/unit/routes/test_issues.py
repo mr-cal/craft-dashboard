@@ -7,7 +7,7 @@ from unittest.mock import patch
 from craft_dashboard.app import create_app
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.views import IssueQueryResult
-from craft_dashboard.routes import issues as issues_routes
+from craft_dashboard.repositories.issue_repository import IssueRepository
 from fastapi.testclient import TestClient
 
 
@@ -31,8 +31,11 @@ class TestIssueList:
         app = create_app()
         app.dependency_overrides[get_db_session] = _override_issue_db_session
 
-        with patch.object(
-            issues_routes, "_query_issues", return_value=EMPTY_QUERY_RESULT
+        with (
+            patch.object(IssueRepository, "search", return_value=EMPTY_QUERY_RESULT),
+            patch.object(
+                IssueRepository, "get_project_names", return_value=["snapcraft"]
+            ),
         ):
             with TestClient(app) as client:
                 response = client.get("/issues")
@@ -45,8 +48,11 @@ class TestIssueList:
         app = create_app()
         app.dependency_overrides[get_db_session] = _override_issue_db_session
 
-        with patch.object(
-            issues_routes, "_query_issues", return_value=EMPTY_QUERY_RESULT
+        with (
+            patch.object(IssueRepository, "search", return_value=EMPTY_QUERY_RESULT),
+            patch.object(
+                IssueRepository, "get_project_names", return_value=["snapcraft"]
+            ),
         ):
             with TestClient(app) as client:
                 response = client.get("/issues")
@@ -59,8 +65,11 @@ class TestIssueList:
         app = create_app()
         app.dependency_overrides[get_db_session] = _override_issue_db_session
 
-        with patch.object(
-            issues_routes, "_query_issues", return_value=EMPTY_QUERY_RESULT
+        with (
+            patch.object(IssueRepository, "search", return_value=EMPTY_QUERY_RESULT),
+            patch.object(
+                IssueRepository, "get_project_names", return_value=["snapcraft"]
+            ),
         ):
             with TestClient(app) as client:
                 response = client.get("/issues")
