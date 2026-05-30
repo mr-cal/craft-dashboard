@@ -27,7 +27,7 @@ class TestIssueList:
         app = create_app()
         app.dependency_overrides[get_db_session] = _override_issue_db_session
 
-        with patch.object(issues_routes, "_query_issues", return_value=([], 1)):
+        with patch.object(issues_routes, "_query_issues", return_value=([], 0, 1)):
             with TestClient(app) as client:
                 response = client.get("/issues")
 
@@ -39,7 +39,7 @@ class TestIssueList:
         app = create_app()
         app.dependency_overrides[get_db_session] = _override_issue_db_session
 
-        with patch.object(issues_routes, "_query_issues", return_value=([], 1)):
+        with patch.object(issues_routes, "_query_issues", return_value=([], 0, 1)):
             with TestClient(app) as client:
                 response = client.get("/issues")
 
@@ -51,7 +51,7 @@ class TestIssueList:
         app = create_app()
         app.dependency_overrides[get_db_session] = _override_issue_db_session
 
-        with patch.object(issues_routes, "_query_issues", return_value=([], 1)):
+        with patch.object(issues_routes, "_query_issues", return_value=([], 0, 1)):
             with TestClient(app) as client:
                 response = client.get("/issues")
 

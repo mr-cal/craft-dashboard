@@ -29,6 +29,26 @@
 
 <hr class="p-rule" />
 
+<h3>LLM Token Usage</h3>
+<table>
+  <thead>
+    <tr>
+      <th>Total Evaluations</th>
+      <th>Total Tokens Used</th>
+      <th>Avg Tokens per Evaluation</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>{{ "{:,}".format(total_evaluations) }}</td>
+      <td>{{ "{:,}".format(total_tokens) }}</td>
+      <td>{{ "{:,.0f}".format(total_tokens / total_evaluations) if total_evaluations > 0 else "N/A" }}</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr class="p-rule" />
+
 <h3>Admin Actions</h3>
 <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
   <label for="admin-token" id="admin-token-label">Admin Token:</label>

@@ -24,6 +24,9 @@ class _EmptyResult:
     def __iter__(self):
         return iter(())
 
+    def one(self):
+        return SimpleNamespace(total_evaluations=0, total_tokens=0)
+
 
 class _ScalarResult:
     def __init__(self, items) -> None:

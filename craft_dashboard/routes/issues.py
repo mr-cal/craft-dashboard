@@ -105,8 +105,8 @@ async def _query_issues(
     search: str = "",
     items_per_page: int = DEFAULT_PER_PAGE,
     llm_status: str = "",
-) -> tuple[list[dict], int]:
-    """Query issues with filters and return (issues, total_pages)."""
+) -> tuple[list[dict], int, int]:
+    """Query issues with filters and return (issues, total_count, total_pages)."""
     query = (
         select(
             Issue,
@@ -129,8 +129,6 @@ async def _query_issues(
             query = query.where(Issue.state == state_list[0])
         elif state_list:
             query = query.where(Issue.state.in_(state_list))
-    else:
-        query = query.where(Issue.state == "open")
 
     if project:
         project_list = [p.strip() for p in project.split(",") if p.strip()]
@@ -245,7 +243,7 @@ async def _query_issues(
             }
         )
 
-    return issues, total_pages
+    return issues, total, total_pages
 
 
 @router.get("", response_class=HTMLResponse)
@@ -273,7 +271,7 @@ async def issue_list(
     if not active_scores:
         active_scores = DEFAULT_SCORES.split(",")
 
-    issues, total_pages = await _query_issues(
+    issues, total_count, total_pages = await _query_issues(
         session,
         state=state,
         project=project,
@@ -317,6 +315,7 @@ async def issue_list(
             "active_scores": active_scores,
             "all_scores": ALL_SCORES,
             "filter_llm_status": llm_status,
+            "total_count": total_count,
         },
     )
 
@@ -346,7 +345,7 @@ async def issue_table_partial(
     if not active_scores:
         active_scores = DEFAULT_SCORES.split(",")
 
-    issues, total_pages = await _query_issues(
+    issues, total_count, total_pages = await _query_issues(
         session,
         state=state,
         project=project,
@@ -382,5 +381,6 @@ async def issue_table_partial(
             "active_scores": active_scores,
             "all_scores": ALL_SCORES,
             "filter_llm_status": llm_status,
+            "total_count": total_count,
         },
     )

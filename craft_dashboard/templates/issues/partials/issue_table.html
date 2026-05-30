@@ -15,6 +15,9 @@
   "readiness": "Readiness",
 } %}
 <div id="issue-table">
+  <p class="u-text--muted" style="margin-bottom:0.5rem;">
+    Showing {{ issues|length }} of {{ total_count }} issue{{ "s" if total_count != 1 else "" }}
+  </p>
   <table role="grid" aria-label="Issues and pull requests">
     <colgroup>
       <col class="col-issue">

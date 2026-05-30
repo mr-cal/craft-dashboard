@@ -126,6 +126,7 @@ async def admin_page(
 
     # Get 7-day schedule with issue counts per day
     from craft_dashboard.models.issue import Issue
+    from craft_dashboard.models.llm_evaluation import LLMEvaluation
 
     now = datetime.now(UTC)
     schedule_days = []
@@ -155,12 +156,25 @@ async def admin_page(
             }
         )
 
+    # Get LLM evaluation token usage stats
+    token_stats_result = await session.execute(
+        select(
+            func.count(LLMEvaluation.id).label("total_evaluations"),
+            func.sum(LLMEvaluation.tokens_used).label("total_tokens"),
+        )
+    )
+    token_row = token_stats_result.one()
+    total_evaluations = token_row.total_evaluations or 0
+    total_tokens = token_row.total_tokens or 0
+
     return templates.TemplateResponse(
         request,
         "admin/index.html",
         {
             "project_names": project_names,
             "schedule_days": schedule_days,
+            "total_evaluations": total_evaluations,
+            "total_tokens": total_tokens,
         },
     )
 
