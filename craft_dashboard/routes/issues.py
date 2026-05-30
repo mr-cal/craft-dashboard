@@ -30,6 +30,43 @@ ALL_SCORES = {
 DEFAULT_SCORES = "staleness,readiness"
 
 
+async def _build_issue_context(
+    session: AsyncSession,
+    *,
+    filters: IssueFilters,
+    scores: str,
+) -> dict:
+    """Build the template context for issue list rendering."""
+    repo = IssueRepository(session)
+    result = await repo.search(filters)
+    project_names = await repo.get_project_names()
+
+    active_scores = [s.strip() for s in scores.split(",") if s.strip() in ALL_SCORES]
+    if not active_scores:
+        active_scores = DEFAULT_SCORES.split(",")
+
+    return {
+        "issues": result.issues,
+        "project_names": project_names,
+        "filter_project": filters.project,
+        "filter_source": filters.source,
+        "filter_state": filters.state,
+        "filter_type": filters.issue_type,
+        "filter_action": filters.action,
+        "filter_author_role": filters.author_role,
+        "filter_search": filters.search,
+        "sort_by": filters.sort_by,
+        "page": result.page,
+        "total_pages": result.total_pages,
+        "per_page": filters.items_per_page,
+        "filter_scores": scores,
+        "active_scores": active_scores,
+        "all_scores": ALL_SCORES,
+        "filter_llm_status": filters.llm_status,
+        "total_count": result.total_count,
+    }
+
+
 class IssueSort(StrEnum):
     """Valid sort fields for the issue list."""
 
@@ -70,10 +107,6 @@ async def issue_list(
         else DEFAULT_PER_PAGE
     )
 
-    active_scores = [s.strip() for s in scores.split(",") if s.strip() in ALL_SCORES]
-    if not active_scores:
-        active_scores = DEFAULT_SCORES.split(",")
-
     filters = IssueFilters(
         project=project,
         source=source,
@@ -87,34 +120,9 @@ async def issue_list(
         items_per_page=effective_per_page,
         llm_status=llm_status,
     )
-    repo = IssueRepository(session)
-    result = await repo.search(filters)
-    project_names = await repo.get_project_names()
+    context = await _build_issue_context(session, filters=filters, scores=scores)
 
-    return templates.TemplateResponse(
-        request,
-        "issues/list.html",
-        {
-            "issues": result.issues,
-            "project_names": project_names,
-            "filter_project": project,
-            "filter_source": source,
-            "filter_state": state,
-            "filter_type": issue_type,
-            "filter_action": action,
-            "filter_author_role": author_role,
-            "filter_search": search,
-            "sort_by": sort,
-            "page": result.page,
-            "total_pages": result.total_pages,
-            "per_page": effective_per_page,
-            "filter_scores": scores,
-            "active_scores": active_scores,
-            "all_scores": ALL_SCORES,
-            "filter_llm_status": llm_status,
-            "total_count": result.total_count,
-        },
-    )
+    return templates.TemplateResponse(request, "issues/list.html", context)
 
 
 @router.get("/table", response_class=HTMLResponse)
@@ -142,10 +150,6 @@ async def issue_table_partial(
         else DEFAULT_PER_PAGE
     )
 
-    active_scores = [s.strip() for s in scores.split(",") if s.strip() in ALL_SCORES]
-    if not active_scores:
-        active_scores = DEFAULT_SCORES.split(",")
-
     filters = IssueFilters(
         project=project,
         source=source,
@@ -159,28 +163,10 @@ async def issue_table_partial(
         items_per_page=effective_per_page,
         llm_status=llm_status,
     )
-    result = await IssueRepository(session).search(filters)
+    context = await _build_issue_context(session, filters=filters, scores=scores)
 
     return templates.TemplateResponse(
         request,
         "issues/partials/issue_table.html",
-        {
-            "issues": result.issues,
-            "filter_project": project,
-            "filter_source": source,
-            "filter_state": state,
-            "filter_type": issue_type,
-            "filter_action": action,
-            "filter_author_role": author_role,
-            "filter_search": search,
-            "sort_by": sort,
-            "page": result.page,
-            "total_pages": result.total_pages,
-            "per_page": effective_per_page,
-            "filter_scores": scores,
-            "active_scores": active_scores,
-            "all_scores": ALL_SCORES,
-            "filter_llm_status": llm_status,
-            "total_count": result.total_count,
-        },
+        context,
     )
