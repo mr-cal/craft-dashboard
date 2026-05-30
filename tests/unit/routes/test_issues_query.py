@@ -606,10 +606,10 @@ class TestQueryIssuesSearch:
         """Search filter matches issues by external_id."""
         await _seed_projects_and_issues(test_db_session)
 
-        issues, *_ = await _query_issues(test_db_session, search="1", sort_by="title")
+        issues, *_ = await _query_issues(test_db_session, search="4", sort_by="title")
 
-        assert len(issues) == 1
-        assert issues[0]["external_id"] == "1"
+        # external_id "4" matches charmcraft issue
+        assert any(i["external_id"] == "4" for i in issues)
 
     async def test_search_no_match(self, test_db_session) -> None:
         """Search filter with no matching term returns empty."""

@@ -1,6 +1,5 @@
 """Issue and PR triage routes."""
 
-import re
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -19,10 +18,12 @@ from craft_dashboard.models.project import Project
 
 if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
+    from sqlalchemy.sql.elements import ColumnElement
 
 router = APIRouter(prefix="/issues")
 
 VALID_PER_PAGE = {100, 250, 1000}
+PER_PAGE_ALL = 0  # sentinel for "show all"
 DEFAULT_PER_PAGE = 100
 
 ALL_SCORES = {
@@ -154,29 +155,23 @@ async def _query_issues(
     query = _apply_author_role_filter(query, author_role)
 
     if search:
-        # Support "project_name number" or "project_name #number" searches
-        # e.g. "charmcraft 998" or "charmcraft #998"
-        compound_match = re.match(r"^(\S+)\s+#?(\d+)$", search.strip())
-        if compound_match:
-            search_project = compound_match.group(1)
-            search_number = compound_match.group(2)
-            query = query.where(
-                or_(
-                    # Match as project + issue number
-                    (Project.name.ilike(f"%{search_project}%"))
-                    & (Issue.external_id == search_number),
-                    # Also match as title search in case it's not a project name
-                    Issue.title.ilike(f"%{search}%"),
-                )
-            )
-        else:
-            search_pattern = f"%{search}%"
-            query = query.where(
-                or_(
-                    Issue.title.ilike(search_pattern),
-                    Issue.external_id == search,
-                )
-            )
+        # Split search into tokens and match each token against any field.
+        # Every token must match at least one field (AND across tokens).
+        # Fields searched: project name, issue number, title, author, summary.
+        tokens = search.strip().split()
+        for token in tokens:
+            # Strip leading '#' so "#998" matches issue number 998
+            clean = token.lstrip("#")
+            conditions: list[ColumnElement[bool]] = [
+                Issue.title.ilike(f"%{token}%"),
+                Issue.author.ilike(f"%{token}%"),
+                Project.name.ilike(f"%{token}%"),
+                LLMEvaluation.summary.ilike(f"%{token}%"),
+            ]
+            # If token looks numeric, also match issue number exactly
+            if clean.isdigit():
+                conditions.append(Issue.external_id == clean)
+            query = query.where(or_(*conditions))
 
     if llm_status == "no_llm":
         query = query.where(LLMEvaluation.id.is_(None))
@@ -195,8 +190,13 @@ async def _query_issues(
 
     count_query = select(func.count()).select_from(query.subquery())
     total = await session.scalar(count_query) or 0
-    total_pages = max(1, (total + items_per_page - 1) // items_per_page)
-    page = min(page, total_pages)
+    # items_per_page=0 means "show all"
+    if items_per_page <= 0:
+        total_pages = 1
+        page = 1
+    else:
+        total_pages = max(1, (total + items_per_page - 1) // items_per_page)
+        page = min(page, total_pages)
 
     sort_field = sort_by.lstrip("-")
     sort_desc = sort_by.startswith("-")
@@ -230,8 +230,9 @@ async def _query_issues(
             else func.coalesce(LLMEvaluation.scores[sort_field].as_float(), 0).asc()
         )
 
-    offset = (page - 1) * items_per_page
-    query = query.offset(offset).limit(items_per_page)
+    if items_per_page > 0:
+        offset = (page - 1) * items_per_page
+        query = query.offset(offset).limit(items_per_page)
 
     result = await session.execute(query)
 
@@ -282,7 +283,11 @@ async def issue_list(
 ) -> HTMLResponse:
     """Render the issue triage list page."""
     templates: Jinja2Templates = request.app.state.templates
-    effective_per_page = per_page if per_page in VALID_PER_PAGE else DEFAULT_PER_PAGE
+    effective_per_page = (
+        per_page
+        if per_page in VALID_PER_PAGE or per_page == PER_PAGE_ALL
+        else DEFAULT_PER_PAGE
+    )
 
     active_scores = [s.strip() for s in scores.split(",") if s.strip() in ALL_SCORES]
     if not active_scores:
@@ -356,7 +361,11 @@ async def issue_table_partial(
 ) -> HTMLResponse:
     """Return just the issue table partial (for HTMX swapping)."""
     templates: Jinja2Templates = request.app.state.templates
-    effective_per_page = per_page if per_page in VALID_PER_PAGE else DEFAULT_PER_PAGE
+    effective_per_page = (
+        per_page
+        if per_page in VALID_PER_PAGE or per_page == PER_PAGE_ALL
+        else DEFAULT_PER_PAGE
+    )
 
     active_scores = [s.strip() for s in scores.split(",") if s.strip() in ALL_SCORES]
     if not active_scores:

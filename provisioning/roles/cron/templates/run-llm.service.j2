@@ -8,6 +8,6 @@ User={{ app_user }}
 Group={{ app_group }}
 WorkingDirectory={{ app_dir }}
 EnvironmentFile={{ app_dir }}/.env
-ExecStart={{ app_venv }}/bin/python scripts/run_llm.py --open-only
+ExecStart={{ app_venv }}/bin/python scripts/run_llm.py evaluate --open-only
 StandardOutput=journal
 StandardError=journal

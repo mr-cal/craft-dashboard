@@ -6,14 +6,15 @@ By default evaluates all issues (open and closed). Use --open-only
 for the daily cron job. Use --backend local for a local LLM server.
 
 Usage:
-    uv run scripts/run_llm.py                          # all issues, openrouter
-    uv run scripts/run_llm.py --open-only              # open issues only (cron mode)
-    uv run scripts/run_llm.py --force                  # re-evaluate all (ignore hash)
-    uv run scripts/run_llm.py --issue charmcraft#2687  # specific issue (implies --force)
-    uv run scripts/run_llm.py --incomplete             # only issues with missing data
-    uv run scripts/run_llm.py --stale-days 30          # issues not evaluated in 30 days
-    uv run scripts/run_llm.py --dry-run                # show count without evaluating
-    uv run scripts/run_llm.py --dry-run --stale-days 7 # see how many are stale
+    uv run scripts/run_llm.py evaluate                          # all issues, openrouter
+    uv run scripts/run_llm.py evaluate --open-only              # open issues only (cron)
+    uv run scripts/run_llm.py evaluate --force                  # re-evaluate all
+    uv run scripts/run_llm.py evaluate --issue charmcraft#2687  # specific issue
+    uv run scripts/run_llm.py evaluate --incomplete             # missing data only
+    uv run scripts/run_llm.py evaluate --stale-days 30          # stale evaluations
+    uv run scripts/run_llm.py evaluate --dry-run                # preview count
+    uv run scripts/run_llm.py clear-evaluations                 # delete all evaluations
+    uv run scripts/run_llm.py clear-evaluations --project snap  # delete for one project
 
 Environment variables:
     DATABASE_URL: PostgreSQL connection URL
@@ -480,7 +481,15 @@ async def _main(  # noqa: PLR0913
         await engine.dispose()
 
 
-@click.command()
+@click.group(invoke_without_command=True)
+@click.pass_context
+def cli(ctx: click.Context) -> None:
+    """LLM evaluation tool for craft-dashboard issues and PRs."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@cli.command(name="evaluate")
 @click.option("--project", default="", help="Only evaluate issues for this project.")
 @click.option("--limit", default=0, type=int, help="Max issues to evaluate (0=all).")
 @click.option(
@@ -531,7 +540,7 @@ async def _main(  # noqa: PLR0913
     default=False,
     help="Show how many issues would be evaluated without actually running.",
 )
-def main(  # noqa: PLR0913
+def evaluate_cmd(  # noqa: PLR0913
     project: str,
     limit: int,
     backend: str,
@@ -569,5 +578,85 @@ def main(  # noqa: PLR0913
     )
 
 
+@cli.command(name="clear-evaluations")
+@click.option(
+    "--project",
+    default="",
+    help="Only clear evaluations for this project (default: all).",
+)
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    default=False,
+    help="Skip confirmation prompt.",
+)
+def clear_evaluations_cmd(project: str, yes: bool) -> None:
+    """Delete all LLM evaluations and reset token counts.
+
+    Removes all rows from llm_evaluations. Use --project to limit
+    the scope to a specific project. Requires confirmation unless --yes.
+    """
+    asyncio.run(_clear_evaluations(project, yes))
+
+
+async def _clear_evaluations(project: str, yes: bool) -> None:
+    """Clear LLM evaluations from the database."""
+    from craft_dashboard.models.issue import Issue
+    from craft_dashboard.models.llm_evaluation import LLMEvaluation
+    from craft_dashboard.models.project import Project
+    from sqlalchemy import delete, func
+    from sqlalchemy import select as sa_select
+
+    settings = Settings()
+    engine = get_engine(settings.database_url)
+    session_factory = get_session_factory(engine)
+
+    try:
+        async with session_factory() as session:
+            # Count evaluations to be deleted
+            if project:
+                count_q = (
+                    sa_select(func.count(LLMEvaluation.id))
+                    .join(Issue, LLMEvaluation.issue_id == Issue.id)
+                    .join(Project, Issue.project_id == Project.id)
+                    .where(Project.name == project)
+                )
+            else:
+                count_q = sa_select(func.count(LLMEvaluation.id))
+            count = await session.scalar(count_q) or 0
+
+            if count == 0:
+                scope = f"for project '{project}'" if project else ""
+                logger.info("No evaluations found %s. Nothing to clear.", scope)
+                return
+
+            scope = f"for project '{project}'" if project else "across ALL projects"
+            if not yes:
+                click.confirm(
+                    f"Delete {count:,} LLM evaluations {scope}?",
+                    abort=True,
+                )
+
+            if project:
+                # Delete evaluations for issues belonging to the project
+                issue_ids = (
+                    sa_select(Issue.id)
+                    .join(Project, Issue.project_id == Project.id)
+                    .where(Project.name == project)
+                )
+                stmt = delete(LLMEvaluation).where(
+                    LLMEvaluation.issue_id.in_(issue_ids)
+                )
+            else:
+                stmt = delete(LLMEvaluation)
+
+            result = await session.execute(stmt)
+            await session.commit()
+            logger.info("Cleared %d evaluations %s.", result.rowcount, scope)
+    finally:
+        await engine.dispose()
+
+
 if __name__ == "__main__":
-    main()
+    cli()

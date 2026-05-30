@@ -30,19 +30,20 @@ _FETCH_CHART_DATA_SCRIPT = """\
       return !el || el.style.display === 'none';
     }, {timeout: 15000});
 
-    // Set view checkboxes
+    // Set view checkboxes via evaluate (they're inside a hidden dropdown)
     const views = VIEWS_CONFIG;
-    const maintainers = await page.$('#view-maintainers');
-    const contributors = await page.$('#view-contributors');
-    const bots = await page.$('#view-bots');
-
-    const mChecked = await page.evaluate(el => el.checked, maintainers);
-    const cChecked = await page.evaluate(el => el.checked, contributors);
-    const bChecked = await page.evaluate(el => el.checked, bots);
-
-    if (views.maintainers !== mChecked) await maintainers.click();
-    if (views.contributors !== cChecked) await contributors.click();
-    if (views.bots !== bChecked) await bots.click();
+    await page.evaluate((v) => {
+      const checkboxes = document.querySelectorAll(
+        '.multiselect[data-name="author-groups"] input[type="checkbox"]'
+      );
+      const mapping = {maintainers: v.maintainers, contributors: v.contributors, bots: v.bots};
+      checkboxes.forEach(cb => {
+        if (cb.value in mapping && cb.checked !== mapping[cb.value]) {
+          cb.checked = mapping[cb.value];
+          cb.dispatchEvent(new Event('change', {bubbles: true}));
+        }
+      });
+    }, views);
 
     await new Promise(r => setTimeout(r, 800));
 
