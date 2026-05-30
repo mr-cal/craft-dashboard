@@ -2,17 +2,31 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict
 
-from craft_dashboard.llm.exceptions import LLMQuotaError, LLMValidationError
+import httpx
+from craft_dashboard.llm.exceptions import (
+    LLMQuotaError,
+    LLMRateLimitError,
+    LLMTimeoutError,
+    LLMValidationError,
+)
 from scripts.llm.queries import IssueFilter, fetch_issue_evaluation_targets
 from scripts.llm.storage import store_evaluation_result
 from scripts.llm.validation import validate_evaluation_result
+from tenacity import (
+    AsyncRetrying,
+    RetryCallState,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 if TYPE_CHECKING:
-    from craft_dashboard.llm.evaluator import IssueEvaluator
+    from craft_dashboard.llm.evaluator import EvaluationResult, IssueEvaluator
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
@@ -32,6 +46,49 @@ class DryRunEvaluationStats(EvaluationStats):
 
 
 logger = logging.getLogger(__name__)
+_RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503})
+_retry_sleep = asyncio.sleep
+
+
+def _is_retryable_evaluation_error(exc: BaseException) -> bool:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _RETRYABLE_STATUS_CODES
+    return isinstance(exc, (httpx.TimeoutException, LLMTimeoutError, LLMRateLimitError))
+
+
+def _log_retry_attempt(retry_state: RetryCallState, *, issue_ref: str) -> None:
+    exception = retry_state.outcome.exception() if retry_state.outcome else None
+    if exception is None:
+        return
+    logger.warning(
+        "Retrying %s after attempt %d/%d in %.1fs: %s",
+        issue_ref,
+        retry_state.attempt_number,
+        3,
+        retry_state.next_action.sleep,
+        exception,
+    )
+
+
+async def _evaluate_issue_with_retries(
+    evaluator: IssueEvaluator,
+    issue_kwargs: dict[str, object],
+    issue_ref: str,
+) -> EvaluationResult | None:
+    async for attempt in AsyncRetrying(
+        retry=retry_if_exception(_is_retryable_evaluation_error),
+        wait=wait_exponential(multiplier=2, min=2, max=8),
+        stop=stop_after_attempt(3),
+        before_sleep=lambda retry_state: _log_retry_attempt(
+            retry_state, issue_ref=issue_ref
+        ),
+        sleep=_retry_sleep,
+        reraise=True,
+    ):
+        with attempt:
+            return await evaluator.evaluate_issue(**issue_kwargs)
+    msg = f"Retry loop exited unexpectedly for {issue_ref}"
+    raise RuntimeError(msg)
 
 
 def _log_progress(
@@ -111,20 +168,26 @@ async def _evaluate_issues(  # noqa: PLR0913
             "[%d/%d] Evaluating %s: %s", idx, total_to_eval, issue_ref, issue.title[:60]
         )
 
+        issue_kwargs = {
+            "title": issue.title,
+            "body": issue.body,
+            "issue_type": issue.issue_type,
+            "labels": labels,
+            "age_days": age_days,
+            "last_activity_days": last_activity_days,
+            "author": issue.author or "unknown",
+            "is_maintainer": issue.author in maintainers if issue.author else False,
+            "comment_count": len(issue_comments),
+            "comments": issue_comments,
+            "pr_details": pr_details,
+            "existing_hash": existing_hash,
+        }
+
         try:
-            result = await evaluator.evaluate_issue(
-                title=issue.title,
-                body=issue.body,
-                issue_type=issue.issue_type,
-                labels=labels,
-                age_days=age_days,
-                last_activity_days=last_activity_days,
-                author=issue.author or "unknown",
-                is_maintainer=issue.author in maintainers if issue.author else False,
-                comment_count=len(issue_comments),
-                comments=issue_comments,
-                pr_details=pr_details,
-                existing_hash=existing_hash,
+            result = await _evaluate_issue_with_retries(
+                evaluator,
+                issue_kwargs,
+                issue_ref,
             )
         except LLMQuotaError:
             logger.warning(

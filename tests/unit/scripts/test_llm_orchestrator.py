@@ -4,8 +4,14 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
-from craft_dashboard.llm.exceptions import LLMQuotaError, LLMValidationError
+from craft_dashboard.llm.exceptions import (
+    LLMQuotaError,
+    LLMRateLimitError,
+    LLMTimeoutError,
+    LLMValidationError,
+)
 from craft_dashboard.models.issue import Issue
 from scripts.llm.orchestrator import _evaluate_issues
 from scripts.llm.queries import IssueEvaluationTarget
@@ -30,6 +36,25 @@ def _make_issue(*, issue_id: int, issue_type: str = "issue") -> Issue:
         updated_at=now,
         last_fetched_at=now,
     )
+
+
+def _valid_result(*, issue_hash: str) -> dict:
+    return {
+        "summary": "Issue still looks actionable because the report has clear details.",
+        "suggested_action": "keep_open",
+        "suggested_action_reason": "Recent comments keep the report active.",
+        "scores": {
+            "staleness": 10,
+            "duplicateness": 0,
+            "complexity": 30,
+            "support_request": 5,
+            "readiness": 90,
+        },
+        "tokens_used": 77,
+        "prompt_tokens": 30,
+        "completion_tokens": 47,
+        "issue_data_hash": issue_hash,
+    }
 
 
 class TestEvaluateIssues:
@@ -92,22 +117,7 @@ class TestEvaluateIssues:
         evaluator = SimpleNamespace(
             evaluate_issue=AsyncMock(
                 side_effect=[
-                    {
-                        "summary": "Issue still looks actionable because the report has clear details.",
-                        "suggested_action": "keep_open",
-                        "suggested_action_reason": "Recent comments keep the report active.",
-                        "scores": {
-                            "staleness": 10,
-                            "duplicateness": 0,
-                            "complexity": 30,
-                            "support_request": 5,
-                            "readiness": 90,
-                        },
-                        "tokens_used": 77,
-                        "prompt_tokens": 30,
-                        "completion_tokens": 47,
-                        "issue_data_hash": "new-hash",
-                    },
+                    _valid_result(issue_hash="new-hash"),
                     None,
                 ]
             ),
@@ -214,20 +224,8 @@ class TestEvaluateIssues:
             evaluate_issue=AsyncMock(
                 side_effect=[
                     {
+                        **_valid_result(issue_hash="hash-1"),
                         "summary": "too short",
-                        "suggested_action": "keep_open",
-                        "suggested_action_reason": "Looks fine",
-                        "scores": {
-                            "staleness": 10,
-                            "duplicateness": 0,
-                            "complexity": 30,
-                            "support_request": 5,
-                            "readiness": 90,
-                        },
-                        "tokens_used": 10,
-                        "prompt_tokens": 4,
-                        "completion_tokens": 6,
-                        "issue_data_hash": "hash-1",
                     },
                     None,
                 ]
@@ -248,6 +246,108 @@ class TestEvaluateIssues:
             )
 
         assert evaluator.evaluate_issue.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_retries_transient_timeout_and_stores_result(
+        self, monkeypatch, caplog
+    ) -> None:
+        target = IssueEvaluationTarget(
+            issue=_make_issue(issue_id=1),
+            project_name="charmcraft",
+            issue_data_hash=None,
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator._retry_sleep",
+            AsyncMock(),
+        )
+        evaluator = SimpleNamespace(
+            evaluate_issue=AsyncMock(
+                side_effect=[
+                    LLMTimeoutError("timeout"),
+                    _valid_result(issue_hash="hash-1"),
+                ]
+            ),
+            evaluation_model="eval-model",
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
+            AsyncMock(return_value=[target]),
+        )
+        store_result = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.store_evaluation_result", store_result
+        )
+
+        caplog.set_level("WARNING")
+        stats = await _evaluate_issues(
+            session_factory=object(),
+            evaluator=evaluator,
+            maintainers=set(),
+        )
+
+        assert stats == {"evaluated": 1, "skipped": 0, "errored": 0, "total_tokens": 77}
+        assert "Retrying charmcraft#1 after attempt 1/3 in 2.0s" in caplog.text
+        assert evaluator.evaluate_issue.await_count == 2
+        store_result.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_moves_to_next_issue_after_retry_exhaustion(
+        self, monkeypatch
+    ) -> None:
+        targets = [
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=1),
+                project_name="charmcraft",
+                issue_data_hash=None,
+            ),
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=2),
+                project_name="snapcraft",
+                issue_data_hash=None,
+            ),
+        ]
+        rate_limit_response = httpx.Response(
+            429,
+            request=httpx.Request("POST", "https://example.test/llm"),
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator._retry_sleep",
+            AsyncMock(),
+        )
+        evaluator = SimpleNamespace(
+            evaluate_issue=AsyncMock(
+                side_effect=[
+                    httpx.HTTPStatusError(
+                        "rate limited",
+                        request=rate_limit_response.request,
+                        response=rate_limit_response,
+                    ),
+                    LLMRateLimitError("slow down"),
+                    LLMTimeoutError("timeout"),
+                    _valid_result(issue_hash="hash-2"),
+                ]
+            ),
+            evaluation_model="eval-model",
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
+            AsyncMock(return_value=targets),
+        )
+        store_result = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.store_evaluation_result", store_result
+        )
+
+        stats = await _evaluate_issues(
+            session_factory=object(),
+            evaluator=evaluator,
+            maintainers=set(),
+        )
+
+        assert stats == {"evaluated": 1, "skipped": 0, "errored": 1, "total_tokens": 77}
+        assert evaluator.evaluate_issue.await_count == 4
+        store_result.assert_awaited_once()
+        assert store_result.await_args.kwargs["issue_id"] == 2
 
     @pytest.mark.asyncio
     async def test_stops_when_quota_is_exhausted(self, monkeypatch) -> None:
