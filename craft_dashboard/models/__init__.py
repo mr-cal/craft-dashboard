@@ -1,6 +1,8 @@
 """SQLAlchemy models for craft-dashboard."""
 
 from craft_dashboard.models.base import Base
+from craft_dashboard.models.collection_run import CollectionRun
+from craft_dashboard.models.collection_watermark import CollectionWatermark
 from craft_dashboard.models.dependency import Dependency
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
@@ -12,6 +14,8 @@ from craft_dashboard.models.views import IssueFilters, IssueQueryResult, IssueVi
 
 __all__ = [
     "Base",
+    "CollectionRun",
+    "CollectionWatermark",
     "Dependency",
     "Issue",
     "LLMEvaluation",

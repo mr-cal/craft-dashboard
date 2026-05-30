@@ -20,6 +20,8 @@ import pathlib
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
 
 import click
 from sqlalchemy import select
@@ -28,6 +30,7 @@ from sqlalchemy.dialects.postgresql import insert
 # Add project root to path
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
+from craft_dashboard.collectors import RateLimitError
 from craft_dashboard.collectors.dependencies import DependencyCollector
 from craft_dashboard.collectors.github import GitHubCollector
 from craft_dashboard.collectors.launchpad import LaunchpadCollector
@@ -42,6 +45,8 @@ from craft_dashboard.collectors.snapshots import (
 )
 from craft_dashboard.config import load_config
 from craft_dashboard.database import get_engine, get_session_factory
+from craft_dashboard.models.collection_run import CollectionRun
+from craft_dashboard.models.collection_watermark import CollectionWatermark
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.refresh_schedule import RefreshSchedule
 from craft_dashboard.settings import Settings
@@ -59,11 +64,13 @@ class CollectionStats:
 
     projects_processed: set[str] = field(default_factory=set)
     issues_collected: int = 0
+    errors: list[dict[str, Any]] = field(default_factory=list)
 
     def merge(self, other: "CollectionStats") -> None:
         """Merge another collection summary into this one."""
         self.projects_processed.update(other.projects_processed)
         self.issues_collected += other.issues_collected
+        self.errors.extend(other.errors)
 
 
 def _format_duration(seconds: float) -> str:
@@ -105,6 +112,82 @@ async def _get_or_create_project(
 
     result = await session.execute(select(Project.id).where(Project.name == name))
     return result.scalar_one()
+
+
+async def _get_collection_watermark(
+    session: object, project_id: int, source: str
+) -> datetime | None:
+    """Return the latest successful collection timestamp for a project source."""
+    result = await session.execute(
+        select(CollectionWatermark.last_collected_at).where(
+            CollectionWatermark.project_id == project_id,
+            CollectionWatermark.source == source,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def _upsert_collection_watermark(
+    session: object,
+    project_id: int,
+    source: str,
+    collected_at: datetime | None = None,
+) -> None:
+    """Persist the latest successful collection timestamp for a project source."""
+    collected_at = collected_at or datetime.now(UTC)
+    stmt = insert(CollectionWatermark).values(
+        project_id=project_id,
+        source=source,
+        last_collected_at=collected_at,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["project_id", "source"],
+        set_={"last_collected_at": stmt.excluded.last_collected_at},
+    )
+    await session.execute(stmt)
+    await session.commit()
+
+
+async def _create_collection_run(source: str, session_factory: object) -> CollectionRun:
+    """Create a running collection health record."""
+    async with session_factory() as session:
+        run = CollectionRun(
+            source=source,
+            started_at=datetime.now(UTC),
+            status="running",
+            projects_processed=0,
+            issues_collected=0,
+            errors=[],
+        )
+        session.add(run)
+        await session.commit()
+        await session.refresh(run)
+        return run
+
+
+async def _finish_collection_run(
+    run: CollectionRun,
+    session_factory: object,
+    *,
+    status: str,
+    projects_processed: int,
+    issues_collected: int,
+    errors: list[dict[str, Any]],
+) -> None:
+    """Finalize a collection health record with stats and errors."""
+    async with session_factory() as session:
+        db_run = await session.get(CollectionRun, run.id)
+        if db_run is None:
+            return
+
+        finished_at = datetime.now(UTC)
+        db_run.finished_at = finished_at
+        db_run.status = status
+        db_run.projects_processed = projects_processed
+        db_run.issues_collected = issues_collected
+        db_run.errors = errors
+        db_run.duration_seconds = (finished_at - db_run.started_at).total_seconds()
+        await session.commit()
 
 
 def _get_dep_branches(
@@ -171,6 +254,7 @@ async def _collect_github(
     limit: int = 0,
     projects: list[str] | None = None,
     run_started_at: float | None = None,
+    full_refresh: bool = False,
 ) -> CollectionStats:
     """Run GitHub data collection for all projects due for refresh."""
     collector = GitHubCollector(
@@ -180,6 +264,16 @@ async def _collect_github(
     )
     stats = CollectionStats()
     bots = set(getattr(config, "bots", []))
+    rate_limit = collector.check_rate_limit()
+    logger.info(
+        "GitHub API quota: %d/%d remaining (reset at %s)",
+        rate_limit["remaining"],
+        rate_limit["limit"],
+        rate_limit["reset_at"],
+    )
+    if int(rate_limit["remaining"]) <= 0:
+        raise RateLimitError("GitHub API rate limit exhausted before collection starts")
+    collector.wait_for_rate_limit()
 
     project_list = projects if projects else config.craft_projects
     for i, project_name in enumerate(project_list):
@@ -274,6 +368,25 @@ async def _collect_github(
                 )
                 continue
 
+            watermark = (
+                None
+                if full_refresh
+                else await _get_collection_watermark(session, project_id, "github")
+            )
+            if full_refresh:
+                logger.info("  canonical/%s: full collection requested", project_name)
+            elif watermark is not None:
+                logger.info(
+                    "  canonical/%s: incremental collection since %s",
+                    project_name,
+                    watermark.isoformat(),
+                )
+            else:
+                logger.info(
+                    "  canonical/%s: full collection (no watermark found)",
+                    project_name,
+                )
+
             try:
                 issues_started_at = time.monotonic()
                 issues_collected = await collector.collect_issues(
@@ -282,6 +395,7 @@ async def _collect_github(
                     session,
                     limit=limit,
                     refresh_age_days=settings.refresh_age_days,
+                    since=watermark,
                 )
                 stats.issues_collected += issues_collected
                 logger.info(
@@ -307,6 +421,7 @@ async def _collect_github(
                 await update_refresh_schedule(
                     project_id, "github", config.refresh_interval_days, session
                 )
+                await _upsert_collection_watermark(session, project_id, "github")
                 logger.info(
                     "Completed GitHub data for %s in %s",
                     project_name,
@@ -314,11 +429,20 @@ async def _collect_github(
                 )
             except Exception as exc:
                 logger.exception("Failed to collect GitHub data for %s", project_name)
+                stats.errors.append({"project": project_name, "error": str(exc)})
                 async with session_factory() as err_session:
                     await record_refresh_error(
                         project_id, "github", str(exc), err_session
                     )
-                continue
+
+            rate_limit = collector.check_rate_limit()
+            logger.info(
+                "GitHub API quota after %s: %d/%d remaining",
+                project_name,
+                rate_limit["remaining"],
+                rate_limit["limit"],
+            )
+            collector.wait_for_rate_limit()
 
             # Avoid GitHub secondary rate limits between repos
             await asyncio.sleep(1)
@@ -362,28 +486,33 @@ async def _collect_launchpad(
                 )
 
             logger.info("Collecting Launchpad data for %s%s", lp_name, elapsed)
-            bugs_started_at = time.monotonic()
-            bug_count = await collector.collect_bugs(lp_name, project_id, session)
-            stats.issues_collected += bug_count
-            logger.info(
-                "  %s: %d bugs fetched in %s",
-                lp_project_name,
-                bug_count,
-                _format_duration(time.monotonic() - bugs_started_at),
-            )
+            try:
+                bugs_started_at = time.monotonic()
+                bug_count = await collector.collect_bugs(lp_name, project_id, session)
+                stats.issues_collected += bug_count
+                logger.info(
+                    "  %s: %d bugs fetched in %s",
+                    lp_project_name,
+                    bug_count,
+                    _format_duration(time.monotonic() - bugs_started_at),
+                )
 
-            snapshot_started_at = time.monotonic()
-            await generate_snapshot(
-                project_id,
-                session,
-                set(config.launchpad_maintainers),
-                bots=bots,
-            )
-            logger.info(
-                "  Generated snapshot for %s in %s",
-                lp_project_name,
-                _format_duration(time.monotonic() - snapshot_started_at),
-            )
+                snapshot_started_at = time.monotonic()
+                await generate_snapshot(
+                    project_id,
+                    session,
+                    set(config.launchpad_maintainers),
+                    bots=bots,
+                )
+                await _upsert_collection_watermark(session, project_id, "launchpad")
+                logger.info(
+                    "  Generated snapshot for %s in %s",
+                    lp_project_name,
+                    _format_duration(time.monotonic() - snapshot_started_at),
+                )
+            except Exception as exc:
+                logger.exception("Failed to collect Launchpad data for %s", lp_name)
+                stats.errors.append({"project": lp_name, "error": str(exc)})
 
     return stats
 
@@ -393,6 +522,7 @@ async def _main(
     limit: int,
     projects: list[str],
     verbose: bool,
+    full_refresh: bool = False,
 ) -> None:
     """Run data collection."""
     settings = Settings()
@@ -413,29 +543,68 @@ async def _main(
         logger.info("Issue collection limit: %d per repo", limit)
     if project_filter:
         logger.info("Project filter: %s", project_filter)
+    if full_refresh:
+        logger.info("Full collection mode enabled; ignoring saved watermarks")
+    else:
+        logger.info("Incremental collection mode enabled; using saved watermarks")
 
     run_started_at = time.monotonic()
     stats = CollectionStats()
 
+    async def _run_source(
+        source_name: str,
+        collector_call: object,
+    ) -> CollectionStats:
+        run = await _create_collection_run(source_name, session_factory)
+        try:
+            source_stats = await collector_call
+        except Exception as exc:
+            await _finish_collection_run(
+                run,
+                session_factory,
+                status="failed",
+                projects_processed=0,
+                issues_collected=0,
+                errors=[{"source": source_name, "error": str(exc)}],
+            )
+            raise
+
+        await _finish_collection_run(
+            run,
+            session_factory,
+            status="completed",
+            projects_processed=len(source_stats.projects_processed),
+            issues_collected=source_stats.issues_collected,
+            errors=source_stats.errors,
+        )
+        return source_stats
+
     try:
         if source in ("all", "github"):
             stats.merge(
-                await _collect_github(
-                    settings,
-                    config,
-                    session_factory,
-                    limit=limit,
-                    projects=project_filter,
-                    run_started_at=run_started_at,
+                await _run_source(
+                    "github",
+                    _collect_github(
+                        settings,
+                        config,
+                        session_factory,
+                        limit=limit,
+                        projects=project_filter,
+                        run_started_at=run_started_at,
+                        full_refresh=full_refresh,
+                    ),
                 )
             )
         if source in ("all", "launchpad"):
             stats.merge(
-                await _collect_launchpad(
-                    config,
-                    session_factory,
-                    projects=project_filter,
-                    run_started_at=run_started_at,
+                await _run_source(
+                    "launchpad",
+                    _collect_launchpad(
+                        config,
+                        session_factory,
+                        projects=project_filter,
+                        run_started_at=run_started_at,
+                    ),
                 )
             )
         logger.info(
@@ -494,14 +663,23 @@ async def _main(
     default=False,
     help="Enable debug logging (individual issues, API calls). Overrides LOG_LEVEL.",
 )
+@click.option(
+    "--full-refresh",
+    is_flag=True,
+    default=False,
+    help="Ignore saved watermarks and run full collection where refresh is due.",
+)
 def main(
     source: str,
     limit: int,
     projects: tuple[str, ...],
     verbose: bool,
+    full_refresh: bool,
 ) -> None:
     """Collect data from external sources."""
-    asyncio.run(_main(source, limit, list(projects), verbose))
+    asyncio.run(
+        _main(source, limit, list(projects), verbose, full_refresh=full_refresh)
+    )
 
 
 if __name__ == "__main__":
