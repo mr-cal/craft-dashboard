@@ -67,21 +67,46 @@ class TestComputeIssueHash:
 
     def test_same_content_same_hash(self) -> None:
         """Identical content produces identical hashes."""
-        hash1 = _compute_issue_hash("title", "body", "open", ["bug"])
-        hash2 = _compute_issue_hash("title", "body", "open", ["bug"])
+        hash1 = _compute_issue_hash(
+            "snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            "When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
+            "open",
+            ["bug", "priority-high"],
+        )
+        hash2 = _compute_issue_hash(
+            "snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            "When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
+            "open",
+            ["bug", "priority-high"],
+        )
 
         assert hash1 == hash2
 
     def test_different_content_different_hash(self) -> None:
         """Different content produces different hashes."""
-        hash1 = _compute_issue_hash("title1", "body", "open", ["bug"])
-        hash2 = _compute_issue_hash("title2", "body", "open", ["bug"])
+        hash1 = _compute_issue_hash(
+            "snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            "When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
+            "open",
+            ["bug", "priority-high"],
+        )
+        hash2 = _compute_issue_hash(
+            "charmcraft deploy times out on large bundles",
+            "Deploying a large bundle stalls while charmcraft waits for the controller response.",
+            "open",
+            ["needs-triage"],
+        )
 
         assert hash1 != hash2
 
     def test_hash_is_hex_string(self) -> None:
         """Hash is a 64-character hex string (SHA-256)."""
-        result = _compute_issue_hash("title", "body", "open", [])
+        result = _compute_issue_hash(
+            "Add support for core24 base",
+            "Please add support for `base: core24` so new snaps can target Ubuntu 24.04.",
+            "open",
+            ["enhancement", "snapcraft"],
+        )
 
         assert len(result) == 64
         assert all(c in "0123456789abcdef" for c in result)

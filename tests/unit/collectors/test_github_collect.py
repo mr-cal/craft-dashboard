@@ -76,22 +76,56 @@ class TestClassifyIssueEdgeCases:
 class TestComputeIssueHashEdgeCases:
     def test_none_body_matches_empty_body_hash(self) -> None:
         assert _compute_issue_hash(
-            "title", None, "open", ["bug"]
-        ) == _compute_issue_hash("title", "", "open", ["bug"])
+            "snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            None,
+            "open",
+            ["bug", "priority-high"],
+        ) == _compute_issue_hash(
+            "snapcraft pack fails with LXD backend on Ubuntu 24.04",
+            "",
+            "open",
+            ["bug", "priority-high"],
+        )
 
     def test_label_order_does_not_change_hash(self) -> None:
         assert _compute_issue_hash(
-            "title", "body", "open", ["zeta", "alpha"]
-        ) == _compute_issue_hash("title", "body", "open", ["alpha", "zeta"])
+            "Add support for core24 base",
+            "Please add support for `base: core24` so new snaps can target Ubuntu 24.04.",
+            "open",
+            ["snapcraft", "enhancement"],
+        ) == _compute_issue_hash(
+            "Add support for core24 base",
+            "Please add support for `base: core24` so new snaps can target Ubuntu 24.04.",
+            "open",
+            ["enhancement", "snapcraft"],
+        )
 
     def test_different_state_changes_hash(self) -> None:
         assert _compute_issue_hash(
-            "title", "body", "open", ["bug"]
-        ) != _compute_issue_hash("title", "body", "closed", ["bug"])
+            "charmcraft deploy times out on large bundles",
+            "Deploying a large bundle stalls while charmcraft waits for the controller response.",
+            "open",
+            ["needs-triage"],
+        ) != _compute_issue_hash(
+            "charmcraft deploy times out on large bundles",
+            "Deploying a large bundle stalls while charmcraft waits for the controller response.",
+            "closed",
+            ["needs-triage"],
+        )
 
     def test_same_inputs_are_deterministic(self) -> None:
-        hash1 = _compute_issue_hash("title", "body", "open", ["bug", "triaged"])
-        hash2 = _compute_issue_hash("title", "body", "open", ["bug", "triaged"])
+        hash1 = _compute_issue_hash(
+            "fix: handle empty manifest gracefully",
+            "Avoid a traceback when snap metadata is rendered from an empty manifest during pack.",
+            "open",
+            ["bug", "snapcraft"],
+        )
+        hash2 = _compute_issue_hash(
+            "fix: handle empty manifest gracefully",
+            "Avoid a traceback when snap metadata is rendered from an empty manifest during pack.",
+            "open",
+            ["bug", "snapcraft"],
+        )
 
         assert hash1 == hash2
 

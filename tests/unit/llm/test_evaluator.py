@@ -234,13 +234,13 @@ class TestEvaluateIssueWithComments:
     async def test_evaluate_passes_comments_to_prompt(self) -> None:
         """Comments from call are forwarded to the prompt builders."""
         mock_summary_response = OpenRouterResponse(
-            content="A bug report.",
+            content="Regression report for snapcraft failing with the LXD backend.",
             total_tokens=15,
             prompt_tokens=10,
             completion_tokens=5,
         )
         mock_eval_response = OpenRouterResponse(
-            content='{"scores": {"staleness": 10}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
+            content='{"scores": {"staleness": 10}, "suggested_action": "keep_open", "suggested_action_reason": "Maintainers are still reproducing the LXD failure."}',
             total_tokens=50,
             prompt_tokens=20,
             completion_tokens=30,
