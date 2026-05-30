@@ -184,10 +184,21 @@ class IssueRepository:
 
         if filters.project:
             project_list = [p.strip() for p in filters.project.split(",") if p.strip()]
-            if len(project_list) == 1:
-                query = query.where(Project.name == project_list[0])
-            elif project_list:
-                query = query.where(Project.name.in_(project_list))
+            conditions = []
+            for p in project_list:
+                if p.endswith("-lp"):
+                    base = p[:-3]
+                    conditions.append(
+                        (Project.name == base) & (Issue.source == "launchpad")
+                    )
+                else:
+                    conditions.append(
+                        (Project.name == p) & (Issue.source != "launchpad")
+                    )
+            if len(conditions) == 1:
+                query = query.where(conditions[0])
+            else:
+                query = query.where(or_(*conditions))
         if filters.source:
             query = query.where(Issue.source == filters.source)
         if filters.issue_type:
@@ -326,10 +337,32 @@ class IssueRepository:
         )
 
     async def get_project_names(self) -> list[str]:
-        """Get non-aggregate project names ordered by display_order."""
-        project_result = await self.session.execute(
-            select(Project.name)
+        """Get non-aggregate project names ordered by display_order.
+
+        Projects with Launchpad issues are returned as "name-lp" in addition
+        to "name" (for their non-Launchpad issues), matching the display
+        convention used in the issues table.
+        """
+        rows = await self.session.execute(
+            select(Project.name, Project.display_order, Issue.source)
+            .join(Issue, Issue.project_id == Project.id)
             .where(Project.category != "aggregate")
-            .order_by(Project.display_order)
+            .distinct()
+            .order_by(Project.display_order, Project.name, Issue.source)
         )
-        return [row.name for row in project_result]
+
+        seen_non_lp: set[str] = set()
+        seen_lp: set[str] = set()
+        names: list[tuple[str, int]] = []
+
+        for row in rows:
+            if row.source == "launchpad":
+                if row.name not in seen_lp:
+                    seen_lp.add(row.name)
+                    names.append((f"{row.name}-lp", row.display_order))
+            elif row.name not in seen_non_lp:
+                seen_non_lp.add(row.name)
+                names.append((row.name, row.display_order))
+
+        names.sort(key=lambda x: (x[1], x[0].removesuffix("-lp"), x[0]))
+        return [name for name, _ in names]

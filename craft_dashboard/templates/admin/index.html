@@ -40,7 +40,7 @@
       {% for run in collection_runs %}
       <tr>
         <td>{{ run.source }}</td>
-        <td>{{ run.started_at.strftime("%Y-%m-%d %H:%M") if run.started_at else "—" }}</td>
+        <td>{{ run.started_at.strftime("%Y-%m-%d %-I:%M %p") if run.started_at else "—" }}</td>
         <td>{{ run.status }}</td>
         <td>{{ run.projects_processed }}</td>
         <td>{{ run.issues_collected }}</td>
