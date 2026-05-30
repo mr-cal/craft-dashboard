@@ -12,13 +12,14 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 from starlette.exceptions import HTTPException
 
 from craft_dashboard.auth import get_admin_bearer_token, verify_admin_token
 from craft_dashboard.dependencies import get_db_session
+from craft_dashboard.services import AdminService
 
 if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
@@ -117,75 +118,11 @@ async def admin_page(
     """Render the admin dashboard page."""
     templates: Jinja2Templates = request.app.state.templates
 
-    from craft_dashboard.models.project import Project
-    from craft_dashboard.models.refresh_schedule import RefreshSchedule
-
-    # Get project names
-    project_result = await session.execute(select(Project.name).order_by(Project.name))
-    project_names = [row[0] for row in project_result]
-
-    # Get 7-day schedule with issue counts per day
-    from craft_dashboard.models.issue import Issue
-    from craft_dashboard.models.llm_evaluation import LLMEvaluation
-
-    now = datetime.now(UTC)
-    schedule_days = []
-    for day_offset in range(7):
-        day_start = (now + timedelta(days=day_offset)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        day_end = day_start + timedelta(days=1)
-        # Count issues belonging to projects scheduled for refresh this day
-        issue_count = (
-            await session.scalar(
-                select(func.count(Issue.id))
-                .join(
-                    RefreshSchedule,
-                    Issue.project_id == RefreshSchedule.project_id,
-                )
-                .where(RefreshSchedule.next_refresh_at >= day_start)
-                .where(RefreshSchedule.next_refresh_at < day_end)
-            )
-            or 0
-        )
-        schedule_days.append(
-            {
-                "date": day_start.strftime("%a %b %d"),
-                "count": issue_count,
-                "is_today": day_offset == 0,
-            }
-        )
-
-    # Get LLM evaluation token usage stats (lifetime)
-    token_stats_result = await session.execute(
-        select(
-            func.count(LLMEvaluation.id).label("total_evaluations"),
-            func.sum(LLMEvaluation.tokens_used).label("total_tokens"),
-            func.sum(LLMEvaluation.prompt_tokens).label("total_prompt_tokens"),
-            func.sum(LLMEvaluation.completion_tokens).label("total_completion_tokens"),
-        )
-    )
-    token_row = token_stats_result.one()
-    total_evaluations = token_row.total_evaluations or 0
-    total_tokens = token_row.total_tokens or 0
-    total_prompt_tokens = token_row.total_prompt_tokens or 0
-    total_completion_tokens = token_row.total_completion_tokens or 0
-
-    # Get 7-day token usage stats
-    seven_days_ago = now - timedelta(days=7)
-    recent_stats_result = await session.execute(
-        select(
-            func.count(LLMEvaluation.id).label("recent_evaluations"),
-            func.sum(LLMEvaluation.tokens_used).label("recent_tokens"),
-            func.sum(LLMEvaluation.prompt_tokens).label("recent_prompt_tokens"),
-            func.sum(LLMEvaluation.completion_tokens).label("recent_completion_tokens"),
-        ).where(LLMEvaluation.evaluated_at >= seven_days_ago)
-    )
-    recent_row = recent_stats_result.one()
-    recent_evaluations = recent_row.recent_evaluations or 0
-    recent_tokens = recent_row.recent_tokens or 0
-    recent_prompt_tokens = recent_row.recent_prompt_tokens or 0
-    recent_completion_tokens = recent_row.recent_completion_tokens or 0
+    admin_service = AdminService(session)
+    project_names = await admin_service.get_project_names()
+    schedule_days = await admin_service.get_schedule_day_counts()
+    lifetime_stats = await admin_service.get_lifetime_token_stats()
+    recent_stats = await admin_service.get_seven_day_token_stats()
 
     return templates.TemplateResponse(
         request,
@@ -193,14 +130,14 @@ async def admin_page(
         {
             "project_names": project_names,
             "schedule_days": schedule_days,
-            "total_evaluations": total_evaluations,
-            "total_tokens": total_tokens,
-            "total_prompt_tokens": total_prompt_tokens,
-            "total_completion_tokens": total_completion_tokens,
-            "recent_evaluations": recent_evaluations,
-            "recent_tokens": recent_tokens,
-            "recent_prompt_tokens": recent_prompt_tokens,
-            "recent_completion_tokens": recent_completion_tokens,
+            "total_evaluations": lifetime_stats["evaluations"],
+            "total_tokens": lifetime_stats["tokens"],
+            "total_prompt_tokens": lifetime_stats["prompt_tokens"],
+            "total_completion_tokens": lifetime_stats["completion_tokens"],
+            "recent_evaluations": recent_stats["evaluations"],
+            "recent_tokens": recent_stats["tokens"],
+            "recent_prompt_tokens": recent_stats["prompt_tokens"],
+            "recent_completion_tokens": recent_stats["completion_tokens"],
         },
     )
 
@@ -338,8 +275,6 @@ async def distribute_refresh_schedule(
 
     Requires admin authentication via Bearer token.
     """
-    from datetime import datetime, timedelta
-
     from craft_dashboard.models.refresh_schedule import (
         RefreshSchedule,
     )

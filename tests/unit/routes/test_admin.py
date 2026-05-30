@@ -26,6 +26,10 @@ class _EmptyResult:
 
     def one(self):
         return SimpleNamespace(
+            evaluations=0,
+            tokens=0,
+            prompt_tokens=0,
+            completion_tokens=0,
             total_evaluations=0,
             total_tokens=0,
             total_prompt_tokens=0,
