@@ -1,307 +1,246 @@
-# craft-dashboard — Master Implementation Plan
+# craft-dashboard — Evaluation Architecture Shift
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement each sub-plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+## Motivation
 
-**Goal:** Convert starcraft-stats into craft-dashboard — a FastAPI + HTMX web dashboard with PostgreSQL, LLM-powered issue/PR triage, and Ansible-provisioned VPS hosting.
+craft-dashboard is deployed on a VPS. Currently, LLM evaluation runs **on the server**,
+connecting either to OpenRouter (cloud) or to a local LLM (e.g. Ollama on a developer
+machine). The local LLM option requires the VPS to reach the developer's machine — if
+the VPS is compromised, the attacker gets a network path to the local LLM host.
 
-**Architecture:** FastAPI serves server-rendered HTML via Jinja2 + HTMX for interactivity. PostgreSQL stores all data (replacing CSV/JSON files). Data collection runs on cron jobs on the VPS. An LLM pipeline (via OpenRouter) evaluates and scores issues/PRs daily. Ansible provisions the VPS idempotently.
+**Goal:** Flip the evaluation direction. Instead of the server pushing work to an LLM,
+a local script on the developer's machine **pulls** issues from the server's API,
+evaluates them locally, and **pushes** results back. This eliminates the server→local
+network path entirely.
 
-**Tech Stack:**
-- **Backend:** Python 3.12, FastAPI, SQLAlchemy 2.x (async), Alembic, Pydantic v2
-- **Frontend:** Jinja2 templates, HTMX, Vanilla framework (Canonical)
-- **Database:** PostgreSQL 16
-- **LLM:** OpenRouter API (production) or any OpenAI-compatible local server (local development) — via OpenAI-compatible HTTP calls with `httpx`
-- **Provisioning:** Ansible
-- **Server:** Ubuntu 24.04 LTS, Nginx, systemd, Let's Encrypt
-- **Auth:** Read-only public access; admin actions behind token-based auth
-
----
-
-## Implementation Context
-
-This plan is implemented in the renamed `craft-dashboard` repo (formerly `starcraft-stats`).
-The existing `starcraft_stats/` Python package and `html/` directory remain present at the start
-and can be broken or removed as new code replaces them.
-
-**Before implementing each plan, read the corresponding existing code:**
-
-| Plan | Existing files to read first |
-|------|------------------------------|
-| 01 — Scaffold | `starcraft_stats/config.py`, `pyproject.toml`, `.pre-commit-config.yaml` |
-| 02 — DB models | `starcraft_stats/models/`, `starcraft_stats/models/github.py`, `starcraft_stats/models/issues.py` |
-| 03 — Data collection | `starcraft_stats/issues.py` (GitHub API, pagination, field mapping), `starcraft_stats/launchpad.py` (Launchpad quirks), `starcraft_stats/dependencies.py`, `starcraft_stats/releases.py` |
-| 04 — Web dashboard | `html/js/issues.js`, `html/js/index.js` (Chart.js config, filter logic), `html/index.html`, `html/issues.html`, `html/css/custom.css` |
-| 05 — LLM | `starcraft_stats/issues.py` (issue field structure) |
-| 06 — Provisioning | `starcraft_stats/schedule.py` (existing cron logic) |
-
-Remove old `starcraft_stats/` and `html/` in a cleanup commit once all plans are complete.
-
----
-
-## Architecture Overview
+## Current Architecture (Before)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        VPS (Ubuntu 24.04)                   │
-│                                                             │
-│  ┌──────────┐    ┌──────────────┐    ┌──────────────────┐   │
-│  │  Nginx   │───▶│   FastAPI    │───▶│   PostgreSQL     │   │
-│  │ (reverse │    │  (gunicorn)  │    │   (port 5432)    │   │
-│  │  proxy)  │    │  port 8000   │    │                  │   │
-│  └──────────┘    └──────────────┘    └──────────────────┘   │
-│                         │                     ▲              │
-│                         │                     │              │
-│  ┌──────────────────────┴─────────────────────┘──────────┐  │
-│  │                  Cron Jobs (systemd timers)            │  │
-│  │  • collect_data.py  (hourly/daily)                    │  │
-│  │  • run_llm.py       (daily, after collection)         │  │
-│  └───────────────────────────────────────────────────────┘  │
-│                                                             │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │              OpenRouter API (external)                 │  │
-│  └───────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────┐       ┌──────────────┐
+│   VPS Server    │──────▶│  OpenRouter   │  (cloud LLM)
+│  (FastAPI app)  │       └──────────────┘
+│                 │
+│  run_llm.py     │──────▶│  Local LLM   │  (developer machine — SECURITY RISK)
+│  (cron/manual)  │       └──────────────┘
+└─────────────────┘
 ```
 
-## Sub-Plans
+- `scripts/llm/cli.py` — CLI entry point (`run_llm evaluate`)
+- `scripts/llm/orchestrator.py` — fetches issues from DB, calls evaluator, stores results
+- `craft_dashboard/llm/evaluator.py` — builds prompts, calls LLM client, parses response
+- `craft_dashboard/llm/client.py` — `OpenRouterClient` and `LocalLLMClient`
+- `craft_dashboard/settings.py` — `LLM_BACKEND` setting (`"openrouter"` or `"local"`)
 
-Each sub-plan is an independent, testable deliverable. They should be implemented in order (later plans depend on earlier ones).
-
-| # | Plan | Description | Depends On |
-|---|------|-------------|------------|
-| 1 | [Project Scaffold](plans/01-project-scaffold.md) | New project structure, FastAPI skeleton, config system | — |
-| 2 | [Database & Models](plans/02-database-models.md) | PostgreSQL schema, SQLAlchemy models, Alembic migrations | Plan 1 |
-| 3 | [Data Collection Pipeline](plans/03-data-collection.md) | GitHub/Launchpad fetchers, snapshot generation, cron scheduling | Plans 1, 2 |
-| 4 | [Web Dashboard & Frontend](plans/04-web-dashboard.md) | FastAPI routes, HTMX templates, stats views, triage dashboard, auth | Plans 1, 2 |
-| 5 | [LLM Integration](plans/05-llm-integration.md) | OpenRouter client, issue/PR evaluation, scoring, summarization | Plans 1, 2, 3 |
-| 6 | [Provisioning & Deployment](plans/06-provisioning.md) | Ansible playbooks, Nginx, systemd, PostgreSQL, cron, SSL, LXD VM testing | Plans 1–5 |
-
-## Key Design Decisions
-
-1. **No craft-application/craft-cli dependency.** The new project uses FastAPI as its core framework. CLI commands for data collection use `click` (comes with FastAPI/uvicorn).
-2. **PostgreSQL with JSONB.** Structured columns for queryable fields; JSONB for flexible metadata (labels, extra source-specific data, LLM scores).
-3. **HTMX for interactivity.** Server-rendered HTML with HTMX for dynamic filtering, sorting, and pagination. Minimal custom JavaScript.
-4. **LLM token optimization.** Only re-evaluate issues that changed since last evaluation (tracked via content hash). Use smaller models for summarization, larger for scoring.
-5. **Dual LLM backends.** `run_llm.py` supports `--backend local` (any OpenAI-compatible server) and `--backend openrouter`. Run the initial full pass locally for free, then migrate the evaluation data to the VPS via `pg_dump`/restore. Daily cron on the VPS uses OpenRouter for incremental updates.
-6. **Evaluate all issues.** LLM evaluation covers both open and closed issues. Closed issues rarely change, so the hash-based deduplication ensures they're only re-evaluated if their content changes.
-7. **Advisory-only actions.** LLM suggests actions (close, triage, etc.) but humans act on them manually through GitHub/Launchpad.
-8. **Read-only public, admin behind auth.** Dashboard is publicly readable. Admin endpoints (force refresh, re-evaluate, etc.) require a bearer token.
-
-## Project File Structure
+## Target Architecture (After)
 
 ```
-craft-dashboard/
-├── pyproject.toml
-├── craft-dashboard.toml          # Project configuration
-├── alembic.ini
-├── alembic/
-│   ├── env.py
-│   └── versions/
-├── craft_dashboard/
-│   ├── __init__.py
-│   ├── app.py                    # FastAPI app factory
-│   ├── config.py                 # TOML config loading
-│   ├── database.py               # SQLAlchemy engine + session
-│   ├── auth.py                   # Token-based auth dependency
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── base.py               # SQLAlchemy declarative base
-│   │   ├── project.py            # Project model
-│   │   ├── issue.py              # Issue/PR model
-│   │   ├── release.py            # Release model
-│   │   ├── dependency.py         # Dependency model
-│   │   ├── snapshot.py           # Daily snapshot model
-│   │   └── llm_evaluation.py    # LLM evaluation model
-│   ├── collectors/
-│   │   ├── __init__.py
-│   │   ├── github.py             # GitHub API client
-│   │   ├── launchpad.py          # Launchpad API client
-│   │   ├── dependencies.py       # Dependency scanner
-│   │   └── releases.py           # Release fetcher
-│   ├── llm/
-│   │   ├── __init__.py
-│   │   ├── client.py             # OpenRouter HTTP client
-│   │   ├── prompts.py            # Prompt templates
-│   │   └── evaluator.py          # Issue/PR evaluator
-│   ├── routes/
-│   │   ├── __init__.py
-│   │   ├── dashboard.py          # Main dashboard + overview
-│   │   ├── issues.py             # Issue triage views
-│   │   ├── stats.py              # Legacy stats (deps, releases, trends)
-│   │   └── admin.py              # Admin endpoints (refresh, re-eval)
-│   ├── templates/
-│   │   ├── base.html
-│   │   ├── components/           # Reusable HTMX partials
-│   │   │   ├── issue_row.html
-│   │   │   ├── filters.html
-│   │   │   ├── pagination.html
-│   │   │   └── score_badge.html
-│   │   ├── dashboard/
-│   │   │   └── index.html
-│   │   ├── issues/
-│   │   │   ├── list.html
-│   │   │   └── detail.html
-│   │   └── stats/
-│   │       ├── dependencies.html
-│   │       ├── releases.html
-│   │       └── trends.html
-│   └── static/
-│       ├── css/
-│       │   └── custom.css
-│       └── js/
-│           └── charts.js         # Chart.js for trend graphs
-├── scripts/
-│   ├── collect_data.py           # Cron entry point: data collection
-│   ├── run_llm.py                # Cron entry point: LLM evaluation
-│   └── migrate_csv.py            # One-time CSV→PostgreSQL migration
-├── provisioning/
-│   ├── inventory.yml
-│   ├── playbook.yml
-│   ├── group_vars/
-│   │   └── all.yml
-│   └── roles/
-│       ├── common/               # Base packages, unattended upgrades
-│       ├── postgresql/           # DB setup
-│       ├── app/                  # App deployment, systemd, gunicorn
-│       ├── nginx/                # Reverse proxy, SSL
-│       └── cron/                 # Systemd timers for data collection
-├── tests/
-│   ├── conftest.py
-│   ├── unit/
-│   │   ├── test_config.py
-│   │   ├── test_models.py
-│   │   ├── test_collectors.py
-│   │   ├── test_llm.py
-│   │   └── test_routes.py
-│   └── integration/
-│       ├── test_database.py
-│       └── test_api.py
-├── Makefile
-├── common.mk
-└── README.md
+┌─────────────────┐                        ┌───────────────────┐
+│   VPS Server    │◀── HTTPS (pull) ───────│  Local Machine    │
+│  (FastAPI app)  │                        │                   │
+│                 │── HTTPS (push result) ─│  eval-client.py   │
+│  /api/eval/*    │                        │  + Local LLM      │
+└─────────────────┘                        └───────────────────┘
+                  │
+                  │── (optional, toggled) ──▶  OpenRouter
 ```
 
-## Database Schema
+### Key Changes
 
-```sql
-CREATE TABLE projects (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) UNIQUE NOT NULL,
-    category VARCHAR(50) NOT NULL,       -- 'application', 'library', 'other'
-    github_org VARCHAR(255) DEFAULT 'canonical',
-    launchpad_name VARCHAR(255),
-    display_order INT NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
+1. **New server-side API endpoints** (`/api/eval/...`) for pull-based evaluation
+2. **New local client script** (`scripts/eval_client.py`) that polls the server
+3. **Remove `LocalLLMClient`** from the server — the server never connects to a local LLM
+4. **Add a toggle** to disable server-side OpenRouter evaluation (`ENABLE_SERVER_EVAL=false`)
+5. **API authentication** for the eval endpoints (bearer token or HMAC)
 
-CREATE TABLE issues (
-    id SERIAL PRIMARY KEY,
-    project_id INT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    source VARCHAR(20) NOT NULL,         -- 'github', 'launchpad'
-    external_id VARCHAR(255) NOT NULL,   -- GitHub number or LP bug ID
-    issue_type VARCHAR(20) NOT NULL,     -- 'issue', 'pull_request'
-    title TEXT NOT NULL,
-    body TEXT,
-    state VARCHAR(20) NOT NULL,          -- 'open', 'closed', 'merged'
-    author VARCHAR(255),
-    author_is_maintainer BOOLEAN DEFAULT FALSE,
-    labels JSONB DEFAULT '[]'::jsonb,
-    created_at TIMESTAMPTZ,
-    updated_at TIMESTAMPTZ,
-    closed_at TIMESTAMPTZ,
-    url TEXT,
-    metadata JSONB DEFAULT '{}'::jsonb,
-    last_fetched_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(project_id, source, external_id)
-);
+## Detailed Design
 
-CREATE TABLE llm_evaluations (
-    id SERIAL PRIMARY KEY,
-    issue_id INT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
-    model_name VARCHAR(255) NOT NULL,
-    summary TEXT,
-    suggested_action VARCHAR(50),        -- 'close_stale', 'close_duplicate', etc.
-    suggested_action_reason TEXT,
-    scores JSONB DEFAULT '{}'::jsonb,    -- {"staleness": 85, "readiness": 20, ...}
-    tokens_used INT,
-    evaluated_at TIMESTAMPTZ DEFAULT NOW(),
-    issue_data_hash VARCHAR(64),         -- SHA-256 of issue content for change detection
-    latest BOOLEAN NOT NULL DEFAULT TRUE -- marks the most recent evaluation for this issue
-    -- Partial unique index ensures only one 'latest=true' row per issue:
-    -- CREATE UNIQUE INDEX ON llm_evaluations (issue_id) WHERE latest = true;
-);
+### 1. Server-Side API Endpoints
 
-CREATE TABLE snapshots (
-    id SERIAL PRIMARY KEY,
-    project_id INT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    snapshot_date DATE NOT NULL,
-    open_issues INT DEFAULT 0,
-    open_prs INT DEFAULT 0,
-    open_issues_external INT DEFAULT 0,
-    open_issues_internal INT DEFAULT 0,
-    open_prs_external INT DEFAULT 0,
-    open_prs_internal INT DEFAULT 0,
-    open_bugs INT DEFAULT 0,
-    UNIQUE(project_id, snapshot_date)
-);
+New API router at `/api/eval/` with authentication required on all endpoints.
 
-CREATE TABLE releases (
-    id SERIAL PRIMARY KEY,
-    project_id INT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    version VARCHAR(100) NOT NULL,
-    branch VARCHAR(255),
-    released_at TIMESTAMPTZ,
-    is_hotfix BOOLEAN DEFAULT FALSE,
-    metadata JSONB DEFAULT '{}'::jsonb,
-    UNIQUE(project_id, version)
-);
+#### `GET /api/eval/next`
 
-CREATE TABLE dependencies (
-    id SERIAL PRIMARY KEY,
-    project_id INT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    branch VARCHAR(255) NOT NULL,
-    dependency_name VARCHAR(255) NOT NULL,
-    version_spec VARCHAR(255),
-    source_file VARCHAR(255),
-    fetched_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(project_id, branch, dependency_name)
-);
+Returns the next issue needing evaluation, or 204 if none available.
 
-CREATE TABLE refresh_schedule (
-    id SERIAL PRIMARY KEY,
-    project_id INT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    source VARCHAR(20) NOT NULL,         -- 'github', 'launchpad'
-    next_refresh_at TIMESTAMPTZ,
-    last_refreshed_at TIMESTAMPTZ,
-    last_error TEXT,                     -- error message from last failed collection
-    consecutive_failures INT DEFAULT 0, -- number of consecutive collection failures
-    UNIQUE(project_id, source)
-);
+Query parameters (mirror existing `run_llm` controls):
+- `project` — filter by project name
+- `open_only` — only open issues (default: true)
+- `force` — ignore content hash (re-evaluate everything)
+- `incomplete` — only issues with missing summary/scores
+- `stale_days` — only issues whose evaluation is older than N days
+
+Response (200):
+```json
+{
+  "issue_id": 42,
+  "project_name": "charmcraft",
+  "external_id": "2687",
+  "title": "Issue title",
+  "state": "open",
+  "issue_type": "issue",
+  "body": "...",
+  "comments": [...],
+  "labels": [...],
+  "author": "username",
+  "author_association": "CONTRIBUTOR",
+  "current_hash": "abc123...",
+  "maintainers": ["user1", "user2"]
+}
 ```
 
-## LLM Scoring Dimensions
+The server marks the issue as "locked for evaluation" (with a TTL, e.g. 10 minutes)
+to prevent duplicate work if multiple clients poll.
 
-Each issue/PR gets evaluated on these dimensions (0–100 scale):
+#### `POST /api/eval/result`
 
-| Score | Description | Applies To |
-|-------|-------------|------------|
-| `staleness` | How stale is this? Based on last activity, age, no recent comments | Issues, PRs |
-| `readiness` | How ready is this PR for review/merge? Tests passing, approvals, no conflicts | PRs only |
-| `relevance` | Is this still relevant to the project? | Issues, PRs |
-| `duplicateness` | How likely is this a duplicate of another issue? | Issues |
-| `support_request` | Is this a support/help request rather than a bug/feature? | Issues |
-| `complexity` | How complex is this issue/PR? | Issues, PRs |
+Submit an evaluation result for an issue.
 
-### Suggested Actions
+Request body:
+```json
+{
+  "issue_id": 42,
+  "content_hash": "abc123...",
+  "summary": "This issue is about...",
+  "scores": {
+    "staleness": 3,
+    "duplicateness": 1,
+    "complexity": 4,
+    "support_request": 2,
+    "readiness": 5
+  },
+  "suggested_action": "keep_open",
+  "suggested_action_reason": "Active development",
+  "tokens_used": 1500,
+  "prompt_tokens": 1200,
+  "completion_tokens": 300,
+  "model_used": "llama3.2",
+  "llm_backend": "local"
+}
+```
 
-| Action | Description |
-|--------|-------------|
-| `close_stale` | Close because it's been inactive too long |
-| `close_duplicate` | Close as duplicate (with reference to original) |
-| `close_not_a_bug` | Close because it's a support request, not a bug |
-| `close_outdated` | Close because it's no longer relevant |
-| `needs_triage` | Needs human attention to classify/prioritize |
-| `needs_review` | PR is ready for review |
-| `needs_rebase` | PR needs rebasing |
-| `keep_open` | No action needed, issue/PR is healthy |
+The server validates the result (same validation as current `validate_evaluation_result`),
+stores it, and returns 200. If the `content_hash` doesn't match the current issue hash
+(issue was updated while being evaluated), the server returns 409 Conflict.
+
+#### `GET /api/eval/status`
+
+Returns evaluation queue status:
+```json
+{
+  "pending": 150,
+  "locked": 2,
+  "evaluated_today": 48,
+  "total_evaluated": 11053
+}
+```
+
+### 2. Local Client Script (`scripts/eval_client.py`)
+
+A standalone script that runs on the developer's machine:
+
+```bash
+# Poll the server for issues and evaluate them locally
+python scripts/eval_client.py \
+  --server https://craft-dashboard.example.com \
+  --token <eval-api-token> \
+  --model llama3.2 \
+  --llm-url http://localhost:11434/v1 \
+  --poll-interval 30 \
+  --limit 100
+```
+
+Behavior:
+1. Poll `GET /api/eval/next` with configured filters
+2. If 204 (no work), sleep for `poll-interval` seconds
+3. If 200, evaluate the issue using the local LLM
+4. Submit result via `POST /api/eval/result`
+5. Repeat until `--limit` reached or interrupted
+
+The client reuses:
+- `craft_dashboard/llm/evaluator.py` — prompt building and response parsing
+- `craft_dashboard/llm/client.py` — `LocalLLMClient` (moved here or imported)
+- `scripts/llm/validation.py` — result validation
+
+### 3. Authentication
+
+The eval API uses a dedicated bearer token, separate from the admin token:
+
+```env
+# secrets.env
+EVAL_API_TOKEN=<random-token>       # required for /api/eval/* endpoints
+ENABLE_SERVER_EVAL=true             # set to false to disable server-side OpenRouter
+OPENROUTER_API_KEY=<key>            # only needed if ENABLE_SERVER_EVAL=true
+```
+
+Server-side middleware checks `Authorization: Bearer <token>` on all `/api/eval/*`
+routes.
+
+### 4. Server-Side Evaluation Toggle
+
+When `ENABLE_SERVER_EVAL=false`:
+- The `run_llm evaluate` command on the server refuses to run (exits with message)
+- The admin "Re-evaluate" button shows a warning that server-side eval is disabled
+- The cron timer for `run-llm.service` can remain enabled but will be a no-op
+- Evaluation only happens via the pull-based client
+
+When `ENABLE_SERVER_EVAL=true` (default, backward compatible):
+- Server-side evaluation via OpenRouter works as before
+- The pull-based client also works (both can coexist)
+
+### 5. Remove `LocalLLMClient` from Server
+
+The `LocalLLMClient` class in `craft_dashboard/llm/client.py` is removed from the
+server deployment. The `LLM_BACKEND=local` setting is removed. The client script
+owns the local LLM connection.
+
+The `create_llm_client()` factory in settings.py only creates `OpenRouterClient`.
+The `LocalLLMClient` moves to a shared module that the client script imports.
+
+## Implementation Steps
+
+- [ ] **Phase 1: Server API**
+  - [ ] Create `/api/eval/` router with `next`, `result`, and `status` endpoints
+  - [ ] Add `EVAL_API_TOKEN` setting and bearer token auth middleware
+  - [ ] Add issue locking mechanism (DB column `eval_locked_until` on evaluations table)
+  - [ ] Add validation on result submission (reuse existing validation)
+  - [ ] Write tests for all new endpoints
+
+- [ ] **Phase 2: Local Client**
+  - [ ] Create `scripts/eval_client.py` with polling loop
+  - [ ] Reuse evaluator, prompts, and validation from existing code
+  - [ ] Add CLI options mirroring `run_llm evaluate` controls
+  - [ ] Add progress logging, retry logic, graceful shutdown
+  - [ ] Write tests for client behavior
+
+- [ ] **Phase 3: Server Toggle**
+  - [ ] Add `ENABLE_SERVER_EVAL` setting (default: true)
+  - [ ] Gate `run_llm evaluate` behind the toggle
+  - [ ] Update admin UI to show toggle status
+  - [ ] Update deployment docs
+
+- [ ] **Phase 4: Remove Local LLM from Server**
+  - [ ] Move `LocalLLMClient` out of server code path
+  - [ ] Remove `LLM_BACKEND=local` option from settings
+  - [ ] Remove `LOCAL_LLM_*` settings from server
+  - [ ] Update docs and deployment templates
+
+- [ ] **Phase 5: Documentation**
+  - [ ] Update `docs/architecture.md` with new eval flow
+  - [ ] Add `docs/eval-client.md` with setup instructions
+  - [ ] Update `docs/deployment.md` with new env vars
+
+## Migration Path
+
+1. Deploy Phase 1 (API endpoints) — no behavior change
+2. Set up eval client on local machine, verify it works
+3. Set `ENABLE_SERVER_EVAL=false` on VPS
+4. Deploy Phase 4 (remove local LLM code from server)
+5. Server only uses OpenRouter (if enabled) or relies entirely on pull-based client
+
+## Security Considerations
+
+- The eval API token should be long and random (≥32 chars)
+- Rate limit the `/api/eval/next` endpoint to prevent abuse
+- The content hash check on result submission prevents replay attacks
+- The lock TTL prevents stale locks from blocking evaluation
+- No network path from VPS to developer machine exists in the new architecture
+
