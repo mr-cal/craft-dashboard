@@ -32,6 +32,43 @@
       <strong data-system-status-value="last_evaluation">Never</strong>
     </span>
   </div>
+  {% if collection_runs %}
+  <h4 style="margin-top: 1rem;">Recent Runs</h4>
+  <table>
+    <thead>
+      <tr>
+        <th>Source</th>
+        <th>Status</th>
+        <th>Projects</th>
+        <th>Issues</th>
+        <th>Duration</th>
+        <th>Errors</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for run in collection_runs %}
+      <tr>
+        <td>{{ run.source }}</td>
+        <td>{{ run.status }}</td>
+        <td>{{ run.projects_processed }}</td>
+        <td>{{ run.issues_collected }}</td>
+        <td>{{ "{:.1f}s".format(run.duration_seconds) if run.duration_seconds is not none else "—" }}</td>
+        <td>
+          {% if run.errors %}
+          <ul style="margin: 0; padding-left: 1rem;">
+            {% for error in run.errors %}
+            <li>{{ error.project or error.source or "run" }}: {{ error.error }}</li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          —
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
 </section>
 
 <h3>Project Refresh Schedule (Next 7 Days)</h3>
@@ -104,48 +141,6 @@
     </tr>
   </tbody>
 </table>
-
-<hr class="p-rule" />
-
-<h3>Collection Health</h3>
-{% if collection_runs %}
-<table>
-  <thead>
-    <tr>
-      <th>Source</th>
-      <th>Status</th>
-      <th>Projects</th>
-      <th>Issues</th>
-      <th>Duration</th>
-      <th>Errors</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for run in collection_runs %}
-    <tr>
-      <td>{{ run.source }}</td>
-      <td>{{ run.status }}</td>
-      <td>{{ run.projects_processed }}</td>
-      <td>{{ run.issues_collected }}</td>
-      <td>{{ "{:.1f}s".format(run.duration_seconds) if run.duration_seconds is not none else "—" }}</td>
-      <td>
-        {% if run.errors %}
-        <ul style="margin: 0; padding-left: 1rem;">
-          {% for error in run.errors %}
-          <li>{{ error.project or error.source or "run" }}: {{ error.error }}</li>
-          {% endfor %}
-        </ul>
-        {% else %}
-        —
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p style="font-size:0.875rem;color:var(--app-text-muted);">No collection runs recorded yet.</p>
-{% endif %}
 
 <hr class="p-rule" />
 
