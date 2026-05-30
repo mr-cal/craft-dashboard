@@ -3,7 +3,7 @@
 {% block content %}
 <h2>Issue &amp; PR Triage</h2>
 
-<div class="filter-bar">
+<div class="filter-bar" id="issue-filters" data-shareable-url-root="/issues">
   <div class="filter-group">
     <label>Projects</label>
     <div class="multiselect" data-name="project" data-hidden="project-hidden">
@@ -208,6 +208,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/issues-filters.js"></script>
 <script src="/static/js/multiselect.js"></script>
 <script src="/static/js/table-interact.js"></script>
 {% endblock %}
