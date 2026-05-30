@@ -3,11 +3,37 @@
 import hashlib
 import json
 import logging
+from typing import Any, TypedDict
 
 from craft_dashboard.llm.client import LLMClient
 from craft_dashboard.llm.prompts import build_evaluation_prompt, build_summary_prompt
 
 logger = logging.getLogger(__name__)
+
+IssueComment = dict[str, Any]
+IssueDetails = dict[str, Any]
+ScoreMap = dict[str, int | float]
+
+
+class ParsedEvaluation(TypedDict, total=False):
+    """Parsed JSON payload returned by the evaluation model."""
+
+    scores: ScoreMap
+    suggested_action: str
+    suggested_action_reason: str
+
+
+class EvaluationResult(TypedDict):
+    """Normalized evaluation payload returned to persistence callers."""
+
+    summary: str
+    scores: ScoreMap
+    suggested_action: str | None
+    suggested_action_reason: str | None
+    tokens_used: int
+    prompt_tokens: int
+    completion_tokens: int
+    issue_data_hash: str
 
 
 def _needs_reevaluation(
@@ -29,7 +55,7 @@ def _needs_reevaluation(
     return existing_hash != current_hash
 
 
-def _parse_evaluation_response(content: str) -> dict | None:
+def _parse_evaluation_response(content: str) -> ParsedEvaluation | None:
     """Parse the LLM evaluation response as JSON.
 
     Handles responses that may be wrapped in markdown code fences, contain
@@ -82,7 +108,7 @@ def _compute_content_hash(
     body: str | None,
     state: str,
     labels: list[str],
-    comments: list[dict] | None = None,
+    comments: list[IssueComment] | None = None,
 ) -> str:
     """Compute a SHA-256 hash of issue content for change detection.
 
@@ -142,7 +168,7 @@ class IssueEvaluator:
         author: str,
         is_maintainer: bool,
         comment_count: int,
-        comments: list[dict] | None = None,
+        comments: list[IssueComment] | None = None,
     ) -> tuple[str, int, int, int]:
         """Generate a summary using the cheap model.
 
@@ -194,9 +220,9 @@ class IssueEvaluator:
         author: str,
         is_maintainer: bool,
         comment_count: int,
-        comments: list[dict] | None = None,
-        pr_details: dict | None = None,
-    ) -> tuple[dict | None, int, int, int]:
+        comments: list[IssueComment] | None = None,
+        pr_details: IssueDetails | None = None,
+    ) -> tuple[ParsedEvaluation | None, int, int, int]:
         """Score the issue using the more capable model.
 
         Returns:
@@ -244,10 +270,10 @@ class IssueEvaluator:
         author: str,
         is_maintainer: bool,
         comment_count: int,
-        comments: list[dict] | None = None,
-        pr_details: dict | None = None,
+        comments: list[IssueComment] | None = None,
+        pr_details: IssueDetails | None = None,
         existing_hash: str | None = None,
-    ) -> dict | None:
+    ) -> EvaluationResult | None:
         """Evaluate a single issue or PR.
 
         Args:

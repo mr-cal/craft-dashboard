@@ -4,19 +4,38 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from craft_dashboard.llm.exceptions import LLMQuotaError
-from scripts.llm.queries import fetch_issue_evaluation_targets
+from scripts.llm.queries import IssueFilter, fetch_issue_evaluation_targets
 from scripts.llm.storage import store_evaluation_result
 
 if TYPE_CHECKING:
     from craft_dashboard.llm.evaluator import IssueEvaluator
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+
+class EvaluationStats(TypedDict):
+    """Progress counters returned by the LLM orchestration loop."""
+
+    evaluated: int
+    skipped: int
+    errored: int
+    total_tokens: int
+
+
+class DryRunEvaluationStats(EvaluationStats):
+    """Evaluation counters returned when running in dry-run mode."""
+
+    would_evaluate: int
+
 
 logger = logging.getLogger(__name__)
 
 
-def _log_progress(stats: dict[str, int], *, processed: int, total_to_eval: int) -> None:
+def _log_progress(
+    stats: EvaluationStats, *, processed: int, total_to_eval: int
+) -> None:
     if processed % 10 == 0:
         logger.info(
             "Progress [%d/%d]: %d evaluated, %d skipped, %d errors",
@@ -29,19 +48,19 @@ def _log_progress(stats: dict[str, int], *, processed: int, total_to_eval: int) 
 
 
 async def _evaluate_issues(  # noqa: PLR0913
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
     evaluator: IssueEvaluator,
     maintainers: set[str],
     project_filter: str = "",
     limit: int = 0,
     open_only: bool = False,
     force: bool = False,
-    issue_filters: list[tuple[str, int, int]] | None = None,
+    issue_filters: list[IssueFilter] | None = None,
     incomplete: bool = False,
     stale_days: int = 0,
     dry_run: bool = False,
     llm_backend: str = "openrouter",
-) -> dict[str, int]:
+) -> EvaluationStats | DryRunEvaluationStats:
     """Evaluate matched issues and persist any new results."""
     stats = {"evaluated": 0, "skipped": 0, "errored": 0, "total_tokens": 0}
     targets = await fetch_issue_evaluation_targets(

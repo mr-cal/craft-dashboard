@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from sqlalchemy import Integer, Select, and_, cast, or_, select
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 @dataclass(frozen=True)
@@ -89,7 +93,7 @@ def _build_issue_query(
 
 
 async def fetch_issue_evaluation_targets(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
     *,
     project_filter: str = "",
     open_only: bool = False,

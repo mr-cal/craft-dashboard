@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING
 
 from craft_dashboard.database import get_engine, get_session_factory
 from craft_dashboard.models.issue import Issue
@@ -14,12 +14,17 @@ from craft_dashboard.settings import Settings
 from sqlalchemy import delete, false, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 
+if TYPE_CHECKING:
+    from craft_dashboard.llm.evaluator import EvaluationResult
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
 logger = logging.getLogger(__name__)
 
 
 def _resolve_session_resources(
-    session_factory=None, engine=None
-) -> tuple[Any, Any, bool]:
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    engine: AsyncEngine | None = None,
+) -> tuple[async_sessionmaker[AsyncSession], AsyncEngine, bool]:
     if session_factory is not None and engine is not None:
         return session_factory, engine, False
 
@@ -32,8 +37,8 @@ def _resolve_session_resources(
 async def count_evaluations(
     project: str = "",
     *,
-    session_factory=None,
-    engine=None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    engine: AsyncEngine | None = None,
 ) -> int:
     """Count stored LLM evaluations, optionally scoped to one project."""
     session_factory, engine, owns_engine = _resolve_session_resources(
@@ -59,10 +64,10 @@ async def count_evaluations(
 
 
 async def store_evaluation_result(
-    session_factory,
+    session_factory: async_sessionmaker[AsyncSession],
     *,
     issue_id: int,
-    result: dict[str, object],
+    result: EvaluationResult,
     evaluation_model: str,
     llm_backend: str,
 ) -> None:
@@ -114,8 +119,8 @@ async def store_evaluation_result(
 async def _clear_evaluations(
     project: str,
     *,
-    session_factory=None,
-    engine=None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    engine: AsyncEngine | None = None,
 ) -> int:
     """Clear stored LLM evaluations and return deleted row count."""
     session_factory, engine, owns_engine = _resolve_session_resources(

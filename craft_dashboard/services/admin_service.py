@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from sqlalchemy import func, select
 
@@ -17,13 +17,37 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 
+class TokenStats(TypedDict):
+    """Token usage totals shown on the admin dashboard."""
+
+    evaluations: int
+    tokens: int
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class ProjectSchedule(TypedDict):
+    """Weekday schedule summary for a project."""
+
+    project: str
+    days: list[int]
+
+
+class ScheduleDayCount(TypedDict):
+    """Upcoming scheduled issue count for a calendar day."""
+
+    date: str
+    count: int
+    is_today: bool
+
+
 class AdminService:
     """Service for admin dashboard data access."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def get_token_stats(self, days: int | None = None) -> dict:
+    async def get_token_stats(self, days: int | None = None) -> TokenStats:
         """Get token usage statistics, optionally filtered to last N days."""
         query = select(
             func.count(LLMEvaluation.id).label("evaluations"),
@@ -44,15 +68,15 @@ class AdminService:
             "completion_tokens": row.completion_tokens or 0,
         }
 
-    async def get_lifetime_token_stats(self) -> dict:
+    async def get_lifetime_token_stats(self) -> TokenStats:
         """Get lifetime token usage statistics."""
         return await self.get_token_stats()
 
-    async def get_seven_day_token_stats(self) -> dict:
+    async def get_seven_day_token_stats(self) -> TokenStats:
         """Get token usage for the last 7 days."""
         return await self.get_token_stats(days=7)
 
-    async def get_schedule(self) -> list[dict]:
+    async def get_schedule(self) -> list[ProjectSchedule]:
         """Get the refresh schedule grouped by project."""
         result = await self.session.execute(
             select(Project.name, RefreshSchedule.next_refresh_at)
@@ -73,7 +97,9 @@ class AdminService:
             for project, days in grouped.items()
         ]
 
-    async def get_schedule_day_counts(self, days_ahead: int = 7) -> list[dict]:
+    async def get_schedule_day_counts(
+        self, days_ahead: int = 7
+    ) -> list[ScheduleDayCount]:
         """Get upcoming schedule counts for the next N days."""
         now = datetime.now(UTC)
         schedule_days = []

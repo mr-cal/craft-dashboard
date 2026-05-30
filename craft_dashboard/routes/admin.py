@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
 
 _ADMIN_SESSION_COOKIE = "admin_session"
-_LOG_SERVICE_UNITS = ["collect-data", "craft-dashboard", "run-llm"]
+_LOG_SERVICE_UNITS: list[str] = ["collect-data", "craft-dashboard", "run-llm"]
 
 
 class AdminActionResponse(BaseModel):

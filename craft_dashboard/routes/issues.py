@@ -1,14 +1,14 @@
 """Issue and PR triage routes."""
 
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.dependencies import get_db_session
-from craft_dashboard.models.views import IssueFilters
+from craft_dashboard.models.views import IssueFilters, IssueView
 from craft_dashboard.repositories.issue_repository import IssueRepository
 
 if TYPE_CHECKING:
@@ -30,22 +30,49 @@ ALL_SCORES = {
 DEFAULT_SCORES = "staleness,readiness"
 
 
+class IssueTemplateContext(TypedDict):
+    """Template context used by issue list and partial responses."""
+
+    issues: list[IssueView]
+    project_names: list[str]
+    filter_project: str
+    filter_source: str
+    filter_state: str
+    filter_type: str
+    filter_action: str
+    filter_author_role: str
+    filter_search: str
+    sort_by: str
+    page: int
+    total_pages: int
+    per_page: int
+    filter_scores: str
+    active_scores: list[str]
+    all_scores: dict[str, str]
+    filter_llm_status: str
+    total_count: int
+
+
 async def _build_issue_context(
     session: AsyncSession,
     *,
     filters: IssueFilters,
     scores: str,
-) -> dict:
+) -> IssueTemplateContext:
     """Build the template context for issue list rendering."""
     repo = IssueRepository(session)
     result = await repo.search(filters)
     project_names = await repo.get_project_names()
 
-    active_scores = [s.strip() for s in scores.split(",") if s.strip() in ALL_SCORES]
+    active_scores: list[str] = [
+        score_name.strip()
+        for score_name in scores.split(",")
+        if score_name.strip() in ALL_SCORES
+    ]
     if not active_scores:
-        active_scores = DEFAULT_SCORES.split(",")
+        active_scores = cast(list[str], DEFAULT_SCORES.split(","))
 
-    return {
+    context: IssueTemplateContext = {
         "issues": result.issues,
         "project_names": project_names,
         "filter_project": filters.project,
@@ -65,6 +92,7 @@ async def _build_issue_context(
         "filter_llm_status": filters.llm_status,
         "total_count": result.total_count,
     }
+    return context
 
 
 class IssueSort(StrEnum):
@@ -122,7 +150,11 @@ async def issue_list(
     )
     context = await _build_issue_context(session, filters=filters, scores=scores)
 
-    return templates.TemplateResponse(request, "issues/list.html", context)
+    return templates.TemplateResponse(
+        request,
+        "issues/list.html",
+        cast(dict[str, Any], dict(context)),
+    )
 
 
 @router.get("/table", response_class=HTMLResponse)
@@ -168,5 +200,5 @@ async def issue_table_partial(
     return templates.TemplateResponse(
         request,
         "issues/partials/issue_table.html",
-        context,
+        cast(dict[str, Any], dict(context)),
     )
