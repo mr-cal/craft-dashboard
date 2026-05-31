@@ -22,6 +22,16 @@ if TYPE_CHECKING:
 import click
 import httpx
 from dotenv import load_dotenv
+from rich.console import Console
+from rich.logging import RichHandler
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -29,6 +39,8 @@ from craft_dashboard.llm.client import LocalLLMClient
 from craft_dashboard.llm.duplicate_detector import DuplicateDetector
 from craft_dashboard.llm.embeddings import EmbeddingClient
 from craft_dashboard.llm.evaluator import IssueEvaluator, _compute_content_hash
+
+from scripts.eval_timing import PHASE_DETECT, PHASE_EVALUATE, TimingHistory
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +53,19 @@ paused_state = {"paused": False}
 _MAX_ERROR_BODY = 200
 
 
-def _setup_logging(*, verbose: bool) -> None:
-    """Configure logging based on verbosity level."""
-    if verbose:
-        fmt = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
-        logging.basicConfig(level=logging.INFO, format=fmt)
-    else:
-        logging.basicConfig(level=logging.INFO, format="%(message)s")
-        # Suppress noisy loggers at default verbosity
+def _setup_logging(*, verbose: bool, console: Console) -> None:
+    """Configure logging with a RichHandler backed by *console*."""
+    handler = RichHandler(
+        console=console,
+        show_path=False,
+        show_time=verbose,
+        markup=False,
+        rich_tracebacks=False,
+        log_time_format="%H:%M:%S",
+    )
+    # basicConfig is a no-op when handlers already exist (e.g. in tests).
+    logging.basicConfig(level=logging.INFO, handlers=[handler], format="%(message)s")
+    if not verbose:
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
         logging.getLogger("craft_dashboard.llm.client").setLevel(logging.WARNING)
@@ -78,9 +95,18 @@ def _format_error_body(response: httpx.Response) -> str:
     return (text[:_MAX_ERROR_BODY] + "…") if len(text) > _MAX_ERROR_BODY else text
 
 
-def _format_limit(limit: int) -> str:
-    """Format the limit as a display string."""
-    return str(limit) if limit > 0 else "∞"
+def _make_progress(console: Console, total: int | None) -> Progress:  # noqa: ARG001
+    """Create a rich Progress bar for the eval loop."""
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[bold]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TextColumn("[cyan]ETA: {task.fields[eta]}"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=False,
+    )
 
 
 def _signal_handler(signum, frame) -> None:
@@ -164,7 +190,8 @@ async def run_eval_loop(  # noqa: PLR0913
 ) -> None:
     """Poll the eval API, run local evaluation, and submit results."""
     signal.signal(signal.SIGINT, _signal_handler)
-    _setup_logging(verbose=verbose)
+    console = Console()
+    _setup_logging(verbose=verbose, console=console)
 
     server_url = server.rstrip("/")
     llm_base_url = llm_url.rstrip("/")
@@ -197,6 +224,7 @@ async def run_eval_loop(  # noqa: PLR0913
             ca_cert=ca_cert,
         )
 
+    timing = TimingHistory()
     filter_parts = []
     if project:
         filter_parts.append(project)
@@ -242,202 +270,217 @@ async def run_eval_loop(  # noqa: PLR0913
                     evaluation_model,
                 )
 
-            limit_str = str(total_remaining) if total_remaining > 0 else "∞"
             _start_keyboard_monitor()
             if sys.stdin.isatty():
                 logger.info("Press space to pause/unpause")
 
-            resume_event = asyncio.Event()
-            resume_event.set()  # starts unpaused
-
-            evaluated = 0
-            while not shutdown_state["requested"]:
-                # Honour pause before fetching next issue
-                if paused_state["paused"]:
-                    await asyncio.sleep(0.5)
-                    continue
-
-                try:
-                    response = await http_client.get(
-                        "/api/eval/next",
-                        params=params,
-                        headers=headers,
-                    )
-                except httpx.ConnectError as exc:
-                    hint = (
-                        " (server may not be using TLS — try http:// instead of https://)"
-                        if "SSL" in str(exc) or "wrong version" in str(exc).lower()
-                        else ""
-                    )
-                    logger.error("Cannot connect to %s%s", server_url, hint)  # noqa: TRY400
-                    await _sleep_until_next_poll(poll_interval)
-                    continue
-                except httpx.HTTPError as exc:
-                    logger.error(  # noqa: TRY400
-                        "HTTP error fetching work from %s: %s", server_url, exc
-                    )
-                    await _sleep_until_next_poll(poll_interval)
-                    continue
-
-                if response.status_code == HTTP_NO_CONTENT:
-                    logger.info("No work available, polling in %ds", poll_interval)
-                    await _sleep_until_next_poll(poll_interval)
-                    continue
-
-                if response.status_code != HTTP_OK:
-                    logger.error(
-                        "Server returned %d: %s",
-                        response.status_code,
-                        _format_error_body(response),
-                    )
-                    await _sleep_until_next_poll(poll_interval)
-                    continue
-
-                try:
-                    issue_data = response.json()
-                except ValueError:
-                    logger.error(  # noqa: TRY400
-                        "Server returned invalid JSON: %s",
-                        _format_error_body(response),
-                    )
-                    await _sleep_until_next_poll(poll_interval)
-                    continue
-
-                local_hash = _compute_content_hash(
-                    issue_data["title"],
-                    issue_data.get("body"),
-                    issue_data["state"],
-                    issue_data.get("labels", []),
-                    issue_data.get("comments"),
+            task_total = total_remaining if total_remaining > 0 else None
+            progress = _make_progress(console, task_total)
+            with progress:
+                task_id = progress.add_task(
+                    "Evaluating issues",
+                    total=task_total,
+                    eta=timing.eta(PHASE_EVALUATE, total_remaining),
                 )
-                current_hash = issue_data.get("current_hash", "")
-                if current_hash and local_hash != current_hash:
-                    logger.warning(
-                        "Issue %s: server hash mismatch (server=%s local=%s)",
-                        issue_data["external_id"],
-                        current_hash,
-                        local_hash,
-                    )
 
-                issue_ref = f"{issue_data['project_name']}#{issue_data['external_id']}"
-                logger.info("Evaluating %s...", issue_ref)
+                evaluated = 0
+                while not shutdown_state["requested"]:
+                    # Honour pause before fetching next issue
+                    if paused_state["paused"]:
+                        await asyncio.sleep(0.5)
+                        continue
 
-                author = issue_data.get("author") or ""
-                maintainers = set(issue_data.get("maintainers", []))
-
-                t0 = time.monotonic()
-                try:
-                    result = await evaluator.evaluate_issue(
-                        title=issue_data["title"],
-                        body=issue_data.get("body"),
-                        issue_type=issue_data["issue_type"],
-                        state=issue_data["state"],
-                        labels=issue_data.get("labels", []),
-                        age_days=_days_since(issue_data.get("created_at")),
-                        last_activity_days=_days_since(issue_data.get("updated_at")),
-                        author=author,
-                        is_maintainer=author in maintainers
-                        or issue_data.get("author_association") == "MAINTAINER",
-                        comment_count=len(issue_data.get("comments", [])),
-                        comments=issue_data.get("comments"),
-                        existing_hash=None,
-                    )
-                except Exception:
-                    elapsed = _format_elapsed(time.monotonic() - t0)
-                    logger.exception(
-                        "%s: evaluation failed after %s",
-                        issue_ref,
-                        elapsed,
-                    )
-                    continue
-
-                elapsed = _format_elapsed(time.monotonic() - t0)
-
-                if result is None:
-                    logger.info(
-                        "%s: content unchanged, skipped (%s)",
-                        issue_ref,
-                        elapsed,
-                    )
-                    continue
-
-                # Compute embedding for phase 2 duplicate detection (optional)
-                embedding: list[float] | None = None
-                if embedding_client and result.get("summary"):
                     try:
-                        embedding = await embedding_client.embed(result["summary"])
-                    except Exception:
+                        response = await http_client.get(
+                            "/api/eval/next",
+                            params=params,
+                            headers=headers,
+                        )
+                    except httpx.ConnectError as exc:
+                        hint = (
+                            " (server may not be using TLS — try http:// instead of https://)"
+                            if "SSL" in str(exc) or "wrong version" in str(exc).lower()
+                            else ""
+                        )
+                        logger.error("Cannot connect to %s%s", server_url, hint)  # noqa: TRY400
+                        await _sleep_until_next_poll(poll_interval)
+                        continue
+                    except httpx.HTTPError as exc:
+                        logger.error(  # noqa: TRY400
+                            "HTTP error fetching work from %s: %s", server_url, exc
+                        )
+                        await _sleep_until_next_poll(poll_interval)
+                        continue
+
+                    if response.status_code == HTTP_NO_CONTENT:
+                        logger.info("No work available, polling in %ds", poll_interval)
+                        await _sleep_until_next_poll(poll_interval)
+                        continue
+
+                    if response.status_code != HTTP_OK:
+                        logger.error(
+                            "Server returned %d: %s",
+                            response.status_code,
+                            _format_error_body(response),
+                        )
+                        await _sleep_until_next_poll(poll_interval)
+                        continue
+
+                    try:
+                        issue_data = response.json()
+                    except ValueError:
+                        logger.error(  # noqa: TRY400
+                            "Server returned invalid JSON: %s",
+                            _format_error_body(response),
+                        )
+                        await _sleep_until_next_poll(poll_interval)
+                        continue
+
+                    local_hash = _compute_content_hash(
+                        issue_data["title"],
+                        issue_data.get("body"),
+                        issue_data["state"],
+                        issue_data.get("labels", []),
+                        issue_data.get("comments"),
+                    )
+                    current_hash = issue_data.get("current_hash", "")
+                    if current_hash and local_hash != current_hash:
                         logger.warning(
-                            "%s: embedding failed, will skip duplicate detection",
-                            issue_ref,
+                            "Issue %s: server hash mismatch (server=%s local=%s)",
+                            issue_data["external_id"],
+                            current_hash,
+                            local_hash,
                         )
 
-                submission: dict[str, Any] = {
-                    "issue_id": issue_data["issue_id"],
-                    "content_hash": result["issue_data_hash"],
-                    "summary": result["summary"],
-                    "scores": result["scores"],
-                    "suggested_action": result["suggested_action"],
-                    "suggested_action_reason": result["suggested_action_reason"],
-                    "tokens_used": result["tokens_used"],
-                    "prompt_tokens": result["prompt_tokens"],
-                    "completion_tokens": result["completion_tokens"],
-                    "model_used": evaluation_model,
-                    "llm_backend": "local",
-                    "embedding": embedding,
-                }
-
-                try:
-                    submit_response = await http_client.post(
-                        "/api/eval/result",
-                        json=submission,
-                        headers=headers,
+                    issue_ref = (
+                        f"{issue_data['project_name']}#{issue_data['external_id']}"
                     )
-                except httpx.ConnectError:
-                    logger.error(  # noqa: TRY400
-                        "%s: lost connection to server while submitting",
+                    logger.info("Evaluating %s...", issue_ref)
+
+                    author = issue_data.get("author") or ""
+                    maintainers = set(issue_data.get("maintainers", []))
+
+                    t0 = time.monotonic()
+                    try:
+                        result = await evaluator.evaluate_issue(
+                            title=issue_data["title"],
+                            body=issue_data.get("body"),
+                            issue_type=issue_data["issue_type"],
+                            state=issue_data["state"],
+                            labels=issue_data.get("labels", []),
+                            age_days=_days_since(issue_data.get("created_at")),
+                            last_activity_days=_days_since(
+                                issue_data.get("updated_at")
+                            ),
+                            author=author,
+                            is_maintainer=author in maintainers
+                            or issue_data.get("author_association") == "MAINTAINER",
+                            comment_count=len(issue_data.get("comments", [])),
+                            comments=issue_data.get("comments"),
+                            existing_hash=None,
+                        )
+                    except Exception:
+                        elapsed = _format_elapsed(time.monotonic() - t0)
+                        logger.exception(
+                            "%s: evaluation failed after %s",
+                            issue_ref,
+                            elapsed,
+                        )
+                        continue
+
+                    duration = time.monotonic() - t0
+                    elapsed = _format_elapsed(duration)
+
+                    if result is None:
+                        logger.info(
+                            "%s: content unchanged, skipped (%s)",
+                            issue_ref,
+                            elapsed,
+                        )
+                        continue
+
+                    # Compute embedding for phase 2 duplicate detection (optional)
+                    embedding: list[float] | None = None
+                    if embedding_client and result.get("summary"):
+                        try:
+                            embedding = await embedding_client.embed(result["summary"])
+                        except Exception:
+                            logger.warning(
+                                "%s: embedding failed, will skip duplicate detection",
+                                issue_ref,
+                            )
+
+                    submission: dict[str, Any] = {
+                        "issue_id": issue_data["issue_id"],
+                        "content_hash": result["issue_data_hash"],
+                        "summary": result["summary"],
+                        "scores": result["scores"],
+                        "suggested_action": result["suggested_action"],
+                        "suggested_action_reason": result["suggested_action_reason"],
+                        "tokens_used": result["tokens_used"],
+                        "prompt_tokens": result["prompt_tokens"],
+                        "completion_tokens": result["completion_tokens"],
+                        "model_used": evaluation_model,
+                        "llm_backend": "local",
+                        "embedding": embedding,
+                    }
+
+                    try:
+                        submit_response = await http_client.post(
+                            "/api/eval/result",
+                            json=submission,
+                            headers=headers,
+                        )
+                    except httpx.ConnectError:
+                        logger.error(  # noqa: TRY400
+                            "%s: lost connection to server while submitting",
+                            issue_ref,
+                        )
+                        continue
+                    except httpx.HTTPError as exc:
+                        logger.error(  # noqa: TRY400
+                            "%s: HTTP error submitting result: %s",
+                            issue_ref,
+                            exc,
+                        )
+                        continue
+
+                    if submit_response.status_code == HTTP_CONFLICT:
+                        logger.warning(
+                            "%s: content changed during evaluation, skipped",
+                            issue_ref,
+                        )
+                        continue
+
+                    if submit_response.status_code != HTTP_OK:
+                        logger.error(
+                            "%s: submit failed %d: %s",
+                            issue_ref,
+                            submit_response.status_code,
+                            _format_error_body(submit_response),
+                        )
+                        continue
+
+                    evaluated += 1
+                    timing.add(PHASE_EVALUATE, duration)
+                    remaining = max(0, (task_total or evaluated) - evaluated)
+                    progress.update(
+                        task_id,
+                        advance=1,
+                        eta=timing.eta(PHASE_EVALUATE, remaining),
+                    )
+                    action = result["suggested_action"] or "summary_only"
+                    logger.info(
+                        "%s — %s (%d tokens, %s)",
                         issue_ref,
+                        action,
+                        result["tokens_used"],
+                        elapsed,
                     )
-                    continue
-                except httpx.HTTPError as exc:
-                    logger.error(  # noqa: TRY400
-                        "%s: HTTP error submitting result: %s",
-                        issue_ref,
-                        exc,
-                    )
-                    continue
 
-                if submit_response.status_code == HTTP_CONFLICT:
-                    logger.warning(
-                        "%s: content changed during evaluation, skipped",
-                        issue_ref,
-                    )
-                    continue
-
-                if submit_response.status_code != HTTP_OK:
-                    logger.error(
-                        "%s: submit failed %d: %s",
-                        issue_ref,
-                        submit_response.status_code,
-                        _format_error_body(submit_response),
-                    )
-                    continue
-
-                evaluated += 1
-                action = result["suggested_action"] or "summary_only"
-                logger.info(
-                    "[%d/%s] %s — %s (%d tokens, %s)",
-                    evaluated,
-                    limit_str,
-                    issue_ref,
-                    action,
-                    result["tokens_used"],
-                    elapsed,
-                )
-
-                if limit > 0 and evaluated >= limit:
-                    logger.info("Done: evaluated %d issues", limit)
-                    break
+                    if limit > 0 and evaluated >= limit:
+                        logger.info("Done: evaluated %d issues", limit)
+                        break
     finally:
         await llm_client.close()
         if embedding_client:
@@ -461,14 +504,15 @@ async def run_duplicate_detection_loop(  # noqa: PLR0913
 ) -> None:
     """Run phase-2 duplicate detection loop."""
     signal.signal(signal.SIGINT, _signal_handler)
-    _setup_logging(verbose=verbose)
+    console = Console()
+    _setup_logging(verbose=verbose, console=console)
 
     server_url = server.rstrip("/")
     llm_base_url = llm_url.rstrip("/")
     verify: bool | str = server_ca_cert if server_ca_cert else True
     headers = {"Authorization": f"Bearer {token}"}
-    limit_str = _format_limit(limit)
 
+    timing = TimingHistory()
     llm_client = LocalLLMClient(
         base_url=llm_base_url,
         api_key=llm_api_key,
@@ -512,184 +556,200 @@ async def run_duplicate_detection_loop(  # noqa: PLR0913
             except httpx.HTTPError:
                 logger.warning("Could not check phase-1 status, proceeding anyway")
 
+            limit_display = str(limit) if limit > 0 else "∞"
             logger.info(
                 "Starting duplicate detection (cosine threshold=%.2f, limit=%s)",
                 cosine_threshold,
-                limit_str,
+                limit_display,
             )
 
-            processed = 0
-            while not shutdown_state["requested"]:
-                try:
-                    work_response = await http_client.get(
-                        "/api/eval/duplicate-work", headers=headers
-                    )
-                except httpx.ConnectError as exc:
-                    hint = (
-                        " (try http:// instead of https://)"
-                        if "SSL" in str(exc) or "wrong version" in str(exc).lower()
-                        else ""
-                    )
-                    logger.error("Cannot connect to %s%s", server_url, hint)  # noqa: TRY400
-                    break
+            task_total = limit if limit > 0 else None
+            progress = _make_progress(console, task_total)
+            with progress:
+                task_id = progress.add_task(
+                    "Detecting duplicates",
+                    total=task_total,
+                    eta=timing.eta(PHASE_DETECT, limit if limit > 0 else 0),
+                )
 
-                if work_response.status_code == HTTP_NO_CONTENT:
-                    logger.info("Done: no more issues to check")
-                    break
-
-                if work_response.status_code != HTTP_OK:
-                    logger.error(
-                        "Server returned %d: %s",
-                        work_response.status_code,
-                        _format_error_body(work_response),
-                    )
-                    break
-
-                items = work_response.json().get("items", [])
-                if not items:
-                    logger.info("Done: no more issues to check")
-                    break
-
-                for item in items:
-                    if shutdown_state["requested"]:
+                processed = 0
+                while not shutdown_state["requested"]:
+                    try:
+                        work_response = await http_client.get(
+                            "/api/eval/duplicate-work", headers=headers
+                        )
+                    except httpx.ConnectError as exc:
+                        hint = (
+                            " (try http:// instead of https://)"
+                            if "SSL" in str(exc) or "wrong version" in str(exc).lower()
+                            else ""
+                        )
+                        logger.error("Cannot connect to %s%s", server_url, hint)  # noqa: TRY400
                         break
 
-                    evaluation_id = item["evaluation_id"]
-                    issue_ref = f"{item['project_name']}#{item['external_id']}"
-                    logger.info("Checking duplicates for %s...", issue_ref)
+                    if work_response.status_code == HTTP_NO_CONTENT:
+                        logger.info("Done: no more issues to check")
+                        break
 
-                    embedding = item.get("embedding")
-                    if not embedding:
-                        logger.warning("%s: no embedding, skipping", issue_ref)
-                        continue
+                    if work_response.status_code != HTTP_OK:
+                        logger.error(
+                            "Server returned %d: %s",
+                            work_response.status_code,
+                            _format_error_body(work_response),
+                        )
+                        break
 
-                    t0 = time.monotonic()
+                    items = work_response.json().get("items", [])
+                    if not items:
+                        logger.info("Done: no more issues to check")
+                        break
 
-                    # Find nearest neighbours via server
-                    async def find_similar(
-                        *,
-                        embedding: list[float],
-                        exclude_issue_id: int,
-                        _item: dict[str, Any] = item,
-                    ) -> list[dict[str, Any]]:
+                    for item in items:
+                        if shutdown_state["requested"]:
+                            break
+
+                        evaluation_id = item["evaluation_id"]
+                        issue_ref = f"{item['project_name']}#{item['external_id']}"
+                        logger.info("Checking duplicates for %s...", issue_ref)
+
+                        embedding = item.get("embedding")
+                        if not embedding:
+                            logger.warning("%s: no embedding, skipping", issue_ref)
+                            continue
+
+                        t0 = time.monotonic()
+
+                        # Find nearest neighbours via server
+                        async def find_similar(
+                            *,
+                            embedding: list[float],
+                            exclude_issue_id: int,
+                            _item: dict[str, Any] = item,
+                        ) -> list[dict[str, Any]]:
+                            try:
+                                resp = await http_client.post(
+                                    "/api/eval/similar",
+                                    json={
+                                        "embedding": embedding,
+                                        "exclude_issue_id": exclude_issue_id,
+                                        "cosine_threshold": cosine_threshold,
+                                        "limit": 5,
+                                    },
+                                    headers=headers,
+                                )
+                                if resp.status_code == HTTP_OK:
+                                    return resp.json().get("candidates", [])
+                            except httpx.HTTPError:
+                                pass
+                            return []
+
                         try:
-                            resp = await http_client.post(
-                                "/api/eval/similar",
-                                json={
-                                    "embedding": embedding,
-                                    "exclude_issue_id": exclude_issue_id,
-                                    "cosine_threshold": cosine_threshold,
-                                    "limit": 5,
-                                },
+                            dup_result = await detector.check_duplicates(
+                                issue_id=item["issue_id"],
+                                project_name=item["project_name"],
+                                title=item["title"],
+                                summary=item["summary"] or "",
+                                embedding=embedding,
+                                find_similar_fn=find_similar,
+                            )
+                        except Exception:
+                            logger.exception("%s: duplicate check failed", issue_ref)
+                            continue
+
+                        duration = time.monotonic() - t0
+                        elapsed = _format_elapsed(duration)
+                        candidates_compared = (dup_result or {}).get(
+                            "candidates_compared", 0
+                        )
+
+                        duplicate_result: dict[str, Any] = {
+                            "evaluation_id": evaluation_id,
+                            "duplicateness": 0.0,
+                            "candidates_compared": candidates_compared,
+                        }
+
+                        if dup_result and "duplicate_of_issue_id" in dup_result:
+                            dup_ref = f"{dup_result['duplicate_of_project_name']}#{dup_result['duplicate_of_external_id']}"
+                            logger.info(
+                                "%s — duplicate of %s (confidence %d%%, %d compared, %s)",
+                                issue_ref,
+                                dup_ref,
+                                dup_result["confidence"],
+                                candidates_compared,
+                                elapsed,
+                            )
+
+                            # Rewrite summary to note the duplicate
+                            try:
+                                new_summary = await detector.rewrite_summary(
+                                    original_summary=item["summary"] or "",
+                                    duplicate_refs=[dup_ref],
+                                )
+                                new_embedding = await embedding_client.embed(
+                                    new_summary
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "%s: summary rewrite failed, using original",
+                                    issue_ref,
+                                )
+                                new_summary = None
+                                new_embedding = None
+
+                            duplicate_result.update(
+                                {
+                                    "duplicateness": float(dup_result["confidence"]),
+                                    "duplicate_of_issue_id": dup_result[
+                                        "duplicate_of_issue_id"
+                                    ],
+                                    "updated_summary": new_summary,
+                                    "updated_embedding": new_embedding,
+                                }
+                            )
+                        else:
+                            logger.info(
+                                "%s — no duplicate (%d compared, %s)",
+                                issue_ref,
+                                candidates_compared,
+                                elapsed,
+                            )
+
+                        # Submit result
+                        try:
+                            submit_resp = await http_client.post(
+                                "/api/eval/duplicate-result",
+                                json=duplicate_result,
                                 headers=headers,
                             )
-                            if resp.status_code == HTTP_OK:
-                                return resp.json().get("candidates", [])
-                        except httpx.HTTPError:
-                            pass
-                        return []
-
-                    try:
-                        dup_result = await detector.check_duplicates(
-                            issue_id=item["issue_id"],
-                            project_name=item["project_name"],
-                            title=item["title"],
-                            summary=item["summary"] or "",
-                            embedding=embedding,
-                            find_similar_fn=find_similar,
-                        )
-                    except Exception:
-                        logger.exception("%s: duplicate check failed", issue_ref)
-                        continue
-
-                    elapsed = _format_elapsed(time.monotonic() - t0)
-                    candidates_compared = (dup_result or {}).get(
-                        "candidates_compared", 0
-                    )
-
-                    duplicate_result: dict[str, Any] = {
-                        "evaluation_id": evaluation_id,
-                        "duplicateness": 0.0,
-                        "candidates_compared": candidates_compared,
-                    }
-
-                    if dup_result and "duplicate_of_issue_id" in dup_result:
-                        dup_ref = f"{dup_result['duplicate_of_project_name']}#{dup_result['duplicate_of_external_id']}"
-                        logger.info(
-                            "[%d/%s] %s — duplicate of %s (confidence %d%%, %d compared, %s)",
-                            processed + 1,
-                            limit_str,
-                            issue_ref,
-                            dup_ref,
-                            dup_result["confidence"],
-                            candidates_compared,
-                            elapsed,
-                        )
-
-                        # Rewrite summary to note the duplicate
-                        try:
-                            new_summary = await detector.rewrite_summary(
-                                original_summary=item["summary"] or "",
-                                duplicate_refs=[dup_ref],
-                            )
-                            new_embedding = await embedding_client.embed(new_summary)
-                        except Exception:
-                            logger.warning(
-                                "%s: summary rewrite failed, using original",
+                            if submit_resp.status_code == HTTP_CONFLICT:
+                                logger.warning(
+                                    "%s: evaluation was superseded, skipping", issue_ref
+                                )
+                            elif submit_resp.status_code != HTTP_OK:
+                                logger.error(
+                                    "%s: submit failed %d: %s",
+                                    issue_ref,
+                                    submit_resp.status_code,
+                                    _format_error_body(submit_resp),
+                                )
+                        except httpx.HTTPError as exc:
+                            logger.error(  # noqa: TRY400
+                                "%s: HTTP error submitting duplicate result: %s",
                                 issue_ref,
+                                exc,
                             )
-                            new_summary = None
-                            new_embedding = None
 
-                        duplicate_result.update(
-                            {
-                                "duplicateness": float(dup_result["confidence"]),
-                                "duplicate_of_issue_id": dup_result[
-                                    "duplicate_of_issue_id"
-                                ],
-                                "updated_summary": new_summary,
-                                "updated_embedding": new_embedding,
-                            }
+                        processed += 1
+                        timing.add(PHASE_DETECT, duration)
+                        remaining = max(0, (task_total or processed) - processed)
+                        progress.update(
+                            task_id,
+                            advance=1,
+                            eta=timing.eta(PHASE_DETECT, remaining),
                         )
-                    else:
-                        logger.info(
-                            "[%d/%s] %s — no duplicate (%d compared, %s)",
-                            processed + 1,
-                            limit_str,
-                            issue_ref,
-                            candidates_compared,
-                            elapsed,
-                        )
-
-                    # Submit result
-                    try:
-                        submit_resp = await http_client.post(
-                            "/api/eval/duplicate-result",
-                            json=duplicate_result,
-                            headers=headers,
-                        )
-                        if submit_resp.status_code == HTTP_CONFLICT:
-                            logger.warning(
-                                "%s: evaluation was superseded, skipping", issue_ref
-                            )
-                        elif submit_resp.status_code != HTTP_OK:
-                            logger.error(
-                                "%s: submit failed %d: %s",
-                                issue_ref,
-                                submit_resp.status_code,
-                                _format_error_body(submit_resp),
-                            )
-                    except httpx.HTTPError as exc:
-                        logger.error(  # noqa: TRY400
-                            "%s: HTTP error submitting duplicate result: %s",
-                            issue_ref,
-                            exc,
-                        )
-
-                    processed += 1
-                    if limit > 0 and processed >= limit:
-                        logger.info("Done: checked %d issues", limit)
-                        return
+                        if limit > 0 and processed >= limit:
+                            logger.info("Done: checked %d issues", limit)
+                            return
     finally:
         await llm_client.close()
         await embedding_client.close()

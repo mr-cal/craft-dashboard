@@ -120,6 +120,17 @@ def patched_runtime(monkeypatch):
     evaluator.evaluate_issue = AsyncMock(return_value=SAMPLE_RESULT)
     sleep_mock = AsyncMock()
 
+    # Mock progress bar to avoid rich terminal output in tests
+    mock_progress = MagicMock()
+    mock_progress.__enter__ = MagicMock(return_value=mock_progress)
+    mock_progress.__exit__ = MagicMock(return_value=False)
+    mock_progress.add_task = MagicMock(return_value=0)
+
+    # Mock timing history to avoid writing to ~/.craft-dashboard/
+    mock_timing = MagicMock()
+    mock_timing.add = MagicMock()
+    mock_timing.eta = MagicMock(return_value="?")
+
     monkeypatch.setattr(
         eval_client, "LocalLLMClient", MagicMock(return_value=llm_client)
     )
@@ -129,11 +140,21 @@ def patched_runtime(monkeypatch):
     monkeypatch.setattr(eval_client, "_sleep_until_next_poll", sleep_mock)
     monkeypatch.setattr(eval_client.signal, "signal", MagicMock())
     monkeypatch.setattr(eval_client, "_start_keyboard_monitor", MagicMock())
+    monkeypatch.setattr(
+        eval_client, "_make_progress", MagicMock(return_value=mock_progress)
+    )
+    monkeypatch.setattr(
+        eval_client, "TimingHistory", MagicMock(return_value=mock_timing)
+    )
+    # Suppress rich console output from _setup_logging in tests
+    monkeypatch.setattr(eval_client, "_setup_logging", MagicMock())
 
     return {
         "llm_client": llm_client,
         "evaluator": evaluator,
         "sleep": sleep_mock,
+        "progress": mock_progress,
+        "timing": mock_timing,
     }
 
 

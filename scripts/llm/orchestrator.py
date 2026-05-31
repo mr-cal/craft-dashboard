@@ -14,6 +14,14 @@ from craft_dashboard.llm.exceptions import (
     LLMTimeoutError,
     LLMValidationError,
 )
+from tenacity import (
+    AsyncRetrying,
+    RetryCallState,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
+
 from scripts.llm.checkpoint import (
     EvaluationCheckpoint,
     clear_checkpoint,
@@ -24,13 +32,6 @@ from scripts.llm.checkpoint import (
 from scripts.llm.queries import IssueFilter, fetch_issue_evaluation_targets
 from scripts.llm.storage import store_evaluation_result
 from scripts.llm.validation import validate_evaluation_result
-from tenacity import (
-    AsyncRetrying,
-    RetryCallState,
-    retry_if_exception,
-    stop_after_attempt,
-    wait_exponential,
-)
 
 if TYPE_CHECKING:
     from craft_dashboard.llm.evaluator import EvaluationResult, IssueEvaluator
