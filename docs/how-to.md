@@ -45,13 +45,10 @@ force a full refresh of all projects, see "Force-refresh all data" below.
 
 ### run_llm.py
 
-Sends issues to an LLM for triage evaluation (summary, suggested action,
-staleness score).
+Server-side LLM evaluation using OpenRouter. Runs inside the app container and
+writes results directly to the database.
 
-**Prerequisites:** The script needs a PostgreSQL database (`DATABASE_URL` in
-`.env`) and an LLM backend. For `--backend openrouter`, set `OPENROUTER_API_KEY`.
-For `--backend local`, a local LLM server (e.g. ollama or llama-server) must
-be running at `LOCAL_LLM_URL` (default: `http://localhost:11434/v1`).
+**Prerequisites:** `OPENROUTER_API_KEY` in `.env` and `ENABLE_SERVER_EVAL=true`.
 
 ```
 # evaluate all open issues (daily cron mode)
@@ -65,9 +62,6 @@ uv run scripts/run_llm.py evaluate --project snapcraft
 
 # limit number of issues (good for testing API costs)
 uv run scripts/run_llm.py evaluate --open-only --limit 40
-
-# use local LLM instead of OpenRouter
-uv run scripts/run_llm.py evaluate --backend local
 ```
 
 In production, this runs as a daily cron job at 6 AM UTC:
@@ -77,7 +71,10 @@ docker compose exec -T app python scripts/run_llm.py evaluate --open-only
 ```
 
 The evaluator hashes issue content and skips unchanged issues, so daily runs
-only process newly changed issues and cost very little.
+only process newly changed issues.
+
+For **local LLM evaluation** (pull-based, runs on your machine), use the eval
+client instead. See [`docs/eval-client.md`](eval-client.md).
 
 ### backfill_snapshots.py
 
@@ -233,3 +230,30 @@ The server now uses OpenRouter for server-side evaluation.
 
 For local LLM evaluation, use the pull-based eval client instead. See
 [`docs/eval-client.md`](eval-client.md) for setup and usage.
+
+### Delete all existing evaluations
+
+Remove all LLM evaluation results to start fresh or re-evaluate everything:
+
+```bash
+docker compose exec -T postgres psql -U craft_dashboard craft_dashboard \
+  -c "DELETE FROM llm_evaluations;"
+```
+
+To delete evaluations for a specific project only:
+
+```bash
+docker compose exec -T postgres psql -U craft_dashboard craft_dashboard \
+  -c "DELETE FROM llm_evaluations WHERE issue_id IN (SELECT id FROM issues WHERE project_id = (SELECT id FROM projects WHERE name = 'snapcraft'));"
+```
+
+After deletion, re-run the evaluation:
+
+```bash
+# Server-side (OpenRouter)
+docker compose exec -T app python scripts/run_llm.py evaluate --open-only
+
+# Pull-based (local LLM)
+source .env
+uv run scripts/eval_client.py --open-only
+```
