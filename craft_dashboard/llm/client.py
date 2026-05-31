@@ -101,7 +101,7 @@ class OpenRouterClient:
     def http(self) -> httpx.AsyncClient:
         """Return a persistent HTTP client, creating one if needed."""
         if self._http is None or self._http.is_closed:
-            self._http = httpx.AsyncClient(timeout=60.0)
+            self._http = httpx.AsyncClient(timeout=600.0)
         return self._http
 
     async def close(self) -> None:
@@ -199,7 +199,7 @@ class LocalLLMClient:
         """Return a persistent HTTP client, creating one if needed."""
         if self._http is None or self._http.is_closed:
             verify: bool | str = self.ca_cert if self.ca_cert else True
-            self._http = httpx.AsyncClient(timeout=120.0, verify=verify)
+            self._http = httpx.AsyncClient(timeout=600.0, verify=verify)
         return self._http
 
     async def close(self) -> None:

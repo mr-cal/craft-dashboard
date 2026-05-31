@@ -103,10 +103,12 @@ def _log_progress(
     stats: EvaluationStats, *, processed: int, total_to_eval: int
 ) -> None:
     if processed % 10 == 0:
+        pct = (processed / total_to_eval * 100) if total_to_eval > 0 else 0
         logger.info(
-            "Progress [%d/%d]: %d evaluated, %d skipped, %d errors",
+            "Progress [%d/%d] (%.0f%%): %d evaluated, %d skipped, %d errors",
             processed,
             total_to_eval,
+            pct,
             stats["evaluated"],
             stats["skipped"],
             stats["errored"],
@@ -215,8 +217,14 @@ async def _evaluate_issues(  # noqa: PLR0913
         )
 
         issue_ref = f"{target.project_name}#{issue.external_id}"
+        pct = (idx / total_to_eval * 100) if total_to_eval > 0 else 0
         logger.info(
-            "[%d/%d] Evaluating %s: %s", idx, total_to_eval, issue_ref, issue.title[:60]
+            "[%d/%d] (%.0f%%) Evaluating %s: %s",
+            idx,
+            total_to_eval,
+            pct,
+            issue_ref,
+            issue.title[:60],
         )
 
         issue_kwargs = {

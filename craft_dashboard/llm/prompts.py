@@ -46,6 +46,38 @@ stale, and 4+ months with no review or update is very stale. Also consider \
 whether the issue is still relevant to the current version of the software \
 (a bug report against an old, superseded version is more stale).
 - complexity: 0 = trivial, 100 = extremely complex
+
+Action guidelines — choose the MOST appropriate action:
+- needs_triage: The issue has NOT yet been assessed by a maintainer. Use \
+this when the issue lacks labels, has no maintainer response or comments, \
+has no assignee, or otherwise shows no sign of having been categorised or \
+prioritised. This is the default action for new, unlabelled issues \
+regardless of how well-written or actionable they are. A well-structured \
+bug report with clear reproduction steps still needs triage if no \
+maintainer has acknowledged, labelled, or responded to it yet.
+- needs_review: The issue HAS already been triaged (it has labels, \
+maintainer comments, an assignee, or other signs of prior assessment) but \
+needs further technical review, code review (for PRs), or developer \
+investigation. Use for PRs awaiting maintainer code review. Do NOT use \
+this for untriaged issues — use needs_triage instead.
+- keep_open: The issue is triaged, valid, and should remain open. Use when \
+the issue is clearly scoped, has maintainer buy-in, or is actively being \
+worked on. As long as a maintainer has triaged and acknowledged an issue,
+it should be kept open unless it's outdated.
+- close_stale: The issue or PR is both inactive AND has become irrelevant. \
+Staleness alone is NEVER a sufficient reason to close an issue — the issue \
+must also show clear signs that it is no longer applicable. Valid reasons \
+include: the feature was implemented elsewhere, the affected version is no \
+longer supported, the PR is clearly abandoned with failing CI and no \
+prospect of revival, or the original problem is no longer reproducible. \
+Always provide a concrete, specific reason why the issue is no longer \
+relevant beyond just its age or inactivity.
+- close_not_a_bug: The reported behaviour is working as intended, is a \
+support/usage question rather than a bug, or has been resolved through \
+configuration or documentation.
+- close_outdated: The issue describes a problem or request that has been \
+superseded by newer work, resolved in a subsequent release, or is no \
+longer applicable to the current codebase.
 """
 
 _ISSUE_EXTRA_SCORES = """

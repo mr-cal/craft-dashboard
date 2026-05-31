@@ -43,7 +43,12 @@
     {% endif %}
     <div class="issue-detail-scores">
       {% for score_key, score_value in (current_evaluation.scores or {}).items() %}
-      <span class="issue-detail-score"><strong>{{ score_key|replace("_", " ")|title }}:</strong> {{ score_value }}</span>
+      {% set score_name = score_key|replace("_", " ")|title %}
+      {% set score_inverted = score_key in ("readiness",) %}
+      <span class="issue-detail-score">
+        <strong>{{ score_name }}:</strong>
+        {% include "components/score_badge.html" %}
+      </span>
       {% else %}
       <span>No scores available.</span>
       {% endfor %}
@@ -56,7 +61,7 @@
 
 <section class="issue-detail-card">
   <h3>Issue body</h3>
-  <pre class="issue-detail-body">{{ issue.body or "No description provided." }}</pre>
+  <div id="issue-body" class="issue-detail-body--markdown">{{ issue.body or "No description provided." }}</div>
 </section>
 
 <section class="issue-detail-card">
@@ -80,7 +85,9 @@
         <td>
           {% if evaluation.scores %}
             {% for score_key, score_value in evaluation.scores.items() %}
-            <div>{{ score_key|replace("_", " ")|title }}: {{ score_value }}</div>
+            {% set score_name = score_key|replace("_", " ")|title %}
+            {% set score_inverted = score_key in ("readiness",) %}
+            <div>{{ score_name }}: {% include "components/score_badge.html" %}</div>
             {% endfor %}
           {% else %}
             —
@@ -96,4 +103,16 @@
   <p>No evaluation history available.</p>
   {% endif %}
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+<script>
+(function () {
+  var el = document.getElementById("issue-body");
+  if (!el || !el.textContent.trim()) return;
+  var raw = el.textContent;
+  el.innerHTML = marked.parse(raw);
+})();
+</script>
 {% endblock %}

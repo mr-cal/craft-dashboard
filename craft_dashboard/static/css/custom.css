@@ -171,6 +171,33 @@ body.is-paper {
   border: 1px solid var(--app-border);
 }
 
+.issue-detail-body--markdown {
+  background: var(--app-surface-muted);
+  color: var(--app-text);
+  padding: 1rem;
+  border-radius: 0.35rem;
+  border: 1px solid var(--app-border);
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.issue-detail-body--markdown pre {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  padding: 0.75rem;
+  border-radius: 0.25rem;
+  overflow-x: auto;
+}
+
+.issue-detail-body--markdown code {
+  font-size: 0.9em;
+}
+
+.issue-detail-body--markdown img {
+  max-width: 100%;
+  height: auto;
+}
+
 .issue-detail-scores,
 .issue-page-status__meta {
   display: flex;
@@ -242,6 +269,14 @@ table[role="grid"] td {
 /* Score headers need visible overflow for tooltips */
 table[role="grid"] th[data-tooltip] {
   overflow: visible;
+}
+
+/* Clip header text via the link element so tooltip overflow still works */
+table[role="grid"] th a {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Let title column wrap */
