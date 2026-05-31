@@ -33,7 +33,6 @@ SAMPLE_RESULT = {
     "summary": "This is a test summary for the issue evaluation.",
     "scores": {
         "staleness": 10,
-        "duplicateness": 0,
         "complexity": 30,
         "support_request": 0,
         "readiness": 50,
@@ -62,6 +61,7 @@ DEFAULT_KWARGS = {
     "incomplete": False,
     "stale_days": 0,
     "server_ca_cert": "",
+    "verbose": False,
 }
 
 
@@ -245,7 +245,7 @@ async def test_run_eval_loop_stops_after_reaching_limit(
 
     assert patched_runtime["evaluator"].evaluate_issue.await_count == 2
     assert http_client.post.await_count == 2
-    assert "Reached limit of 2 evaluations" in caplog.text
+    assert "Done: evaluated 2 issues" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -292,4 +292,4 @@ async def test_run_eval_loop_skips_submission_when_evaluator_returns_none(
     patched_runtime["evaluator"].evaluate_issue.assert_awaited_once()
     http_client.post.assert_not_awaited()
     patched_runtime["sleep"].assert_awaited_once_with(1)
-    assert "content unchanged, skipping" in caplog.text
+    assert "content unchanged, skipped" in caplog.text

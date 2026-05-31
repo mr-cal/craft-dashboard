@@ -12,7 +12,6 @@ def _valid_result() -> dict:
         "suggested_action_reason": "Maintainers still have enough detail to act on it.",
         "scores": {
             "staleness": 10,
-            "duplicateness": 5,
             "complexity": 40,
             "support_request": 15,
             "readiness": 85,
@@ -40,7 +39,6 @@ def test_accepts_valid_pull_request_results() -> None:
     result = _valid_result()
     result["scores"] = {
         "staleness": 10,
-        "duplicateness": 5,
         "complexity": 40,
         "readiness": 85,
     }

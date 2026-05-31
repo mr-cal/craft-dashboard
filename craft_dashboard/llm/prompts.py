@@ -28,11 +28,10 @@ Respond with valid JSON matching this schema:
 {
   "scores": {
     "staleness": <0-100, how stale/inactive is this>,
-    "duplicateness": <0-100, how likely is this a duplicate>,
     "complexity": <0-100, how complex is this>,
     <additional scores based on type>
   },
-  "suggested_action": "<one of: close_stale, close_duplicate, close_not_a_bug, \
+  "suggested_action": "<one of: close_stale, close_not_a_bug, \
 close_outdated, needs_triage, needs_review, keep_open>",
   "suggested_action_reason": "<brief explanation for the suggested action>"
 }
@@ -46,7 +45,6 @@ faster than issues — a PR with no activity for 2+ weeks is already mildly \
 stale, and 4+ months with no review or update is very stale. Also consider \
 whether the issue is still relevant to the current version of the software \
 (a bug report against an old, superseded version is more stale).
-- duplicateness: 0 = unique, 100 = clearly a duplicate
 - complexity: 0 = trivial, 100 = extremely complex
 """
 

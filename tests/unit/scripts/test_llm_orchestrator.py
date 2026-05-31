@@ -46,7 +46,6 @@ def _valid_result(*, issue_hash: str) -> dict:
         "suggested_action_reason": "Recent comments keep the report active.",
         "scores": {
             "staleness": 10,
-            "duplicateness": 0,
             "complexity": 30,
             "support_request": 5,
             "readiness": 90,
@@ -221,7 +220,6 @@ class TestEvaluateIssues:
                     "suggested_action_reason": "Looks fine",
                     "scores": {
                         "staleness": 10,
-                        "duplicateness": 0,
                         "complexity": 30,
                         "support_request": 5,
                         "readiness": 90,

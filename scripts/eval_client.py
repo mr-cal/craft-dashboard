@@ -8,6 +8,7 @@ import logging
 import pathlib
 import signal
 import sys
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -20,10 +21,6 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from craft_dashboard.llm.client import LocalLLMClient
 from craft_dashboard.llm.evaluator import IssueEvaluator, _compute_content_hash
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 HTTP_OK = httpx.codes.OK
@@ -32,6 +29,28 @@ HTTP_CONFLICT = httpx.codes.CONFLICT
 shutdown_state = {"requested": False}
 
 _MAX_ERROR_BODY = 200
+
+
+def _setup_logging(*, verbose: bool) -> None:
+    """Configure logging based on verbosity level."""
+    if verbose:
+        fmt = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
+        logging.basicConfig(level=logging.INFO, format=fmt)
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        # Suppress noisy loggers at default verbosity
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        logging.getLogger("craft_dashboard.llm.client").setLevel(logging.WARNING)
+
+
+def _format_elapsed(seconds: float) -> str:
+    """Format elapsed time as a human-readable string."""
+    if seconds < 60:  # noqa: PLR2004
+        return f"{seconds:.0f}s"
+    minutes = int(seconds // 60)
+    remaining = int(seconds % 60)
+    return f"{minutes}m{remaining:02d}s"
 
 
 def _format_error_body(response: httpx.Response) -> str:
@@ -49,10 +68,15 @@ def _format_error_body(response: httpx.Response) -> str:
     return (text[:_MAX_ERROR_BODY] + "…") if len(text) > _MAX_ERROR_BODY else text
 
 
+def _format_limit(limit: int) -> str:
+    """Format the limit as a display string."""
+    return str(limit) if limit > 0 else "∞"
+
+
 def _signal_handler(signum, frame) -> None:
     del signum, frame
     shutdown_state["requested"] = True
-    logger.info("Shutdown requested, finishing current evaluation...")
+    logger.info("Shutting down after current evaluation...")
 
 
 def _parse_timestamp(value: str | None) -> datetime | None:
@@ -96,9 +120,11 @@ async def run_eval_loop(  # noqa: PLR0913
     incomplete: bool,
     stale_days: int,
     server_ca_cert: str,
+    verbose: bool,
 ) -> None:
     """Poll the eval API, run local evaluation, and submit results."""
     signal.signal(signal.SIGINT, _signal_handler)
+    _setup_logging(verbose=verbose)
 
     server_url = server.rstrip("/")
     llm_base_url = llm_url.rstrip("/")
@@ -121,6 +147,21 @@ async def run_eval_loop(  # noqa: PLR0913
         client=llm_client,
         summary_model=summary_model,
         evaluation_model=evaluation_model,
+    )
+
+    limit_str = _format_limit(limit)
+    filter_parts = []
+    if project:
+        filter_parts.append(project)
+    if open_only:
+        filter_parts.append("open only")
+    filter_desc = f" ({', '.join(filter_parts)})" if filter_parts else ""
+    logger.info(
+        "Connecting to %s%s, model=%s, limit=%s",
+        server_url,
+        filter_desc,
+        evaluation_model,
+        limit_str,
     )
 
     try:
@@ -154,7 +195,7 @@ async def run_eval_loop(  # noqa: PLR0913
                     continue
 
                 if response.status_code == HTTP_NO_CONTENT:
-                    logger.info("No work available, sleeping %ds", poll_interval)
+                    logger.info("No work available, polling in %ds", poll_interval)
                     await _sleep_until_next_poll(poll_interval)
                     continue
 
@@ -193,9 +234,13 @@ async def run_eval_loop(  # noqa: PLR0913
                         local_hash,
                     )
 
+                issue_ref = f"{issue_data['project_name']}#{issue_data['external_id']}"
+                logger.info("Evaluating %s...", issue_ref)
+
                 author = issue_data.get("author") or ""
                 maintainers = set(issue_data.get("maintainers", []))
 
+                t0 = time.monotonic()
                 try:
                     result = await evaluator.evaluate_issue(
                         title=issue_data["title"],
@@ -213,16 +258,21 @@ async def run_eval_loop(  # noqa: PLR0913
                         existing_hash=None,
                     )
                 except Exception:
+                    elapsed = _format_elapsed(time.monotonic() - t0)
                     logger.exception(
-                        "Issue %s: evaluation failed",
-                        issue_data["external_id"],
+                        "%s: evaluation failed after %s",
+                        issue_ref,
+                        elapsed,
                     )
                     continue
 
+                elapsed = _format_elapsed(time.monotonic() - t0)
+
                 if result is None:
                     logger.info(
-                        "Issue %s: content unchanged, skipping",
-                        issue_data["external_id"],
+                        "%s: content unchanged, skipped (%s)",
+                        issue_ref,
+                        elapsed,
                     )
                     continue
 
@@ -248,46 +298,48 @@ async def run_eval_loop(  # noqa: PLR0913
                     )
                 except httpx.ConnectError:
                     logger.error(  # noqa: TRY400
-                        "Issue %s: lost connection to server while submitting",
-                        issue_data["external_id"],
+                        "%s: lost connection to server while submitting",
+                        issue_ref,
                     )
                     continue
                 except httpx.HTTPError as exc:
                     logger.error(  # noqa: TRY400
-                        "Issue %s: HTTP error submitting result: %s",
-                        issue_data["external_id"],
+                        "%s: HTTP error submitting result: %s",
+                        issue_ref,
                         exc,
                     )
                     continue
 
                 if submit_response.status_code == HTTP_CONFLICT:
                     logger.warning(
-                        "Issue %s: content changed during evaluation, skipping",
-                        issue_data["external_id"],
+                        "%s: content changed during evaluation, skipped",
+                        issue_ref,
                     )
                     continue
 
                 if submit_response.status_code != HTTP_OK:
                     logger.error(
-                        "Issue %s: failed to submit result: %d %s",
-                        issue_data["external_id"],
+                        "%s: submit failed %d: %s",
+                        issue_ref,
                         submit_response.status_code,
                         _format_error_body(submit_response),
                     )
                     continue
 
                 evaluated += 1
+                action = result["suggested_action"] or "summary_only"
                 logger.info(
-                    "Evaluated %d: %s#%s — %s (%d tokens)",
+                    "[%d/%s] %s — %s (%d tokens, %s)",
                     evaluated,
-                    issue_data["project_name"],
-                    issue_data["external_id"],
-                    result["suggested_action"] or "summary_only",
+                    limit_str,
+                    issue_ref,
+                    action,
                     result["tokens_used"],
+                    elapsed,
                 )
 
                 if limit > 0 and evaluated >= limit:
-                    logger.info("Reached limit of %d evaluations", limit)
+                    logger.info("Done: evaluated %d issues", limit)
                     break
     finally:
         await llm_client.close()
@@ -385,6 +437,12 @@ async def run_eval_loop(  # noqa: PLR0913
     type=click.IntRange(min=0),
     help="Only evaluate stale evaluations older than N days",
 )
+@click.option(
+    "--verbose",
+    is_flag=True,
+    default=False,
+    help="Show timestamps, URLs, and model details",
+)
 def main(  # noqa: PLR0913
     server: str,
     token: str,
@@ -401,6 +459,7 @@ def main(  # noqa: PLR0913
     force: bool,
     incomplete: bool,
     stale_days: int,
+    verbose: bool,
 ) -> None:
     """Run the local evaluation client CLI."""
     asyncio.run(
@@ -420,6 +479,7 @@ def main(  # noqa: PLR0913
             incomplete=incomplete,
             stale_days=stale_days,
             server_ca_cert=server_ca_cert,
+            verbose=verbose,
         )
     )
 

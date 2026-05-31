@@ -10,7 +10,6 @@ from craft_dashboard.llm.exceptions import LLMValidationError
 ALLOWED_ACTIONS: Final[frozenset[str]] = frozenset(
     {
         "close_stale",
-        "close_duplicate",
         "close_not_a_bug",
         "close_outdated",
         "needs_triage",
@@ -19,12 +18,8 @@ ALLOWED_ACTIONS: Final[frozenset[str]] = frozenset(
     }
 )
 _REQUIRED_SCORE_KEYS: Final[dict[str, frozenset[str]]] = {
-    "issue": frozenset(
-        {"staleness", "duplicateness", "complexity", "support_request", "readiness"}
-    ),
-    "pull_request": frozenset(
-        {"staleness", "duplicateness", "complexity", "readiness"}
-    ),
+    "issue": frozenset({"staleness", "complexity", "support_request", "readiness"}),
+    "pull_request": frozenset({"staleness", "complexity", "readiness"}),
 }
 _MIN_SUMMARY_LENGTH: Final[int] = 20
 _MAX_SCORE: Final[int] = 100

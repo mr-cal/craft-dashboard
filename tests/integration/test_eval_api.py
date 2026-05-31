@@ -220,7 +220,6 @@ class TestEvalNextIntegration:
             suggested_action_reason="The issue still needs maintainer attention.",
             scores={
                 "staleness": 0,
-                "duplicateness": 0,
                 "complexity": 0,
                 "support_request": 0,
                 "readiness": 0,
@@ -270,7 +269,6 @@ class TestEvalResultIntegration:
                     "summary": "This summary is definitely long enough.",
                     "scores": {
                         "staleness": 1,
-                        "duplicateness": 2,
                         "complexity": 3,
                         "support_request": 4,
                         "readiness": 5,
@@ -310,7 +308,6 @@ class TestEvalResultIntegration:
                     "summary": "too short",
                     "scores": {
                         "staleness": 1,
-                        "duplicateness": 2,
                         "complexity": 3,
                         "support_request": 4,
                         "readiness": 5,
@@ -338,7 +335,6 @@ class TestEvalResultIntegration:
             suggested_action_reason="The issue still needs maintainer investigation.",
             scores={
                 "staleness": 0,
-                "duplicateness": 0,
                 "complexity": 0,
                 "support_request": 0,
                 "readiness": 0,
@@ -368,7 +364,6 @@ class TestEvalResultIntegration:
                     "summary": "Maintainers confirmed the regression is still reproducible.",
                     "scores": {
                         "staleness": 2,
-                        "duplicateness": 3,
                         "complexity": 55,
                         "support_request": 12,
                         "readiness": 70,
