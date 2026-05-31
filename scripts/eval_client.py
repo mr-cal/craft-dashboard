@@ -13,6 +13,7 @@ from typing import Any
 
 import click
 import httpx
+from dotenv import load_dotenv
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -65,7 +66,8 @@ async def run_eval_loop(  # noqa: PLR0913
     *,
     server: str,
     token: str,
-    model: str,
+    summary_model: str,
+    evaluation_model: str,
     llm_url: str,
     llm_api_key: str,
     ca_cert: str,
@@ -100,8 +102,8 @@ async def run_eval_loop(  # noqa: PLR0913
     )
     evaluator = IssueEvaluator(
         client=llm_client,
-        summary_model=model,
-        evaluation_model=model,
+        summary_model=summary_model,
+        evaluation_model=evaluation_model,
     )
 
     try:
@@ -203,7 +205,7 @@ async def run_eval_loop(  # noqa: PLR0913
                     "tokens_used": result["tokens_used"],
                     "prompt_tokens": result["prompt_tokens"],
                     "completion_tokens": result["completion_tokens"],
-                    "model_used": model,
+                    "model_used": evaluation_model,
                     "llm_backend": "local",
                 }
 
@@ -254,26 +256,56 @@ async def run_eval_loop(  # noqa: PLR0913
 
 
 @click.command()
-@click.option("--server", required=True, help="Base URL of craft-dashboard server")
-@click.option("--token", required=True, help="Eval API bearer token")
-@click.option("--model", default="llama3.2", show_default=True, help="LLM model name")
+@click.option(
+    "--server",
+    required=True,
+    envvar="EVAL_CLIENT_SERVER",
+    help="Base URL of craft-dashboard server [env: EVAL_CLIENT_SERVER]",
+)
+@click.option(
+    "--token",
+    required=True,
+    envvar="EVAL_API_TOKEN",
+    help="Eval API bearer token [env: EVAL_API_TOKEN]",
+)
+@click.option(
+    "--summary-model",
+    default="llama3.2",
+    show_default=True,
+    envvar="LOCAL_LLM_SUMMARY_MODEL",
+    help="LLM model for summarization [env: LOCAL_LLM_SUMMARY_MODEL]",
+)
+@click.option(
+    "--evaluation-model",
+    default="llama3.2",
+    show_default=True,
+    envvar="LOCAL_LLM_EVALUATION_MODEL",
+    help="LLM model for scoring [env: LOCAL_LLM_EVALUATION_MODEL]",
+)
 @click.option(
     "--llm-url",
     default="http://localhost:11434/v1",
     show_default=True,
-    help="OpenAI-compatible LLM endpoint",
+    envvar="LOCAL_LLM_URL",
+    help="OpenAI-compatible LLM endpoint [env: LOCAL_LLM_URL]",
 )
 @click.option(
     "--llm-api-key",
     default="",
-    show_default=True,
-    help="API key for the LLM endpoint",
+    envvar="LOCAL_LLM_API_KEY",
+    help="API key for the LLM endpoint [env: LOCAL_LLM_API_KEY]",
 )
 @click.option(
     "--ca-cert",
     default="",
-    show_default=False,
-    help="PEM CA cert path for LLM server TLS verification",
+    envvar="LOCAL_LLM_CA_CERT",
+    help="PEM CA cert path for LLM server TLS verification [env: LOCAL_LLM_CA_CERT]",
+)
+@click.option(
+    "--server-ca-cert",
+    default="",
+    envvar="EVAL_CLIENT_SERVER_CA_CERT",
+    help="PEM CA cert for verifying the craft-dashboard server TLS cert [env: EVAL_CLIENT_SERVER_CA_CERT]",
 )
 @click.option(
     "--poll-interval",
@@ -315,19 +347,15 @@ async def run_eval_loop(  # noqa: PLR0913
     type=click.IntRange(min=0),
     help="Only evaluate stale evaluations older than N days",
 )
-@click.option(
-    "--server-ca-cert",
-    default="",
-    show_default=False,
-    help="PEM CA cert for verifying the craft-dashboard server TLS cert",
-)
 def main(  # noqa: PLR0913
     server: str,
     token: str,
-    model: str,
+    summary_model: str,
+    evaluation_model: str,
     llm_url: str,
     llm_api_key: str,
     ca_cert: str,
+    server_ca_cert: str,
     poll_interval: int,
     limit: int,
     project: str,
@@ -335,14 +363,14 @@ def main(  # noqa: PLR0913
     force: bool,
     incomplete: bool,
     stale_days: int,
-    server_ca_cert: str,
 ) -> None:
     """Run the local evaluation client CLI."""
     asyncio.run(
         run_eval_loop(
             server=server,
             token=token,
-            model=model,
+            summary_model=summary_model,
+            evaluation_model=evaluation_model,
             llm_url=llm_url,
             llm_api_key=llm_api_key,
             ca_cert=ca_cert,
@@ -359,4 +387,7 @@ def main(  # noqa: PLR0913
 
 
 if __name__ == "__main__":
+    # Load .env from the repo root so dev machine settings are picked up automatically.
+    # This is intentionally dev-only — production runners set env vars directly.
+    load_dotenv(pathlib.Path(__file__).resolve().parent.parent / ".env")
     main()
