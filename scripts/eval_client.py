@@ -120,8 +120,19 @@ async def run_eval_loop(  # noqa: PLR0913
                         params=params,
                         headers=headers,
                     )
-                except httpx.HTTPError:
-                    logger.exception("Failed to fetch work from %s", server_url)
+                except httpx.ConnectError as exc:
+                    hint = (
+                        " (server may not be using TLS — try http:// instead of https://)"
+                        if "SSL" in str(exc) or "wrong version" in str(exc).lower()
+                        else ""
+                    )
+                    logger.error("Cannot connect to %s%s", server_url, hint)  # noqa: TRY400
+                    await _sleep_until_next_poll(poll_interval)
+                    continue
+                except httpx.HTTPError as exc:
+                    logger.error(  # noqa: TRY400
+                        "HTTP error fetching work from %s: %s", server_url, exc
+                    )
                     await _sleep_until_next_poll(poll_interval)
                     continue
 
@@ -215,10 +226,17 @@ async def run_eval_loop(  # noqa: PLR0913
                         json=submission,
                         headers=headers,
                     )
-                except httpx.HTTPError:
-                    logger.exception(
-                        "Issue %s: failed to submit result",
+                except httpx.ConnectError:
+                    logger.error(  # noqa: TRY400
+                        "Issue %s: lost connection to server while submitting",
                         issue_data["external_id"],
+                    )
+                    continue
+                except httpx.HTTPError as exc:
+                    logger.error(  # noqa: TRY400
+                        "Issue %s: HTTP error submitting result: %s",
+                        issue_data["external_id"],
+                        exc,
                     )
                     continue
 

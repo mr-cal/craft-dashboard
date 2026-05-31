@@ -19,59 +19,40 @@ This keeps the LLM close to your machine while the server stays stateless and re
 
 ## Setup
 
-From the repository root:
+Get an `EVAL_API_TOKEN` from the server admin, then copy `.env.example` to `.env`
+and fill in the eval client settings at the bottom of the file.
+Source it before running the client:
 
 ```bash
-uv sync
+source .env
 ```
 
-Then get an `EVAL_API_TOKEN` from the server admin and set these environment
-variables (for example in `.env` or your shell profile):
-
-```bash
-export EVAL_CLIENT_SERVER=https://craft-dashboard.example.com
-export EVAL_API_TOKEN=<your-eval-api-token>
-export LOCAL_LLM_URL=http://localhost:11434/v1   # default; change if needed
-```
-
-See [CLI options](#cli-options) for the full list of env var names.
+The script also loads `.env` automatically, so sourcing is optional if you only
+run via `uv run`.
 
 ## Usage
 
-Run the client from the repository root.
+Run the client from the repository root:
 
 ```bash
-# Evaluate 10 open issues using the local Ollama (env vars set)
-python scripts/eval_client.py --limit 10
+# Evaluate 10 open issues using the local Ollama
+uv run scripts/eval_client.py --limit 10
 
 # Evaluate 50 open issues with a remote LLM over TLS
-python scripts/eval_client.py --limit 50 --open-only \
+uv run scripts/eval_client.py --limit 50 --open-only \
   --summary-model Qwen3-35B --evaluation-model Qwen3-35B \
   --llm-url https://192.168.1.64:8443/v1 \
   --ca-cert ~/.config/local-llm/cert.pem
 ```
 
-By default the client polls every 30 seconds when no work is available and continues until you stop it. Use `--limit` for bounded runs.
+By default the client polls every 30 seconds when no work is available and
+continues until you stop it. Use `--limit` for bounded runs.
 
-## CLI options
+For the full list of options and their corresponding environment variables:
 
-| Option | Env var | Purpose |
-| --- | --- | --- |
-| `--server` | `EVAL_CLIENT_SERVER` | Base URL of the craft-dashboard server |
-| `--token` | `EVAL_API_TOKEN` | Bearer token for the eval API |
-| `--summary-model` | `LOCAL_LLM_SUMMARY_MODEL` | Model name used for issue summarization |
-| `--evaluation-model` | `LOCAL_LLM_EVALUATION_MODEL` | Model name used for scoring |
-| `--llm-url` | `LOCAL_LLM_URL` | OpenAI-compatible LLM endpoint |
-| `--llm-api-key` | `LOCAL_LLM_API_KEY` | API key for the LLM endpoint, if required |
-| `--ca-cert` | `LOCAL_LLM_CA_CERT` | CA certificate for verifying the LLM server over TLS |
-| `--server-ca-cert` | `EVAL_CLIENT_SERVER_CA_CERT` | CA certificate for verifying the craft-dashboard server over TLS |
-| `--poll-interval` | — | Seconds to wait before polling again when the queue is empty |
-| `--limit` | — | Maximum evaluations before exit; `0` means unlimited |
-| `--project` | — | Restrict work to a single project |
-| `--open-only` / `--all-issues` | — | Evaluate only open issues or include closed ones |
-| `--force` | — | Re-evaluate even if the current content hash already matches |
-| `--incomplete` | — | Only pull issues with missing or partial evaluations |
-| `--stale-days` | — | Only pull evaluations older than `N` days |
+```bash
+uv run scripts/eval_client.py --help
+```
 
 ## Architecture note
 
