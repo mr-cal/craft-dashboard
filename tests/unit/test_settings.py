@@ -1,12 +1,9 @@
 """Tests for application settings."""
 
-import pytest
 from craft_dashboard.settings import Settings
-from pydantic import ValidationError
 
 _EXPECTED_GITHUB_TOKEN = "ghp_test123"
 _EXPECTED_ADMIN_TOKEN = "admin-secret"
-_EXPECTED_LOCAL_LLM_API_KEY = "my-bearer-token"
 
 
 class TestSettings:
@@ -39,46 +36,38 @@ class TestSettings:
         assert settings.admin_token == _EXPECTED_ADMIN_TOKEN
         assert settings.debug is True
 
-    def test_default_llm_backend(self, monkeypatch) -> None:
-        """Default LLM backend is openrouter."""
+    def test_summary_and_evaluation_models_use_openrouter_settings(
+        self, monkeypatch
+    ) -> None:
+        """Derived model properties always follow the OpenRouter settings."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-        monkeypatch.setenv("LLM_BACKEND", "openrouter")
-        monkeypatch.setenv("LOCAL_LLM_API_KEY", "")
 
-        settings = Settings()
+        settings = Settings(
+            openrouter_summary_model="google/gemini-2.5-flash",
+            openrouter_evaluation_model="anthropic/claude-haiku-4.5",
+        )
 
-        assert settings.llm_backend == "openrouter"
-        assert settings.local_llm_api_key == ""
+        assert settings.summary_model == "google/gemini-2.5-flash"
+        assert settings.evaluation_model == "anthropic/claude-haiku-4.5"
 
-    def test_local_llm_backend(self, monkeypatch) -> None:
-        """Local LLM backend can be configured via env vars."""
+    def test_ignores_removed_local_llm_environment_variables(self, monkeypatch) -> None:
+        """Removed local LLM env vars no longer appear in server settings."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         monkeypatch.setenv("LLM_BACKEND", "local")
         monkeypatch.setenv("LOCAL_LLM_URL", "http://192.168.1.10:11434/v1")
         monkeypatch.setenv("LOCAL_LLM_SUMMARY_MODEL", "qwen2.5")
-        monkeypatch.setenv("LOCAL_LLM_API_KEY", _EXPECTED_LOCAL_LLM_API_KEY)
+        monkeypatch.setenv("LOCAL_LLM_EVALUATION_MODEL", "llama3.2")
+        monkeypatch.setenv("LOCAL_LLM_API_KEY", "my-bearer-token")
+        monkeypatch.setenv("LOCAL_LLM_CA_CERT", "/etc/ssl/local-llm/cert.pem")
 
         settings = Settings()
 
-        assert settings.llm_backend == "local"
-        assert settings.local_llm_url == "http://192.168.1.10:11434/v1"
-        assert settings.local_llm_summary_model == "qwen2.5"
-        assert settings.local_llm_api_key == _EXPECTED_LOCAL_LLM_API_KEY
-
-    def test_llm_backend_rejects_invalid(self, monkeypatch) -> None:
-        """Invalid LLM backends should be rejected."""
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-
-        with pytest.raises(ValidationError):
-            Settings(llm_backend="invalid_backend")
-
-    def test_llm_backend_accepts_valid(self, monkeypatch) -> None:
-        """Known LLM backends should validate."""
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-
-        settings = Settings(llm_backend="local")
-
-        assert settings.llm_backend == "local"
+        assert not hasattr(settings, "llm_backend")
+        assert not hasattr(settings, "local_llm_url")
+        assert not hasattr(settings, "local_llm_summary_model")
+        assert not hasattr(settings, "local_llm_evaluation_model")
+        assert not hasattr(settings, "local_llm_api_key")
+        assert not hasattr(settings, "local_llm_ca_cert")
 
     def test_validate_required_secrets_returns_warnings_for_missing_tokens(
         self, monkeypatch
@@ -125,7 +114,7 @@ class TestValidateRequiredSecrets:
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         monkeypatch.setenv("ADMIN_TOKEN", "")
         monkeypatch.setenv("GITHUB_TOKEN", "")
-        settings = Settings()
+        settings = Settings(_env_file=None, eval_api_token="")
         warnings = settings.validate_required_secrets()
         assert len(warnings) == 3
         assert any("ADMIN_TOKEN" in warning for warning in warnings)

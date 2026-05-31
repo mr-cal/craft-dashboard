@@ -38,6 +38,7 @@ class TestEvaluateCommand:
         assert result.exit_code == 0
         assert "--strict-validation" in result.output
         assert "--no-resume" in result.output
+        assert "--backend" not in result.output
 
     @pytest.mark.asyncio
     async def test_clear_main_confirms_before_deleting(self, monkeypatch) -> None:

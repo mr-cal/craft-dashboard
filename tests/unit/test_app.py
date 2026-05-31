@@ -102,6 +102,7 @@ class TestCreateApp:
             database_url="postgresql+asyncpg://localhost/test",
             admin_token="",
             github_token="",
+            eval_api_token="",
             config_file="craft-dashboard.toml",
         )
         engine = MagicMock()

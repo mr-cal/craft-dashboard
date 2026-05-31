@@ -257,26 +257,5 @@ class LocalLLMClient:
 
 
 def create_llm_client(settings: Settings) -> LLMClient:
-    """Create the appropriate LLM client based on settings.llm_backend.
-
-    Args:
-        settings: Application Settings instance.
-
-    Returns:
-        OpenRouterClient for 'openrouter' backend, LocalLLMClient for 'local'.
-
-    Raises:
-        ValueError: If llm_backend is not recognized.
-
-    """
-    if settings.llm_backend == "local":
-        return LocalLLMClient(
-            base_url=settings.local_llm_url,
-            api_key=settings.local_llm_api_key,
-            ca_cert=settings.local_llm_ca_cert,
-        )
-    if settings.llm_backend == "openrouter":
-        return OpenRouterClient(api_key=settings.openrouter_api_key)
-    raise ValueError(
-        f"Unknown llm_backend: {settings.llm_backend!r}. Use 'openrouter' or 'local'."
-    )
+    """Create the server-side LLM client."""
+    return OpenRouterClient(api_key=settings.openrouter_api_key)

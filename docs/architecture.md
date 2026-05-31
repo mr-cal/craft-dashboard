@@ -114,12 +114,13 @@ Two configuration sources:
 
 ## LLM evaluation
 
-The LLM subsystem lives in `craft_dashboard/llm/`. It supports two backends:
+The LLM subsystem lives in `craft_dashboard/llm/`.
 
-- OpenRouter (production) -- uses `anthropic/claude-haiku-4.5` for evaluation
-  and `google/gemini-2.5-flash-lite` for summaries by default.
-- Local LLM -- any OpenAI-compatible server (e.g. Ollama). Configure with
-  `LLM_BACKEND=local` and `LOCAL_LLM_URL`.
+- Server-side evaluation uses OpenRouter, with
+  `anthropic/claude-haiku-4.5` for evaluation and
+  `google/gemini-2.5-flash-lite` for summaries by default.
+- Local LLM evaluation uses the pull-based eval client; the local client class
+  remains available for that workflow.
 
 The evaluator hashes issue content and skips re-evaluation when the hash
 matches the previous run. This keeps API costs low for daily cron runs.

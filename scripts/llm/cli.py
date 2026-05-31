@@ -93,7 +93,6 @@ async def _clear_main(project: str, yes: bool) -> None:
 async def _main(  # noqa: PLR0913
     project: str,
     limit: int,
-    backend: str | None,
     open_only: bool,
     verbose: bool,
     force: bool,
@@ -120,10 +119,7 @@ async def _main(  # noqa: PLR0913
         )
         return
 
-    if backend:
-        settings = settings.model_copy(update={"llm_backend": backend})
-
-    if settings.llm_backend == "openrouter" and not settings.openrouter_api_key:
+    if not settings.openrouter_api_key:
         logger.error("OPENROUTER_API_KEY environment variable is not set.")
         sys.exit(1)
 
@@ -150,8 +146,7 @@ async def _main(  # noqa: PLR0913
         force = True
 
     logger.info(
-        "Using %s backend (summary=%s, eval=%s, open_only=%s, force=%s)",
-        settings.llm_backend,
+        "Using openrouter backend (summary=%s, eval=%s, open_only=%s, force=%s)",
         settings.summary_model,
         settings.evaluation_model,
         open_only,
@@ -171,7 +166,7 @@ async def _main(  # noqa: PLR0913
             incomplete=incomplete,
             stale_days=stale_days,
             dry_run=dry_run,
-            llm_backend=settings.llm_backend,
+            llm_backend="openrouter",
             strict_validation=strict_validation,
             resume=not no_resume,
         )
@@ -197,12 +192,6 @@ def cli(ctx: click.Context) -> None:
 @cli.command(name="evaluate")
 @click.option("--project", default="", help="Only evaluate issues for this project.")
 @click.option("--limit", default=0, type=int, help="Max issues to evaluate (0=all).")
-@click.option(
-    "--backend",
-    type=click.Choice(["openrouter", "local"]),
-    default=None,
-    help="LLM backend to use (overrides LLM_BACKEND env var).",
-)
 @click.option(
     "--open-only",
     is_flag=True,
@@ -260,7 +249,6 @@ def cli(ctx: click.Context) -> None:
 def evaluate_cmd(  # noqa: PLR0913
     project: str,
     limit: int,
-    backend: str | None,
     open_only: bool,
     verbose: bool,
     force: bool,
@@ -276,7 +264,6 @@ def evaluate_cmd(  # noqa: PLR0913
         _main(
             project,
             limit,
-            backend,
             open_only,
             verbose,
             force,

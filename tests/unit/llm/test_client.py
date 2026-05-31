@@ -111,46 +111,30 @@ class TestLocalLLMClient:
 class TestCreateLLMClient:
     """Tests for the create_llm_client factory."""
 
-    def test_openrouter_backend(self, monkeypatch) -> None:
-        """create_llm_client returns OpenRouterClient for openrouter backend."""
+    def test_returns_openrouter_client(self, monkeypatch) -> None:
+        """create_llm_client always returns OpenRouterClient."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-        monkeypatch.setenv("LLM_BACKEND", "openrouter")
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
 
         client = create_llm_client(Settings())
 
         assert isinstance(client, OpenRouterClient)
 
-    def test_local_backend(self, monkeypatch) -> None:
-        """create_llm_client returns LocalLLMClient for local backend."""
+    def test_ignores_removed_local_backend_environment_variables(
+        self, monkeypatch
+    ) -> None:
+        """Server-side client creation ignores removed local backend config."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
         monkeypatch.setenv("LLM_BACKEND", "local")
-
-        client = create_llm_client(Settings())
-
-        assert isinstance(client, LocalLLMClient)
-
-    def test_local_backend_with_api_key(self, monkeypatch) -> None:
-        """create_llm_client passes the API key to LocalLLMClient."""
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-        monkeypatch.setenv("LLM_BACKEND", "local")
+        monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
         monkeypatch.setenv("LOCAL_LLM_API_KEY", "my-secret-token")
-
-        client = create_llm_client(Settings())
-
-        assert isinstance(client, LocalLLMClient)
-        assert client.api_key == "my-secret-token"
-
-    def test_local_backend_with_ca_cert(self, monkeypatch) -> None:
-        """create_llm_client passes the CA cert path to LocalLLMClient."""
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-        monkeypatch.setenv("LLM_BACKEND", "local")
         monkeypatch.setenv("LOCAL_LLM_CA_CERT", "/etc/ssl/local-llm/cert.pem")
 
         client = create_llm_client(Settings())
 
-        assert isinstance(client, LocalLLMClient)
-        assert client.ca_cert == "/etc/ssl/local-llm/cert.pem"
+        assert isinstance(client, OpenRouterClient)
+        assert client.api_key == "sk-or-test"
 
 
 class TestLLMResponse:

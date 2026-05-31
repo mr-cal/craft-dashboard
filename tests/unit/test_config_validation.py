@@ -18,17 +18,18 @@ class TestSettingsValidation:
         with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
             Settings.validate_config(settings)
 
-    def test_local_backend_uses_local_models(self, monkeypatch) -> None:
-        """Derived model properties follow the selected backend."""
+    def test_openrouter_models_drive_derived_model_properties(
+        self, monkeypatch
+    ) -> None:
+        """Derived model properties follow the OpenRouter settings."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         settings = Settings(
-            llm_backend="local",
-            local_llm_summary_model="qwen2.5",
-            local_llm_evaluation_model="llama3.2",
+            openrouter_summary_model="google/gemini-2.5-flash",
+            openrouter_evaluation_model="anthropic/claude-haiku-4.5",
         )
 
-        assert settings.summary_model == "qwen2.5"
-        assert settings.evaluation_model == "llama3.2"
+        assert settings.summary_model == "google/gemini-2.5-flash"
+        assert settings.evaluation_model == "anthropic/claude-haiku-4.5"
 
     def test_validate_config_rejects_missing_config_file(self, monkeypatch) -> None:
         """Validation rejects config paths that do not exist."""

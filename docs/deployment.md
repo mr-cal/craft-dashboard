@@ -39,15 +39,11 @@ ADMIN_TOKEN=<a random string for the admin API>
 For LLM evaluation, also set:
 
 ```
-# Option A: OpenRouter (recommended for production)
-LLM_BACKEND=openrouter
 OPENROUTER_API_KEY=<your key>
-
-# Option B: Local LLM server
-LLM_BACKEND=local
-LOCAL_LLM_URL=https://192.168.1.10:8443/v1
-LOCAL_LLM_API_KEY=<your bearer token>
 ```
+
+For local LLM evaluation, use the pull-based eval client (see
+`docs/eval-client.md`).
 
 See `.env.example` for all available settings.
 

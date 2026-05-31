@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 from pydantic_settings import BaseSettings
 
@@ -27,18 +26,6 @@ class Settings(BaseSettings):
     # Toggle server-side LLM evaluation (run_llm evaluate / admin re-evaluate)
     enable_server_eval: bool = True
 
-    # LLM backend: "openrouter" (production) or "local" (local LLM server)
-    llm_backend: Literal["openrouter", "local"] = "openrouter"
-
-    # Local LLM settings (any OpenAI-compatible server)
-    local_llm_url: str = "http://localhost:11434/v1"
-    local_llm_api_key: str = ""
-    local_llm_summary_model: str = "llama3.2"
-    local_llm_evaluation_model: str = "llama3.2"
-    # Path to a PEM CA cert for verifying the local LLM server's TLS certificate.
-    # Required when LOCAL_LLM_URL uses https:// with a self-signed cert.
-    local_llm_ca_cert: str = ""
-
     # OpenRouter model settings
     openrouter_summary_model: str = "google/gemini-2.5-flash-lite"
     openrouter_evaluation_model: str = "anthropic/claude-haiku-4.5"
@@ -52,16 +39,12 @@ class Settings(BaseSettings):
 
     @property
     def summary_model(self) -> str:
-        """Return the summary model for the selected LLM backend."""
-        if self.llm_backend == "local":
-            return self.local_llm_summary_model
+        """Return the summary model for server-side evaluation."""
         return self.openrouter_summary_model
 
     @property
     def evaluation_model(self) -> str:
-        """Return the evaluation model for the selected LLM backend."""
-        if self.llm_backend == "local":
-            return self.local_llm_evaluation_model
+        """Return the evaluation model for server-side evaluation."""
         return self.openrouter_evaluation_model
 
     @property
@@ -74,13 +57,11 @@ class Settings(BaseSettings):
 
     @classmethod
     def validate_config(cls, settings: Settings) -> None:
-        """Validate derived configuration requirements for the active backend."""
-        if settings.llm_backend == "openrouter" and not settings.openrouter_api_key:
+        """Validate derived configuration requirements for server-side evaluation."""
+        if not settings.openrouter_api_key:
             raise ValueError(
-                "OPENROUTER_API_KEY is required when LLM_BACKEND=openrouter"
+                "OPENROUTER_API_KEY is required for server-side evaluation"
             )
-        if settings.llm_backend == "local" and not settings.local_llm_url:
-            raise ValueError("LOCAL_LLM_URL is required when LLM_BACKEND=local")
         _ = settings.config_path
 
     def validate_required_secrets(self) -> list[str]:

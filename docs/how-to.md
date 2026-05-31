@@ -227,20 +227,9 @@ docker compose up -d
 4. Run data collection to populate the project immediately, or wait for the
    next scheduled run.
 
-### Switch LLM backend
+### Run local LLM evaluation
 
-To use a local LLM server instead of OpenRouter, set these in `.env`:
+The server now uses OpenRouter for server-side evaluation.
 
-```
-LLM_BACKEND=local
-LOCAL_LLM_URL=https://192.168.1.10:8443/v1
-LOCAL_LLM_API_KEY=your-bearer-token
-LOCAL_LLM_SUMMARY_MODEL=qwen2.5
-LOCAL_LLM_EVALUATION_MODEL=qwen2.5
-```
-
-If the server uses a self-signed TLS certificate (as set up by the
-[local-llm](https://github.com/mr-cal/local-llm) tool), set `LOCAL_LLM_CA_CERT`
-to the path of the CA certificate inside the container.
-
-Then restart the app container: `docker compose restart app`.
+For local LLM evaluation, use the pull-based eval client instead. See
+[`docs/eval-client.md`](eval-client.md) for setup and usage.
