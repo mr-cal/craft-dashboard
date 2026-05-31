@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import pathlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -190,7 +191,7 @@ class LocalLLMClient:
         """
         self.base_url = base_url
         self.api_key = api_key
-        self.ca_cert = ca_cert
+        self.ca_cert = str(pathlib.Path(ca_cert).expanduser()) if ca_cert else ca_cert
         self._http: httpx.AsyncClient | None = None
 
     @property
