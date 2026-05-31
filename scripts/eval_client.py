@@ -273,7 +273,6 @@ async def run_eval_loop(  # noqa: PLR0913
     "--ca-cert",
     default="",
     show_default=False,
-    type=click.Path(exists=True, dir_okay=False),
     help="PEM CA cert path for LLM server TLS verification",
 )
 @click.option(
@@ -320,7 +319,6 @@ async def run_eval_loop(  # noqa: PLR0913
     "--server-ca-cert",
     default="",
     show_default=False,
-    type=click.Path(exists=True, dir_okay=False),
     help="PEM CA cert for verifying the craft-dashboard server TLS cert",
 )
 def main(  # noqa: PLR0913

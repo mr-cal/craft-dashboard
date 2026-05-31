@@ -89,7 +89,6 @@ async def _fetch_issue_and_latest_evaluation(
             )
         )
         .order_by(Issue.id)
-        .with_for_update(skip_locked=True)
     )
 
     if open_only:
@@ -125,7 +124,8 @@ async def _fetch_issue_and_latest_evaluation(
         )
 
     result = await session.execute(query)
-    for issue, project_name, evaluation in result.all():
+    for row in result.all():
+        issue, project_name, evaluation = row[0], row[1], row[2]
         current_hash = _current_content_hash(issue)
         has_complete_evaluation = (
             evaluation is not None
