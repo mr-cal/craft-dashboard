@@ -12,6 +12,7 @@ from craft_dashboard.repositories.issue_repository import IssueRepository
 from craft_dashboard.routes.issues import (
     ALL_SCORES,
     DEFAULT_SCORES,
+    INVERTED_SCORES,
     _build_issue_context,
 )
 from fastapi.testclient import TestClient
@@ -80,6 +81,7 @@ class TestIssueContext:
             "filter_scores": "bogus",
             "active_scores": DEFAULT_SCORES.split(","),
             "all_scores": ALL_SCORES,
+            "inverted_scores": INVERTED_SCORES,
             "filter_llm_status": "partial_llm",
             "total_count": 12,
         }

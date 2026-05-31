@@ -367,12 +367,16 @@ async def eval_status(
             LLMEvaluation.model_name != "pending",
         )
     )
+    total_open = await session.scalar(
+        select(func.count(Issue.id)).where(Issue.state == "open")
+    )
 
     return {
         "pending": pending or 0,
         "locked": locked or 0,
         "evaluated_today": evaluated_today or 0,
         "total_evaluated": total_evaluated or 0,
+        "total_open": total_open or 0,
     }
 
 

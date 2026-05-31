@@ -30,6 +30,8 @@ ALL_SCORES = {
     "support_request": "Support Request",
     "readiness": "Readiness",
 }
+# Scores where a higher value is better (green) rather than worse (red)
+INVERTED_SCORES: frozenset[str] = frozenset({"readiness"})
 DEFAULT_SCORES = "staleness,readiness"
 
 
@@ -52,6 +54,7 @@ class IssueTemplateContext(TypedDict):
     filter_scores: str
     active_scores: list[str]
     all_scores: dict[str, str]
+    inverted_scores: frozenset[str]
     filter_llm_status: str
     total_count: int
 
@@ -142,6 +145,7 @@ async def _build_issue_context(
         "filter_scores": scores,
         "active_scores": active_scores,
         "all_scores": ALL_SCORES,
+        "inverted_scores": INVERTED_SCORES,
         "filter_llm_status": filters.llm_status,
         "total_count": result.total_count,
     }

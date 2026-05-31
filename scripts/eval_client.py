@@ -6,9 +6,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import pathlib
+import select
 import signal
 import sys
+import termios
+import threading
 import time
+import tty
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +36,7 @@ HTTP_OK = httpx.codes.OK
 HTTP_NO_CONTENT = httpx.codes.NO_CONTENT
 HTTP_CONFLICT = httpx.codes.CONFLICT
 shutdown_state = {"requested": False}
+paused_state = {"paused": False}
 
 _MAX_ERROR_BODY = 200
 
@@ -82,6 +87,35 @@ def _signal_handler(signum, frame) -> None:
     del signum, frame
     shutdown_state["requested"] = True
     logger.info("Shutting down after current evaluation...")
+
+
+def _start_keyboard_monitor() -> None:
+    """Monitor stdin for space key to pause/unpause. No-op if not a TTY."""
+    if not sys.stdin.isatty():
+        return
+
+    import contextlib
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+
+    def _listen() -> None:
+        with contextlib.suppress(Exception):
+            tty.setcbreak(fd)
+            while not shutdown_state["requested"]:
+                ready, _, _ = select.select([sys.stdin], [], [], 0.2)
+                if ready:
+                    ch = sys.stdin.read(1)
+                    if ch == " ":
+                        paused_state["paused"] = not paused_state["paused"]
+                        if paused_state["paused"]:
+                            logger.info("Paused — press space to resume")
+                        else:
+                            logger.info("Resuming")
+        with contextlib.suppress(Exception):
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    threading.Thread(target=_listen, daemon=True).start()
 
 
 def _parse_timestamp(value: str | None) -> datetime | None:
@@ -163,20 +197,12 @@ async def run_eval_loop(  # noqa: PLR0913
             ca_cert=ca_cert,
         )
 
-    limit_str = _format_limit(limit)
     filter_parts = []
     if project:
         filter_parts.append(project)
     if open_only:
         filter_parts.append("open only")
     filter_desc = f" ({', '.join(filter_parts)})" if filter_parts else ""
-    logger.info(
-        "Connecting to %s%s, model=%s, limit=%s",
-        server_url,
-        filter_desc,
-        evaluation_model,
-        limit_str,
-    )
 
     try:
         async with httpx.AsyncClient(
@@ -184,8 +210,53 @@ async def run_eval_loop(  # noqa: PLR0913
             timeout=30.0,
             verify=verify,
         ) as http_client:
+            # Fetch queue status at startup for progress display
+            total_remaining = limit if limit > 0 else 0
+            try:
+                status_resp = await http_client.get("/api/eval/status", headers=headers)
+                if status_resp.status_code == HTTP_OK:
+                    status_data = status_resp.json()
+                    server_pending = status_data.get("pending", 0)
+                    total_open = status_data.get("total_open", 0)
+                    total_evaluated = status_data.get("total_evaluated", 0)
+                    already_pct = (
+                        int(100 * total_evaluated / total_open) if total_open > 0 else 0
+                    )
+                    total_remaining = limit if limit > 0 else server_pending
+                    logger.info(
+                        "Connected to %s%s — %d/%d open issues evaluated (%d%%), "
+                        "%d pending | model=%s",
+                        server_url,
+                        filter_desc,
+                        total_evaluated,
+                        total_open,
+                        already_pct,
+                        server_pending,
+                        evaluation_model,
+                    )
+            except httpx.HTTPError:
+                logger.info(
+                    "Connected to %s%s, model=%s",
+                    server_url,
+                    filter_desc,
+                    evaluation_model,
+                )
+
+            limit_str = str(total_remaining) if total_remaining > 0 else "∞"
+            _start_keyboard_monitor()
+            if sys.stdin.isatty():
+                logger.info("Press space to pause/unpause")
+
+            resume_event = asyncio.Event()
+            resume_event.set()  # starts unpaused
+
             evaluated = 0
             while not shutdown_state["requested"]:
+                # Honour pause before fetching next issue
+                if paused_state["paused"]:
+                    await asyncio.sleep(0.5)
+                    continue
+
                 try:
                     response = await http_client.get(
                         "/api/eval/next",

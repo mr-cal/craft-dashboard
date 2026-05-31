@@ -84,6 +84,7 @@
           {% elif sv is not none %}
           {% set score_value = sv %}
           {% set score_name = score_labels.get(score_key, score_key) %}
+          {% set score_inverted = score_key in inverted_scores %}
           {% include "components/score_badge.html" %}
           {% else %}
           <span class="score-badge" style="background:#ccc;color:#666;">?</span>

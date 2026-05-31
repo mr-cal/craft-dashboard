@@ -1,7 +1,12 @@
 {# Score badge component. Usage: {% include "components/score_badge.html" with context %} #}
-{# Expects: score_value (int 0-100), score_name (str) #}
+{# Expects: score_value (int 0-100), score_name (str), score_inverted (bool, optional) #}
 {% if score_value is not none %}
-<span class="score-badge {% if score_value >= 70 %}score-high{% elif score_value >= 40 %}score-medium{% else %}score-low{% endif %}"
+{% if score_inverted %}
+  {% set _tier = "score-low" if score_value >= 70 else ("score-medium" if score_value >= 40 else "score-high") %}
+{% else %}
+  {% set _tier = "score-high" if score_value >= 70 else ("score-medium" if score_value >= 40 else "score-low") %}
+{% endif %}
+<span class="score-badge {{ _tier }}"
       title="{{ score_name }}: {{ score_value }}/100"
       aria-label="{{ score_name }}: {{ score_value }} out of 100">
   {{ score_value }}

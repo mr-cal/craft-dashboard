@@ -92,6 +92,24 @@ def _make_issue(**updates: Any) -> dict[str, Any]:
 @pytest.fixture(autouse=True)
 def _reset_shutdown_state() -> None:
     eval_client.shutdown_state["requested"] = False
+    eval_client.paused_state["paused"] = False
+
+
+_STATUS_RESPONSE = httpx.Response(
+    status_code=200,
+    json={
+        "pending": 10,
+        "locked": 0,
+        "evaluated_today": 5,
+        "total_evaluated": 5,
+        "total_open": 15,
+    },
+)
+
+
+def _with_status(*responses: httpx.Response) -> list[httpx.Response]:
+    """Prepend a status response to a list of responses (startup call)."""
+    return [_STATUS_RESPONSE, *responses]
 
 
 @pytest.fixture
@@ -110,6 +128,7 @@ def patched_runtime(monkeypatch):
     )
     monkeypatch.setattr(eval_client, "_sleep_until_next_poll", sleep_mock)
     monkeypatch.setattr(eval_client.signal, "signal", MagicMock())
+    monkeypatch.setattr(eval_client, "_start_keyboard_monitor", MagicMock())
 
     return {
         "llm_client": llm_client,
@@ -142,7 +161,7 @@ async def test_run_eval_loop_processes_issue_and_stops_at_limit(
 ) -> None:
     http_client = _patch_http_client(
         monkeypatch,
-        get_responses=[httpx.Response(status_code=200, json=_make_issue())],
+        get_responses=_with_status(httpx.Response(status_code=200, json=_make_issue())),
         post_responses=[httpx.Response(status_code=200)],
     )
 
@@ -178,12 +197,12 @@ async def test_run_eval_loop_sleeps_without_evaluating_when_no_work(
     patched_runtime["sleep"].side_effect = request_shutdown
     http_client = _patch_http_client(
         monkeypatch,
-        get_responses=[httpx.Response(status_code=204)],
+        get_responses=_with_status(httpx.Response(status_code=204)),
     )
 
     await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
-    http_client.get.assert_awaited_once()
+    assert http_client.get.await_count == 2  # status + next
     patched_runtime["evaluator"].evaluate_issue.assert_not_awaited()
     http_client.post.assert_not_awaited()
     patched_runtime["sleep"].assert_awaited_once_with(1)
@@ -199,10 +218,10 @@ async def test_run_eval_loop_logs_warning_and_continues_on_submit_conflict(
     patched_runtime["sleep"].side_effect = request_shutdown
     http_client = _patch_http_client(
         monkeypatch,
-        get_responses=[
+        get_responses=_with_status(
             httpx.Response(status_code=200, json=_make_issue()),
             httpx.Response(status_code=204),
-        ],
+        ),
         post_responses=[httpx.Response(status_code=409, text="conflict")],
     )
 
@@ -228,14 +247,14 @@ async def test_run_eval_loop_stops_after_reaching_limit(
     ]
     http_client = _patch_http_client(
         monkeypatch,
-        get_responses=[
+        get_responses=_with_status(
             httpx.Response(
                 status_code=200, json=_make_issue(issue_id=1, external_id="1")
             ),
             httpx.Response(
                 status_code=200, json=_make_issue(issue_id=2, external_id="2")
             ),
-        ],
+        ),
         post_responses=[
             httpx.Response(status_code=200),
             httpx.Response(status_code=200),
@@ -256,16 +275,16 @@ async def test_run_eval_loop_sleeps_and_retries_after_server_error(
 ) -> None:
     http_client = _patch_http_client(
         monkeypatch,
-        get_responses=[
+        get_responses=_with_status(
             httpx.Response(status_code=500, text="boom"),
             httpx.Response(status_code=200, json=_make_issue()),
-        ],
+        ),
         post_responses=[httpx.Response(status_code=200)],
     )
 
     await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
-    assert http_client.get.await_count == 2
+    assert http_client.get.await_count == 3  # status + 500 + issue
     patched_runtime["sleep"].assert_awaited_once_with(1)
     patched_runtime["evaluator"].evaluate_issue.assert_awaited_once()
     http_client.post.assert_awaited_once()
@@ -282,10 +301,10 @@ async def test_run_eval_loop_skips_submission_when_evaluator_returns_none(
     patched_runtime["sleep"].side_effect = request_shutdown
     http_client = _patch_http_client(
         monkeypatch,
-        get_responses=[
+        get_responses=_with_status(
             httpx.Response(status_code=200, json=_make_issue()),
             httpx.Response(status_code=204),
-        ],
+        ),
     )
 
     with caplog.at_level(logging.INFO):
