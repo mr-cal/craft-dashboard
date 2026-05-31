@@ -17,6 +17,37 @@ def get_admin_bearer_token(request: Request, authorization: str = "") -> str:
     return authorization
 
 
+def verify_eval_token(token: str, eval_api_token: str) -> None:
+    """Verify that the provided bearer token matches the eval API token.
+
+    Args:
+        token: The Authorization header value (e.g., 'Bearer <token>').
+        eval_api_token: The expected eval API token from settings.
+
+    Raises:
+        HTTPException: If the token is invalid or missing.
+
+    """
+    if not eval_api_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Eval API authentication is not configured.",
+        )
+
+    if not token.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authorization header format. Use 'Bearer <token>'.",
+        )
+
+    provided = token.removeprefix("Bearer ")
+    if not secrets.compare_digest(provided, eval_api_token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid eval API token.",
+        )
+
+
 def verify_admin_token(token: str, admin_token: str) -> None:
     """Verify that the provided bearer token matches the admin token.
 

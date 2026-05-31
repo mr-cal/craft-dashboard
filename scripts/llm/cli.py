@@ -113,6 +113,13 @@ async def _main(  # noqa: PLR0913
     )
     logging.getLogger().setLevel(log_level)
 
+    if not settings.enable_server_eval:
+        logger.info(
+            "Server-side evaluation is disabled (ENABLE_SERVER_EVAL=false). "
+            "Use the eval client script for pull-based evaluation instead."
+        )
+        return
+
     if backend:
         settings = settings.model_copy(update={"llm_backend": backend})
 
