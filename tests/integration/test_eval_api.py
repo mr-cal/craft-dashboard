@@ -114,6 +114,8 @@ class TestEvalNextIntegration:
             "labels": ["bug", "arm64"],
             "author": "alice",
             "author_association": "MAINTAINER",
+            "created_at": issue.created_at.isoformat(),
+            "updated_at": issue.updated_at.isoformat(),
             "current_hash": expected_hash,
             "maintainers": ["alice", "bob"],
         }

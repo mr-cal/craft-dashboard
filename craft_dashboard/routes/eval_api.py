@@ -207,6 +207,8 @@ async def next_issue(
         "author_association": (
             "MAINTAINER" if issue.author_is_maintainer else "CONTRIBUTOR"
         ),
+        "created_at": issue.created_at.isoformat() if issue.created_at else None,
+        "updated_at": issue.updated_at.isoformat() if issue.updated_at else None,
         "current_hash": _current_content_hash(issue),
         "maintainers": list(request.app.state.config.maintainers),
     }
