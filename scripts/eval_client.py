@@ -284,6 +284,8 @@ async def run_eval_loop(  # noqa: PLR0913
                 )
 
                 evaluated = 0
+                total_prompt_tokens = 0
+                total_completion_tokens = 0
                 while not shutdown_state["requested"]:
                     # Honour pause before fetching next issue
                     if paused_state["paused"]:
@@ -462,6 +464,10 @@ async def run_eval_loop(  # noqa: PLR0913
                         continue
 
                     evaluated += 1
+                    prompt_tok = result["prompt_tokens"]
+                    completion_tok = result["completion_tokens"]
+                    total_prompt_tokens += prompt_tok
+                    total_completion_tokens += completion_tok
                     timing.add(PHASE_EVALUATE, duration)
                     remaining = max(0, (task_total or evaluated) - evaluated)
                     progress.update(
@@ -471,16 +477,26 @@ async def run_eval_loop(  # noqa: PLR0913
                     )
                     action = result["suggested_action"] or "summary_only"
                     logger.info(
-                        "%s — %s (%d tokens, %s)",
+                        "%s — %s (%d in / %d out tokens, %s)",
                         issue_ref,
                         action,
-                        result["tokens_used"],
+                        prompt_tok,
+                        completion_tok,
                         elapsed,
                     )
 
                     if limit > 0 and evaluated >= limit:
                         logger.info("Done: evaluated %d issues", limit)
                         break
+
+                if evaluated > 0:
+                    logger.info(
+                        "Run total: %d issues, %d in / %d out tokens (%d total)",
+                        evaluated,
+                        total_prompt_tokens,
+                        total_completion_tokens,
+                        total_prompt_tokens + total_completion_tokens,
+                    )
     finally:
         await llm_client.close()
         if embedding_client:

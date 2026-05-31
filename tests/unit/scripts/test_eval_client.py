@@ -288,6 +288,7 @@ async def test_run_eval_loop_stops_after_reaching_limit(
     assert patched_runtime["evaluator"].evaluate_issue.await_count == 2
     assert http_client.post.await_count == 2
     assert "Done: evaluated 2 issues" in caplog.text
+    assert "Run total: 2 issues, 600 in / 400 out tokens (1000 total)" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -335,3 +336,20 @@ async def test_run_eval_loop_skips_submission_when_evaluator_returns_none(
     http_client.post.assert_not_awaited()
     patched_runtime["sleep"].assert_awaited_once_with(1)
     assert "content unchanged, skipped" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_run_eval_loop_logs_per_eval_token_counts(
+    monkeypatch, patched_runtime, caplog
+) -> None:
+    _patch_http_client(
+        monkeypatch,
+        get_responses=_with_status(httpx.Response(status_code=200, json=_make_issue())),
+        post_responses=[httpx.Response(status_code=200)],
+    )
+
+    with caplog.at_level(logging.INFO):
+        await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+
+    assert "300 in / 200 out tokens" in caplog.text
+    assert "Run total: 1 issues, 300 in / 200 out tokens (500 total)" in caplog.text
