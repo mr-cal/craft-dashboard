@@ -12,6 +12,9 @@ make test     # pytest (unit + integration, ~495 tests)
 
 Make sure all commands pass before marking a task complete.
 
+Additionally, any changes to the docker file, setup (including alemic migrations)
+should test that the docker compose build succeeds.
+
 ## Before completing UI/UX tasks
 
 Always run the slow and e2e tasks when making UI or UX changes.
