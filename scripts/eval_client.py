@@ -31,6 +31,23 @@ HTTP_NO_CONTENT = httpx.codes.NO_CONTENT
 HTTP_CONFLICT = httpx.codes.CONFLICT
 shutdown_state = {"requested": False}
 
+_MAX_ERROR_BODY = 200
+
+
+def _format_error_body(response: httpx.Response) -> str:
+    """Return a compact, readable summary of a non-2xx response body."""
+    content_type = response.headers.get("content-type", "")
+    if "json" in content_type:
+        try:
+            data = response.json()
+            return str(data.get("detail", data))
+        except ValueError:
+            pass
+    if "html" in content_type:
+        return "(HTML response — is the server URL correct?)"
+    text = response.text.strip()
+    return (text[:_MAX_ERROR_BODY] + "…") if len(text) > _MAX_ERROR_BODY else text
+
 
 def _signal_handler(signum, frame) -> None:
     del signum, frame
@@ -145,7 +162,7 @@ async def run_eval_loop(  # noqa: PLR0913
                     logger.error(
                         "Server returned %d: %s",
                         response.status_code,
-                        response.text,
+                        _format_error_body(response),
                     )
                     await _sleep_until_next_poll(poll_interval)
                     continue
@@ -153,7 +170,10 @@ async def run_eval_loop(  # noqa: PLR0913
                 try:
                     issue_data = response.json()
                 except ValueError:
-                    logger.exception("Server returned invalid JSON: %s", response.text)
+                    logger.error(  # noqa: TRY400
+                        "Server returned invalid JSON: %s",
+                        _format_error_body(response),
+                    )
                     await _sleep_until_next_poll(poll_interval)
                     continue
 
@@ -252,7 +272,7 @@ async def run_eval_loop(  # noqa: PLR0913
                         "Issue %s: failed to submit result: %d %s",
                         issue_data["external_id"],
                         submit_response.status_code,
-                        submit_response.text,
+                        _format_error_body(submit_response),
                     )
                     continue
 
