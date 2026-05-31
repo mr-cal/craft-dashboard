@@ -1,7 +1,8 @@
 """Shared fixtures for integration tests.
 
-Patches SQLite's type compiler to handle PostgreSQL JSONB columns as TEXT,
-so in-memory SQLite databases can be used with models that declare JSONB columns.
+Patches SQLite's type compiler to handle PostgreSQL JSONB and pgvector Vector
+columns as TEXT, so in-memory SQLite databases can be used with models that
+declare those types.
 """
 
 from collections.abc import AsyncGenerator
@@ -28,6 +29,14 @@ from sqlalchemy.ext.asyncio import (
 # SQLAlchemy's JSON TypeEngine still handles Python-level serialisation.
 if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"  # type: ignore[attr-defined]
+
+# ---------------------------------------------------------------------------
+# SQLite pgvector compatibility patch
+# ---------------------------------------------------------------------------
+# The LLMEvaluation model uses pgvector's Vector type for the embedding column.
+# SQLite doesn't know this type; render it as TEXT for test purposes.
+if not hasattr(SQLiteTypeCompiler, "visit_VECTOR"):
+    SQLiteTypeCompiler.visit_VECTOR = lambda self, type_, **kw: "TEXT"  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------

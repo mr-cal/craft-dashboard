@@ -6,11 +6,11 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from scripts.llm.validation import validate_evaluation_result
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.orm import aliased
 
 if TYPE_CHECKING:
@@ -28,6 +28,8 @@ router = APIRouter(prefix="/api/eval")
 limiter = Limiter(key_func=get_remote_address)
 
 _LOCK_TTL = timedelta(minutes=10)
+_DUPLICATE_LOCK_TTL = timedelta(minutes=30)
+_EMBEDDING_DIMENSION = 768
 
 
 class EvalResultSubmission(BaseModel):
@@ -44,6 +46,35 @@ class EvalResultSubmission(BaseModel):
     completion_tokens: int = 0
     model_used: str = ""
     llm_backend: str = "local"
+    embedding: list[float] | None = None
+
+
+class SimilarRequest(BaseModel):
+    """Request body for finding similar evaluations."""
+
+    embedding: list[float]
+    exclude_issue_id: int
+    limit: int = Field(default=5, ge=1, le=50)
+    cosine_threshold: float = Field(default=0.15, ge=0.0, le=2.0)
+
+    def model_post_init(self, /, __context: object) -> None:
+        """Validate that the embedding dimension matches the expected size."""
+        if len(self.embedding) != _EMBEDDING_DIMENSION:
+            raise ValueError(
+                f"embedding must have {_EMBEDDING_DIMENSION} dimensions, "
+                f"got {len(self.embedding)}"
+            )
+
+
+class DuplicateResultSubmission(BaseModel):
+    """Request body for submitting phase-2 duplicate detection results."""
+
+    evaluation_id: int
+    duplicateness: float = Field(ge=0.0, le=100.0)
+    candidates_compared: int = Field(ge=0)
+    duplicate_of_issue_id: int | None = None
+    updated_summary: str | None = None
+    updated_embedding: list[float] | None = None
 
 
 def _require_eval_auth(request: Request, authorization: str = "") -> None:
@@ -276,6 +307,7 @@ async def submit_result(
             issue_data_hash=current_hash,
             latest=True,
             eval_locked_until=None,
+            summary_embedding=payload.embedding,
         )
     )
 
@@ -342,3 +374,163 @@ async def eval_status(
         "evaluated_today": evaluated_today or 0,
         "total_evaluated": total_evaluated or 0,
     }
+
+
+@router.get("/duplicate-work", response_model=None)
+async def duplicate_work(
+    request: Request,
+    *,
+    authorization: str = Header(default=""),
+    limit: int = Query(default=1, ge=1, le=100),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any] | Response:
+    """Return the next evaluation that needs phase-2 duplicate detection.
+
+    Eligible: latest=True, summary_embedding IS NOT NULL, no 'duplicateness'
+    key in scores, not currently locked for duplicate processing.
+
+    Locks the returned evaluation for _DUPLICATE_LOCK_TTL to prevent
+    concurrent workers from picking up the same item.
+    """
+    _require_eval_auth(request, authorization)
+
+    now = datetime.now(tz=UTC)
+
+    result = await session.execute(
+        select(LLMEvaluation, Issue, Project)
+        .join(Issue, LLMEvaluation.issue_id == Issue.id)
+        .join(Project, Issue.project_id == Project.id)
+        .where(
+            LLMEvaluation.latest.is_(True),
+            LLMEvaluation.summary_embedding.is_not(None),
+            LLMEvaluation.scores["duplicateness"].as_string().is_(None),
+            or_(
+                LLMEvaluation.duplicate_locked_until.is_(None),
+                LLMEvaluation.duplicate_locked_until <= now,
+            ),
+        )
+        .order_by(LLMEvaluation.id)
+        .limit(limit)
+    )
+    rows = result.all()
+    if not rows:
+        return Response(status_code=204)
+
+    items = []
+    lock_until = now + _DUPLICATE_LOCK_TTL
+    for evaluation, issue, project in rows:
+        evaluation.duplicate_locked_until = lock_until
+        items.append(
+            {
+                "evaluation_id": evaluation.id,
+                "issue_id": issue.id,
+                "external_id": issue.external_id,
+                "project_name": project.name,
+                "title": issue.title,
+                "summary": evaluation.summary,
+                "embedding": (
+                    list(evaluation.summary_embedding)
+                    if evaluation.summary_embedding is not None
+                    else None
+                ),
+            }
+        )
+
+    await session.commit()
+    return {"items": items}
+
+
+@router.post("/similar")
+async def find_similar(
+    request: Request,
+    payload: SimilarRequest,
+    *,
+    authorization: str = Header(default=""),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Find evaluations with similar embeddings (cross-project, pgvector).
+
+    Uses cosine distance (<=> operator). Returns candidates ordered by
+    distance ascending (most similar first).
+
+    Note: this endpoint requires PostgreSQL with the pgvector extension.
+    """
+    _require_eval_auth(request, authorization)
+
+    sql = text("""
+        SELECT e.id AS evaluation_id,
+               e.issue_id,
+               i.external_id,
+               p.name AS project_name,
+               i.title,
+               e.summary,
+               e.summary_embedding <=> CAST(:embedding AS vector) AS distance
+        FROM llm_evaluations e
+        JOIN issues i ON e.issue_id = i.id
+        JOIN projects p ON i.project_id = p.id
+        WHERE e.latest = true
+          AND e.summary_embedding IS NOT NULL
+          AND i.id != :exclude_issue_id
+          AND (e.summary_embedding <=> CAST(:embedding AS vector)) < :threshold
+        ORDER BY distance
+        LIMIT :limit
+    """)
+    rows = await session.execute(
+        sql,
+        {
+            "embedding": str(payload.embedding),
+            "exclude_issue_id": payload.exclude_issue_id,
+            "threshold": payload.cosine_threshold,
+            "limit": payload.limit,
+        },
+    )
+    candidates = [dict(row._mapping) for row in rows.fetchall()]  # noqa: SLF001
+    return {"candidates": candidates}
+
+
+@router.post("/duplicate-result")
+async def submit_duplicate_result(
+    request: Request,
+    payload: DuplicateResultSubmission,
+    *,
+    authorization: str = Header(default=""),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Store the phase-2 duplicate detection result for an evaluation.
+
+    Updates the specific evaluation row identified by evaluation_id. Rejects
+    if that row is no longer the latest (i.e., phase 1 re-ran in the meantime).
+    """
+    _require_eval_auth(request, authorization)
+
+    evaluation = await session.get(LLMEvaluation, payload.evaluation_id)
+    if evaluation is None:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+    if not evaluation.latest:
+        raise HTTPException(
+            status_code=409,
+            detail="Evaluation is no longer the latest; phase 1 may have re-run.",
+        )
+
+    scores = dict(evaluation.scores or {})
+    scores["duplicateness"] = payload.duplicateness
+
+    values: dict[str, Any] = {
+        "scores": scores,
+        "candidates_compared": payload.candidates_compared,
+        "duplicate_locked_until": None,
+    }
+    if payload.duplicate_of_issue_id is not None:
+        values["duplicate_of_issue_id"] = payload.duplicate_of_issue_id
+    if payload.updated_summary is not None:
+        values["summary"] = payload.updated_summary
+    if payload.updated_embedding is not None:
+        values["summary_embedding"] = payload.updated_embedding
+
+    await session.execute(
+        update(LLMEvaluation)
+        .where(LLMEvaluation.id == payload.evaluation_id)
+        .values(**values)
+    )
+    await session.commit()
+    return {"status": "stored", "evaluation_id": payload.evaluation_id}

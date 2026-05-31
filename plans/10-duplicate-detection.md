@@ -386,8 +386,8 @@ Respond with valid JSON:
 
 _SUMMARY_REWRITE_SYSTEM = """\
 You are a concise technical writer. Rewrite the following issue summary to \
-note that it is likely a duplicate. Prepend "Likely duplicate of #<number>. " \
-to a condensed version of the original summary. Keep it under 256 characters. \
+note that it is likely a duplicate. Prepend "May duplicate of #<number>, #<number>. " \
+to a condensed version of the original summary. Keep it under 300 characters. \
 Do not include markdown formatting.
 """
 

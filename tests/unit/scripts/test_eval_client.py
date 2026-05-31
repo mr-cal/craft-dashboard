@@ -50,6 +50,7 @@ DEFAULT_KWARGS = {
     "token": "test-token",
     "summary_model": "test-model",
     "evaluation_model": "test-model",
+    "embedding_model": "",
     "llm_url": "http://localhost:11434/v1",
     "llm_api_key": "",
     "ca_cert": "",
@@ -161,6 +162,7 @@ async def test_run_eval_loop_processes_issue_and_stops_at_limit(
         "completion_tokens": SAMPLE_RESULT["completion_tokens"],
         "model_used": "test-model",
         "llm_backend": "local",
+        "embedding": None,
     }
     patched_runtime["sleep"].assert_not_awaited()
     patched_runtime["llm_client"].close.assert_awaited_once()

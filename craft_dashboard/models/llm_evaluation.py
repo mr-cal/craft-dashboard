@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -66,6 +67,16 @@ class LLMEvaluation(Base):
     eval_locked_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+    # Phase 2: duplicate detection
+    summary_embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(768), nullable=True
+    )
+    candidates_compared: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duplicate_locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    duplicate_of_issue_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Relationships
     issue: Mapped["Issue"] = relationship(back_populates="evaluations")

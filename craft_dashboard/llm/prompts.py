@@ -284,3 +284,88 @@ def build_evaluation_prompt(
         {"role": "system", "content": system_content},
         {"role": "user", "content": user_content},
     ]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Duplicate detection prompts
+# ---------------------------------------------------------------------------
+
+_DUPLICATE_CHECK_SYSTEM = """\
+You are an expert open-source project maintainer. Given two issues or pull \
+requests (possibly from different projects), determine whether they describe \
+the same underlying problem or feature request.
+
+Two issues are duplicates if they describe the same root cause, bug, or \
+feature — even if the symptoms, wording, or reproduction steps differ. \
+Cross-project duplicates are common: a feature request in an application and \
+a related issue in the underlying library it depends on may be duplicates.
+
+Two issues are NOT duplicates if they merely involve the same component or \
+area of the codebase but describe distinct problems.
+
+Respond with valid JSON:
+{
+  "is_duplicate": <true or false>,
+  "confidence": <0-100, how confident you are>,
+  "reason": "<brief explanation, one sentence>"
+}
+"""
+
+_SUMMARY_REWRITE_SYSTEM = """\
+You are a concise technical writer. Rewrite the following issue summary to \
+note that it is likely a duplicate. Prepend the duplicate reference to a \
+condensed version of the original summary. Keep the total under 300 \
+characters. Do not include markdown formatting.
+"""
+
+
+def build_duplicate_check_prompt(
+    *,
+    issue_a_title: str,
+    issue_a_summary: str,
+    issue_a_project: str,
+    issue_b_title: str,
+    issue_b_summary: str,
+    issue_b_project: str,
+    issue_b_external_id: str,
+) -> list[dict[str, str]]:
+    """Build a prompt to check if two issues are duplicates.
+
+    Accepts cross-project issue pairs; includes project names for context.
+    """
+    project_note = (
+        f" (from {issue_b_project})" if issue_b_project != issue_a_project else ""
+    )
+    user_content = (
+        f"Issue A ({issue_a_project}):\n"
+        f"  Title: {issue_a_title}\n"
+        f"  Summary: {issue_a_summary}\n\n"
+        f"Issue B (#{issue_b_external_id}{project_note}):\n"
+        f"  Title: {issue_b_title}\n"
+        f"  Summary: {issue_b_summary}\n"
+    )
+    return [
+        {"role": "system", "content": _DUPLICATE_CHECK_SYSTEM},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def build_duplicate_summary_rewrite_prompt(
+    *,
+    original_summary: str,
+    duplicate_refs: list[str],
+) -> list[dict[str, str]]:
+    """Build a prompt to rewrite a summary noting the detected duplicate(s).
+
+    Args:
+        original_summary: The original phase-1 summary.
+        duplicate_refs: List of human-readable references, e.g. ["snapcraft#123",
+            "craft-parts#45"]. Used as-is in the rewrite.
+
+    """
+    refs = ", ".join(duplicate_refs)
+    user_content = f"Original summary: {original_summary}\nDuplicate of: {refs}\n"
+    return [
+        {"role": "system", "content": _SUMMARY_REWRITE_SYSTEM},
+        {"role": "user", "content": user_content},
+    ]
