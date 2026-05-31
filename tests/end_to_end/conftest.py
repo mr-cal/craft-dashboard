@@ -28,7 +28,7 @@ HEALTH_TIMEOUT = 120  # seconds (includes image build + migrations)
 SEED_TIMEOUT = 30  # seconds
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-COMPOSE_FILE = str(REPO_ROOT / "docker-compose.dev.yml")
+COMPOSE_FILE = str(REPO_ROOT / "docker-compose.yml")
 E2E_PROJECT = f"craft-dashboard-e2e-{os.getpid()}"
 
 

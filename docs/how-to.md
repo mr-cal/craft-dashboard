@@ -3,8 +3,9 @@
 ## Scripts
 
 All scripts live in `scripts/`. In production, they run inside the app
-container via `docker compose exec`. They can also run locally with a `.env`
-file pointing at a PostgreSQL database (tests use SQLite and do not need this).
+container via `docker compose exec`. For local development, they run against
+the Docker Compose PostgreSQL container (tests use SQLite and do not need
+Docker).
 
 ### collect_data.py
 
@@ -198,14 +199,21 @@ GROUP BY p.name;
 
 ### Restore from backup
 
+The database must be empty before restoring — the dump includes `CREATE TABLE`
+statements that conflict with an already-migrated schema.
+
 ```bash
 # Stop the app
 docker compose stop app
 
+# Drop and recreate the database
+docker compose exec -T postgres psql -U craft_dashboard postgres \
+  -c "DROP DATABASE craft_dashboard; CREATE DATABASE craft_dashboard;"
+
 # Restore
 gunzip -c backup.sql.gz | docker compose exec -T postgres psql -U craft_dashboard craft_dashboard
 
-# Restart
+# Restart (Alembic sees the existing schema and skips migrations)
 docker compose up -d
 ```
 

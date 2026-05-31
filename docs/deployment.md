@@ -8,17 +8,30 @@ to `main`.
 
 ### .env
 
-All app settings are configured via environment variables, read from `.env` by
+App settings are configured via environment variables, read from `.env` by
 pydantic-settings at startup. Copy the example file and fill in your values:
 
 ```
 cp .env.example .env
 ```
 
-The key settings:
+You do **not** need to set `DATABASE_URL` in `.env` for local development — it
+is hardcoded in `docker-compose.yml` and overrides anything in `.env`. The
+local database credentials are:
+
+| Setting  | Value |
+|----------|-------|
+| User     | `craft_dashboard` |
+| Password | `devpassword` |
+| Database | `craft_dashboard` |
+| Host     | `postgres` (Docker service name) |
+
+For **production**, `.env` must include `DATABASE_URL` and `DB_PASSWORD` with
+real credentials. See the [Production deployment](#production-deployment) section.
+
+The other key settings in `.env` are API tokens:
 
 ```
-DATABASE_URL=postgresql+asyncpg://craft_dashboard:<password>@postgres/craft_dashboard
 GITHUB_TOKEN=<your GitHub fine-grained token>
 ADMIN_TOKEN=<a random string for the admin API>
 ```
@@ -40,10 +53,10 @@ See `.env.example` for all available settings.
 
 ## Local development with Docker
 
-The `docker-compose.dev.yml` file provides a full local stack:
+The `docker-compose.yml` file provides a full local stack:
 
 ```
-docker compose -f docker-compose.dev.yml up --build
+docker compose up --build
 ```
 
 This starts:
@@ -56,7 +69,7 @@ immediately. Visit `http://localhost:8000/` to see the dashboard.
 To stop and remove all data:
 
 ```
-docker compose -f docker-compose.dev.yml down -v
+docker compose down -v
 ```
 
 ## Production deployment
@@ -102,7 +115,19 @@ volumes:
   pgdata:
 ```
 
-2. Create a `.env` file with your production settings (see Configuration above).
+2. Create a `.env` file on the server. Start from `.env.example` and set all
+   required values. The production `.env` must include:
+
+```
+# Database — must match POSTGRES_PASSWORD in docker-compose.yml
+DB_PASSWORD=<a strong random password>
+DATABASE_URL=postgresql+asyncpg://craft_dashboard:<DB_PASSWORD>@postgres/craft_dashboard
+
+GITHUB_TOKEN=<your GitHub fine-grained token>
+ADMIN_TOKEN=<a random string for the admin API>
+```
+
+   See `.env.example` for all available settings.
 
 3. Pull and start:
 
@@ -127,9 +152,36 @@ The GHCR image is rebuilt on every push to `main`, tagged as `latest` and
 
 ### Import from a SQL dump
 
-```
+Import the dump **before** starting the app. The app runs Alembic migrations on
+startup; if you import into an already-migrated database, the restore will fail
+with "relation already exists" errors and FK violations (the dump's table order
+differs from Alembic's).
+
+```bash
+# 1. Start only the database
+docker compose up -d postgres
+
+# 2. Wait for it to be healthy, then import
 gunzip -c craft-dashboard-initial.sql.gz | \
   docker compose exec -T postgres psql -U craft_dashboard craft_dashboard
+
+# 3. Start the app (Alembic sees the existing schema and skips migrations)
+docker compose up -d
+```
+
+If you already ran `docker compose up` and the database has been migrated, drop
+and recreate the database before importing:
+
+```bash
+docker compose stop app
+
+docker compose exec -T postgres psql -U craft_dashboard postgres \
+  -c "DROP DATABASE craft_dashboard; CREATE DATABASE craft_dashboard;"
+
+gunzip -c craft-dashboard-initial.sql.gz | \
+  docker compose exec -T postgres psql -U craft_dashboard craft_dashboard
+
+docker compose up -d
 ```
 
 ### Export a dump

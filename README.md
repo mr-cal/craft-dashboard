@@ -17,7 +17,7 @@ make lint          # lint and type-check
 ## Docker
 
 ```
-docker compose -f docker-compose.dev.yml up --build   # run locally with Docker
+docker compose up --build   # run locally with Docker
 ```
 
 ## Documentation

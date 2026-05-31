@@ -6,10 +6,12 @@ You need these on your local machine:
 
 - Python 3.12+
 - [uv](https://astral.sh/uv) (Python package manager)
+- Docker Engine and Docker Compose
 - git
 
-PostgreSQL is only needed on the server. Local development and tests use SQLite
-in-memory databases.
+PostgreSQL runs in a Docker container — you do not need to install it locally.
+Unit and integration tests use SQLite in-memory databases and do not need
+Docker.
 
 ## Setup
 
@@ -22,15 +24,16 @@ This runs `uv sync` and installs all dev, lint, and type-checking dependencies.
 ## Running the dev server
 
 ```
-make dev
+docker compose up --build
 ```
 
-Starts uvicorn on `0.0.0.0:8000` with hot reload. You need a `.env` file with
-at least `DATABASE_URL` pointing at a Postgres instance (or you can use the
-LXD VM workflow described in `deployment.md`).
+This starts the app on `http://localhost:8000` with PostgreSQL via Docker
+Compose. The database credentials are hardcoded in `docker-compose.yml`
+(user: `craft_dashboard`, password: `devpassword`).
 
-Copy `.env.example` to `.env` and fill in your values. The dev server reads
-settings from `.env` via pydantic-settings.
+For non-Docker development (e.g. `make dev` with hot reload), you still need
+a `.env` file — but `DATABASE_URL` is set by Docker Compose and does not need
+to be in `.env`. Copy `.env.example` to `.env` and fill in your API tokens.
 
 ## Tests
 
@@ -114,5 +117,5 @@ alembic/                  # database migration files
 ```
 Dockerfile                # multi-stage build for the app container
 .dockerignore             # files excluded from Docker build context
-docker-compose.dev.yml    # local development stack (app + postgres)
+docker-compose.yml        # Docker Compose stack (app + postgres)
 ```
