@@ -2,26 +2,32 @@
 
 ## Motivation
 
-craft-dashboard is deployed on a VPS. Currently, LLM evaluation runs **on the server**,
-connecting either to OpenRouter (cloud) or to a local LLM (e.g. Ollama on a developer
-machine). The local LLM option requires the VPS to reach the developer's machine — if
-the VPS is compromised, the attacker gets a network path to the local LLM host.
+craft-dashboard runs as a **Docker container** on a VPS. Currently, LLM evaluation runs
+**inside the container**, connecting either to OpenRouter (cloud) or to a local LLM
+(e.g. Ollama on a developer machine). The local LLM option requires the container to
+reach the developer's machine — if the container is compromised, the attacker gets a
+network path to the local LLM host.
 
-**Goal:** Flip the evaluation direction. Instead of the server pushing work to an LLM,
+Note: `localhost` inside the Docker container refers to the container itself, not the
+host machine. Reaching a local Ollama requires `host.docker.internal` or a host IP
+(e.g. `LOCAL_LLM_URL=https://192.168.1.10:8443/v1`), making the outbound path from
+the container explicit and confirming the security risk.
+
+**Goal:** Flip the evaluation direction. Instead of the container pushing work to an LLM,
 a local script on the developer's machine **pulls** issues from the server's API,
-evaluates them locally, and **pushes** results back. This eliminates the server→local
+evaluates them locally, and **pushes** results back. This eliminates the container→local
 network path entirely.
 
 ## Current Architecture (Before)
 
 ```
-┌─────────────────┐       ┌──────────────┐
-│   VPS Server    │──────▶│  OpenRouter   │  (cloud LLM)
-│  (FastAPI app)  │       └──────────────┘
-│                 │
-│  run_llm.py     │──────▶│  Local LLM   │  (developer machine — SECURITY RISK)
-│  (cron/manual)  │       └──────────────┘
-└─────────────────┘
+┌──────────────────────────┐       ┌──────────────┐
+│   Docker Container (VPS) │──────▶│  OpenRouter   │  (cloud LLM)
+│   (FastAPI app)          │       └──────────────┘
+│                          │
+│   run_llm.py             │──────▶│  Local LLM   │  (developer machine — SECURITY RISK)
+│   (cron/manual)          │       └──────────────┘
+└──────────────────────────┘
 ```
 
 - `scripts/llm/cli.py` — CLI entry point (`run_llm evaluate`)
@@ -33,14 +39,14 @@ network path entirely.
 ## Target Architecture (After)
 
 ```
-┌─────────────────┐                        ┌───────────────────┐
-│   VPS Server    │◀── HTTPS (pull) ───────│  Local Machine    │
-│  (FastAPI app)  │                        │                   │
-│                 │── HTTPS (push result) ─│  eval-client.py   │
-│  /api/eval/*    │                        │  + Local LLM      │
-└─────────────────┘                        └───────────────────┘
-                  │
-                  │── (optional, toggled) ──▶  OpenRouter
+┌──────────────────────────┐                        ┌───────────────────┐
+│   Docker Container (VPS) │◀── HTTPS (pull) ───────│  Local Machine    │
+│   (FastAPI app)          │                        │                   │
+│                          │── HTTPS (push result) ─│  eval-client.py   │
+│   /api/eval/*            │                        │  + Local LLM      │
+└──────────────────────────┘                        └───────────────────┘
+                            │
+                            │── (optional, toggled) ──▶  OpenRouter
 ```
 
 ### Key Changes
@@ -165,7 +171,7 @@ The client reuses:
 The eval API uses a dedicated bearer token, separate from the admin token:
 
 ```env
-# secrets.env
+# .env (on the VPS, read by Docker via env_file in docker-compose.yml)
 EVAL_API_TOKEN=<random-token>       # required for /api/eval/* endpoints
 ENABLE_SERVER_EVAL=true             # set to false to disable server-side OpenRouter
 OPENROUTER_API_KEY=<key>            # only needed if ENABLE_SERVER_EVAL=true
@@ -179,7 +185,7 @@ routes.
 When `ENABLE_SERVER_EVAL=false`:
 - The `run_llm evaluate` command on the server refuses to run (exits with message)
 - The admin "Re-evaluate" button shows a warning that server-side eval is disabled
-- The cron timer for `run-llm.service` can remain enabled but will be a no-op
+- The cron job in `/etc/cron.d/craft-dashboard` that runs `docker compose exec -T app python scripts/run_llm.py evaluate` can remain enabled but will be a no-op
 - Evaluation only happens via the pull-based client
 
 When `ENABLE_SERVER_EVAL=true` (default, backward compatible):
@@ -230,10 +236,10 @@ The `LocalLLMClient` moves to a shared module that the client script imports.
 
 ## Migration Path
 
-1. Deploy Phase 1 (API endpoints) — no behavior change
-2. Set up eval client on local machine, verify it works
-3. Set `ENABLE_SERVER_EVAL=false` on VPS
-4. Deploy Phase 4 (remove local LLM code from server)
+1. Deploy Phase 1 (API endpoints) — no behavior change (`docker compose pull && docker compose up -d`)
+2. Set up eval client on local machine, verify it works against the server
+3. Set `ENABLE_SERVER_EVAL=false` in `.env` on the VPS and redeploy
+4. Deploy Phase 4 (remove local LLM code from server image)
 5. Server only uses OpenRouter (if enabled) or relies entirely on pull-based client
 
 ## Security Considerations
