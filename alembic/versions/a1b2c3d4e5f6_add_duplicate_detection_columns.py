@@ -1,7 +1,7 @@
 """add_duplicate_detection_columns
 
-Revision ID: b1c2d3e4f5a6
-Revises: fa02b11af7dc
+Revision ID: a1b2c3d4e5f6
+Revises: f2a3b4c5d6e7
 Create Date: 2026-05-31 00:00:00.000000
 
 """
@@ -10,8 +10,8 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 
-revision: str = "b1c2d3e4f5a6"
-down_revision: str | None = "fa02b11af7dc"
+revision: str = "a1b2c3d4e5f6"
+down_revision: str | None = "f2a3b4c5d6e7"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
