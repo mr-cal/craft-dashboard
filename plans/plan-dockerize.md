@@ -167,18 +167,71 @@ services:
 
 Run with: `docker compose -f docker-compose.dev.yml up --build`
 
-### 5. What to Keep / Remove
+### 5. Where `provisioning/secrets.env` Config Goes
+
+`provisioning/secrets.env` has three categories of settings. Here is where each
+goes in the Docker world:
+
+#### Ansible connection settings → **deleted entirely** (no Ansible, no need)
+
+```
+VM_NAME=             # LXD VM name — gone
+DASHBOARD_HOST=      # VPS IP — gone
+DASHBOARD_USER=      # SSH user — gone
+DASHBOARD_SSH_KEY=   # SSH key path — gone
+```
+
+#### Server infrastructure settings → **VPS infra plan** (not this plan)
+
+```
+DOMAIN_NAME=         # handled by nginx/caddy config on the host
+SSL_EMAIL=           # handled by certbot config on the host
+DB_PASSWORD=         # becomes part of DATABASE_URL in .env
+```
+
+#### App secrets and settings → **`.env` file** (already covered by `.env.example`)
+
+```
+GITHUB_TOKEN=             → .env
+OPENROUTER_API_KEY=       → .env
+ADMIN_TOKEN=              → .env
+LOG_LEVEL=                → .env
+REFRESH_AGE_DAYS=         → .env
+LLM_BACKEND=              → .env
+LOCAL_LLM_URL=            → .env
+LOCAL_LLM_API_KEY=        → .env
+LOCAL_LLM_SUMMARY_MODEL=  → .env
+LOCAL_LLM_EVALUATION_MODEL= → .env
+LOCAL_LLM_CA_CERT=        → .env
+```
+
+These are already documented in `.env.example` at the repo root, which pydantic-
+settings reads at startup. Nothing is lost — the `.env` file is the direct
+replacement for the `secrets.env` app-settings section.
+
+The `DATABASE_URL` in `.env` replaces the Ansible-composed connection string:
+```
+DATABASE_URL=postgresql+asyncpg://craft_dashboard:<DB_PASSWORD>@postgres/craft_dashboard
+```
+
+### 6. What to Delete
+
+The entire Ansible provisioning system is replaced by Docker. Delete:
+
+| Path | Reason |
+|------|--------|
+| `provisioning/` | Entire directory — Ansible, roles, templates, secrets |
+| `Makefile` targets: `ansible-deps`, `deploy`, `deploy-vm` | No more Ansible |
 
 **Keep (unchanged):**
-- `Makefile` — local dev commands (format, lint, test) still work without Docker
-- `provisioning/` — keep for reference/rollback, but mark as deprecated in README
+- `Makefile` — local dev commands (format, lint, test, deploy targets removed)
 - All application code, tests, scripts
 - CI workflow (`ci.yml`) — tests still run in GitHub Actions without Docker
 
 **No changes to application code** — the app already reads config from environment
 variables via pydantic-settings. No code changes needed for Docker.
 
-### 6. Database Migration Path
+### 7. Database Migration Path
 
 When moving from the current VPS to the Dockerized setup:
 
@@ -187,7 +240,7 @@ When moving from the current VPS to the Dockerized setup:
 3. Import: `docker compose exec -T postgres psql -U craft_dashboard craft_dashboard < dump.sql`
 4. Verify: hit `/health`, check dashboard data
 
-### 7. Scheduled Tasks in Docker
+### 8. Scheduled Tasks in Docker
 
 The cron jobs (data collection, LLM evaluation) run via `docker compose exec`:
 
@@ -208,6 +261,32 @@ The `-T` flag disables pseudo-TTY allocation (required for cron).
 | `.github/workflows/publish.yml` | Build and push Docker image to GHCR on push to main |
 | `docker-compose.dev.yml` | Optional local development stack |
 
+## Files to Delete
+
+| Path | Description |
+|------|-------------|
+| `provisioning/` | Entire directory (Ansible playbook, roles, templates, `secrets.env`, `secrets.env.example`) |
+
+## Makefile Targets to Remove
+
+| Target | Reason |
+|--------|--------|
+| `ansible-deps` | No more Ansible |
+| `deploy` | Replaced by Docker deploy workflow |
+| `deploy-vm` | Replaced by `docker compose up` |
+
+## Documentation to Update
+
+All docs changes should be done together as part of this plan. The goal is docs
+that accurately reflect the Docker-based workflow with no stale Ansible references.
+
+| File | Change |
+|------|--------|
+| `docs/deployment.md` | **Full rewrite** — replace entire Ansible/LXD deployment guide with Docker-based workflow: building the image, running with `docker compose`, configuring `.env`, VPS deploy via `docker compose pull && docker compose up -d` |
+| `docs/development.md` | Update project layout (remove `provisioning/` entry); update e2e test prerequisites (no `provisioning/secrets.env`); add note about `docker-compose.dev.yml` as an alternative to running Postgres locally |
+| `docs/architecture.md` | Update the ASCII diagram: replace "systemd timers (on the server)" with "cron / `docker compose exec` (on the host)"; replace "nginx" entry point note if relevant |
+| `README.md` | Update the deployment link/description from "LXD VM and VPS deployment with Ansible" to reflect Docker |
+
 ## Implementation Order
 
 1. Create `Dockerfile` and `.dockerignore`
@@ -215,3 +294,6 @@ The `-T` flag disables pseudo-TTY allocation (required for cron).
 3. Create `.github/workflows/publish.yml`
 4. Push to main, verify image appears in GHCR
 5. Create `docker-compose.dev.yml` for convenient local dev
+6. Delete `provisioning/` directory
+7. Remove `ansible-deps`, `deploy`, `deploy-vm` Makefile targets
+8. Update all documentation (deployment.md, development.md, architecture.md, README.md)
