@@ -14,9 +14,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +24,8 @@ from craft_dashboard.database import get_engine, get_session_factory
 from craft_dashboard.dependencies import get_db_session, set_session_factory
 from craft_dashboard.routes.admin import router as admin_router
 from craft_dashboard.routes.dashboard import router as dashboard_router
+from craft_dashboard.routes.eval_api import limiter as eval_api_limiter
+from craft_dashboard.routes.eval_api import router as eval_api_router
 from craft_dashboard.routes.issues import router as issues_router
 from craft_dashboard.routes.stats import router as stats_router
 from craft_dashboard.settings import Settings
@@ -111,7 +112,7 @@ def create_app() -> FastAPI:
     )
 
     # Rate limiter
-    limiter = Limiter(key_func=get_remote_address)
+    limiter = eval_api_limiter
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _slowapi_rate_limit_handler)
 
@@ -160,6 +161,7 @@ def create_app() -> FastAPI:
     app.include_router(issues_router)
     app.include_router(stats_router)
     app.include_router(admin_router)
+    app.include_router(eval_api_router)
 
     # E2E test seeding endpoint - only available when CRAFT_DASHBOARD_E2E=1
     if os.environ.get("CRAFT_DASHBOARD_E2E") == "1":

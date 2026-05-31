@@ -92,7 +92,11 @@ async def _noop_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def _create_admin_app(session_override=_override_admin_db_session):
     app = create_app()
     app.router.lifespan_context = _noop_lifespan
-    app.state.settings = SimpleNamespace(admin_token=_ADMIN_TOKEN, refresh_age_days=7)
+    app.state.settings = SimpleNamespace(
+        admin_token=_ADMIN_TOKEN,
+        refresh_age_days=7,
+        enable_server_eval=True,
+    )
     app.dependency_overrides[get_db_session] = session_override
     return app
 

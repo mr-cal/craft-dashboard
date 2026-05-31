@@ -120,6 +120,7 @@ class TestCreateApp:
         assert caplog.messages == [
             "⚠️  ADMIN_TOKEN is not set. Admin endpoints will reject all requests.",
             "⚠️  GITHUB_TOKEN is not set. Data collection will fail.",
+            "⚠️  EVAL_API_TOKEN is not set. Eval API endpoints will reject all requests.",
         ]
 
     def test_json_formatter_formats_log_record(self) -> None:

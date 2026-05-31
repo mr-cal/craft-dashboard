@@ -8,6 +8,7 @@ import pytest
 from craft_dashboard._version import __version__
 from craft_dashboard.dependencies import set_session_factory
 from craft_dashboard.models.base import Base
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -41,6 +42,18 @@ def project_main_module():
     return craft_dashboard
 
 
+async def _configure_sqlite_indexes(engine: AsyncEngine) -> None:
+    """Restore SQLite compatibility for partial unique indexes used in tests."""
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP INDEX IF EXISTS ix_llm_evaluations_latest_issue"))
+        await conn.execute(
+            text(
+                "CREATE UNIQUE INDEX ix_llm_evaluations_latest_issue "
+                "ON llm_evaluations (issue_id) WHERE latest = 1"
+            )
+        )
+
+
 @pytest.fixture
 async def test_db_engine() -> AsyncEngine:
     """Create an in-memory SQLite database engine for testing."""
@@ -49,9 +62,9 @@ async def test_db_engine() -> AsyncEngine:
         echo=False,
     )
 
-    # Create all tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await _configure_sqlite_indexes(engine)
 
     yield engine
 

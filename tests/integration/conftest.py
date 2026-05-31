@@ -11,6 +11,7 @@ import pytest
 from craft_dashboard.dependencies import set_session_factory
 from craft_dashboard.models.base import Base
 from fastapi import FastAPI
+from sqlalchemy import text
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -44,12 +45,25 @@ async def noop_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # ---------------------------------------------------------------------------
 
 
+async def _configure_sqlite_indexes(engine: AsyncEngine) -> None:
+    """Restore SQLite compatibility for partial unique indexes used in tests."""
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP INDEX IF EXISTS ix_llm_evaluations_latest_issue"))
+        await conn.execute(
+            text(
+                "CREATE UNIQUE INDEX ix_llm_evaluations_latest_issue "
+                "ON llm_evaluations (issue_id) WHERE latest = 1"
+            )
+        )
+
+
 @pytest.fixture
 async def test_db_engine() -> AsyncGenerator[AsyncEngine, None]:
     """In-memory SQLite engine with all tables created."""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await _configure_sqlite_indexes(engine)
     yield engine
     await engine.dispose()
 

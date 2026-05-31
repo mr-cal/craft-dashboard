@@ -93,6 +93,7 @@ class TestSettings:
         assert settings.validate_required_secrets() == [
             "ADMIN_TOKEN is not set. Admin endpoints will reject all requests.",
             "GITHUB_TOKEN is not set. Data collection will fail.",
+            "EVAL_API_TOKEN is not set. Eval API endpoints will reject all requests.",
         ]
 
     def test_validate_required_secrets_returns_empty_list_when_tokens_present(
@@ -102,6 +103,7 @@ class TestSettings:
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         monkeypatch.setenv("ADMIN_TOKEN", _EXPECTED_ADMIN_TOKEN)
         monkeypatch.setenv("GITHUB_TOKEN", _EXPECTED_GITHUB_TOKEN)
+        monkeypatch.setenv("EVAL_API_TOKEN", "eval-token")
 
         settings = Settings()
 
@@ -113,6 +115,7 @@ class TestValidateRequiredSecrets:
         """No warnings when all secrets are set."""
         monkeypatch.setenv("ADMIN_TOKEN", "secret")
         monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
+        monkeypatch.setenv("EVAL_API_TOKEN", "eval-token")
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         settings = Settings()
         assert settings.validate_required_secrets() == []
@@ -124,6 +127,7 @@ class TestValidateRequiredSecrets:
         monkeypatch.setenv("GITHUB_TOKEN", "")
         settings = Settings()
         warnings = settings.validate_required_secrets()
-        assert len(warnings) == 2
+        assert len(warnings) == 3
         assert any("ADMIN_TOKEN" in warning for warning in warnings)
         assert any("GITHUB_TOKEN" in warning for warning in warnings)
+        assert any("EVAL_API_TOKEN" in warning for warning in warnings)
