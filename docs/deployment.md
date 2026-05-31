@@ -34,16 +34,21 @@ The other key settings in `.env` are API tokens:
 ```
 GITHUB_TOKEN=<your GitHub fine-grained token>
 ADMIN_TOKEN=<a random string for the admin API>
+EVAL_API_TOKEN=<a random string for /api/eval/*>
 ```
 
-For LLM evaluation, also set:
+Evaluation settings:
 
 ```
+ENABLE_SERVER_EVAL=true
 OPENROUTER_API_KEY=<your key>
 ```
 
-For local LLM evaluation, use the pull-based eval client (see
-`docs/eval-client.md`).
+- `EVAL_API_TOKEN` is required for the pull-based eval API (`/api/eval/*`).
+- `ENABLE_SERVER_EVAL` toggles server-side OpenRouter evaluation for
+  `run_llm.py evaluate` and admin-triggered re-evaluation.
+- Local LLM evaluation is now handled by the eval client (`docs/eval-client.md`),
+  not by the server.
 
 See `.env.example` for all available settings.
 
@@ -121,7 +126,12 @@ DATABASE_URL=postgresql+asyncpg://craft_dashboard:<DB_PASSWORD>@postgres/craft_d
 
 GITHUB_TOKEN=<your GitHub fine-grained token>
 ADMIN_TOKEN=<a random string for the admin API>
+EVAL_API_TOKEN=<a random string for /api/eval/*>
+ENABLE_SERVER_EVAL=true
 ```
+
+   If you disable `ENABLE_SERVER_EVAL`, the server will still expose the eval
+   API, but local LLM evaluation must be done with `python scripts/eval_client.py`.
 
    See `.env.example` for all available settings.
 
@@ -198,7 +208,7 @@ Data collection and LLM evaluation run as cron jobs on the host, using
 # Data collection — daily at 2 AM UTC
 0 2 * * * root cd /opt/craft-dashboard && docker compose exec -T app python scripts/collect_data.py --source all
 
-# LLM evaluation — daily at 6 AM UTC
+# LLM evaluation — daily at 6 AM UTC (only if ENABLE_SERVER_EVAL=true)
 0 6 * * * root cd /opt/craft-dashboard && docker compose exec -T app python scripts/run_llm.py evaluate --open-only
 
 # Database backup — daily at 3 AM UTC
@@ -206,3 +216,7 @@ Data collection and LLM evaluation run as cron jobs on the host, using
 ```
 
 The `-T` flag disables pseudo-TTY allocation (required for cron).
+
+If you use local LLM evaluation, run `scripts/eval_client.py` from a trusted
+machine that can reach the server over HTTPS and the LLM over your local
+network. That workflow replaces the old server-hosted local LLM setup.

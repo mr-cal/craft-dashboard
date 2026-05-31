@@ -3,9 +3,10 @@
 ## Overview
 
 craft-dashboard is a read-only web application backed by a PostgreSQL database.
-The web app never calls external APIs during request handling. All external data
-(GitHub issues, Launchpad bugs, LLM evaluations) is fetched by offline scripts
-that run on systemd timers.
+The web app never calls external APIs during request handling. GitHub and
+Launchpad data is fetched by offline scripts that run on systemd timers. LLM
+results can be produced either by optional server-side jobs or by a pull-based
+local eval client that fetches work from the server and submits results back.
 
 ```
                           ┌──────────────────────────────────┐
@@ -14,7 +15,7 @@ that run on systemd timers.
   GitHub API  <───────────│  collect_data.py  (2 AM daily)   │───────> PostgreSQL
   Launchpad   <───────────│                                  │
                           │  run_llm.py       (6 AM daily)   │───────> PostgreSQL
-  OpenRouter / local LLM <│                                  │
+  OpenRouter              <│                                  │
                           └──────────────────────────────────┘
 
                           ┌──────────────────────────────────┐
@@ -32,10 +33,16 @@ collection takes, and a GitHub API outage doesn't break the dashboard.
    GitHub (and optionally Launchpad). It upserts them into the database and
    generates a daily snapshot (aggregate counts + median ages) for each project.
 
-2. `run_llm.py` reads issues from the database, sends them to an LLM
-   (OpenRouter or a local server), and writes the evaluation (summary,
-   suggested action, scores) back. It uses content hashing to skip issues
-   that haven't changed since their last evaluation.
+2. LLM evaluation can run in two ways:
+
+   - `run_llm.py evaluate` performs optional server-side evaluation against
+     OpenRouter and writes the evaluation (summary, suggested action, scores)
+     back to PostgreSQL.
+   - `scripts/eval_client.py` performs pull-based local evaluation. It requests
+     the next issue from `/api/eval/next`, evaluates it against an
+     OpenAI-compatible LLM, and submits the result to `/api/eval/result`.
+
+   Both flows use content hashing to skip unchanged issues.
 
 3. The FastAPI app reads everything from the database and renders HTML pages
    with Jinja2 templates. The issues page uses HTMX for filtering and
@@ -89,6 +96,38 @@ All routes are in `craft_dashboard/routes/`:
   endpoint returns the full trend dataset as JSON for Chart.js.
 - `admin.py` -- `GET /admin` renders the admin page. POST endpoints for
   triggering refreshes and distributing schedules. Protected by bearer token.
+- `eval_api.py` -- pull-based evaluation API. `GET /api/eval/next` leases the
+  next issue, `POST /api/eval/result` stores the evaluation, and
+  `GET /api/eval/status` returns queue counts. Protected by the eval API token.
+
+## Pull-based evaluation architecture
+
+The local eval workflow is designed so the server never needs outbound access to
+a developer workstation or home-lab LLM.
+
+```
+┌──────────────────────────────┐   ← HTTPS (`next` / `result`) ←   ┌────────────────────────────────┐
+│ Docker container on VPS      │                                    │ Local machine                  │
+│ FastAPI + /api/eval/*        │                                    │ scripts/eval_client.py         │
+│ PostgreSQL                   │                                    │ OpenAI-compatible local LLM    │
+└──────────────────────────────┘                                    └────────────────────────────────┘
+```
+
+Flow:
+
+1. The server exposes `GET /api/eval/next` to hand out the next eligible issue.
+2. The eval client pulls that issue over HTTPS and evaluates it locally.
+3. The client pushes the finished result to `POST /api/eval/result`.
+4. Operators can query `GET /api/eval/status` to see queue counts.
+
+Security properties:
+
+- All `/api/eval/*` endpoints require bearer token authentication via
+  `EVAL_API_TOKEN`.
+- The server does not initiate any connection to the developer machine.
+- Local LLMs stay behind the client host; only evaluation results are sent back.
+- The server uses short-lived evaluation locks so multiple clients do not work
+  the same issue at once.
 
 ## Templates
 
