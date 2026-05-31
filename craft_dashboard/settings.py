@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     config_file: str = "craft-dashboard.toml"
     log_level: str = "INFO"
 
+    # Eval API token for /api/eval/* endpoints (pull-based evaluation)
+    eval_api_token: str = ""
+
+    # Toggle server-side LLM evaluation (run_llm evaluate / admin re-evaluate)
+    enable_server_eval: bool = True
+
     # LLM backend: "openrouter" (production) or "local" (local LLM server)
     llm_backend: Literal["openrouter", "local"] = "openrouter"
 
@@ -86,6 +92,10 @@ class Settings(BaseSettings):
             )
         if not self.github_token:
             warnings.append("GITHUB_TOKEN is not set. Data collection will fail.")
+        if not self.eval_api_token:
+            warnings.append(
+                "EVAL_API_TOKEN is not set. Eval API endpoints will reject all requests."
+            )
         return warnings
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}

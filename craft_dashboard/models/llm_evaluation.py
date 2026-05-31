@@ -63,6 +63,9 @@ class LLMEvaluation(Base):
     )
     issue_data_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     latest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    eval_locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationships
     issue: Mapped["Issue"] = relationship(back_populates="evaluations")
