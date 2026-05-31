@@ -55,19 +55,19 @@ be running at `LOCAL_LLM_URL` (default: `http://localhost:11434/v1`).
 
 ```
 # evaluate all open issues (daily cron mode)
-uv run scripts/run_llm.py --open-only
+uv run scripts/run_llm.py evaluate --open-only
 
 # evaluate everything (open + closed)
-uv run scripts/run_llm.py
+uv run scripts/run_llm.py evaluate
 
 # limit to a project
-uv run scripts/run_llm.py --project snapcraft
+uv run scripts/run_llm.py evaluate --project snapcraft
 
 # limit number of issues (good for testing API costs)
-uv run scripts/run_llm.py --open-only --limit 40
+uv run scripts/run_llm.py evaluate --open-only --limit 40
 
 # use local LLM instead of OpenRouter
-uv run scripts/run_llm.py --backend local
+uv run scripts/run_llm.py evaluate --backend local
 ```
 
 In production, this runs as a daily cron job at 6 AM UTC:

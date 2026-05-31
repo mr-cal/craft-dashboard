@@ -99,15 +99,18 @@ craft_dashboard/          # main Python package
   dependencies.py         # FastAPI dependency injection (DB session)
   enums.py                # IssueState, IssueType, IssueSource
   settings.py             # pydantic-settings (env vars / .env)
-  utils.py                # datetime normalization
   models/                 # SQLAlchemy ORM models
+  repositories/           # data access layer (query helpers)
   routes/                 # FastAPI route handlers
+  services/               # business logic (admin operations)
   collectors/             # data collection (GitHub, Launchpad, deps, snapshots)
   llm/                    # LLM evaluation (OpenRouter, local)
+  utils/                  # shared utilities (retention, etc.)
   templates/              # Jinja2 HTML templates
   static/                 # CSS, JS, favicon
 
 scripts/                  # standalone scripts (run via docker compose exec)
+  llm/                    # LLM evaluation CLI and orchestration
 tests/                    # pytest test suite
 alembic/                  # database migration files
 ```

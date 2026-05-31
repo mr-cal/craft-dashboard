@@ -81,6 +81,14 @@ The main tables:
   the next refresh is due. Used by the collector to avoid re-fetching projects
   that were recently updated.
 
+- `collection_watermarks` -- records the last successful collection timestamp
+  per `(project, source)` pair. Distinct from `refresh_schedule`: the watermark
+  is set only on success, while the schedule drives when the next run fires.
+
+- `collection_runs` -- one row per collection run. Stores start/finish times,
+  status, issue counts, duration, and any per-project errors. Used by the admin
+  status endpoint to surface collection health.
+
 Migrations are managed with Alembic (`alembic/`). Run `make migrate` or
 `uv run alembic upgrade head` to apply them.
 
@@ -90,12 +98,21 @@ All routes are in `craft_dashboard/routes/`:
 
 - `dashboard.py` -- `GET /` renders the overview page with project counts.
 - `issues.py` -- `GET /issues` renders the triage table. `GET /issues/table`
-  returns just the table partial for HTMX swaps.
+  returns just the table partial for HTMX swaps. `GET /issues/{project}/{number}`
+  renders an individual issue detail page. `GET /issues/export` exports filtered
+  issues as CSV.
 - `stats.py` -- `GET /stats` redirects to `/stats/trends`. Sub-routes for
-  trends, releases, and dependencies. The `GET /stats/trends/all-data`
-  endpoint returns the full trend dataset as JSON for Chart.js.
-- `admin.py` -- `GET /admin` renders the admin page. POST endpoints for
-  triggering refreshes and distributing schedules. Protected by bearer token.
+  trends, releases, and dependencies. `GET /stats/trends/all-data` returns the
+  full trend dataset as JSON for Chart.js. `GET /stats/trends/data` and
+  `GET /stats/trends/chart` return per-project trend data and chart partials for
+  HTMX. `GET /stats/triage` renders the triage summary page.
+- `admin.py` -- `GET /admin` renders the admin page. `POST /admin/auth` and
+  `POST /admin/logout` handle session login. `GET /admin/status` returns
+  collection run status as JSON. `POST /admin/refresh` triggers a data refresh,
+  `POST /admin/re-evaluate` triggers LLM re-evaluation, and
+  `POST /admin/distribute` spreads refresh schedules evenly. `GET /admin/health`
+  returns a health check. `GET /admin/logs` streams recent application logs.
+  Protected by bearer token.
 - `eval_api.py` -- pull-based evaluation API. `GET /api/eval/next` leases the
   next issue, `POST /api/eval/result` stores the evaluation, and
   `GET /api/eval/status` returns queue counts. Protected by the eval API token.

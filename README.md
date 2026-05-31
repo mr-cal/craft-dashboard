@@ -22,7 +22,10 @@ docker compose up --build   # run locally with Docker
 
 ## Documentation
 
-- [Development](docs/development.md) -- local setup, tests, linting, project layout
-- [Deployment](docs/deployment.md) -- Docker-based deployment and configuration
-- [Architecture](docs/architecture.md) -- how the app works, data flow, schema
-- [How-to guide](docs/how-to.md) -- scripts, common operations, recipes
+| Doc | Description |
+|-----|-------------|
+| [Development](docs/development.md) | Local setup, tests, linting, project layout |
+| [Deployment](docs/deployment.md) | Docker-based deployment and configuration |
+| [Architecture](docs/architecture.md) | How the app works, data flow, schema |
+| [How-to guide](docs/how-to.md) | Scripts, common operations, recipes |
+| [Eval client](docs/eval-client.md) | Pull-based local LLM evaluation client |

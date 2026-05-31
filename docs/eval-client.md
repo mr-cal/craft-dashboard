@@ -25,53 +25,53 @@ From the repository root:
 uv sync
 ```
 
-Then get an `EVAL_API_TOKEN` from the server admin. The token authorizes access to the `/api/eval/*` endpoints used by the client.
+Then get an `EVAL_API_TOKEN` from the server admin and set these environment
+variables (for example in `.env` or your shell profile):
+
+```bash
+export EVAL_CLIENT_SERVER=https://craft-dashboard.example.com
+export EVAL_API_TOKEN=<your-eval-api-token>
+export LOCAL_LLM_URL=http://localhost:11434/v1   # default; change if needed
+```
+
+See [CLI options](#cli-options) for the full list of env var names.
 
 ## Usage
 
 Run the client from the repository root.
 
 ```bash
-# Evaluate 10 issues from the local Ollama
-python scripts/eval_client.py \
-  --server https://craft-dashboard.example.com \
-  --token <eval-api-token> \
-  --model llama3.2 \
-  --llm-url http://localhost:11434/v1 \
-  --limit 10
+# Evaluate 10 open issues using the local Ollama (env vars set)
+python scripts/eval_client.py --limit 10
 
-# Evaluate using a remote LLM with TLS
-python scripts/eval_client.py \
-  --server https://craft-dashboard.example.com \
-  --token <eval-api-token> \
-  --model Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf \
+# Evaluate 50 open issues with a remote LLM over TLS
+python scripts/eval_client.py --limit 50 --open-only \
+  --summary-model Qwen3-35B --evaluation-model Qwen3-35B \
   --llm-url https://192.168.1.64:8443/v1 \
-  --llm-api-key <llm-api-key> \
-  --ca-cert ~/.config/local-llm/cert.pem \
-  --limit 50 \
-  --open-only
+  --ca-cert ~/.config/local-llm/cert.pem
 ```
 
 By default the client polls every 30 seconds when no work is available and continues until you stop it. Use `--limit` for bounded runs.
 
 ## CLI options
 
-| Option | Purpose |
-| --- | --- |
-| `--server` | Base URL of the craft-dashboard server |
-| `--token` | Bearer token for the eval API |
-| `--model` | Model name recorded with submitted evaluations |
-| `--llm-url` | OpenAI-compatible LLM endpoint |
-| `--llm-api-key` | API key for the LLM endpoint, if required |
-| `--ca-cert` | CA certificate for verifying the LLM server over TLS |
-| `--poll-interval` | Seconds to wait before polling again when the queue is empty |
-| `--limit` | Maximum evaluations before exit; `0` means unlimited |
-| `--project` | Restrict work to a single project |
-| `--open-only` / `--all-issues` | Evaluate only open issues or include closed ones |
-| `--force` | Re-evaluate even if the current content hash already matches |
-| `--incomplete` | Only pull issues with missing or partial evaluations |
-| `--stale-days` | Only pull evaluations older than `N` days |
-| `--server-ca-cert` | CA certificate for verifying the craft-dashboard server over TLS |
+| Option | Env var | Purpose |
+| --- | --- | --- |
+| `--server` | `EVAL_CLIENT_SERVER` | Base URL of the craft-dashboard server |
+| `--token` | `EVAL_API_TOKEN` | Bearer token for the eval API |
+| `--summary-model` | `LOCAL_LLM_SUMMARY_MODEL` | Model name used for issue summarization |
+| `--evaluation-model` | `LOCAL_LLM_EVALUATION_MODEL` | Model name used for scoring |
+| `--llm-url` | `LOCAL_LLM_URL` | OpenAI-compatible LLM endpoint |
+| `--llm-api-key` | `LOCAL_LLM_API_KEY` | API key for the LLM endpoint, if required |
+| `--ca-cert` | `LOCAL_LLM_CA_CERT` | CA certificate for verifying the LLM server over TLS |
+| `--server-ca-cert` | `EVAL_CLIENT_SERVER_CA_CERT` | CA certificate for verifying the craft-dashboard server over TLS |
+| `--poll-interval` | — | Seconds to wait before polling again when the queue is empty |
+| `--limit` | — | Maximum evaluations before exit; `0` means unlimited |
+| `--project` | — | Restrict work to a single project |
+| `--open-only` / `--all-issues` | — | Evaluate only open issues or include closed ones |
+| `--force` | — | Re-evaluate even if the current content hash already matches |
+| `--incomplete` | — | Only pull issues with missing or partial evaluations |
+| `--stale-days` | — | Only pull evaluations older than `N` days |
 
 ## Architecture note
 
