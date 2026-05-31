@@ -12,12 +12,17 @@ charts, release tracking, and dependency monitoring.
 make setup         # install dependencies
 make test          # run tests
 make lint          # lint and type-check
-make deploy-vm     # deploy to an LXD VM (see docs/deployment.md)
+```
+
+## Docker
+
+```
+docker compose -f docker-compose.dev.yml up --build   # run locally with Docker
 ```
 
 ## Documentation
 
 - [Development](docs/development.md) -- local setup, tests, linting, project layout
-- [Deployment](docs/deployment.md) -- LXD VM and VPS deployment with Ansible
+- [Deployment](docs/deployment.md) -- Docker-based deployment and configuration
 - [Architecture](docs/architecture.md) -- how the app works, data flow, schema
 - [How-to guide](docs/how-to.md) -- scripts, common operations, recipes

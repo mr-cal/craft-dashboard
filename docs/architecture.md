@@ -9,7 +9,7 @@ that run on systemd timers.
 
 ```
                           ┌──────────────────────────────────┐
-                          │  systemd timers (on the server)  │
+                          │  cron / docker compose exec      │
                           │                                  │
   GitHub API  <───────────│  collect_data.py  (2 AM daily)   │───────> PostgreSQL
   Launchpad   <───────────│                                  │
@@ -18,7 +18,7 @@ that run on systemd timers.
                           └──────────────────────────────────┘
 
                           ┌──────────────────────────────────┐
-  browser  ───> nginx ──> │  gunicorn + uvicorn workers      │
+  browser  ──────────────>│  gunicorn + uvicorn workers      │
                           │    └── FastAPI (craft_dashboard)  │──────> PostgreSQL
                           └──────────────────────────────────┘
 ```

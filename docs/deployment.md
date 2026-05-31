@@ -1,177 +1,160 @@
 # Deployment
 
-craft-dashboard is deployed via Ansible from your local machine. You do not
-check out the project on the server. Ansible SSHes in, clones the repo from
-GitHub, installs dependencies, runs migrations, and restarts services.
-
-There are two deployment targets: an LXD VM (for development) and a VPS (for
-production). The only difference is that the VPS deployment includes SSL
-certificate setup via certbot.
+craft-dashboard runs as a Docker container alongside a PostgreSQL container,
+managed by Docker Compose. The Docker image is published to GHCR on every push
+to `main`.
 
 ## Configuration
 
-### secrets.env
+### .env
 
-`provisioning/secrets.env` holds all deployment secrets. It is gitignored.
-Copy the example file and fill in your values:
-
-```
-cp provisioning/secrets.env.example provisioning/secrets.env
-```
-
-Minimum required values for a dev VM:
+All app settings are configured via environment variables, read from `.env` by
+pydantic-settings at startup. Copy the example file and fill in your values:
 
 ```
-VM_NAME=craft-dashboard-dev
-DASHBOARD_USER=ubuntu
-DASHBOARD_HOST=<VM IP, filled in after VM creation>
-DOMAIN_NAME=localhost
-DB_PASSWORD=dev-password-123
+cp .env.example .env
+```
+
+The key settings:
+
+```
+DATABASE_URL=postgresql+asyncpg://craft_dashboard:<password>@postgres/craft_dashboard
 GITHUB_TOKEN=<your GitHub fine-grained token>
-```
-
-For production, also set:
-
-```
-DOMAIN_NAME=yourdomain.example.com
-SSL_EMAIL=you@example.com
-OPENROUTER_API_KEY=<your key>
 ADMIN_TOKEN=<a random string for the admin API>
 ```
 
-Ansible reads these values and writes them into `/opt/craft-dashboard/.env` on
-the server. That server file is auto-generated; do not edit it by hand. To
-change a setting on the server, edit `secrets.env` and re-deploy.
+For LLM evaluation, also set:
 
-### .env (local development only)
+```
+# Option A: OpenRouter (recommended for production)
+LLM_BACKEND=openrouter
+OPENROUTER_API_KEY=<your key>
 
-`.env` in the repo root is for running the app or scripts directly on your
-machine with `make dev` or `make collect`. It is read by pydantic-settings at
-startup. If you only use the VM workflow, you do not need this file.
+# Option B: Local LLM server
+LLM_BACKEND=local
+LOCAL_LLM_URL=https://192.168.1.10:8443/v1
+LOCAL_LLM_API_KEY=<your bearer token>
+```
 
-Some keys (`GITHUB_TOKEN`, `OPENROUTER_API_KEY`, `ADMIN_TOKEN`) appear in both
-files. This is intentional: `secrets.env` feeds the server through Ansible,
-while `.env` feeds your local process through pydantic.
+See `.env.example` for all available settings.
 
-### Which branch gets deployed
+## Local development with Docker
 
-The repo and branch cloned on the server are set in
-`provisioning/group_vars/all.yml`:
+The `docker-compose.dev.yml` file provides a full local stack:
+
+```
+docker compose -f docker-compose.dev.yml up --build
+```
+
+This starts:
+- **app**: the craft-dashboard FastAPI app on port 8000
+- **postgres**: PostgreSQL 16 database
+
+The app runs Alembic migrations on startup, so the database is ready
+immediately. Visit `http://localhost:8000/` to see the dashboard.
+
+To stop and remove all data:
+
+```
+docker compose -f docker-compose.dev.yml down -v
+```
+
+## Production deployment
+
+### Prerequisites
+
+- A VPS or server with Docker Engine and Docker Compose installed
+- A domain name pointing to the server IP (for HTTPS)
+- A reverse proxy (nginx or caddy) for TLS termination
+
+### Deploy
+
+1. Create a `docker-compose.yml` on the server:
 
 ```yaml
-app_repo:   https://github.com/mr-cal/craft-dashboard.git
-app_branch: main
+services:
+  app:
+    image: ghcr.io/mr-cal/craft-dashboard:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: craft_dashboard
+      POSTGRES_USER: craft_dashboard
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U craft_dashboard"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
 ```
 
-To ship a code change, push to the configured branch, then re-deploy.
+2. Create a `.env` file with your production settings (see Configuration above).
 
-## LXD VM setup (development)
+3. Pull and start:
 
-### Create a VM
-
-LXD containers do not support systemd reliably, so the `--vm` flag is required.
-
-```fish
-lxc launch ubuntu:24.04 craft-dashboard-dev --vm
-sleep 30 && lxc exec craft-dashboard-dev -- cloud-init status --wait
+```
+docker compose pull
+docker compose up -d
 ```
 
-### Get the VM IP
+The app runs Alembic migrations automatically on startup.
 
-The VM may have multiple network interfaces. Parse the IP:
+### Update
 
-```fish
-set VM_NAME (grep '^VM_NAME=' provisioning/secrets.env | cut -d= -f2)
-set VM_USER (grep '^DASHBOARD_USER=' provisioning/secrets.env | cut -d= -f2)
-set VM_IP (lxc list $VM_NAME -c4 --format csv | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-echo "VM: $VM_NAME  user: $VM_USER  IP: $VM_IP"
+```
+docker compose pull
+docker compose up -d
 ```
 
-Update `DASHBOARD_HOST` in `provisioning/secrets.env` with this IP. Re-run this
-block whenever the VM restarts, as LXD may assign a different IP.
+The GHCR image is rebuilt on every push to `main`, tagged as `latest` and
+`sha-<commit>`.
 
-### Set up SSH access
+## Migrating data
 
-Ansible connects over SSH:
+### Import from a SQL dump
 
-```fish
-lxc exec $VM_NAME -- mkdir -p /home/$VM_USER/.ssh
-lxc file push ~/.ssh/id_ed25519.pub $VM_NAME/home/$VM_USER/.ssh/authorized_keys
-lxc exec $VM_NAME -- chown -R $VM_USER:$VM_USER /home/$VM_USER/.ssh
-lxc exec $VM_NAME -- chmod 600 /home/$VM_USER/.ssh/authorized_keys
-ssh -o StrictHostKeyChecking=no -l $VM_USER $VM_IP "echo SSH works"
+```
+gunzip -c craft-dashboard-initial.sql.gz | \
+  docker compose exec -T postgres psql -U craft_dashboard craft_dashboard
 ```
 
-If you don't have an SSH key yet:
+### Export a dump
 
-```fish
-ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
+```
+docker compose exec -T postgres pg_dump -U craft_dashboard craft_dashboard | \
+  gzip > craft-dashboard-$(date +%Y%m%d).sql.gz
 ```
 
-### Deploy to the VM
+## Scheduled tasks
 
-```fish
-make deploy-vm
+Data collection and LLM evaluation run as cron jobs on the host, using
+`docker compose exec` to run scripts inside the app container:
+
+```bash
+# /etc/cron.d/craft-dashboard
+
+# Data collection — daily at 2 AM UTC
+0 2 * * * root cd /opt/craft-dashboard && docker compose exec -T app python scripts/collect_data.py --source all
+
+# LLM evaluation — daily at 6 AM UTC
+0 6 * * * root cd /opt/craft-dashboard && docker compose exec -T app python scripts/run_llm.py evaluate --open-only
+
+# Database backup — daily at 3 AM UTC
+0 3 * * * root cd /opt/craft-dashboard && docker compose exec -T postgres pg_dump -U craft_dashboard craft_dashboard | gzip > backups/craft-dashboard-$(date +\%Y\%m\%d).sql.gz
 ```
 
-This runs Ansible, which installs PostgreSQL, nginx, the app, and systemd
-timers. It also runs database migrations. The `--skip-tags ssl` flag is
-passed automatically so certbot is not invoked.
-
-After provisioning, the dashboard is at `http://<VM_IP>/` (port 80, plain HTTP).
-Do not use `https://`, port 8000, or `localhost`.
-
-## VPS deployment (production)
-
-Prerequisites:
-
-- Ubuntu 24.04 LTS VPS with SSH access
-- A domain name pointing to the VPS IP
-
-Fill in `provisioning/secrets.env` with production values and deploy:
-
-```fish
-make deploy
-```
-
-Same as `make deploy-vm` but includes SSL (certbot obtains a certificate for
-the configured domain).
-
-Both `make deploy` and `make deploy-vm` are idempotent. Run them again to
-apply changes.
-
-## Migrating data from dev VM to production
-
-After provisioning the VPS, you can import the dev VM's data so production
-starts with a fully evaluated dataset.
-
-```fish
-# Dump from the dev VM
-lxc exec $VM_NAME -- sudo -u postgres pg_dump craft_dashboard | gzip > craft-dashboard-initial.sql.gz
-
-# Copy to VPS and restore
-scp craft-dashboard-initial.sql.gz $DASHBOARD_USER@$DASHBOARD_HOST:~
-ssh -l $DASHBOARD_USER $DASHBOARD_HOST "sudo systemctl stop craft-dashboard"
-ssh -l $DASHBOARD_USER $DASHBOARD_HOST "gunzip -c craft-dashboard-initial.sql.gz | sudo -u postgres psql craft_dashboard"
-ssh -l $DASHBOARD_USER $DASHBOARD_HOST "sudo systemctl restart craft-dashboard"
-```
-
-Load the variables from secrets.env first:
-
-```fish
-for line in (grep -v '^#' provisioning/secrets.env | grep '=')
-    set -x (string split -m1 = $line)[1] (string split -m1 = $line)[2]
-end
-```
-
-## Ansible details
-
-Ansible needs two Galaxy collections, installed automatically by `make deploy`
-and `make deploy-vm`. To install them manually:
-
-```fish
-ansible-galaxy collection install -r provisioning/requirements.yml
-```
-
-The Ansible playbook is at `provisioning/playbook.yml`. Roles are in
-`provisioning/roles/`. Variables are in `provisioning/group_vars/all.yml`.
+The `-T` flag disables pseudo-TTY allocation (required for cron).

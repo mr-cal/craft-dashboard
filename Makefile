@@ -56,26 +56,6 @@ clean:  ## Clean build artifacts and caches
 	find . -name __pycache__ -type d -exec rm -rf {} +
 	find . -name "*.pyc" -delete
 
-.PHONY: ansible-deps
-ansible-deps:  ## Install required Ansible collections
-	ansible-galaxy collection install -r provisioning/requirements.yml
-
-.PHONY: deploy
-deploy: ansible-deps  ## Deploy to VPS (sources provisioning/secrets.env)
-	@if [ ! -f provisioning/secrets.env ]; then \
-		echo "Missing provisioning/secrets.env -- copy provisioning/secrets.env.example and fill in your values."; \
-		exit 1; \
-	fi
-	set -a; . provisioning/secrets.env; set +a; cd provisioning && ansible-playbook playbook.yml
-
-.PHONY: deploy-vm
-deploy-vm: ansible-deps  ## Deploy to LXD VM with SSL skipped (sources provisioning/secrets.env)
-	@if [ ! -f provisioning/secrets.env ]; then \
-		echo "Missing provisioning/secrets.env -- copy provisioning/secrets.env.example and fill in your values."; \
-		exit 1; \
-	fi
-	set -a; . provisioning/secrets.env; set +a; cd provisioning && ansible-playbook playbook.yml --skip-tags ssl
-
 .PHONY: test-e2e
-test-e2e:  ## Run end-to-end tests (requires LXD and provisioning/secrets.env)
+test-e2e:  ## Run end-to-end tests (requires Docker)
 	CRAFT_DASHBOARD_E2E=1 uv run pytest tests/end_to_end/ -v -x --timeout=300

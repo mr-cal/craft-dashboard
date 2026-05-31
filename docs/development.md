@@ -37,7 +37,7 @@ settings from `.env` via pydantic-settings.
 ```
 make test          # all tests (unit + integration, excludes e2e)
 make test-cov      # same, with coverage report
-make test-e2e      # end-to-end tests (requires LXD VM, see deployment.md)
+make test-e2e      # end-to-end tests (requires Docker, see below)
 ```
 
 Run a specific test file or test:
@@ -56,8 +56,8 @@ Tests are in `tests/` and split into three categories:
 - `tests/integration/` -- uses an in-memory SQLite database and FastAPI's
   `TestClient`. Tests routes, templates, and queries against real (but
   ephemeral) data.
-- `tests/end_to_end/` -- requires a live LXD VM with the app deployed and
-  seeded. Uses `requests` and Puppeteer for browser-level checks. Marked with
+- `tests/end_to_end/` -- requires Docker (builds and runs the app via Docker
+  Compose). Uses `requests` and Puppeteer for browser-level checks. Marked with
   `@pytest.mark.e2e` and `@pytest.mark.slow`.
 
 Integration tests patch SQLAlchemy's SQLite type compiler to handle JSONB
@@ -104,8 +104,15 @@ craft_dashboard/          # main Python package
   templates/              # Jinja2 HTML templates
   static/                 # CSS, JS, favicon
 
-scripts/                  # standalone scripts (run on the server)
+scripts/                  # standalone scripts (run via docker compose exec)
 tests/                    # pytest test suite
-provisioning/             # Ansible playbook and roles for deployment
 alembic/                  # database migration files
+```
+
+### Docker files
+
+```
+Dockerfile                # multi-stage build for the app container
+.dockerignore             # files excluded from Docker build context
+docker-compose.dev.yml    # local development stack (app + postgres)
 ```

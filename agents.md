@@ -26,19 +26,17 @@ uv run pytest tests/unit/    # unit tests only
 uv run pytest tests/integration/  # integration tests only
 ```
 
-### End-to-end tests (requires LXD VM, ~5-10min)
+### End-to-end tests (requires Docker, ~5-10min)
 
-E2E tests launch an ephemeral LXD VM, deploy the app with Ansible, seed
-it with test data, and run Puppeteer-based browser tests.
+E2E tests build the Docker image, start the app and PostgreSQL via Docker
+Compose, seed with test data, and run Puppeteer-based browser tests.
 
 **Prerequisites:**
-- LXD installed and configured (`lxc` CLI available)
-- `provisioning/secrets.env` exists with required secrets
+- Docker Engine and Docker Compose plugin installed
 - Node.js with puppeteer installed at `/tmp/node_modules/`
-- Ansible playbook dependencies installed (`make ansible-deps`)
 
 ```bash
-make test-e2e   # runs tests/end_to_end/ with LXD VM
+make test-e2e   # runs tests/end_to_end/ with Docker Compose
 ```
 
 Or manually:
