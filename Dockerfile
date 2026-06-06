@@ -33,4 +33,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
 
 # Wait for postgres, run Alembic migrations, then start Gunicorn
-CMD ["sh", "-c", "until pg_isready -h postgres -U craft_dashboard; do echo 'waiting for postgres...'; sleep 2; done && alembic upgrade head && gunicorn --bind 0.0.0.0:8000 --workers 4 --worker-class uvicorn.workers.UvicornWorker 'craft_dashboard.app:create_app()'"]
+CMD ["sh", "-c", "until pg_isready -h postgres -U craft_dashboard; do echo 'waiting for postgres...'; sleep 2; done && alembic upgrade head && gunicorn --bind 0.0.0.0:8000 --workers 1 --worker-class uvicorn.workers.UvicornWorker 'craft_dashboard.app:create_app()'"]
