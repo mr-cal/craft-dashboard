@@ -19,18 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
-      - name: Install node
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Install renovate
         run: npm install --global re2 renovate
-      - name: Enable ssh access
-        uses: mxschmitt/action-tmate@v3
-        if: ${{ inputs.enable_ssh_access }}
-        with:
-          limit-access-to-actor: true
       - name: Check renovate config
         run: renovate-config-validator .github/renovate.json5
       - name: Renovate dry-run
