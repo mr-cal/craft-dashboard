@@ -38,5 +38,4 @@ provisioning/secrets.env
 .DS_Store
 
 # uv
-uv.lock
 logs.txt
