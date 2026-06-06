@@ -50,7 +50,12 @@ llm:  ## Run LLM evaluation (open issues only)
 migrate-csv:  ## One-time CSV migration from starcraft-stats
 	uv run scripts/migrate_csv.py
 
-.PHONY: clean
+CONTAINER_ENGINE := $(shell command -v podman 2>/dev/null || command -v docker)
+
+.PHONY: build
+build:  ## Build the OCI image
+	$(CONTAINER_ENGINE) build --build-arg SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0 -t craft-dashboard:latest .
+
 clean:  ## Clean build artifacts and caches
 	rm -rf dist build .coverage htmlcov .pytest_cache
 	find . -name __pycache__ -type d -exec rm -rf {} +
