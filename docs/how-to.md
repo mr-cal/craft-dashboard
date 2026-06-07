@@ -2,10 +2,18 @@
 
 ## Scripts
 
-All scripts live in `scripts/`. In production, they run inside the app
-container via `docker compose exec`. For local development, they run against
-the Docker Compose PostgreSQL container (tests use SQLite and do not need
-Docker).
+All scripts live in `scripts/`. In local development they run inside the Docker
+Compose app container. In production they run inside the Podman container.
+
+**Local:**
+```bash
+docker compose exec -T app python scripts/<script>.py
+```
+
+**Production:**
+```bash
+podman exec -i vps-infra_craft-dashboard_1 python scripts/<script>.py
+```
 
 ### collect_data.py
 
@@ -32,11 +40,13 @@ uv run scripts/collect_data.py --source github --limit 25
 uv run scripts/collect_data.py --source github --project snapcraft -v
 ```
 
-In production, this runs as a daily cron job at 2 AM UTC via
-`docker compose exec`:
+In production, this runs as a daily cron job at 2 AM UTC:
 
 ```bash
+# local
 docker compose exec -T app python scripts/collect_data.py --source all
+# production
+podman exec -i vps-infra_craft-dashboard_1 python scripts/collect_data.py --source all
 ```
 
 The script respects the refresh schedule. If a project was recently fetched, it
@@ -67,7 +77,10 @@ uv run scripts/run_llm.py evaluate --open-only --limit 40
 In production, this runs as a daily cron job at 6 AM UTC:
 
 ```bash
+# local
 docker compose exec -T app python scripts/run_llm.py evaluate --open-only
+# production
+podman exec -i vps-infra_craft-dashboard_1 python scripts/run_llm.py evaluate --open-only
 ```
 
 The evaluator hashes issue content and skips unchanged issues, so daily runs
@@ -117,56 +130,54 @@ DATABASE_URL=postgresql+asyncpg://... uv run scripts/lp_bug_report.py
 ### Force-refresh all data
 
 The collector skips projects that are not due for refresh. To force a full
-re-fetch of everything, reset all refresh schedules by calling the admin
-distribute endpoint:
+re-fetch of everything, reset all refresh schedules via the admin endpoint:
 
 ```bash
-curl -X POST http://localhost:8000/admin/distribute \
+curl -X POST https://craft-dashboard.name/admin/distribute \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Origin: http://localhost:8000"
+  -H "Origin: https://craft-dashboard.name"
 ```
 
 Then trigger a collection:
 
 ```bash
+# local
 docker compose exec -T app python scripts/collect_data.py --source all
-```
-
-Alternatively, delete all refresh schedule rows. The collector treats missing
-schedules as "due now":
-
-```bash
-docker compose exec -T postgres psql -U craft_dashboard craft_dashboard \
-  -c "DELETE FROM refresh_schedule;"
-docker compose exec -T app python scripts/collect_data.py --source all
+# production
+podman exec -i vps-infra_craft-dashboard_1 python scripts/collect_data.py --source all
 ```
 
 ### Distribute refresh schedules
 
 The distribute endpoint spreads all project refresh times evenly across the
-configured interval (default: 7 days). This prevents all projects from being
-fetched on the same day, which reduces API load and collection time.
+configured interval (default: 7 days).
 
 ```bash
-curl -X POST http://localhost:8000/admin/distribute \
+curl -X POST https://craft-dashboard.name/admin/distribute \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Origin: http://localhost:8000"
+  -H "Origin: https://craft-dashboard.name"
 ```
 
 ### Check logs
 
 ```bash
-# application logs
+# local
 docker compose logs -f app
-
-# database logs
 docker compose logs -f postgres
+
+# production
+podman logs -f vps-infra_craft-dashboard_1
+podman logs -f vps-infra_postgres_1
 ```
 
 ### Database access
 
 ```bash
-docker compose exec -T postgres psql -U craft_dashboard craft_dashboard
+# local
+docker compose exec postgres psql -U craft_dashboard craft_dashboard
+
+# production
+podman exec -it vps-infra_postgres_1 psql -U craft_dashboard craft_dashboard
 ```
 
 Some useful queries:
@@ -196,22 +207,25 @@ GROUP BY p.name;
 
 ### Restore from backup
 
-The database must be empty before restoring — the dump includes `CREATE TABLE`
-statements that conflict with an already-migrated schema.
+**Local:**
 
 ```bash
-# Stop the app
 docker compose stop app
-
-# Drop and recreate the database
-docker compose exec -T postgres psql -U craft_dashboard postgres \
-  -c "DROP DATABASE craft_dashboard; CREATE DATABASE craft_dashboard;"
-
-# Restore
+docker compose exec postgres dropdb -U craft_dashboard craft_dashboard
+docker compose exec postgres createdb -U craft_dashboard craft_dashboard
 gunzip -c backup.sql.gz | docker compose exec -T postgres psql -U craft_dashboard craft_dashboard
-
-# Restart (Alembic sees the existing schema and skips migrations)
 docker compose up -d
+```
+
+**Production:**
+
+```bash
+podman stop vps-infra_craft-dashboard_1
+podman exec -i vps-infra_postgres_1 dropdb -U craft_dashboard craft_dashboard
+podman exec -i vps-infra_postgres_1 createdb -U craft_dashboard craft_dashboard
+gunzip -c backup.sql.gz | podman exec -i vps-infra_postgres_1 psql -U craft_dashboard craft_dashboard
+podman rm vps-infra_craft-dashboard_1
+cd /opt/vps-infra && podman-compose -f docker-compose.craft-dashboard.yml up -d
 ```
 
 ### Add a new project
@@ -236,24 +250,23 @@ For local LLM evaluation, use the pull-based eval client instead. See
 Remove all LLM evaluation results to start fresh or re-evaluate everything:
 
 ```bash
+# local
 docker compose exec -T postgres psql -U craft_dashboard craft_dashboard \
+  -c "DELETE FROM llm_evaluations;"
+
+# production
+podman exec -i vps-infra_postgres_1 psql -U craft_dashboard craft_dashboard \
   -c "DELETE FROM llm_evaluations;"
 ```
 
 To delete evaluations for a specific project only:
 
 ```bash
+# local
 docker compose exec -T postgres psql -U craft_dashboard craft_dashboard \
   -c "DELETE FROM llm_evaluations WHERE issue_id IN (SELECT id FROM issues WHERE project_id = (SELECT id FROM projects WHERE name = 'snapcraft'));"
-```
 
-After deletion, re-run the evaluation:
-
-```bash
-# Server-side (OpenRouter)
-docker compose exec -T app python scripts/run_llm.py evaluate --open-only
-
-# Pull-based (local LLM)
-source .env
-uv run scripts/eval_client.py --open-only
+# production
+podman exec -i vps-infra_postgres_1 psql -U craft_dashboard craft_dashboard \
+  -c "DELETE FROM llm_evaluations WHERE issue_id IN (SELECT id FROM issues WHERE project_id = (SELECT id FROM projects WHERE name = 'snapcraft'));"
 ```

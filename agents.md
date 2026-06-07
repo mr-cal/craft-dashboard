@@ -12,43 +12,54 @@ make test     # pytest (unit + integration, ~495 tests)
 
 Make sure all commands pass before marking a task complete.
 
-Additionally, any changes to the docker file, setup (including alemic migrations)
-should test that the docker compose build succeeds.
+Any changes to the Dockerfile or Alembic migrations should also verify that
+`make build` succeeds.
 
 ## Before completing UI/UX tasks
 
-Always run the slow and e2e tasks when making UI or UX changes.
-
-## Running all tests
-
-### Unit and integration tests (fast, ~15s)
+Run the e2e tests when making UI or UX changes:
 
 ```bash
-make test                    # runs all non-marked tests
-uv run pytest tests/unit/    # unit tests only
-uv run pytest tests/integration/  # integration tests only
+make test-e2e  # requires Docker, ~5-10 min
 ```
 
-### End-to-end tests (requires Docker, ~5-10min)
+## Test layout
 
-E2E tests build the Docker image, start the app and PostgreSQL via Docker
-Compose, seed with test data, and run Puppeteer-based browser tests.
+- `tests/unit/` — no database, no HTTP. Fast.
+- `tests/integration/` — uses SQLite in-memory + FastAPI TestClient.
+- `tests/end_to_end/` — builds the Docker image and runs Puppeteer browser
+  tests. Marked `@pytest.mark.e2e`, skipped unless `CRAFT_DASHBOARD_E2E=1`.
 
-**Prerequisites:**
-- Docker Engine and Docker Compose plugin installed
-- Node.js with puppeteer installed at `/tmp/node_modules/`
+Integration tests patch SQLAlchemy to treat JSONB columns as TEXT on SQLite.
 
-```bash
-make test-e2e   # runs tests/end_to_end/ with Docker Compose
-```
+## Container engines
 
-Or manually:
-```bash
-CRAFT_DASHBOARD_E2E=1 uv run pytest tests/end_to_end/ -v -x
-```
+- **Local development**: Docker / Docker Compose (`docker-compose.yml`)
+- **Production**: Podman, managed by the vps-infra repo
 
-### Running everything together
+In production, use `podman exec -i vps-infra_craft-dashboard_1` where the
+docs say `docker compose exec -T app`, and `podman exec -i vps-infra_postgres_1`
+where they say `docker compose exec -T postgres`.
 
-```bash
-make format && make lint && make test && make test-e2e
-```
+## Key config files
+
+- `craft-dashboard.toml` — project list, maintainers, bots, hotfix thresholds.
+  Edit this to add or remove tracked repos.
+- `.env` / `.env.example` — runtime secrets and feature flags. Not committed.
+- `alembic/versions/` — database migrations. Always generate with
+  `uv run alembic revision --autogenerate -m "<description>"`.
+
+## Database
+
+Schema is managed by Alembic. The app runs `alembic upgrade head` on every
+startup, so migrations apply automatically on deploy.
+
+When writing migrations, be careful with the vector extension — it's only
+available in the `pgvector/pgvector:pg16` image, not `postgres:16-alpine`.
+
+## Image publishing
+
+Pushing to `main` triggers `.github/workflows/publish.yml`, which builds and
+pushes `ghcr.io/mr-cal/craft-dashboard:latest` to GHCR. The vps-infra deploy
+workflow then picks up the new image.
+
