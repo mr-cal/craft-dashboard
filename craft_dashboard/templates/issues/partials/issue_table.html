@@ -2,17 +2,13 @@
 {# Score descriptions for column header tooltips #}
 {% set score_tooltips = {
   "staleness": "How stale/inactive this issue is (0=very active, 100=completely dead)",
-  "duplicateness": "How likely this is a duplicate of another issue (0=unique, 100=clearly duplicate)",
   "complexity": "How complex this issue is to resolve (0=trivial, 100=extremely complex)",
   "support_request": "How likely this is a support request rather than a bug or feature (0=not support, 100=clearly support)",
-  "readiness": "How ready this PR is for review and merge (0=not ready, 100=ready to merge)",
 } %}
 {% set score_labels = {
   "staleness": "Staleness",
-  "duplicateness": "Duplicate",
   "complexity": "Complexity",
   "support_request": "Support Req",
-  "readiness": "Readiness",
 } %}
 <div id="issue-table">
   <p class="u-text--muted" style="margin-bottom:0.5rem;">
@@ -111,6 +107,6 @@
     </tbody>
   </table>
 
-  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&source=" ~ (filter_source or "") ~ "&state=" ~ (filter_state or "open") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&author_role=" ~ (filter_author_role or "") ~ "&sort=" ~ (sort_by or "staleness") ~ "&search=" ~ (filter_search or "") ~ "&per_page=" ~ (per_page or 100) ~ "&scores=" ~ (filter_scores or "staleness,readiness") ~ "&llm_status=" ~ (filter_llm_status or "") %}
+  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&source=" ~ (filter_source or "") ~ "&state=" ~ (filter_state or "open") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&author_role=" ~ (filter_author_role or "") ~ "&sort=" ~ (sort_by or "staleness") ~ "&search=" ~ (filter_search or "") ~ "&per_page=" ~ (per_page or 100) ~ "&scores=" ~ (filter_scores or "staleness") ~ "&llm_status=" ~ (filter_llm_status or "") %}
   {% include "components/pagination.html" %}
 </div>

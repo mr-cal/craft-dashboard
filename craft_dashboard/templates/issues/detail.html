@@ -44,7 +44,7 @@
     <div class="issue-detail-scores">
       {% for score_key, score_value in (current_evaluation.scores or {}).items() %}
       {% set score_name = score_key|replace("_", " ")|title %}
-      {% set score_inverted = score_key in ("readiness",) %}
+      {% set score_inverted = False %}
       <span class="issue-detail-score">
         <strong>{{ score_name }}:</strong>
         {% include "components/score_badge.html" %}
@@ -86,7 +86,7 @@
           {% if evaluation.scores %}
             {% for score_key, score_value in evaluation.scores.items() %}
             {% set score_name = score_key|replace("_", " ")|title %}
-            {% set score_inverted = score_key in ("readiness",) %}
+            {% set score_inverted = False %}
             <div>{{ score_name }}: {% include "components/score_badge.html" %}</div>
             {% endfor %}
           {% else %}

@@ -25,14 +25,12 @@ DEFAULT_PER_PAGE = 100
 
 ALL_SCORES = {
     "staleness": "Staleness",
-    "duplicateness": "Duplicateness",
     "complexity": "Complexity",
     "support_request": "Support Request",
-    "readiness": "Readiness",
 }
 # Scores where a higher value is better (green) rather than worse (red)
-INVERTED_SCORES: frozenset[str] = frozenset({"readiness"})
-DEFAULT_SCORES = "staleness,readiness"
+INVERTED_SCORES: frozenset[str] = frozenset()
+DEFAULT_SCORES = "staleness"
 
 
 class IssueTemplateContext(TypedDict):
@@ -156,10 +154,8 @@ class IssueSort(StrEnum):
     """Valid sort fields for the issue list."""
 
     staleness = "staleness"
-    duplicateness = "duplicateness"
     complexity = "complexity"
     support_request = "support_request"
-    readiness = "readiness"
     age = "age"
     updated = "updated"
     title = "title"
