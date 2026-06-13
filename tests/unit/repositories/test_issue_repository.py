@@ -264,10 +264,9 @@ async def _seed_issues_with_scores(session) -> None:
             suggested_action_reason="No activity since the Ubuntu 24.04 migration",
             scores={
                 "staleness": 0.95,
-                "duplicateness": 0.1,
                 "complexity": 0.3,
                 "support_request": 0.2,
-                "readiness": 0.2,
+                "confidence": 70.0,
             },
         )
     )
@@ -292,10 +291,9 @@ async def _seed_issues_with_scores(session) -> None:
             suggested_action_reason="Implementation scope is clear and unblocked",
             scores={
                 "staleness": 0.1,
-                "duplicateness": 0.05,
                 "complexity": 0.2,
                 "support_request": 0.05,
-                "readiness": 0.9,
+                "confidence": 85.0,
             },
         )
     )
@@ -320,10 +318,9 @@ async def _seed_issues_with_scores(session) -> None:
             suggested_action_reason="Touches multiple build stages and architecture-specific paths",
             scores={
                 "staleness": 0.4,
-                "duplicateness": 0.15,
                 "complexity": 0.95,
                 "support_request": 0.1,
-                "readiness": 0.5,
+                "confidence": 60.0,
             },
         )
     )
@@ -813,10 +810,9 @@ async def _seed_issues_with_scores(session) -> None:
             suggested_action_reason="No activity since the Ubuntu 24.04 migration",
             scores={
                 "staleness": 0.95,
-                "duplicateness": 0.1,
                 "complexity": 0.3,
                 "support_request": 0.2,
-                "readiness": 0.2,
+                "confidence": 70.0,
             },
         )
     )
@@ -841,10 +837,9 @@ async def _seed_issues_with_scores(session) -> None:
             suggested_action_reason="Implementation scope is clear and unblocked",
             scores={
                 "staleness": 0.1,
-                "duplicateness": 0.05,
                 "complexity": 0.2,
                 "support_request": 0.05,
-                "readiness": 0.9,
+                "confidence": 85.0,
             },
         )
     )
@@ -869,10 +864,9 @@ async def _seed_issues_with_scores(session) -> None:
             suggested_action_reason="Touches multiple build stages and architecture-specific paths",
             scores={
                 "staleness": 0.4,
-                "duplicateness": 0.15,
                 "complexity": 0.95,
                 "support_request": 0.1,
-                "readiness": 0.5,
+                "confidence": 60.0,
             },
         )
     )
@@ -910,19 +904,17 @@ class TestQueryIssuesLLMScores:
 
         # Verify all score fields are present
         assert "staleness" in scored_issue
-        assert "duplicateness" in scored_issue
         assert "complexity" in scored_issue
         assert "support_request" in scored_issue
-        assert "readiness" in scored_issue
+        assert "confidence" in scored_issue
         assert "suggested_action" in scored_issue
         assert "suggested_action_reason" in scored_issue
 
         # Verify score values
         assert scored_issue.staleness == 0.95
-        assert scored_issue.duplicateness == 0.1
         assert scored_issue.complexity == 0.3
         assert scored_issue.support_request == 0.2
-        assert scored_issue.readiness == 0.2
+        assert scored_issue.confidence == 70.0
         assert scored_issue.suggested_action == "close"
         assert (
             scored_issue.suggested_action_reason
@@ -943,10 +935,9 @@ class TestQueryIssuesLLMScores:
 
         # Verify score fields are None
         assert unscored_issue.staleness is None
-        assert unscored_issue.duplicateness is None
         assert unscored_issue.complexity is None
         assert unscored_issue.support_request is None
-        assert unscored_issue.readiness is None
+        assert unscored_issue.confidence is None
         assert unscored_issue.suggested_action is None
         assert unscored_issue.suggested_action_reason is None
 
@@ -959,17 +950,6 @@ class TestQueryIssuesLLMScores:
         # First issue should be the one with highest staleness
         assert issues[0]["external_id"] == "100"
         assert issues[0]["staleness"] == 0.95
-
-    async def test_sort_by_readiness_score(self, test_db_session) -> None:
-        """Sort by readiness should order by readiness score descending."""
-        await _seed_issues_with_scores(test_db_session)
-
-        issues, *_ = await _query(test_db_session, sort_by="readiness")
-
-        # First issue should be the one with highest readiness
-        assert issues[0]["external_id"] == "101"
-        assert issues[0]["readiness"] == 0.9
-
     async def test_sort_by_complexity_score(self, test_db_session) -> None:
         """Sort by complexity should order by complexity score descending."""
         await _seed_issues_with_scores(test_db_session)
@@ -980,15 +960,6 @@ class TestQueryIssuesLLMScores:
         assert issues[0]["external_id"] == "102"
         assert issues[0]["complexity"] == 0.95
 
-    async def test_sort_by_duplicateness_score(self, test_db_session) -> None:
-        """Sort by duplicateness should order by duplicateness score descending."""
-        await _seed_issues_with_scores(test_db_session)
-
-        issues, *_ = await _query(test_db_session, sort_by="duplicateness")
-
-        # First issue should be the one with highest duplicateness
-        assert issues[0]["external_id"] == "102"
-        assert issues[0]["duplicateness"] == 0.15
 
     async def test_sort_by_support_request_score(self, test_db_session) -> None:
         """Sort by support_request should order by support_request score descending."""
@@ -999,18 +970,16 @@ class TestQueryIssuesLLMScores:
         # First issue should be the one with highest support_request
         assert issues[0]["external_id"] == "100"
         assert issues[0]["support_request"] == 0.2
-
-    async def test_reverse_sort_by_readiness_score(self, test_db_session) -> None:
-        """Reverse sort by readiness should order by readiness score ascending."""
+    async def test_sort_by_confidence_score(self, test_db_session) -> None:
+        """Sort by confidence should order by confidence score descending."""
         await _seed_issues_with_scores(test_db_session)
 
-        issues, *_ = await _query(test_db_session, sort_by="-readiness")
+        issues, *_ = await _query(test_db_session, sort_by="confidence")
 
-        # Last scored issue should be the one with highest readiness
-        # (issues with no scores come first with 0)
-        scored_issues = [i for i in issues if i["readiness"] is not None]
-        assert scored_issues[-1]["external_id"] == "101"
-        assert scored_issues[-1]["readiness"] == 0.9
+        # First issue should be the one with highest confidence
+        assert issues[0]["external_id"] == "101"
+        assert issues[0]["confidence"] == 85.0
+
 
 
 class TestLLMStatusFilter:
