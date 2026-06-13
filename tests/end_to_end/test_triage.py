@@ -159,7 +159,7 @@ class TestTriagePage:
         )
 
     def test_triage_default_score_columns(self, seeded_url: str) -> None:
-        """The triage page should show default score columns: Staleness and Readiness."""
+        """The triage page should show only Staleness by default."""
         script = make_script("""\
     await page.goto(`${BASE}/issues`, {waitUntil: 'networkidle0', timeout: 30000});
     await new Promise(r => setTimeout(r, 2000));
@@ -172,15 +172,40 @@ class TestTriagePage:
     console.log(JSON.stringify({
       headers: headers,
       has_staleness: headers.some(h => h.toLowerCase().includes('staleness')),
-      has_readiness: headers.some(h => h.toLowerCase().includes('readiness')),
+      has_confidence: headers.some(h => h.toLowerCase().includes('confidence')),
     }));
 """)
         result = run_puppeteer(script, base_url=seeded_url, timeout=20)
         assert result["has_staleness"], (
             f"Expected 'Staleness' column, got headers: {result['headers']}"
         )
-        assert result["has_readiness"], (
-            f"Expected 'Readiness' column, got headers: {result['headers']}"
+        assert not result["has_confidence"], (
+            f"Confidence should not be a default column, got headers: {result['headers']}"
+        )
+
+    def test_triage_confidence_column_available(self, seeded_url: str) -> None:
+        """Confidence column should appear when selected via scores param."""
+        script = make_script("""\
+    await page.goto(`${BASE}/issues?scores=staleness,confidence`, {waitUntil: 'networkidle0', timeout: 30000});
+    await new Promise(r => setTimeout(r, 2000));
+
+    const headers = await page.evaluate(() => {
+      const ths = document.querySelectorAll('table thead th');
+      return Array.from(ths).map(th => th.textContent.trim());
+    });
+
+    console.log(JSON.stringify({
+      headers: headers,
+      has_staleness: headers.some(h => h.toLowerCase().includes('staleness')),
+      has_confidence: headers.some(h => h.toLowerCase().includes('confidence')),
+    }));
+""")
+        result = run_puppeteer(script, base_url=seeded_url, timeout=20)
+        assert result["has_staleness"], (
+            f"Expected 'Staleness' column, got headers: {result['headers']}"
+        )
+        assert result["has_confidence"], (
+            f"Expected 'Confidence' column when selected, got headers: {result['headers']}"
         )
 
     def test_triage_score_columns_have_values(self, seeded_url: str) -> None:

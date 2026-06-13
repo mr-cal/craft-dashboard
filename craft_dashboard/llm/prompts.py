@@ -4,7 +4,7 @@ _SUMMARY_SYSTEM = (
     "You are a concise technical writer. Write a single sentence of at most "
     "256 characters summarising the following GitHub issue or pull request. "
     "Focus on what it is about and its current state (e.g. under discussion, "
-    "waiting for review, stalled, has a proposed fix). "
+    "needs triage, waiting to be assigned). "
     "Do not include markdown formatting. "
     "Do not start with boilerplate like 'This issue', 'This pull request', "
     "'This PR', or 'The issue'. Get straight to the point."
@@ -41,11 +41,13 @@ Score guidelines:
 open-source projects: issues under 1 month old are fresh (0-10), 1-3 months \
 is mildly stale (10-30), 3-6 months is moderately stale (30-60), and only \
 issues with no activity for 6+ months should score above 60. PRs go stale \
-faster than issues — a PR with no activity for 2+ weeks is already mildly \
+faster than issues - a PR with no activity for 4+ weeks is already mildly \
 stale, and 4+ months with no review or update is very stale. Also consider \
 whether the issue is still relevant to the current version of the software \
 (a bug report against an old, superseded version is more stale).
-- complexity: 0 = trivial, 100 = extremely complex
+- complexity: 0 = trivial, 100 = extremely complex. Changes that involve \
+architectural decisions or backward compatibility considerations are more \
+complex.
 
 Action guidelines — choose the MOST appropriate action:
 - needs_triage: The issue has NOT yet been assessed by a maintainer. Use \
@@ -63,28 +65,28 @@ this for untriaged issues — use needs_triage instead.
 - keep_open: The issue is triaged, valid, and should remain open. Use when \
 the issue is clearly scoped, has maintainer buy-in, or is actively being \
 worked on. As long as a maintainer has triaged and acknowledged an issue,
-it should be kept open unless it's outdated.
+it should be kept open unless it's outdated. This is also appropriate if a \
+maintainer has asked for further information or changes and is waiting on a \
+response from the original author.
 - close_stale: The issue or PR is both inactive AND has become irrelevant. \
-Staleness alone is NEVER a sufficient reason to close an issue — the issue \
+Staleness alone is NEVER a sufficient reason to close an issue - the issue \
 must also show clear signs that it is no longer applicable. Valid reasons \
 include: the feature was implemented elsewhere, the affected version is no \
-longer supported, the PR is clearly abandoned with failing CI and no \
-prospect of revival, or the original problem is no longer reproducible. \
+longer supported, or the original problem is no longer reproducible. \
 Always provide a concrete, specific reason why the issue is no longer \
 relevant beyond just its age or inactivity.
 - close_not_a_bug: The reported behaviour is working as intended, is a \
 support/usage question rather than a bug, or has been resolved through \
 configuration or documentation.
-- close_outdated: The issue describes a problem or request that has been \
-superseded by newer work, resolved in a subsequent release, or is no \
-longer applicable to the current codebase.
 """
 
 _ISSUE_EXTRA_SCORES = """
 For issues, also include:
-- "support_request": <0-100, how likely this is a support/help request rather than a bug or feature>
-- "confidence": <0-100, how confident the LLM is in its suggested action. High confidence means \
-the issue is clearly one of the allowed actions based on the evidence. Low confidence means \
+- support_request": , 0 = actual bug or feature, 100 = a support/help request>
+how likely this is a support/help request rather \
+than a bug or feature>
+- "confidence": <0-100, how confident you are in its suggested action. High \
+confidence means the issue is clearly one of the allowed actions based on the evidence. Low confidence means \
 the issue is ambiguous, mixed signals, or would benefit from human review before deciding.>
 """
 
