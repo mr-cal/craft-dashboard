@@ -66,7 +66,7 @@ class TestIssueExport:
             summary="Summary",
             suggested_action="needs_review",
             suggested_action_reason="Needs a maintainer pass.",
-            scores={"staleness": 72.5, "readiness": 18.0},
+            scores={"staleness": 72.5, "confidence": 65.0},
             age_days=14,
             labels=["bug", "core24"],
             created_at=datetime(2025, 1, 1, tzinfo=UTC),
@@ -74,10 +74,9 @@ class TestIssueExport:
             author_is_maintainer=True,
             author_is_bot=False,
             staleness=72.5,
-            duplicateness=None,
             complexity=None,
             support_request=None,
-            readiness=18.0,
+            confidence=65.0,
         )
         export_result = IssueQueryResult(
             issues=[issue], total_count=1, total_pages=1, page=1
@@ -109,7 +108,7 @@ class TestIssueExport:
                 "summary": "Summary",
                 "suggested_action": "needs_review",
                 "suggested_action_reason": "Needs a maintainer pass.",
-                "scores": {"staleness": 72.5, "readiness": 18.0},
+                "scores": {"staleness": 72.5, "confidence": 65.0},
                 "age_days": 14,
                 "labels": ["bug", "core24"],
                 "created_at": "2025-01-01T00:00:00+00:00",
@@ -117,10 +116,9 @@ class TestIssueExport:
                 "author_is_maintainer": True,
                 "author_is_bot": False,
                 "staleness": 72.5,
-                "duplicateness": None,
                 "complexity": None,
                 "support_request": None,
-                "readiness": 18.0,
+                "confidence": 65.0,
             }
         ]
         assert search.await_args.args[0] == IssueFilters(
