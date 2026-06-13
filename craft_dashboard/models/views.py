@@ -28,10 +28,8 @@ class IssueView:
     author_is_maintainer: bool = False
     author_is_bot: bool = False
     staleness: float | None = None
-    duplicateness: float | None = None
     complexity: float | None = None
     support_request: float | None = None
-    readiness: float | None = None
 
     def as_dict(self) -> dict[str, object]:
         """Return a dict representation for template compatibility."""

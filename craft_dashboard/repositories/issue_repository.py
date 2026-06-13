@@ -20,10 +20,8 @@ if TYPE_CHECKING:
 
 _SCORE_SORT_FIELDS = {
     "staleness",
-    "duplicateness",
     "complexity",
     "support_request",
-    "readiness",
 }
 _VALID_SORT_FIELDS = _SCORE_SORT_FIELDS | {
     "age",
@@ -322,10 +320,8 @@ class IssueRepository:
                     author_is_maintainer=issue.author_is_maintainer,
                     author_is_bot=issue.author_is_bot,
                     staleness=scores.get("staleness"),
-                    duplicateness=scores.get("duplicateness"),
                     complexity=scores.get("complexity"),
                     support_request=scores.get("support_request"),
-                    readiness=scores.get("readiness"),
                 )
             )
 
