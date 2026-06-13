@@ -36,11 +36,9 @@ from rich.progress import (
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from craft_dashboard.llm.client import LocalLLMClient
-from craft_dashboard.llm.duplicate_detector import DuplicateDetector
-from craft_dashboard.llm.embeddings import EmbeddingClient
 from craft_dashboard.llm.evaluator import IssueEvaluator, _compute_content_hash
 
-from scripts.eval_timing import PHASE_DETECT, PHASE_EVALUATE, TimingHistory
+from scripts.eval_timing import PHASE_EVALUATE, TimingHistory
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +172,6 @@ async def run_eval_loop(  # noqa: PLR0913
     token: str,
     summary_model: str,
     evaluation_model: str,
-    embedding_model: str,
     llm_url: str,
     llm_api_key: str,
     ca_cert: str,
@@ -215,15 +212,6 @@ async def run_eval_loop(  # noqa: PLR0913
         summary_model=summary_model,
         evaluation_model=evaluation_model,
     )
-    embedding_client: EmbeddingClient | None = None
-    if embedding_model:
-        embedding_client = EmbeddingClient(
-            base_url=llm_base_url,
-            model=embedding_model,
-            api_key=llm_api_key,
-            ca_cert=ca_cert,
-        )
-
     timing = TimingHistory()
     filter_parts = []
     if project:
@@ -499,276 +487,6 @@ async def run_eval_loop(  # noqa: PLR0913
                     )
     finally:
         await llm_client.close()
-        if embedding_client:
-            await embedding_client.close()
-
-
-async def run_duplicate_detection_loop(  # noqa: PLR0913
-    *,
-    server: str,
-    token: str,
-    evaluation_model: str,
-    summary_model: str,
-    embedding_model: str,
-    llm_url: str,
-    llm_api_key: str,
-    ca_cert: str,
-    server_ca_cert: str,
-    cosine_threshold: float,
-    limit: int,
-    verbose: bool,
-) -> None:
-    """Run phase-2 duplicate detection loop."""
-    signal.signal(signal.SIGINT, _signal_handler)
-    console = Console()
-    _setup_logging(verbose=verbose, console=console)
-
-    server_url = server.rstrip("/")
-    llm_base_url = llm_url.rstrip("/")
-    verify: bool | str = server_ca_cert if server_ca_cert else True
-    headers = {"Authorization": f"Bearer {token}"}
-
-    timing = TimingHistory()
-    llm_client = LocalLLMClient(
-        base_url=llm_base_url,
-        api_key=llm_api_key,
-        ca_cert=ca_cert,
-    )
-    embedding_client = EmbeddingClient(
-        base_url=llm_base_url,
-        model=embedding_model,
-        api_key=llm_api_key,
-        ca_cert=ca_cert,
-    )
-    detector = DuplicateDetector(
-        embedding_client=embedding_client,
-        llm_client=llm_client,
-        evaluation_model=evaluation_model,
-        summary_model=summary_model,
-    )
-
-    try:
-        async with httpx.AsyncClient(
-            base_url=server_url,
-            timeout=30.0,
-            verify=verify,
-        ) as http_client:
-            # Check phase-1 readiness before proceeding
-            try:
-                status_response = await http_client.get(
-                    "/api/eval/status", headers=headers
-                )
-                if status_response.status_code == HTTP_OK:
-                    status = status_response.json()
-                    pending = status.get("pending", 0)
-                    locked = status.get("locked", 0)
-                    if pending > 0 or locked > 0:
-                        logger.warning(
-                            "Phase 1 not complete: %d pending, %d locked. "
-                            "Run 'evaluate' first for best results.",
-                            pending,
-                            locked,
-                        )
-            except httpx.HTTPError:
-                logger.warning("Could not check phase-1 status, proceeding anyway")
-
-            limit_display = str(limit) if limit > 0 else "∞"
-            logger.info(
-                "Starting duplicate detection (cosine threshold=%.2f, limit=%s)",
-                cosine_threshold,
-                limit_display,
-            )
-
-            task_total = limit if limit > 0 else None
-            progress = _make_progress(console, task_total)
-            with progress:
-                task_id = progress.add_task(
-                    "Detecting duplicates",
-                    total=task_total,
-                    eta=timing.eta(PHASE_DETECT, limit if limit > 0 else 0),
-                )
-
-                processed = 0
-                while not shutdown_state["requested"]:
-                    try:
-                        work_response = await http_client.get(
-                            "/api/eval/duplicate-work", headers=headers
-                        )
-                    except httpx.ConnectError as exc:
-                        hint = (
-                            " (try http:// instead of https://)"
-                            if "SSL" in str(exc) or "wrong version" in str(exc).lower()
-                            else ""
-                        )
-                        logger.error("Cannot connect to %s%s", server_url, hint)  # noqa: TRY400
-                        break
-
-                    if work_response.status_code == HTTP_NO_CONTENT:
-                        logger.info("Done: no more issues to check")
-                        break
-
-                    if work_response.status_code != HTTP_OK:
-                        logger.error(
-                            "Server returned %d: %s",
-                            work_response.status_code,
-                            _format_error_body(work_response),
-                        )
-                        break
-
-                    items = work_response.json().get("items", [])
-                    if not items:
-                        logger.info("Done: no more issues to check")
-                        break
-
-                    for item in items:
-                        if shutdown_state["requested"]:
-                            break
-
-                        evaluation_id = item["evaluation_id"]
-                        issue_ref = f"{item['project_name']}#{item['external_id']}"
-                        logger.info("Checking duplicates for %s...", issue_ref)
-
-                        embedding = item.get("embedding")
-                        if not embedding:
-                            logger.warning("%s: no embedding, skipping", issue_ref)
-                            continue
-
-                        t0 = time.monotonic()
-
-                        # Find nearest neighbours via server
-                        async def find_similar(
-                            *,
-                            embedding: list[float],
-                            exclude_issue_id: int,
-                            _item: dict[str, Any] = item,
-                        ) -> list[dict[str, Any]]:
-                            try:
-                                resp = await http_client.post(
-                                    "/api/eval/similar",
-                                    json={
-                                        "embedding": embedding,
-                                        "exclude_issue_id": exclude_issue_id,
-                                        "cosine_threshold": cosine_threshold,
-                                        "limit": 5,
-                                    },
-                                    headers=headers,
-                                )
-                                if resp.status_code == HTTP_OK:
-                                    return resp.json().get("candidates", [])
-                            except httpx.HTTPError:
-                                pass
-                            return []
-
-                        try:
-                            dup_result = await detector.check_duplicates(
-                                issue_id=item["issue_id"],
-                                project_name=item["project_name"],
-                                title=item["title"],
-                                summary=item["summary"] or "",
-                                embedding=embedding,
-                                find_similar_fn=find_similar,
-                            )
-                        except Exception:
-                            logger.exception("%s: duplicate check failed", issue_ref)
-                            continue
-
-                        duration = time.monotonic() - t0
-                        elapsed = _format_elapsed(duration)
-                        candidates_compared = (dup_result or {}).get(
-                            "candidates_compared", 0
-                        )
-
-                        duplicate_result: dict[str, Any] = {
-                            "evaluation_id": evaluation_id,
-                            "duplicateness": 0.0,
-                            "candidates_compared": candidates_compared,
-                        }
-
-                        if dup_result and "duplicate_of_issue_id" in dup_result:
-                            dup_ref = f"{dup_result['duplicate_of_project_name']}#{dup_result['duplicate_of_external_id']}"
-                            logger.info(
-                                "%s — duplicate of %s (confidence %d%%, %d compared, %s)",
-                                issue_ref,
-                                dup_ref,
-                                dup_result["confidence"],
-                                candidates_compared,
-                                elapsed,
-                            )
-
-                            # Rewrite summary to note the duplicate
-                            try:
-                                new_summary = await detector.rewrite_summary(
-                                    original_summary=item["summary"] or "",
-                                    duplicate_refs=[dup_ref],
-                                )
-                                new_embedding = await embedding_client.embed(
-                                    new_summary
-                                )
-                            except Exception:
-                                logger.warning(
-                                    "%s: summary rewrite failed, using original",
-                                    issue_ref,
-                                )
-                                new_summary = None
-                                new_embedding = None
-
-                            duplicate_result.update(
-                                {
-                                    "duplicateness": float(dup_result["confidence"]),
-                                    "duplicate_of_issue_id": dup_result[
-                                        "duplicate_of_issue_id"
-                                    ],
-                                    "updated_summary": new_summary,
-                                    "updated_embedding": new_embedding,
-                                }
-                            )
-                        else:
-                            logger.info(
-                                "%s — no duplicate (%d compared, %s)",
-                                issue_ref,
-                                candidates_compared,
-                                elapsed,
-                            )
-
-                        # Submit result
-                        try:
-                            submit_resp = await http_client.post(
-                                "/api/eval/duplicate-result",
-                                json=duplicate_result,
-                                headers=headers,
-                            )
-                            if submit_resp.status_code == HTTP_CONFLICT:
-                                logger.warning(
-                                    "%s: evaluation was superseded, skipping", issue_ref
-                                )
-                            elif submit_resp.status_code != HTTP_OK:
-                                logger.error(
-                                    "%s: submit failed %d: %s",
-                                    issue_ref,
-                                    submit_resp.status_code,
-                                    _format_error_body(submit_resp),
-                                )
-                        except httpx.HTTPError as exc:
-                            logger.error(  # noqa: TRY400
-                                "%s: HTTP error submitting duplicate result: %s",
-                                issue_ref,
-                                exc,
-                            )
-
-                        processed += 1
-                        timing.add(PHASE_DETECT, duration)
-                        remaining = max(0, (task_total or processed) - processed)
-                        progress.update(
-                            task_id,
-                            advance=1,
-                            eta=timing.eta(PHASE_DETECT, remaining),
-                        )
-                        if limit > 0 and processed >= limit:
-                            logger.info("Done: checked %d issues", limit)
-                            return
-    finally:
-        await llm_client.close()
-        await embedding_client.close()
 
 
 # ---------------------------------------------------------------------------
@@ -851,12 +569,6 @@ def cli() -> None:
     help="LLM model for scoring [env: LOCAL_LLM_EVALUATION_MODEL]",
 )
 @click.option(
-    "--embedding-model",
-    default="",
-    envvar="LOCAL_LLM_EMBEDDING_MODEL",
-    help="Embedding model for phase-2 duplicate detection [env: LOCAL_LLM_EMBEDDING_MODEL]",
-)
-@click.option(
     "--poll-interval",
     default=30,
     show_default=True,
@@ -896,7 +608,6 @@ def evaluate(  # noqa: PLR0913
     token: str,
     summary_model: str,
     evaluation_model: str,
-    embedding_model: str,
     llm_url: str,
     llm_api_key: str,
     ca_cert: str,
@@ -917,7 +628,6 @@ def evaluate(  # noqa: PLR0913
             token=token,
             summary_model=summary_model,
             evaluation_model=evaluation_model,
-            embedding_model=embedding_model,
             llm_url=llm_url,
             llm_api_key=llm_api_key,
             ca_cert=ca_cert,
@@ -934,78 +644,6 @@ def evaluate(  # noqa: PLR0913
     )
 
 
-@cli.command("detect-duplicates")
-@_add_common_options
-@click.option(
-    "--evaluation-model",
-    default="llama3.2",
-    show_default=True,
-    envvar="LOCAL_LLM_EVALUATION_MODEL",
-    help="LLM model for duplicate confirmation [env: LOCAL_LLM_EVALUATION_MODEL]",
-)
-@click.option(
-    "--summary-model",
-    default="llama3.2",
-    show_default=True,
-    envvar="LOCAL_LLM_SUMMARY_MODEL",
-    help="LLM model for summary rewriting [env: LOCAL_LLM_SUMMARY_MODEL]",
-)
-@click.option(
-    "--embedding-model",
-    default="nomic-embed-text",
-    show_default=True,
-    envvar="LOCAL_LLM_EMBEDDING_MODEL",
-    help="Embedding model [env: LOCAL_LLM_EMBEDDING_MODEL]",
-)
-@click.option(
-    "--cosine-threshold",
-    default=0.15,
-    show_default=True,
-    type=click.FloatRange(min=0.0, max=2.0),
-    help="Max cosine distance to consider as candidate (0=identical, 2=opposite)",
-)
-@click.option(
-    "--limit",
-    default=0,
-    show_default=True,
-    type=click.IntRange(min=0),
-    help="Max issues to check before exit (0=unlimited)",
-)
-def detect_duplicates(  # noqa: PLR0913
-    server: str,
-    token: str,
-    evaluation_model: str,
-    summary_model: str,
-    embedding_model: str,
-    llm_url: str,
-    llm_api_key: str,
-    ca_cert: str,
-    server_ca_cert: str,
-    cosine_threshold: float,
-    limit: int,
-    verbose: bool,
-) -> None:
-    """Run phase-2 duplicate detection across all evaluated issues.
-
-    Only run after phase-1 evaluation is complete. Requires an embedding
-    model (LOCAL_LLM_EMBEDDING_MODEL) and a PostgreSQL server with pgvector.
-    """
-    asyncio.run(
-        run_duplicate_detection_loop(
-            server=server,
-            token=token,
-            evaluation_model=evaluation_model,
-            summary_model=summary_model,
-            embedding_model=embedding_model,
-            llm_url=llm_url,
-            llm_api_key=llm_api_key,
-            ca_cert=ca_cert,
-            server_ca_cert=server_ca_cert,
-            cosine_threshold=cosine_threshold,
-            limit=limit,
-            verbose=verbose,
-        )
-    )
 
 
 if __name__ == "__main__":

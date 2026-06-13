@@ -66,16 +66,6 @@ class SimilarRequest(BaseModel):
             )
 
 
-class DuplicateResultSubmission(BaseModel):
-    """Request body for submitting phase-2 duplicate detection results."""
-
-    evaluation_id: int
-    duplicateness: float = Field(ge=0.0, le=100.0)
-    candidates_compared: int = Field(ge=0)
-    duplicate_of_issue_id: int | None = None
-    updated_summary: str | None = None
-    updated_embedding: list[float] | None = None
-
 
 def _require_eval_auth(request: Request, authorization: str = "") -> None:
     """Require a valid eval API bearer token."""
@@ -380,68 +370,6 @@ async def eval_status(
     }
 
 
-@router.get("/duplicate-work", response_model=None)
-async def duplicate_work(
-    request: Request,
-    *,
-    authorization: str = Header(default=""),
-    limit: int = Query(default=1, ge=1, le=100),
-    session: AsyncSession = Depends(get_db_session),
-) -> dict[str, Any] | Response:
-    """Return the next evaluation that needs phase-2 duplicate detection.
-
-    Eligible: latest=True, summary_embedding IS NOT NULL, no 'duplicateness'
-    key in scores, not currently locked for duplicate processing.
-
-    Locks the returned evaluation for _DUPLICATE_LOCK_TTL to prevent
-    concurrent workers from picking up the same item.
-    """
-    _require_eval_auth(request, authorization)
-
-    now = datetime.now(tz=UTC)
-
-    result = await session.execute(
-        select(LLMEvaluation, Issue, Project)
-        .join(Issue, LLMEvaluation.issue_id == Issue.id)
-        .join(Project, Issue.project_id == Project.id)
-        .where(
-            LLMEvaluation.latest.is_(True),
-            LLMEvaluation.summary_embedding.is_not(None),
-            LLMEvaluation.scores["duplicateness"].as_string().is_(None),
-            or_(
-                LLMEvaluation.duplicate_locked_until.is_(None),
-                LLMEvaluation.duplicate_locked_until <= now,
-            ),
-        )
-        .order_by(LLMEvaluation.id)
-        .limit(limit)
-    )
-    rows = result.all()
-    if not rows:
-        return Response(status_code=204)
-
-    items = []
-    lock_until = now + _DUPLICATE_LOCK_TTL
-    for evaluation, issue, project in rows:
-        evaluation.duplicate_locked_until = lock_until
-        items.append(
-            {
-                "evaluation_id": evaluation.id,
-                "issue_id": issue.id,
-                "external_id": issue.external_id,
-                "project_name": project.name,
-                "title": issue.title,
-                "summary": evaluation.summary,
-                "embedding": (
-                    list(evaluation.summary_embedding)
-                    if evaluation.summary_embedding is not None
-                    else None
-                ),
-            }
-        )
-
-    await session.commit()
-    return {"items": items}
 
 
 @router.post("/similar")
@@ -492,49 +420,3 @@ async def find_similar(
     return {"candidates": candidates}
 
 
-@router.post("/duplicate-result")
-async def submit_duplicate_result(
-    request: Request,
-    payload: DuplicateResultSubmission,
-    *,
-    authorization: str = Header(default=""),
-    session: AsyncSession = Depends(get_db_session),
-) -> dict[str, Any]:
-    """Store the phase-2 duplicate detection result for an evaluation.
-
-    Updates the specific evaluation row identified by evaluation_id. Rejects
-    if that row is no longer the latest (i.e., phase 1 re-ran in the meantime).
-    """
-    _require_eval_auth(request, authorization)
-
-    evaluation = await session.get(LLMEvaluation, payload.evaluation_id)
-    if evaluation is None:
-        raise HTTPException(status_code=404, detail="Evaluation not found")
-    if not evaluation.latest:
-        raise HTTPException(
-            status_code=409,
-            detail="Evaluation is no longer the latest; phase 1 may have re-run.",
-        )
-
-    scores = dict(evaluation.scores or {})
-    scores["duplicateness"] = payload.duplicateness
-
-    values: dict[str, Any] = {
-        "scores": scores,
-        "candidates_compared": payload.candidates_compared,
-        "duplicate_locked_until": None,
-    }
-    if payload.duplicate_of_issue_id is not None:
-        values["duplicate_of_issue_id"] = payload.duplicate_of_issue_id
-    if payload.updated_summary is not None:
-        values["summary"] = payload.updated_summary
-    if payload.updated_embedding is not None:
-        values["summary_embedding"] = payload.updated_embedding
-
-    await session.execute(
-        update(LLMEvaluation)
-        .where(LLMEvaluation.id == payload.evaluation_id)
-        .values(**values)
-    )
-    await session.commit()
-    return {"status": "stored", "evaluation_id": payload.evaluation_id}
