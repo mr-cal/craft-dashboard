@@ -82,20 +82,23 @@ configuration or documentation.
 
 _ISSUE_EXTRA_SCORES = """
 For issues, also include:
-- support_request": , 0 = actual bug or feature, 100 = a support/help request>
-how likely this is a support/help request rather \
-than a bug or feature>
-- "confidence": <0-100, how confident you are in its suggested action. High \
-confidence means the issue is clearly one of the allowed actions based on the evidence. Low confidence means \
-the issue is ambiguous, mixed signals, or would benefit from human review before deciding.>
+- support_request: 0 = actual bug or feature, 100 = support or help request with
+using the tool
+- "confidence": 0 = not confident the chosen action is the right correct, 100 = \
+high confidence the action is the correct action. High confidence means the \
+issue is clearly one of the allowed actions based on the evidence. Low confidence \
+means the issue is ambiguous, mixed signals, or would benefit from human review \
+before deciding. You should be skeptical and considerate, not overly confident
+without concrete evidence.
 """
 
 _PR_EXTRA_SCORES = """
 For pull requests, also include:
-- "confidence": <0-100, how confident the LLM is in its suggested action. High confidence means \
-the PR is clearly ready for review or ready to merge based on CI status and review state. \
-Low confidence means mixed signals -- e.g. passing CI but no reviewer assigned, or \
-review approved but CI is still running.>
+- "confidence": 0 = not confident the chosen action is the right correct, 100 = \
+high confidence the action is the correct action. High confidence means \
+the PR is clearly ready for review or ready to merge based on CI status and \
+review state. Low confidence means mixed signals - e.g. passing CI but no \
+reviewer assigned, or review approved but CI is still running.>
 """
 
 
