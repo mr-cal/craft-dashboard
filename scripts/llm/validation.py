@@ -18,8 +18,8 @@ ALLOWED_ACTIONS: Final[frozenset[str]] = frozenset(
     }
 )
 _REQUIRED_SCORE_KEYS: Final[dict[str, frozenset[str]]] = {
-    "issue": frozenset({"staleness", "complexity", "support_request", "readiness"}),
-    "pull_request": frozenset({"staleness", "complexity", "readiness"}),
+    "issue": frozenset({"staleness", "complexity", "support_request", "confidence"}),
+    "pull_request": frozenset({"staleness", "complexity", "confidence"}),
 }
 _MIN_SUMMARY_LENGTH: Final[int] = 20
 _MAX_SCORE: Final[int] = 100

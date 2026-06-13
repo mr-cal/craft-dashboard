@@ -164,7 +164,7 @@ class TestBuildEvaluationPrompt:
         assert len(messages) == 2
 
     def test_pr_specific_scores(self) -> None:
-        """PR evaluation prompt mentions readiness score."""
+        """PR evaluation prompt mentions confidence score."""
         messages = build_evaluation_prompt(
             title="Add support for core24 base",
             body="Implements `base: core24` support for snapcraft project definitions.",
@@ -178,7 +178,7 @@ class TestBuildEvaluationPrompt:
         )
 
         system_msg = messages[0]["content"]
-        assert "readiness" in system_msg.lower()
+        assert "confidence" in system_msg.lower()
 
     def test_issue_specific_scores(self) -> None:
         """Issue evaluation prompt mentions support_request score."""
