@@ -256,7 +256,6 @@ _ACTIONS = [
     "keep_open",
     "needs_review",
     "close_duplicate",
-    "close_outdated",
     "close_not_a_bug",
 ]
 
@@ -266,7 +265,6 @@ _ACTION_REASONS = [
     "Active discussion and recent commits, keep monitoring.",
     "PR has approvals but CI is failing, needs author attention.",
     "Very similar to issue #42, likely a duplicate report.",
-    "PR has merge conflicts that need resolving.",
     "References an API that was removed in v3.0.",
     "This is expected behavior, not a bug.",
 ]

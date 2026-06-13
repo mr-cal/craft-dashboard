@@ -11,7 +11,6 @@ ALLOWED_ACTIONS: Final[frozenset[str]] = frozenset(
     {
         "close_stale",
         "close_not_a_bug",
-        "close_outdated",
         "needs_triage",
         "needs_review",
         "keep_open",
