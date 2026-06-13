@@ -22,6 +22,7 @@ _SCORE_SORT_FIELDS = {
     "staleness",
     "complexity",
     "support_request",
+    "confidence",
 }
 _VALID_SORT_FIELDS = _SCORE_SORT_FIELDS | {
     "age",
@@ -322,6 +323,7 @@ class IssueRepository:
                     staleness=scores.get("staleness"),
                     complexity=scores.get("complexity"),
                     support_request=scores.get("support_request"),
+                    confidence=scores.get("confidence"),
                 )
             )
 

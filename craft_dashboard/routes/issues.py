@@ -27,6 +27,7 @@ ALL_SCORES = {
     "staleness": "Staleness",
     "complexity": "Complexity",
     "support_request": "Support Request",
+    "confidence": "Confidence",
 }
 # Scores where a higher value is better (green) rather than worse (red)
 INVERTED_SCORES: frozenset[str] = frozenset()
@@ -156,6 +157,7 @@ class IssueSort(StrEnum):
     staleness = "staleness"
     complexity = "complexity"
     support_request = "support_request"
+    confidence = "confidence"
     age = "age"
     updated = "updated"
     title = "title"

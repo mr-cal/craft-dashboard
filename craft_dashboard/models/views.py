@@ -30,6 +30,7 @@ class IssueView:
     staleness: float | None = None
     complexity: float | None = None
     support_request: float | None = None
+    confidence: float | None = None
 
     def as_dict(self) -> dict[str, object]:
         """Return a dict representation for template compatibility."""
