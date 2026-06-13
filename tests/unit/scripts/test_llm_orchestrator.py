@@ -48,7 +48,7 @@ def _valid_result(*, issue_hash: str) -> dict:
             "staleness": 10,
             "complexity": 30,
             "support_request": 5,
-            "readiness": 90,
+            "confidence": 90,
         },
         "tokens_used": 77,
         "prompt_tokens": 30,

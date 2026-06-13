@@ -14,7 +14,7 @@ def _valid_result() -> dict:
             "staleness": 10,
             "complexity": 40,
             "support_request": 15,
-            "readiness": 85,
+            "confidence": 85,
         },
         "tokens_used": 42,
         "prompt_tokens": 20,
@@ -40,7 +40,7 @@ def test_accepts_valid_pull_request_results() -> None:
     result["scores"] = {
         "staleness": 10,
         "complexity": 40,
-        "readiness": 85,
+        "confidence": 85,
     }
 
     validate_evaluation_result(result, issue_type="pull_request")

@@ -82,7 +82,6 @@ class TestSettings:
         assert settings.validate_required_secrets() == [
             "ADMIN_TOKEN is not set. Admin endpoints will reject all requests.",
             "GITHUB_TOKEN is not set. Data collection will fail.",
-            "EVAL_API_TOKEN is not set. Eval API endpoints will reject all requests.",
         ]
 
     def test_validate_required_secrets_returns_empty_list_when_tokens_present(

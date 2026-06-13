@@ -389,17 +389,6 @@ async def run_eval_loop(  # noqa: PLR0913
                         )
                         continue
 
-                    # Compute embedding for phase 2 duplicate detection (optional)
-                    embedding: list[float] | None = None
-                    if embedding_client and result.get("summary"):
-                        try:
-                            embedding = await embedding_client.embed(result["summary"])
-                        except Exception:
-                            logger.warning(
-                                "%s: embedding failed, will skip duplicate detection",
-                                issue_ref,
-                            )
-
                     submission: dict[str, Any] = {
                         "issue_id": issue_data["issue_id"],
                         "content_hash": result["issue_data_hash"],
@@ -412,7 +401,7 @@ async def run_eval_loop(  # noqa: PLR0913
                         "completion_tokens": result["completion_tokens"],
                         "model_used": evaluation_model,
                         "llm_backend": "local",
-                        "embedding": embedding,
+                        "embedding": None,
                     }
 
                     try:

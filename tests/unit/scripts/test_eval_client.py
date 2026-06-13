@@ -50,7 +50,6 @@ DEFAULT_KWARGS = {
     "token": "test-token",
     "summary_model": "test-model",
     "evaluation_model": "test-model",
-    "embedding_model": "",
     "llm_url": "http://localhost:11434/v1",
     "llm_api_key": "",
     "ca_cert": "",
