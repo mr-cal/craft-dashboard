@@ -22,8 +22,8 @@
       <col class="col-title" data-col="title">
       <col class="col-author" data-col="author">
       <col class="col-age" data-col="age">
-      {% for score_key in active_scores %}<col class="col-score" data-col="{{ score_key }}">{% endfor %}
       <col class="col-action" data-col="action">
+      {% for score_key in active_scores %}<col class="col-score" data-col="{{ score_key }}">{% endfor %}
       <col class="col-summary" data-col="summary">
     </colgroup>
     <thead>
@@ -53,10 +53,10 @@
         {{ sort_header("Title", "title", column_name="title") }}
         {{ sort_header("Author", "author", column_name="author") }}
         {{ sort_header("Age", "age", column_name="age") }}
+        <th data-col="action">Action</th>
         {% for score_key in active_scores %}
         {{ sort_header(score_labels.get(score_key, score_key), score_key, score_tooltips.get(score_key, ""), column_name=score_key) }}
         {% endfor %}
-        <th data-col="action">Action</th>
         <th data-col="summary">Summary</th>
       </tr>
     </thead>
@@ -74,6 +74,13 @@
         </td>
         <td data-col="author">{{ issue.author or "unknown" }}</td>
         <td data-col="age">{{ (issue.age_days ~ "d") if issue.age_days is not none else "?" }}</td>
+        <td data-col="action">
+          {% if issue.state in ("closed", "merged") %}
+          <span style="color:var(--app-text-muted);">-</span>
+          {% elif issue.suggested_action %}
+          <span class="action-badge" aria-label="Suggested action: {{ issue.suggested_action|replace('_', ' ') }}">{{ issue.suggested_action|replace("_", " ") }}</span>
+          {% endif %}
+        </td>
         {% for score_key in active_scores %}
         <td data-col="{{ score_key }}">
           {% set sv = issue.get(score_key) if issue.get is defined else issue[score_key] %}
@@ -89,13 +96,6 @@
           {% endif %}
         </td>
         {% endfor %}
-        <td data-col="action">
-          {% if issue.state in ("closed", "merged") %}
-          <span style="color:var(--app-text-muted);">-</span>
-          {% elif issue.suggested_action %}
-          <span class="action-badge" aria-label="Suggested action: {{ issue.suggested_action|replace('_', ' ') }}">{{ issue.suggested_action|replace("_", " ") }}</span>
-          {% endif %}
-        </td>
         <td class="summary-cell" data-col="summary">{{ (issue.summary or "")|truncate(350) }}</td>
       </tr>
       {% else %}
