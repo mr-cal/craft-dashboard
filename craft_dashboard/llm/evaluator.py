@@ -374,9 +374,18 @@ class IssueEvaluator:
 
         total_tokens = summary_tokens + eval_tokens
 
+        scores = parsed.get("scores", {}) if parsed else {}
+        # Default confidence to 50 when the LLM omits it.
+        # The prompt asks for confidence, so omission usually means the model
+        # skipped it rather than deliberately withholding a value.  50 is
+        # a neutral "moderate confidence" default that lets the submission
+        # succeed instead of looping forever on the same issue.
+        if "confidence" not in scores:
+            scores["confidence"] = 50
+
         return {
             "summary": summary,
-            "scores": parsed.get("scores", {}) if parsed else {},
+            "scores": scores,
             "suggested_action": parsed.get("suggested_action") if parsed else None,
             "suggested_action_reason": parsed.get("suggested_action_reason")
             if parsed
