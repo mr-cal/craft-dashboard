@@ -105,6 +105,15 @@ _STATUS_RESPONSE = httpx.Response(
     },
 )
 
+_DUMMY_REQUEST = httpx.Request("GET", "http://localhost:8000/api/eval/next")
+
+
+def _response(status_code: int, **kwargs) -> httpx.Response:
+    """Create an httpx.Response with a request attached (required for response.url)."""
+    r = httpx.Response(status_code=status_code, **kwargs)
+    r.request = _DUMMY_REQUEST
+    return r
+
 
 def _with_status(*responses: httpx.Response) -> list[httpx.Response]:
     """Prepend a status response to a list of responses (startup call)."""
@@ -297,10 +306,10 @@ async def test_run_eval_loop_sleeps_and_retries_after_server_error(
     http_client = _patch_http_client(
         monkeypatch,
         get_responses=_with_status(
-            httpx.Response(status_code=500, text="boom"),
-            httpx.Response(status_code=200, json=_make_issue()),
+            _response(500, text="boom"),
+            _response(200, json=_make_issue()),
         ),
-        post_responses=[httpx.Response(status_code=200)],
+        post_responses=[_response(200)],
     )
 
     await eval_client.run_eval_loop(**DEFAULT_KWARGS)

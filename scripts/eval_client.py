@@ -88,7 +88,16 @@ def _format_error_body(response: httpx.Response) -> str:
         except ValueError:
             pass
     if "html" in content_type:
-        return "(HTML response — is the server URL correct?)"
+        # 4xx with HTML usually means the URL hit a different server (e.g. a
+        # CDN, proxy, or wrong host) that doesn't serve the API.
+        # 5xx with HTML means the craft-dashboard server itself errored —
+        # check the server logs for the root cause.
+        if response.status_code >= 500:  # noqa: PLR2004
+            return (
+                f"(HTML response from {response.url} — "
+                "server error; check the craft-dashboard logs)"
+            )
+        return f"(HTML response from {response.url} — is the server URL correct?)"
     text = response.text.strip()
     return (text[:_MAX_ERROR_BODY] + "…") if len(text) > _MAX_ERROR_BODY else text
 
@@ -309,8 +318,9 @@ async def run_eval_loop(  # noqa: PLR0913
 
                     if response.status_code != HTTP_OK:
                         logger.error(
-                            "Server returned %d: %s",
+                            "Server returned %d from %s: %s",
                             response.status_code,
+                            response.url,
                             _format_error_body(response),
                         )
                         await _sleep_until_next_poll(poll_interval)
@@ -433,9 +443,10 @@ async def run_eval_loop(  # noqa: PLR0913
 
                     if submit_response.status_code != HTTP_OK:
                         logger.error(
-                            "%s: submit failed %d: %s",
+                            "%s: submit failed %d from %s: %s",
                             issue_ref,
                             submit_response.status_code,
+                            submit_response.url,
                             _format_error_body(submit_response),
                         )
                         continue
