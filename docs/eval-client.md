@@ -28,6 +28,35 @@ source .env
 The script also loads `.env` automatically, so sourcing is optional if you only
 run via `uv run`.
 
+### TLS certificates
+
+There are two separate TLS cert settings:
+
+| Variable | Flag | Purpose |
+|---|---|---|
+| `EVAL_CLIENT_SERVER_CA_CERT` | `--server-ca-cert` | CA cert to verify the **craft-dashboard server** |
+| `LOCAL_LLM_CA_CERT` | `--ca-cert` | CA cert to verify the **local LLM endpoint** |
+
+**`EVAL_CLIENT_SERVER_CA_CERT`** — you only need this if the craft-dashboard server
+uses a self-signed or private CA certificate. If the server uses a publicly-trusted
+cert (e.g. Let's Encrypt, as `craft-dashboard.name` does), leave this unset and the
+system CA bundle handles verification automatically.
+
+To get the server's CA cert from a running server:
+
+```bash
+# Fetch the CA cert from the server (replace with your server hostname)
+openssl s_client -connect craft-dashboard.name:443 -showcerts </dev/null 2>/dev/null \
+  | openssl x509 -outform PEM > server-ca.pem
+```
+
+For a self-hosted server that uses a custom CA, ask the server admin for the CA cert
+PEM file, or copy it from the server directly (e.g. from `/etc/ssl/certs/` or
+wherever the CA cert is stored).
+
+**`LOCAL_LLM_CA_CERT`** — needed when your LLM endpoint uses HTTPS with a self-signed
+cert (common for llama-server on a local machine). See the usage example below.
+
 ## Usage
 
 Run the client from the repository root:
