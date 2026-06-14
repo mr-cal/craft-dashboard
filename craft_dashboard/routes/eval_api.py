@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from scripts.llm.validation import validate_evaluation_result
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -28,8 +28,6 @@ router = APIRouter(prefix="/api/eval")
 limiter = Limiter(key_func=get_remote_address)
 
 _LOCK_TTL = timedelta(minutes=10)
-_DUPLICATE_LOCK_TTL = timedelta(minutes=30)
-_EMBEDDING_DIMENSION = 768
 
 
 class EvalResultSubmission(BaseModel):
@@ -46,24 +44,6 @@ class EvalResultSubmission(BaseModel):
     completion_tokens: int = 0
     model_used: str = ""
     llm_backend: str = "local"
-    embedding: list[float] | None = None
-
-
-class SimilarRequest(BaseModel):
-    """Request body for finding similar evaluations."""
-
-    embedding: list[float]
-    exclude_issue_id: int
-    limit: int = Field(default=5, ge=1, le=50)
-    cosine_threshold: float = Field(default=0.15, ge=0.0, le=2.0)
-
-    def model_post_init(self, /, __context: object) -> None:
-        """Validate that the embedding dimension matches the expected size."""
-        if len(self.embedding) != _EMBEDDING_DIMENSION:
-            raise ValueError(
-                f"embedding must have {_EMBEDDING_DIMENSION} dimensions, "
-                f"got {len(self.embedding)}"
-            )
 
 
 def _require_eval_auth(request: Request, authorization: str = "") -> None:
@@ -296,7 +276,6 @@ async def submit_result(
             issue_data_hash=current_hash,
             latest=True,
             eval_locked_until=None,
-            summary_embedding=payload.embedding,
         )
     )
 
@@ -369,49 +348,3 @@ async def eval_status(
     }
 
 
-@router.post("/similar")
-async def find_similar(
-    request: Request,
-    payload: SimilarRequest,
-    *,
-    authorization: str = Header(default=""),
-    session: AsyncSession = Depends(get_db_session),
-) -> dict[str, Any]:
-    """Find evaluations with similar embeddings (cross-project, pgvector).
-
-    Uses cosine distance (<=> operator). Returns candidates ordered by
-    distance ascending (most similar first).
-
-    Note: this endpoint requires PostgreSQL with the pgvector extension.
-    """
-    _require_eval_auth(request, authorization)
-
-    sql = text("""
-        SELECT e.id AS evaluation_id,
-               e.issue_id,
-               i.external_id,
-               p.name AS project_name,
-               i.title,
-               e.summary,
-               e.summary_embedding <=> CAST(:embedding AS vector) AS distance
-        FROM llm_evaluations e
-        JOIN issues i ON e.issue_id = i.id
-        JOIN projects p ON i.project_id = p.id
-        WHERE e.latest = true
-          AND e.summary_embedding IS NOT NULL
-          AND i.id != :exclude_issue_id
-          AND (e.summary_embedding <=> CAST(:embedding AS vector)) < :threshold
-        ORDER BY distance
-        LIMIT :limit
-    """)
-    rows = await session.execute(
-        sql,
-        {
-            "embedding": str(payload.embedding),
-            "exclude_issue_id": payload.exclude_issue_id,
-            "threshold": payload.cosine_threshold,
-            "limit": payload.limit,
-        },
-    )
-    candidates = [dict(row._mapping) for row in rows.fetchall()]  # noqa: SLF001
-    return {"candidates": candidates}
