@@ -394,7 +394,7 @@ class TestEvalResultIntegration:
         assert evaluations[1].model_name == "haiku"
         assert evaluations[1].llm_backend == "local"
         assert evaluations[1].issue_data_hash == current_hash
-        assert evaluations[1].eval_locked_until is None
+        assert evaluations[1].eval_locked_until is not None
 
 
 class TestEvalStatusIntegration:

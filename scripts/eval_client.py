@@ -238,7 +238,9 @@ async def run_eval_loop(  # noqa: PLR0913
             # Fetch queue status at startup for progress display
             total_remaining = limit if limit > 0 else 0
             try:
-                status_resp = await http_client.get("/api/eval/status", headers=headers)
+                status_resp = await http_client.get(
+                    "/api/eval/status", params=params, headers=headers
+                )
                 if status_resp.status_code == HTTP_OK:
                     status_data = status_resp.json()
                     server_pending = status_data.get("pending", 0)

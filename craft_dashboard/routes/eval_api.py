@@ -275,7 +275,7 @@ async def submit_result(
             evaluated_at=datetime.now(tz=UTC),
             issue_data_hash=current_hash,
             latest=True,
-            eval_locked_until=None,
+            eval_locked_until=datetime.now(tz=UTC) + _LOCK_TTL,
         )
     )
 
@@ -288,6 +288,11 @@ async def eval_status(
     request: Request,
     *,
     authorization: str = Header(default=""),
+    project: str = Query(default=""),
+    open_only: bool = Query(default=True),
+    force: bool = Query(default=False),
+    incomplete: bool = Query(default=False),
+    stale_days: int = Query(default=0),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, int]:
     """Return summary counts for the eval queue."""
@@ -296,28 +301,6 @@ async def eval_status(
     now = datetime.now(tz=UTC)
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    latest_evaluation = aliased(LLMEvaluation)
-    pending = await session.scalar(
-        select(func.count(Issue.id))
-        .outerjoin(
-            latest_evaluation,
-            (latest_evaluation.issue_id == Issue.id)
-            & latest_evaluation.latest.is_(True),
-        )
-        .where(
-            Issue.state == "open",
-            or_(
-                latest_evaluation.id.is_(None),
-                (
-                    (latest_evaluation.model_name == "pending")
-                    & or_(
-                        latest_evaluation.eval_locked_until.is_(None),
-                        latest_evaluation.eval_locked_until <= now,
-                    )
-                ),
-            ),
-        )
-    )
     locked = await session.scalar(
         select(func.count(LLMEvaluation.id)).where(
             LLMEvaluation.eval_locked_until > now
@@ -335,9 +318,75 @@ async def eval_status(
             LLMEvaluation.model_name != "pending",
         )
     )
-    total_open = await session.scalar(
-        select(func.count(Issue.id)).where(Issue.state == "open")
+
+    # Build base issue query (no latest_evaluation join — used for total_open)
+    base_query = select(Issue.id).join(
+        Project, Issue.project_id == Project.id
     )
+    if open_only:
+        base_query = base_query.where(Issue.state == "open")
+    if project:
+        base_query = base_query.where(Project.name == project)
+    total_open = await session.scalar(select(func.count()).select_from(base_query.subquery()))
+
+    # Pending count depends on filter mode
+    if force:
+        pending = total_open
+    else:
+        latest_evaluation = aliased(LLMEvaluation)
+        pending_query = (
+            select(Issue.id)
+            .join(Project, Issue.project_id == Project.id)
+            .outerjoin(
+                latest_evaluation,
+                (latest_evaluation.issue_id == Issue.id)
+                & latest_evaluation.latest.is_(True),
+            )
+        )
+        if open_only:
+            pending_query = pending_query.where(Issue.state == "open")
+        if project:
+            pending_query = pending_query.where(Project.name == project)
+
+        if incomplete:
+            pending_query = pending_query.where(
+                or_(
+                    latest_evaluation.id.is_(None),
+                    latest_evaluation.summary.is_(None),
+                    latest_evaluation.summary == "",
+                    (
+                        (Issue.state == "open")
+                        & or_(
+                            latest_evaluation.scores.is_(None),
+                            latest_evaluation.suggested_action.is_(None),
+                            latest_evaluation.suggested_action == "",
+                        )
+                    ),
+                )
+            )
+        elif stale_days > 0:
+            cutoff = now - timedelta(days=stale_days)
+            pending_query = pending_query.where(
+                or_(
+                    latest_evaluation.id.is_(None),
+                    latest_evaluation.evaluated_at < cutoff,
+                )
+            )
+        else:
+            pending_query = pending_query.where(
+                or_(
+                    latest_evaluation.id.is_(None),
+                    (
+                        (latest_evaluation.model_name == "pending")
+                        & or_(
+                            latest_evaluation.eval_locked_until.is_(None),
+                            latest_evaluation.eval_locked_until <= now,
+                        )
+                    ),
+                )
+            )
+
+        pending = await session.scalar(select(func.count()).select_from(pending_query.subquery()))
 
     return {
         "pending": pending or 0,
@@ -346,5 +395,3 @@ async def eval_status(
         "total_evaluated": total_evaluated or 0,
         "total_open": total_open or 0,
     }
-
-
