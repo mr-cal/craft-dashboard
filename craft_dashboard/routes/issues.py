@@ -31,7 +31,7 @@ ALL_SCORES = {
 }
 # Scores where a higher value is better (green) rather than worse (red)
 INVERTED_SCORES: frozenset[str] = frozenset()
-DEFAULT_SCORES = "staleness"
+DEFAULT_SCORES = "staleness,confidence"
 
 
 class IssueTemplateContext(TypedDict):

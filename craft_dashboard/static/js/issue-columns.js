@@ -11,7 +11,7 @@
     "title",
     "author",
     "age",
-    ...scoreColumns.filter((column) => ["staleness"].includes(column)),
+    ...scoreColumns.filter((column) => ["staleness", "confidence"].includes(column)),
     "action",
     "summary",
   ];

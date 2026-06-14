@@ -159,7 +159,7 @@ class TestTriagePage:
         )
 
     def test_triage_default_score_columns(self, seeded_url: str) -> None:
-        """The triage page should show only Staleness by default."""
+        """The triage page should show Staleness and Confidence by default."""
         script = make_script("""\
     await page.goto(`${BASE}/issues`, {waitUntil: 'networkidle0', timeout: 30000});
     await new Promise(r => setTimeout(r, 2000));
@@ -179,14 +179,14 @@ class TestTriagePage:
         assert result["has_staleness"], (
             f"Expected 'Staleness' column, got headers: {result['headers']}"
         )
-        assert not result["has_confidence"], (
-            f"Confidence should not be a default column, got headers: {result['headers']}"
+        assert result["has_confidence"], (
+            f"Expected 'Confidence' column by default, got headers: {result['headers']}"
         )
 
-    def test_triage_confidence_column_available(self, seeded_url: str) -> None:
-        """Confidence column should appear when selected via scores param."""
+    def test_triage_complexity_column_toggling(self, seeded_url: str) -> None:
+        """Complexity should appear when selected, confidence remains visible."""
         script = make_script("""\
-    await page.goto(`${BASE}/issues?scores=staleness,confidence`, {waitUntil: 'networkidle0', timeout: 30000});
+    await page.goto(`${BASE}/issues?scores=staleness,confidence,complexity`, {waitUntil: 'networkidle0', timeout: 30000});
     await new Promise(r => setTimeout(r, 2000));
 
     const headers = await page.evaluate(() => {
@@ -198,6 +198,7 @@ class TestTriagePage:
       headers: headers,
       has_staleness: headers.some(h => h.toLowerCase().includes('staleness')),
       has_confidence: headers.some(h => h.toLowerCase().includes('confidence')),
+      has_complexity: headers.some(h => h.toLowerCase().includes('complexity')),
     }));
 """)
         result = run_puppeteer(script, base_url=seeded_url, timeout=20)
@@ -205,7 +206,10 @@ class TestTriagePage:
             f"Expected 'Staleness' column, got headers: {result['headers']}"
         )
         assert result["has_confidence"], (
-            f"Expected 'Confidence' column when selected, got headers: {result['headers']}"
+            f"Expected 'Confidence' column, got headers: {result['headers']}"
+        )
+        assert result["has_complexity"], (
+            f"Expected 'Complexity' column when selected, got headers: {result['headers']}"
         )
 
     def test_triage_score_columns_have_values(self, seeded_url: str) -> None:
