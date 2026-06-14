@@ -950,6 +950,7 @@ class TestQueryIssuesLLMScores:
         # First issue should be the one with highest staleness
         assert issues[0]["external_id"] == "100"
         assert issues[0]["staleness"] == 0.95
+
     async def test_sort_by_complexity_score(self, test_db_session) -> None:
         """Sort by complexity should order by complexity score descending."""
         await _seed_issues_with_scores(test_db_session)
@@ -960,7 +961,6 @@ class TestQueryIssuesLLMScores:
         assert issues[0]["external_id"] == "102"
         assert issues[0]["complexity"] == 0.95
 
-
     async def test_sort_by_support_request_score(self, test_db_session) -> None:
         """Sort by support_request should order by support_request score descending."""
         await _seed_issues_with_scores(test_db_session)
@@ -970,6 +970,7 @@ class TestQueryIssuesLLMScores:
         # First issue should be the one with highest support_request
         assert issues[0]["external_id"] == "100"
         assert issues[0]["support_request"] == 0.2
+
     async def test_sort_by_confidence_score(self, test_db_session) -> None:
         """Sort by confidence should order by confidence score descending."""
         await _seed_issues_with_scores(test_db_session)
@@ -979,7 +980,6 @@ class TestQueryIssuesLLMScores:
         # First issue should be the one with highest confidence
         assert issues[0]["external_id"] == "101"
         assert issues[0]["confidence"] == 85.0
-
 
 
 class TestLLMStatusFilter:

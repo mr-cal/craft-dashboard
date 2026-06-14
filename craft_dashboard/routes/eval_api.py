@@ -66,7 +66,6 @@ class SimilarRequest(BaseModel):
             )
 
 
-
 def _require_eval_auth(request: Request, authorization: str = "") -> None:
     """Require a valid eval API bearer token."""
     eval_api_token = request.app.state.settings.eval_api_token
@@ -370,8 +369,6 @@ async def eval_status(
     }
 
 
-
-
 @router.post("/similar")
 async def find_similar(
     request: Request,
@@ -418,5 +415,3 @@ async def find_similar(
     )
     candidates = [dict(row._mapping) for row in rows.fetchall()]  # noqa: SLF001
     return {"candidates": candidates}
-
-

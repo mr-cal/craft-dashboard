@@ -464,5 +464,3 @@ class TestEvalStatusIntegration:
             "total_evaluated": 1,
             "total_open": 4,
         }
-
-

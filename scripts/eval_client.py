@@ -633,8 +633,6 @@ def evaluate(  # noqa: PLR0913
     )
 
 
-
-
 if __name__ == "__main__":
     # Load .env from the repo root so dev machine settings are picked up automatically.
     # This is intentionally dev-only — production runners set env vars directly.
