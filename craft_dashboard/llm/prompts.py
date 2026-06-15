@@ -48,12 +48,6 @@ architectural decisions or is blocked by an external dependency).
 - {61-100}: Very stale. No activity within the last year or limited maintainer \
 interaction. Clearly no longer relevant to a newer version of the project.
 
- issues under 1 month old are fresh (0-10), 1-3 months is mildly stale \
-(10-30), 3-6 months is moderately stale (30-50), and only issues with no activity for \
-6+ months should score above 50. Also consider whether the issue is still relevant to \
-the current major version of the software (a bug report against an old, superseded \
-version is slightly more stale).
-
 - complexity: 0 = trivial, 100 = extremely complex. Issues that would require \
 architectural decisions or backward compatibility considerations are more \
 complex. Issues that are difficult to reproduce or don't have a simple reproducer \
@@ -62,12 +56,11 @@ are also more complex.
 - support_request: 0 = actual bug or feature, 100 = support or help request with \
 using the tool
 
-- confidence: 0 = not confident the chosen action is the right correct, 100 = \
-high confidence the action is the correct action. High confidence means the \
-issue is clearly one of the allowed actions based on the evidence. Low confidence \
-means the issue is ambiguous, mixed signals, or would benefit from human review \
-before deciding. You should be skeptical and considerate, not overly confident
-without concrete evidence.
+- confidence: 0 = not confident the chosen action is correct, 100 = high confidence \
+the action is the correct action. High confidence means the issue is clearly one of \
+the allowed actions based on the evidence. Low confidence means the issue is \
+ambiguous, mixed signals, or would benefit from human review before deciding. You \
+should be skeptical and considerate, not overly confident without concrete evidence.
 
 Action guidelines — choose the MOST appropriate action:
 
@@ -111,7 +104,7 @@ Respond with valid JSON matching this schema:
     "complexity": <0-100, how complex is this>,
     "confidence": <0-100, how confident you are in the suggested action>
   },
-  "suggested_action": "<one of: close_stale, close_not_a_bug, needs_review, keep_open>",
+  "suggested_action": "<one of: close_stale, close_not_mergeable, needs_review, keep_open>",
   "suggested_action_reason": "<1-3 sentences justifying the suggested action and scores>"
 }
 
@@ -132,12 +125,11 @@ changes or have backward compatibility considerations are more complex. PRs that
 fix difficult to reproduce issues, impact on existing projects is difficult to
 reason about, or have extensive integration testing are also more complex.
 
-- confidence: 0 = not confident the chosen action is the right correct, 100 = \
-high confidence the action is the correct action. High confidence means the \
-issue is clearly one of the allowed actions based on the evidence. Low confidence \
-means the PR is ambiguous, mixed signals, or would benefit from human review \
-before deciding. You should be skeptical and considerate, not overly confident
-without concrete evidence.
+- confidence: 0 = not confident the chosen action is correct, 100 = high confidence \
+the action is the correct action. High confidence means the issue is clearly one of \
+the allowed actions based on the evidence. Low confidence means the PR is ambiguous, \
+mixed signals, or would benefit from human review before deciding. You should be \
+skeptical and considerate, not overly confident without concrete evidence.
 
 Action guidelines — choose the MOST appropriate action:
 
