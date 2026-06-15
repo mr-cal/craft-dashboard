@@ -1,7 +1,7 @@
 """Prompt templates for LLM evaluation of issues and PRs."""
 
 _SUMMARY_SYSTEM = (
-    "You are a concise technical writer. Write a single sentence of at most "
+    "You are a concise technical writer. Write a brief explanation of at most "
     "256 characters summarising the following GitHub issue or pull request. "
     "Focus on what it is about and its current state (e.g. under discussion, "
     "needs triage, waiting to be assigned). "
@@ -11,7 +11,7 @@ _SUMMARY_SYSTEM = (
 )
 
 _CLOSED_SUMMARY_SYSTEM = (
-    "You are a concise technical writer. Write a single sentence of at most "
+    "You are a concise technical writer. Write a brief explaination of at most "
     "256 characters summarising what happened with this closed GitHub issue or "
     "pull request. Focus on the outcome: was it fixed, merged, rejected, "
     "superseded, or abandoned? Mention any resolution or merge details. "
@@ -20,85 +20,139 @@ _CLOSED_SUMMARY_SYSTEM = (
     "'This PR', or 'The issue'. Get straight to the point."
 )
 
-_EVALUATION_SYSTEM = """\
+_ISSUE_EVAL_SYSTEM = """
 You are an expert open-source project maintainer. Evaluate the following \
-GitHub issue or pull request and provide scores and a suggested action.
+GitHub issue and provide scores and a suggested action.
 
 Respond with valid JSON matching this schema:
 {
   "scores": {
     "staleness": <0-100, how stale/inactive is this>,
     "complexity": <0-100, how complex is this>,
-    <additional scores based on type>
+    "support_request": <0-100, how much this is a support request vs actual bug>,
+    "confidence": <0-100, how confident you are in the suggested action>
   },
-  "suggested_action": "<one of: close_stale, close_not_a_bug, \
-needs_triage, needs_review, keep_open>",
-  "suggested_action_reason": "<brief explanation for the suggested action>"
+  "suggested_action": "<one of: close_stale, close_not_a_bug, needs_triage, keep_open>",
+  "suggested_action_reason": "<1-3 sentences justifying the suggested action and scores>"
 }
 
 Score guidelines:
-- staleness: 0 = very active, 100 = completely dead. Consider the pace of \
-open-source projects: issues under 1 month old are fresh (0-10), 1-3 months \
-is mildly stale (10-30), 3-6 months is moderately stale (30-60), and only \
-issues with no activity for 6+ months should score above 60. PRs go stale \
-faster than issues - a PR with no activity for 4+ weeks is already mildly \
-stale, and 4+ months with no review or update is very stale. Also consider \
-whether the issue is still relevant to the current version of the software \
-(a bug report against an old, superseded version is more stale).
-- complexity: 0 = trivial, 100 = extremely complex. Changes that involve \
+
+- staleness: 0 = very active, 100 = completely dead. Consider the pace of open-source \
+projects: issues under 1 month old are fresh (0-10), 1-3 months is mildly stale \
+(10-30), 3-6 months is moderately stale (30-50), and only issues with no activity for \
+6+ months should score above 50. Also consider whether the issue is still relevant to \
+the current major version of the software (a bug report against an old, superseded \
+version is slightly more stale).
+
+- complexity: 0 = trivial, 100 = extremely complex. Issues that would require \
 architectural decisions or backward compatibility considerations are more \
-complex.
+complex. Issues that are difficult to reproduce or don't have a simple reproducer \
+are also more complex.
 
-Action guidelines — choose the MOST appropriate action:
-- needs_triage: The issue has NOT yet been assessed by a maintainer. Use \
-this when the issue lacks labels, has no maintainer response or comments, \
-has no assignee, or otherwise shows no sign of having been categorised or \
-prioritised. This is the default action for new, unlabelled issues \
-regardless of how well-written or actionable they are. A well-structured \
-bug report with clear reproduction steps still needs triage if no \
-maintainer has acknowledged, labelled, or responded to it yet.
-- needs_review: The issue HAS already been triaged (it has labels, \
-maintainer comments, an assignee, or other signs of prior assessment) but \
-needs further technical review, code review (for PRs), or developer \
-investigation. Use for PRs awaiting maintainer code review. Do NOT use \
-this for untriaged issues — use needs_triage instead.
-- keep_open: The issue is triaged, valid, and should remain open. Use when \
-the issue is clearly scoped, has maintainer buy-in, or is actively being \
-worked on. As long as a maintainer has triaged and acknowledged an issue,
-it should be kept open unless it's outdated. This is also appropriate if a \
-maintainer has asked for further information or changes and is waiting on a \
-response from the original author.
-- close_stale: The issue or PR is both inactive AND has become irrelevant. \
-Staleness alone is NEVER a sufficient reason to close an issue - the issue \
-must also show clear signs that it is no longer applicable. Valid reasons \
-include: the feature was implemented elsewhere, the affected version is no \
-longer supported, or the original problem is no longer reproducible. \
-Always provide a concrete, specific reason why the issue is no longer \
-relevant beyond just its age or inactivity.
-- close_not_a_bug: The reported behaviour is working as intended, is a \
-support/usage question rather than a bug, or has been resolved through \
-configuration or documentation.
-"""
-
-_ISSUE_EXTRA_SCORES = """
-For issues, also include:
-- support_request: 0 = actual bug or feature, 100 = support or help request with
+- support_request: 0 = actual bug or feature, 100 = support or help request with \
 using the tool
+
 - "confidence": 0 = not confident the chosen action is the right correct, 100 = \
 high confidence the action is the correct action. High confidence means the \
 issue is clearly one of the allowed actions based on the evidence. Low confidence \
 means the issue is ambiguous, mixed signals, or would benefit from human review \
 before deciding. You should be skeptical and considerate, not overly confident
 without concrete evidence.
+
+Action guidelines — choose the MOST appropriate action:
+
+- needs_triage: The issue has NOT yet been assessed by a maintainer. Use \
+this when the issue lacks labels, has no maintainer response or comments, \
+has no assignee, or otherwise shows no sign of having been categorised or \
+prioritized. This is the default action for new, unlabelled issues \
+regardless of how well-written or actionable they are. A well-structured \
+bug report with clear reproduction steps still needs triage if no \
+maintainer has acknowledged, labelled, or responded to it yet.
+
+- keep_open: The issue is triaged, valid, and should remain open. Use when \
+the issue is clearly scoped, has maintainer buy-in, or is actively being \
+worked on. As long as a maintainer has triaged and acknowledged an issue,
+it should be kept open unless it's outdated. This is also appropriate if a \
+maintainer has asked for further information or changes and has been waiting \
+less than 6 months for a response from the original author.
+
+- close_stale: The issue is both inactive AND has become irrelevant. Inactivy alone \
+is NEVER a sufficient reason to close an issue. The issue must also show clear signs \
+that it is no longer applicable. Valid reasons include: the feature was implemented \
+elsewhere, the affected version is no longer supported, or the original problem is no \
+longer reproducible. Lack of maintainer engagement is not a sufficient reason alone. \
+However, if the maintainer has asked for more details and the reporter has not \
+provided details within 6 months, this may be sufficient. Always provide a concrete, \
+specific reason why the issue is no longer relevant beyond just its age or inactivity.
+
+- close_not_a_bug: The reported behaviour is working as intended, is a \
+support/usage question rather than a bug, or has been resolved through \
+configuration or documentation.
 """
 
-_PR_EXTRA_SCORES = """
-For pull requests, also include:
+_PR_EVAL_SYSTEM = """
+You are an expert open-source project maintainer. Evaluate the following \
+GitHub issue and provide scores and a suggested action.
+
+Respond with valid JSON matching this schema:
+{
+  "scores": {
+    "staleness": <0-100, how stale/inactive is this>,
+    "complexity": <0-100, how complex is this>,
+    "confidence": <0-100, how confident you are in the suggested action>
+  },
+  "suggested_action": "<one of: close_stale, close_not_a_bug, needs_review, keep_open>",
+  "suggested_action_reason": "<1-3 sentences justifying the suggested action and scores>"
+}
+
+Score guidelines:
+
+- staleness: 0 = very active, 100 = completely dead. Consider the pace of open-source \
+projects: a PR with no activity for 4+ weeks is already mildly stale (10-30), and 4+ \
+months with no review or update is very stale (50+). Also consider whether the PR is \
+still relevant to the current version of the software (a PR for an old, superseded \
+version is slightly more stale).
+
+- complexity: 0 = trivial, 100 = extremely complex. PRs that make architectural \
+changes or have backward compatibility considerations are more complex. PRs that \
+fix difficult to reproduce issues, impact on existing projects is difficult to
+reason about, or have extensive integration testing are also more complex.
+
 - "confidence": 0 = not confident the chosen action is the right correct, 100 = \
-high confidence the action is the correct action. High confidence means \
-the PR is clearly ready for review or ready to merge based on CI status and \
-review state. Low confidence means mixed signals - e.g. passing CI but no \
-reviewer assigned, or review approved but CI is still running.>
+high confidence the action is the correct action. High confidence means the \
+issue is clearly one of the allowed actions based on the evidence. Low confidence \
+means the PR is ambiguous, mixed signals, or would benefit from human review \
+before deciding. You should be skeptical and considerate, not overly confident
+without concrete evidence.
+
+Action guidelines — choose the MOST appropriate action:
+
+- needs_review: The PR has NOT yet been reviewed by a maintainer. This may also be \
+appropriate if a maintainer has already reviewed a PR and the author has made \
+subsequent changes or has asked a question of the maintainer. This is also used \
+when a PR has sufficient (2) approvals and is ready to be landed.
+
+- keep_open: The PR has been acknowledged by a maintainer, is under development, \
+or is undergoing review cycles. Also use when the PR is a draft PR or is currently \
+being developed. As long as it has recieved updates within 3 months, it can be kept \
+open. PRs blocked by other PRs or issues, pending external decisions, or upstream \
+changes should be kept open, even if they haven't been updated in months.
+
+- close_stale: The PR is both inactive AND has become irrelevant. Inactivy alone \
+is NEVER a sufficient reason to close an PR. The PR must also show clear signs \
+that it is no longer applicable. Valid reasons include: the feature was implemented \
+elsewhere, the affected version is no longer supported, or the original problem it
+solves is no longer reproducible. Lack of maintainer engagement is not a sufficient \
+reason alone and neither is failing CI jobs. However, if the maintainer has asked \
+for feedback and the reporter has not addressed the feedback within 3 months, this \
+may be sufficient. Always provide a concrete, specific reason why the PR is no longer \
+relevant beyond just its age or inactivity.
+
+- close_not_a_bug: The PR makes a change that isn't appropriate or relevant, makes \
+an backward incompatible change that isn't acceptable, or otherwise makes a change \
+that isn't mergeable. This can include adding features or fixing bugs that the \
+maintainers expressly mention they can't accept.
 """
 
 
@@ -290,11 +344,9 @@ def build_evaluation_prompt(
     """
     type_label = "Pull Request" if issue_type == "pull_request" else "Issue"
     label_str = ", ".join(labels) if labels else "none"
-    extra_scores = (
-        _PR_EXTRA_SCORES if issue_type == "pull_request" else _ISSUE_EXTRA_SCORES
+    system_content = (
+        _PR_EVAL_SYSTEM if issue_type == "pull_request" else _ISSUE_EVAL_SYSTEM
     )
-
-    system_content = _EVALUATION_SYSTEM + extra_scores
 
     comments_text = _format_comments(comments or [])
     pr_details_text = (
