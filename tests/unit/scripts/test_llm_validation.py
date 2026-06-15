@@ -112,3 +112,41 @@ def test_rejects_closed_issue_without_summary() -> None:
 
     with pytest.raises(LLMValidationError, match="Summary"):
         validate_evaluation_result(result, issue_type="issue", state="closed")
+
+
+def test_accepts_close_not_mergeable_for_pr() -> None:
+    """PR evaluations may produce close_not_mergeable action."""
+    result = _valid_result()
+    result["scores"] = {
+        "staleness": 30,
+        "complexity": 60,
+        "confidence": 75,
+    }
+    result["suggested_action"] = "close_not_mergeable"
+    result["suggested_action_reason"] = (
+        "The PR introduces a breaking change that maintainers have explicitly "
+        "declined to accept."
+    )
+    validate_evaluation_result(result, issue_type="pull_request")
+
+
+def test_rejects_close_not_mergeable_for_issue() -> None:
+    """close_not_mergeable is invalid for issue evaluations."""
+    result = _valid_result()
+    result["suggested_action"] = "close_not_mergeable"
+
+    with pytest.raises(LLMValidationError, match="suggested_action"):
+        validate_evaluation_result(result, issue_type="issue")
+
+
+def test_accepts_close_not_a_bug_for_pr() -> None:
+    """close_not_a_bug is valid for both issues and PRs."""
+    result = _valid_result()
+    result["scores"] = {
+        "staleness": 30,
+        "complexity": 60,
+        "confidence": 75,
+    }
+    result["suggested_action"] = "close_not_a_bug"
+    result["suggested_action_reason"] = "The reported behaviour is working as intended."
+    validate_evaluation_result(result, issue_type="pull_request")

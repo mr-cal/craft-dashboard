@@ -7,7 +7,20 @@ from typing import Final
 
 from craft_dashboard.llm.exceptions import LLMValidationError
 
-ALLOWED_ACTIONS: Final[frozenset[str]] = frozenset(
+# Actions common to both issues and PRs.
+_ALL_ACTIONS: Final[frozenset[str]] = frozenset(
+    {
+        "close_stale",
+        "close_not_a_bug",
+        "close_not_mergeable",
+        "needs_triage",
+        "needs_review",
+        "keep_open",
+    }
+)
+
+# Actions valid for issue evaluations.
+_ISSUE_ACTIONS: Final[frozenset[str]] = frozenset(
     {
         "close_stale",
         "close_not_a_bug",
@@ -16,10 +29,28 @@ ALLOWED_ACTIONS: Final[frozenset[str]] = frozenset(
         "keep_open",
     }
 )
-_REQUIRED_SCORE_KEYS: Final[dict[str, frozenset[str]]] = {
-    "issue": frozenset({"staleness", "complexity", "support_request", "confidence"}),
-    "pull_request": frozenset({"staleness", "complexity", "confidence"}),
-}
+
+# Actions valid for PR evaluations.
+_PR_ACTIONS: Final[frozenset[str]] = frozenset(
+    {
+        "close_stale",
+        "close_not_a_bug",
+        "close_not_mergeable",
+        "needs_review",
+        "keep_open",
+    }
+)
+
+_ISSUE_REQUIRED_SCORE_KEYS: Final[frozenset[str]] = frozenset(
+    {"staleness", "complexity", "support_request", "confidence"}
+)
+_PR_REQUIRED_SCORE_KEYS: Final[frozenset[str]] = frozenset(
+    {"staleness", "complexity", "confidence"}
+)
+
+# Backward-compatible exports.
+ALLOWED_ACTIONS: Final[frozenset[str]] = _ALL_ACTIONS
+
 _MIN_SUMMARY_LENGTH: Final[int] = 20
 _MAX_SCORE: Final[int] = 100
 
@@ -57,10 +88,12 @@ def validate_evaluation_result(
             raise LLMValidationError(msg)
         return
 
-    required_score_keys = _REQUIRED_SCORE_KEYS.get(issue_type)
-    if required_score_keys is None:
-        msg = f"Unsupported issue_type for validation: {issue_type}"
-        raise LLMValidationError(msg)
+    if issue_type == "pull_request":
+        required_score_keys = _PR_REQUIRED_SCORE_KEYS
+        valid_actions = _PR_ACTIONS
+    else:
+        required_score_keys = _ISSUE_REQUIRED_SCORE_KEYS
+        valid_actions = _ISSUE_ACTIONS
 
     missing_keys = required_score_keys.difference(scores)
     if missing_keys:
@@ -79,8 +112,8 @@ def validate_evaluation_result(
     suggested_action = _require_non_empty_string(
         result.get("suggested_action"), field_name="suggested_action"
     )
-    if suggested_action not in ALLOWED_ACTIONS:
-        msg = f"suggested_action must be one of: {', '.join(sorted(ALLOWED_ACTIONS))}"
+    if suggested_action not in valid_actions:
+        msg = f"suggested_action must be one of: {', '.join(sorted(valid_actions))}"
         raise LLMValidationError(msg)
 
     _require_non_empty_string(

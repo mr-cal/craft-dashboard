@@ -257,6 +257,7 @@ _ACTIONS = [
     "needs_review",
     "close_duplicate",
     "close_not_a_bug",
+    "close_not_mergeable",
 ]
 
 _ACTION_REASONS = [
@@ -267,6 +268,7 @@ _ACTION_REASONS = [
     "Very similar to issue #42, likely a duplicate report.",
     "References an API that was removed in v3.0.",
     "This is expected behavior, not a bug.",
+    "Makes a breaking change that maintainers have rejected.",
 ]
 
 
