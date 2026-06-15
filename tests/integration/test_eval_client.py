@@ -7,15 +7,14 @@ eval API and mocks only the HTTP boundary and LLM layer.
 
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
-import logging
 import pytest
 from scripts import eval_client
-
 
 # ---------------------------------------------------------------------------
 # Real-world issue data captured from the craft-dashboard API
@@ -184,6 +183,7 @@ SAMPLE_EVAL_RESULT: dict[str, Any] = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_issue(**overrides: Any) -> dict[str, Any]:
     """Return a copy of the snapcraft issue with optional overrides."""
     result = deepcopy(REAL_ISSUE_SNAPCRAFT)
@@ -287,7 +287,9 @@ def _patch_http(
     client_mock.__aexit__ = AsyncMock(return_value=False)
     client_mock.get = AsyncMock(side_effect=get_responses)
     client_mock.post = AsyncMock(side_effect=post_responses or [])
-    monkeypatch.setattr(eval_client.httpx, "AsyncClient", MagicMock(return_value=client_mock))
+    monkeypatch.setattr(
+        eval_client.httpx, "AsyncClient", MagicMock(return_value=client_mock)
+    )
     return client_mock
 
 
@@ -295,11 +297,14 @@ def _patch_http(
 # Happy-path integration tests with real-world data
 # ---------------------------------------------------------------------------
 
+
 class TestEvalClientHappyPath:
     """Test the full client loop using realistic issue data."""
 
     @pytest.mark.asyncio
-    async def test_evaluates_single_real_issue(self, monkeypatch, patched_runtime) -> None:
+    async def test_evaluates_single_real_issue(
+        self, monkeypatch, patched_runtime
+    ) -> None:
         """A single real-world issue is fetched, evaluated, and submitted."""
         client_mock = _patch_http(
             monkeypatch,
@@ -350,20 +355,31 @@ class TestEvalClientHappyPath:
         )
         post_responses = [httpx.Response(status_code=200)] * 3
 
-        _patch_http(monkeypatch, get_responses=get_responses, post_responses=post_responses)
+        _patch_http(
+            monkeypatch, get_responses=get_responses, post_responses=post_responses
+        )
 
         await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 3})
 
         assert patched_runtime["evaluator"].evaluate_issue.call_count == 3
-        assert patched_runtime["evaluator"].evaluate_issue.call_args_list[0].kwargs[
-            "title"
-        ] == issues[0]["title"]
-        assert patched_runtime["evaluator"].evaluate_issue.call_args_list[1].kwargs[
-            "title"
-        ] == issues[1]["title"]
-        assert patched_runtime["evaluator"].evaluate_issue.call_args_list[2].kwargs[
-            "title"
-        ] == issues[2]["title"]
+        assert (
+            patched_runtime["evaluator"]
+            .evaluate_issue.call_args_list[0]
+            .kwargs["title"]
+            == issues[0]["title"]
+        )
+        assert (
+            patched_runtime["evaluator"]
+            .evaluate_issue.call_args_list[1]
+            .kwargs["title"]
+            == issues[1]["title"]
+        )
+        assert (
+            patched_runtime["evaluator"]
+            .evaluate_issue.call_args_list[2]
+            .kwargs["title"]
+            == issues[2]["title"]
+        )
 
         # Verify each project name was extracted correctly
         calls = patched_runtime["evaluator"].evaluate_issue.call_args_list
@@ -372,7 +388,9 @@ class TestEvalClientHappyPath:
         assert calls[2].kwargs["author"] == "new-contributor"
 
     @pytest.mark.asyncio
-    async def test_evaluates_pr_with_real_data(self, monkeypatch, patched_runtime) -> None:
+    async def test_evaluates_pr_with_real_data(
+        self, monkeypatch, patched_runtime
+    ) -> None:
         """A pull request issue is evaluated with correct issue_type."""
         _patch_http(
             monkeypatch,
@@ -439,21 +457,28 @@ class TestEvalClientHappyPath:
         assert "LLM timeout" in caplog.text
         # Evaluator was called twice (error + success), but only one was submitted
         assert patched_runtime["evaluator"].evaluate_issue.call_count == 2
-        assert patched_runtime["evaluator"].evaluate_issue.call_args_list[0].kwargs[
-            "title"
-        ] == REAL_ISSUE_SNAPCRAFT["title"]
+        assert (
+            patched_runtime["evaluator"]
+            .evaluate_issue.call_args_list[0]
+            .kwargs["title"]
+            == REAL_ISSUE_SNAPCRAFT["title"]
+        )
 
 
 # ---------------------------------------------------------------------------
 # Error-path integration tests
 # ---------------------------------------------------------------------------
 
+
 class TestEvalClientErrorPaths:
     """Test error handling in the client loop with realistic scenarios."""
 
     @pytest.mark.asyncio
-    async def test_server_returns_401_unauthorized(self, monkeypatch, patched_runtime) -> None:
+    async def test_server_returns_401_unauthorized(
+        self, monkeypatch, patched_runtime
+    ) -> None:
         """401 from the API is logged and the loop sleeps."""
+
         async def request_shutdown(seconds: int) -> None:
             eval_client.shutdown_state["requested"] = True
 
@@ -476,6 +501,7 @@ class TestEvalClientErrorPaths:
         self, monkeypatch, patched_runtime, caplog
     ) -> None:
         """422 from the API (e.g. missing confidence) is logged as an error."""
+
         async def request_shutdown(seconds: int) -> None:
             eval_client.shutdown_state["requested"] = True
 
@@ -487,7 +513,9 @@ class TestEvalClientErrorPaths:
                 httpx.Response(status_code=204),
             ),
             post_responses=[
-                _response(422, json={"detail": "scores missing required keys: confidence"})
+                _response(
+                    422, json={"detail": "scores missing required keys: confidence"}
+                )
             ],
         )
 
@@ -498,8 +526,11 @@ class TestEvalClientErrorPaths:
         assert "confidence" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_submit_409_conflict_is_skipped(self, monkeypatch, patched_runtime, caplog) -> None:
+    async def test_submit_409_conflict_is_skipped(
+        self, monkeypatch, patched_runtime, caplog
+    ) -> None:
         """409 (content changed) is logged as a warning and the loop continues."""
+
         async def request_shutdown(seconds: int) -> None:
             eval_client.shutdown_state["requested"] = True
 
@@ -511,7 +542,12 @@ class TestEvalClientErrorPaths:
                 httpx.Response(status_code=204),
             ),
             post_responses=[
-                _response(409, json={"detail": "Content hash mismatch; issue content has changed."})
+                _response(
+                    409,
+                    json={
+                        "detail": "Content hash mismatch; issue content has changed."
+                    },
+                )
             ],
         )
 
@@ -521,8 +557,11 @@ class TestEvalClientErrorPaths:
         assert "content changed during evaluation" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_server_500_triggers_retry(self, monkeypatch, patched_runtime) -> None:
+    async def test_server_500_triggers_retry(
+        self, monkeypatch, patched_runtime
+    ) -> None:
         """A 500 on the next endpoint causes a retry, not a crash."""
+
         async def request_shutdown(seconds: int) -> None:
             eval_client.shutdown_state["requested"] = True
 
@@ -543,8 +582,11 @@ class TestEvalClientErrorPaths:
         patched_runtime["evaluator"].evaluate_issue.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_invalid_json_from_server_is_handled(self, monkeypatch, patched_runtime) -> None:
+    async def test_invalid_json_from_server_is_handled(
+        self, monkeypatch, patched_runtime
+    ) -> None:
         """Non-JSON response body is logged as an error and the loop continues."""
+
         async def request_shutdown(seconds: int) -> None:
             eval_client.shutdown_state["requested"] = True
 
@@ -563,8 +605,11 @@ class TestEvalClientErrorPaths:
         assert "invalid JSON" in str(mock_logger.error.call_args)
 
     @pytest.mark.asyncio
-    async def test_connect_error_triggers_sleep(self, monkeypatch, patched_runtime) -> None:
+    async def test_connect_error_triggers_sleep(
+        self, monkeypatch, patched_runtime
+    ) -> None:
         """Connection errors cause the loop to sleep and retry."""
+
         async def request_shutdown(seconds: int) -> None:
             eval_client.shutdown_state["requested"] = True
 
@@ -573,7 +618,9 @@ class TestEvalClientErrorPaths:
             monkeypatch,
             get_responses=[],
         )
-        client_mock.get = AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
+        client_mock.get = AsyncMock(
+            side_effect=httpx.ConnectError("Connection refused")
+        )
 
         with patch.object(eval_client, "logger") as mock_logger:
             await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
@@ -586,6 +633,7 @@ class TestEvalClientErrorPaths:
         self, monkeypatch, patched_runtime, caplog
     ) -> None:
         """When the server hash differs from the local hash, a warning is logged."""
+
         async def request_shutdown(seconds: int) -> None:
             eval_client.shutdown_state["requested"] = True
 
@@ -612,6 +660,7 @@ class TestEvalClientErrorPaths:
         self, monkeypatch, patched_runtime, caplog
     ) -> None:
         """A failed submission does not increment the evaluated counter."""
+
         async def request_shutdown(seconds: int) -> None:
             eval_client.shutdown_state["requested"] = True
 
@@ -637,6 +686,7 @@ class TestEvalClientErrorPaths:
 # Flow-control integration tests
 # ---------------------------------------------------------------------------
 
+
 class TestEvalClientFlowControl:
     """Test flow control: limits, no-work, shutdown, pause."""
 
@@ -645,6 +695,7 @@ class TestEvalClientFlowControl:
         self, monkeypatch, patched_runtime
     ) -> None:
         """limit=0 runs until the server returns 204 (no more work)."""
+
         async def request_shutdown(seconds: int) -> None:
             eval_client.shutdown_state["requested"] = True
 
@@ -658,7 +709,10 @@ class TestEvalClientFlowControl:
                 httpx.Response(status_code=204),
                 httpx.Response(status_code=204),
             ),
-            post_responses=[httpx.Response(status_code=200), httpx.Response(status_code=200)],
+            post_responses=[
+                httpx.Response(status_code=200),
+                httpx.Response(status_code=200),
+            ],
         )
 
         await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
@@ -666,7 +720,9 @@ class TestEvalClientFlowControl:
         assert patched_runtime["evaluator"].evaluate_issue.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_limit_two_stops_after_two(self, monkeypatch, patched_runtime, caplog) -> None:
+    async def test_limit_two_stops_after_two(
+        self, monkeypatch, patched_runtime, caplog
+    ) -> None:
         """limit=N stops after evaluating N issues."""
         _patch_http(
             monkeypatch,
@@ -675,7 +731,10 @@ class TestEvalClientFlowControl:
                 httpx.Response(status_code=200, json=REAL_ISSUE_LANDSCAPE),
                 httpx.Response(status_code=200, json=REAL_ISSUE_CHARM),
             ),
-            post_responses=[httpx.Response(status_code=200), httpx.Response(status_code=200)],
+            post_responses=[
+                httpx.Response(status_code=200),
+                httpx.Response(status_code=200),
+            ],
         )
 
         with caplog.at_level(logging.INFO):
@@ -687,8 +746,11 @@ class TestEvalClientFlowControl:
         assert "charmhub" not in caplog.text
 
     @pytest.mark.asyncio
-    async def test_no_work_sleeps_and_retries(self, monkeypatch, patched_runtime) -> None:
+    async def test_no_work_sleeps_and_retries(
+        self, monkeypatch, patched_runtime
+    ) -> None:
         """When the server returns 204, the client sleeps before re-polling."""
+
         async def request_shutdown(seconds: int) -> None:
             eval_client.shutdown_state["requested"] = True
 
@@ -711,6 +773,7 @@ class TestEvalClientFlowControl:
         self, monkeypatch, patched_runtime, caplog
     ) -> None:
         """When the evaluator returns None (content unchanged), no submission is made."""
+
         async def request_shutdown(seconds: int) -> None:
             eval_client.shutdown_state["requested"] = True
 
@@ -749,18 +812,24 @@ class TestEvalClientFlowControl:
                 httpx.Response(status_code=200, json=REAL_ISSUE_LANDSCAPE),
                 httpx.Response(status_code=204),
             ),
-            post_responses=[httpx.Response(status_code=200), httpx.Response(status_code=200)],
+            post_responses=[
+                httpx.Response(status_code=200),
+                httpx.Response(status_code=200),
+            ],
         )
 
         with caplog.at_level(logging.INFO):
             await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 2})
 
-        assert "Run total: 2 issues, 700 in / 500 out tokens (1200 total)" in caplog.text
+        assert (
+            "Run total: 2 issues, 700 in / 500 out tokens (1200 total)" in caplog.text
+        )
 
 
 # ---------------------------------------------------------------------------
 # Submission payload integration tests
 # ---------------------------------------------------------------------------
+
 
 class TestEvalClientSubmissionPayload:
     """Test that submission payloads are correctly constructed from real issue data."""
@@ -803,7 +872,9 @@ class TestEvalClientSubmissionPayload:
         # Token fields
         assert submit_json["tokens_used"] == SAMPLE_EVAL_RESULT["tokens_used"]
         assert submit_json["prompt_tokens"] == SAMPLE_EVAL_RESULT["prompt_tokens"]
-        assert submit_json["completion_tokens"] == SAMPLE_EVAL_RESULT["completion_tokens"]
+        assert (
+            submit_json["completion_tokens"] == SAMPLE_EVAL_RESULT["completion_tokens"]
+        )
 
     @pytest.mark.asyncio
     async def test_submission_uses_evaluator_hash_not_server_hash(
@@ -813,7 +884,10 @@ class TestEvalClientSubmissionPayload:
         # The server returns current_hash = "219a6a5fdaa8390c"
         # The evaluator produces issue_data_hash = "abc123"
         # The submission should use "abc123"
-        assert REAL_ISSUE_SNAPCRAFT["current_hash"] != SAMPLE_EVAL_RESULT["issue_data_hash"]
+        assert (
+            REAL_ISSUE_SNAPCRAFT["current_hash"]
+            != SAMPLE_EVAL_RESULT["issue_data_hash"]
+        )
 
         client_mock = _patch_http(
             monkeypatch,
@@ -832,6 +906,7 @@ class TestEvalClientSubmissionPayload:
 # ---------------------------------------------------------------------------
 # Edge-case integration tests with real-world data shapes
 # ---------------------------------------------------------------------------
+
 
 class TestEvalClientEdgeCases:
     """Edge cases using realistic data shapes from the API."""
@@ -864,8 +939,8 @@ class TestEvalClientEdgeCases:
             {
                 "author": f"user-{i}",
                 "body": f"Comment number {i} in the thread discussing this issue.",
-                "created_at": f"2026-05-{10+i:02d}T10:00:00+00:00",
-                "updated_at": f"2026-05-{10+i:02d}T10:00:00+00:00",
+                "created_at": f"2026-05-{10 + i:02d}T10:00:00+00:00",
+                "updated_at": f"2026-05-{10 + i:02d}T10:00:00+00:00",
             }
             for i in range(15)
         ]
@@ -946,7 +1021,9 @@ class TestEvalClientEdgeCases:
         assert call_kwargs["age_days"] <= 80
 
     @pytest.mark.asyncio
-    async def test_run_continues_after_failed_submission(self, monkeypatch, patched_runtime) -> None:
+    async def test_run_continues_after_failed_submission(
+        self, monkeypatch, patched_runtime
+    ) -> None:
         """After a failed submission, the client fetches and evaluates the next issue."""
         patched_runtime["evaluator"].evaluate_issue.side_effect = [
             SAMPLE_EVAL_RESULT,  # First issue
@@ -965,7 +1042,9 @@ class TestEvalClientEdgeCases:
                 httpx.Response(status_code=204),
             ),
             post_responses=[
-                _response(422, json={"detail": "scores missing required keys: confidence"}),
+                _response(
+                    422, json={"detail": "scores missing required keys: confidence"}
+                ),
                 httpx.Response(status_code=200),
             ],
         )
@@ -996,4 +1075,6 @@ class TestEvalClientEdgeCases:
         # The log line should include the issue reference and action
         assert any("snapcraft#2695" in record.message for record in caplog.records)
         assert any("needs_triage" in record.message for record in caplog.records)
-        assert any("300 in / 200 out tokens" in record.message for record in caplog.records)
+        assert any(
+            "300 in / 200 out tokens" in record.message for record in caplog.records
+        )
