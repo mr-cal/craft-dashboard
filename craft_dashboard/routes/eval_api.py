@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from scripts.llm.validation import validate_evaluation_result
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from sqlalchemy import func, or_, select, text, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import aliased
 
 if TYPE_CHECKING:
@@ -320,14 +320,14 @@ async def eval_status(
     )
 
     # Build base issue query (no latest_evaluation join — used for total_open)
-    base_query = select(Issue.id).join(
-        Project, Issue.project_id == Project.id
-    )
+    base_query = select(Issue.id).join(Project, Issue.project_id == Project.id)
     if open_only:
         base_query = base_query.where(Issue.state == "open")
     if project:
         base_query = base_query.where(Project.name == project)
-    total_open = await session.scalar(select(func.count()).select_from(base_query.subquery()))
+    total_open = await session.scalar(
+        select(func.count()).select_from(base_query.subquery())
+    )
 
     # Pending count depends on filter mode
     if force:
@@ -386,7 +386,9 @@ async def eval_status(
                 )
             )
 
-        pending = await session.scalar(select(func.count()).select_from(pending_query.subquery()))
+        pending = await session.scalar(
+            select(func.count()).select_from(pending_query.subquery())
+        )
 
     return {
         "pending": pending or 0,

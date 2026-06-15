@@ -393,8 +393,6 @@ dev = [
 ]
 lint = [
     { name = "ruff" },
-]
-types = [
     { name = "ty" },
 ]
 
@@ -433,8 +431,11 @@ dev = [
     { name = "requests", specifier = ">=2.31" },
     { name = "ruff", specifier = ">=0.15.13" },
 ]
-lint = [{ name = "ruff", specifier = ">=0.9" }]
-types = [{ name = "ty", specifier = ">=0.0.1a6" }]
+lint = [
+    { name = "ruff", specifier = ">=0.9" },
+    { name = "ty", specifier = ">=0.0.1a6" },
+]
+types = []
 
 [[package]]
 name = "cryptography"
