@@ -11,7 +11,7 @@ _SUMMARY_SYSTEM = (
 )
 
 _CLOSED_SUMMARY_SYSTEM = (
-    "You are a concise technical writer. Write a brief explaination of at most "
+    "You are a concise technical writer. Write a brief explanation of at most "
     "256 characters summarising what happened with this closed GitHub issue or "
     "pull request. Focus on the outcome: was it fixed, merged, rejected, "
     "superseded, or abandoned? Mention any resolution or merge details. "
@@ -39,7 +39,16 @@ Respond with valid JSON matching this schema:
 Score guidelines:
 
 - staleness: 0 = very active, 100 = completely dead. Consider the pace of open-source \
-projects: issues under 1 month old are fresh (0-10), 1-3 months is mildly stale \
+projects:
+- {0-30}: Fresh. Under discussion, activity in the last month, or recently referenced \
+ in other issues or PRs.
+- {31-60}: Moderately stale. Activity within the last 6 months, some acknowledgement \
+that this issue is relevant, even if it's not able to be solved (i.e. it requires \
+architectural decisions or is blocked by an external dependency).
+- {61-100}: Very stale. No activity within the last year or limited maintainer \
+interaction. Clearly no longer relevant to a newer version of the project.
+
+ issues under 1 month old are fresh (0-10), 1-3 months is mildly stale \
 (10-30), 3-6 months is moderately stale (30-50), and only issues with no activity for \
 6+ months should score above 50. Also consider whether the issue is still relevant to \
 the current major version of the software (a bug report against an old, superseded \
@@ -53,7 +62,7 @@ are also more complex.
 - support_request: 0 = actual bug or feature, 100 = support or help request with \
 using the tool
 
-- "confidence": 0 = not confident the chosen action is the right correct, 100 = \
+- confidence: 0 = not confident the chosen action is the right correct, 100 = \
 high confidence the action is the correct action. High confidence means the \
 issue is clearly one of the allowed actions based on the evidence. Low confidence \
 means the issue is ambiguous, mixed signals, or would benefit from human review \
@@ -77,7 +86,7 @@ it should be kept open unless it's outdated. This is also appropriate if a \
 maintainer has asked for further information or changes and has been waiting \
 less than 6 months for a response from the original author.
 
-- close_stale: The issue is both inactive AND has become irrelevant. Inactivy alone \
+- close_stale: The issue is both inactive AND has become irrelevant. Inactivity alone \
 is NEVER a sufficient reason to close an issue. The issue must also show clear signs \
 that it is no longer applicable. Valid reasons include: the feature was implemented \
 elsewhere, the affected version is no longer supported, or the original problem is no \
@@ -93,7 +102,7 @@ configuration or documentation.
 
 _PR_EVAL_SYSTEM = """
 You are an expert open-source project maintainer. Evaluate the following \
-GitHub issue and provide scores and a suggested action.
+GitHub pull request and provide scores and a suggested action.
 
 Respond with valid JSON matching this schema:
 {
@@ -109,17 +118,21 @@ Respond with valid JSON matching this schema:
 Score guidelines:
 
 - staleness: 0 = very active, 100 = completely dead. Consider the pace of open-source \
-projects: a PR with no activity for 4+ weeks is already mildly stale (10-30), and 4+ \
-months with no review or update is very stale (50+). Also consider whether the PR is \
-still relevant to the current version of the software (a PR for an old, superseded \
-version is slightly more stale).
+projects:
+- {0-30}: Fresh. Under discussion, activity in the last month, or recently referenced \
+ in other issues or PRs.
+- {31-60}: Moderately stale. Activity within the last 6 months, some acknowledgement \
+that this issue is relevant, even if it's not able to be solved (i.e. it requires \
+architectural decisions or is blocked by an external dependency).
+- {61-100}: Very stale. No activity within the last year or limited maintainer \
+interaction. Targets an outdated version of the project. Superseded by a newer PR.
 
 - complexity: 0 = trivial, 100 = extremely complex. PRs that make architectural \
 changes or have backward compatibility considerations are more complex. PRs that \
 fix difficult to reproduce issues, impact on existing projects is difficult to
 reason about, or have extensive integration testing are also more complex.
 
-- "confidence": 0 = not confident the chosen action is the right correct, 100 = \
+- confidence: 0 = not confident the chosen action is the right correct, 100 = \
 high confidence the action is the correct action. High confidence means the \
 issue is clearly one of the allowed actions based on the evidence. Low confidence \
 means the PR is ambiguous, mixed signals, or would benefit from human review \
@@ -128,31 +141,31 @@ without concrete evidence.
 
 Action guidelines — choose the MOST appropriate action:
 
-- needs_review: The PR has NOT yet been reviewed by a maintainer. This may also be \
-appropriate if a maintainer has already reviewed a PR and the author has made \
-subsequent changes or has asked a question of the maintainer. This is also used \
-when a PR has sufficient (2) approvals and is ready to be landed.
+- needs_review: The PR needs a maintainer review. This may also be appropriate if \
+a maintainer has already reviewed a PR and the author has made subsequent changes \
+or has asked a question of the maintainer. This is also used when a PR has sufficient \
+(2) approvals and is ready to be landed.
 
 - keep_open: The PR has been acknowledged by a maintainer, is under development, \
 or is undergoing review cycles. Also use when the PR is a draft PR or is currently \
-being developed. As long as it has recieved updates within 3 months, it can be kept \
+being developed. As long as it has received updates within 3 months, it can be kept \
 open. PRs blocked by other PRs or issues, pending external decisions, or upstream \
-changes should be kept open, even if they haven't been updated in months.
+changes should be kept open, regardless of their last update.
 
-- close_stale: The PR is both inactive AND has become irrelevant. Inactivy alone \
-is NEVER a sufficient reason to close an PR. The PR must also show clear signs \
+- close_stale: The PR is both inactive AND has become irrelevant. Inactivity alone \
+is NEVER a sufficient reason to close a PR. The PR must also show clear signs \
 that it is no longer applicable. Valid reasons include: the feature was implemented \
-elsewhere, the affected version is no longer supported, or the original problem it
+elsewhere, the affected version is no longer supported, or the original problem it \
 solves is no longer reproducible. Lack of maintainer engagement is not a sufficient \
 reason alone and neither is failing CI jobs. However, if the maintainer has asked \
 for feedback and the reporter has not addressed the feedback within 3 months, this \
 may be sufficient. Always provide a concrete, specific reason why the PR is no longer \
 relevant beyond just its age or inactivity.
 
-- close_not_a_bug: The PR makes a change that isn't appropriate or relevant, makes \
-an backward incompatible change that isn't acceptable, or otherwise makes a change \
+- close_not_mergeable: The PR makes a change that isn't appropriate or relevant, makes \
+a backward incompatible change that isn't acceptable, or otherwise makes a change \
 that isn't mergeable. This can include adding features or fixing bugs that the \
-maintainers expressly mention they can't accept.
+maintainers expressly state they can't accept.
 """
 
 
