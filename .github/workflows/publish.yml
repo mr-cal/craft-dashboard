@@ -48,7 +48,6 @@ jobs:
 
       - name: Trigger vps-infra deploy
         uses: peter-evans/repository-dispatch@v3
-        continue-on-error: true
         with:
           token: ${{ secrets.VPSINFRA_PAT }}
           repository: mr-cal/vps-infra
