@@ -4,6 +4,17 @@ craft-dashboard runs as a container alongside a PostgreSQL container.
 Locally it uses Docker Compose. In production it runs under Podman,
 managed by the [vps-infra](https://github.com/mr-cal/vps-infra) repo.
 
+## CI deployment
+
+Pushing to `main` triggers `.github/workflows/publish.yml`, which builds and
+pushes `ghcr.io/mr-cal/craft-dashboard:latest` to GHCR, then dispatches a
+`craft-dashboard-updated` event to vps-infra. The vps-infra deploy workflow
+pulls the new image and restarts the container automatically.
+
+To enable the dispatch, add a `VPSINFRA_PAT` secret to this repo
+(Settings → Secrets and variables → Actions) with a fine-grained PAT
+scoped to `mr-cal/vps-infra` with **Contents: Read and write**.
+
 ## Configuration
 
 ### .env

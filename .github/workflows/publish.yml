@@ -45,3 +45,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0
+
+      - name: Trigger vps-infra deploy
+        uses: peter-evans/repository-dispatch@v3
+        continue-on-error: true
+        with:
+          token: ${{ secrets.VPSINFRA_PAT }}
+          repository: mr-cal/vps-infra
+          event-type: craft-dashboard-updated

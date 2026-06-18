@@ -60,6 +60,11 @@ available in the `pgvector/pgvector:pg16` image, not `postgres:16-alpine`.
 ## Image publishing
 
 Pushing to `main` triggers `.github/workflows/publish.yml`, which builds and
-pushes `ghcr.io/mr-cal/craft-dashboard:latest` to GHCR. The vps-infra deploy
-workflow then picks up the new image.
+pushes `ghcr.io/mr-cal/craft-dashboard:latest` to GHCR, then dispatches a
+`repository_dispatch` event to [mr-cal/vps-infra](https://github.com/mr-cal/vps-infra)
+to trigger a redeploy. The vps-infra deploy workflow pulls the new image and restarts
+the container.
 
+A `VPSINFRA_PAT` secret must be set on this repo (Settings → Secrets and variables →
+Actions) with a fine-grained PAT scoped to `mr-cal/vps-infra` with
+**Contents: Read and write**.
