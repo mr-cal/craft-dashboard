@@ -13,7 +13,7 @@ pulls the new image and restarts the container automatically.
 
 To enable the dispatch, add a `VPSINFRA_PAT` secret to this repo
 (Settings → Secrets and variables → Actions) with a fine-grained PAT
-scoped to `mr-cal/vps-infra` with **Actions: Read and write**.
+scoped to `mr-cal/vps-infra` with **Contents: Read and write**.
 
 ## Configuration
 

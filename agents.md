@@ -67,4 +67,4 @@ the container.
 
 A `VPSINFRA_PAT` secret must be set on this repo (Settings → Secrets and variables →
 Actions) with a fine-grained PAT scoped to `mr-cal/vps-infra` with
-**Actions: Read and write**.
+**Contents: Read and write**.
