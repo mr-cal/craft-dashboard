@@ -320,10 +320,11 @@ class TestAdminDistribute:
         assert response.status_code == 200
         assert "Admin: distributed 2 schedules over 7 days" in caplog.text
 
-    def test_distribute_spreads_by_issue_weight(self) -> None:
-        """Projects with more issues get proportionally more time between them."""
-        # Project 1 has 10 issues, project 2 has 90 issues.
-        # Project 2 should be scheduled much later than project 1.
+    def test_distribute_balances_heavy_and_light_projects(self) -> None:
+        """Heavy and light projects land on different days (greedy bin packing)."""
+        # With 2 projects and 7 days they each get their own day.
+        # The heavy project (90 issues) should be on day 0 (largest-first),
+        # the light project (10 issues) on a different day.
         schedules = [
             SimpleNamespace(project_id=1, source="github", next_refresh_at=None),
             SimpleNamespace(project_id=2, source="github", next_refresh_at=None),
@@ -347,10 +348,51 @@ class TestAdminDistribute:
         t1, t2 = schedules[0].next_refresh_at, schedules[1].next_refresh_at
         assert t1 is not None
         assert t2 is not None
-        # With 10/100 cumulative weight, project 1 → 0.1 * 7 days = 0.7 days
-        # With 100/100 cumulative weight, project 2 → 1.0 * 7 days = 7 days
-        gap = (t2 - t1).total_seconds()
-        assert gap > 5 * 86400, f"Expected gap > 5 days, got {gap / 86400:.1f} days"
+        # The two projects must land on different calendar days.
+        assert t1.date() != t2.date()
+
+    def test_distribute_balances_total_issues_across_days(self) -> None:
+        """Greedy packing keeps per-day issue totals roughly equal."""
+        # 7 projects: one with 1000 issues, six with ~170 each → total ≈ 2020.
+        # Ideal: ~288 per day. After packing the heaviest project alone on day 0,
+        # the remaining six should fill the other 6 days with ~170 each.
+        schedules = [
+            SimpleNamespace(project_id=i, source="github", next_refresh_at=None)
+            for i in range(7)
+        ]
+        issue_counts = [
+            SimpleNamespace(project_id=0, source="github", issue_count=1000),
+            *[
+                SimpleNamespace(project_id=i, source="github", issue_count=170)
+                for i in range(1, 7)
+            ],
+        ]
+
+        async def _override_distribute_session():
+            yield _DistributeSession(schedules, issue_counts)
+
+        app = _create_admin_app(session_override=_override_distribute_session)
+
+        with TestClient(app) as client:
+            client.post(
+                "/admin/distribute",
+                headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
+            )
+
+        # Group assigned times by calendar-day offset from now.
+        now = datetime.now(UTC)
+        day_issues: dict[int, int] = {}
+        issue_map = {0: 1000, **dict.fromkeys(range(1, 7), 170)}
+        for s in schedules:
+            day = (s.next_refresh_at - now).days
+            day_issues[day] = day_issues.get(day, 0) + issue_map[s.project_id]
+
+        # No single day should have more than 60% of all issues.
+        total = sum(day_issues.values())
+        for day, count in day_issues.items():
+            assert count / total < 0.6, (
+                f"Day {day} has {count}/{total} issues ({count / total:.0%})"
+            )
 
     def test_distribute_unique_times_for_many_projects(self) -> None:
         """All schedules get unique times regardless of issue count."""

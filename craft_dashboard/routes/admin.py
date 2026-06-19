@@ -388,16 +388,27 @@ async def distribute_refresh_schedule(
 
     # Assign each schedule a weight (minimum 1 so new projects still get a slot).
     weights = [max(1, issue_counts.get((s.project_id, s.source), 0)) for s in schedules]
-    total_weight = sum(weights)
-    total_seconds = refresh_age_days * 86400
 
+    # Greedy bin packing: sort heaviest-first, assign each to the lightest day.
+    # This minimises the maximum-day load and gives the most even distribution.
+    order = sorted(range(len(schedules)), key=lambda i: -weights[i])
+    day_totals = [0] * refresh_age_days
+    day_assignments: list[list[int]] = [[] for _ in range(refresh_age_days)]
+
+    for orig_idx in order:
+        lightest_day = min(range(refresh_age_days), key=lambda d: day_totals[d])
+        day_assignments[lightest_day].append(orig_idx)
+        day_totals[lightest_day] += weights[orig_idx]
+
+    # Spread projects within their assigned day to avoid all hitting at midnight.
     now = datetime.now(UTC)
-    cumulative = 0
-    for schedule, weight in zip(schedules, weights):
-        cumulative += weight
-        schedule.next_refresh_at = now + timedelta(
-            seconds=total_seconds * cumulative / total_weight
-        )
+    for day_idx, assigned_indices in enumerate(day_assignments):
+        n = len(assigned_indices)
+        day_start = now + timedelta(days=day_idx)
+        for slot, orig_idx in enumerate(assigned_indices):
+            schedules[orig_idx].next_refresh_at = day_start + timedelta(
+                seconds=86400 * (slot + 1) / (n + 1)
+            )
 
     await session.commit()
     total_schedules = len(schedules)
