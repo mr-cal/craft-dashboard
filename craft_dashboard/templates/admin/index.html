@@ -69,8 +69,21 @@
 <p style="font-size:0.875rem;color:var(--app-text-muted);">Number of issues scheduled for data collection each day.</p>
 {% if next_refresh %}
 <p style="font-size:0.875rem;">
-  Next scheduled refresh: <strong>{{ next_refresh.strftime('%a %b %d, %H:%M UTC') }}</strong>
+  Next scheduled refresh: <strong><time id="next-refresh-time" datetime="{{ next_refresh.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ next_refresh.strftime('%a %b %d, %H:%M UTC') }}</time></strong>
 </p>
+<script>
+  (function () {
+    var el = document.getElementById('next-refresh-time');
+    if (!el) return;
+    try {
+      var d = new Date(el.getAttribute('datetime'));
+      el.textContent = d.toLocaleString(undefined, {
+        weekday: 'short', month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
+      });
+    } catch (e) {}
+  })();
+</script>
 {% else %}
 <p style="font-size:0.875rem;color:var(--app-text-muted);">No upcoming refresh scheduled. Use <em>Redistribute</em> to set one up.</p>
 {% endif %}
