@@ -154,6 +154,7 @@ async def admin_page(
     lifetime_stats = await admin_service.get_lifetime_token_stats()
     recent_stats = await admin_service.get_seven_day_token_stats()
     collection_runs = await admin_service.get_recent_collection_runs()
+    next_refresh = await admin_service.get_next_scheduled_refresh()
 
     return templates.TemplateResponse(
         request,
@@ -161,6 +162,7 @@ async def admin_page(
         {
             "project_names": project_names,
             "schedule_days": schedule_days,
+            "next_refresh": next_refresh,
             "total_evaluations": lifetime_stats["evaluations"],
             "total_tokens": lifetime_stats["tokens"],
             "total_prompt_tokens": lifetime_stats["prompt_tokens"],
@@ -400,11 +402,16 @@ async def distribute_refresh_schedule(
         day_assignments[lightest_day].append(orig_idx)
         day_totals[lightest_day] += weights[orig_idx]
 
-    # Spread projects within their assigned day to avoid all hitting at midnight.
+    # Use midnight-aligned day boundaries so assignments match the calendar-day
+    # buckets that get_schedule_day_counts uses.  Start from tomorrow so nothing
+    # is scheduled in tonight's remaining hours.
     now = datetime.now(UTC)
+    tomorrow_midnight = now.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ) + timedelta(days=1)
     for day_idx, assigned_indices in enumerate(day_assignments):
         n = len(assigned_indices)
-        day_start = now + timedelta(days=day_idx)
+        day_start = tomorrow_midnight + timedelta(days=day_idx)
         for slot, orig_idx in enumerate(assigned_indices):
             schedules[orig_idx].next_refresh_at = day_start + timedelta(
                 seconds=86400 * (slot + 1) / (n + 1)

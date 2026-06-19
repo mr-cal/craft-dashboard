@@ -162,6 +162,17 @@ class AdminService:
             )
         return schedule_days
 
+    async def get_next_scheduled_refresh(self) -> datetime | None:
+        """Return the earliest future next_refresh_at across all schedules."""
+        result = await self.session.scalar(
+            select(func.min(RefreshSchedule.next_refresh_at)).where(
+                RefreshSchedule.next_refresh_at > datetime.now(UTC)
+            )
+        )
+        if not isinstance(result, datetime):
+            return None
+        return _ensure_utc(result)
+
     async def get_project_names(self) -> list[str]:
         """Get all non-aggregate project names."""
         project_result = await self.session.execute(

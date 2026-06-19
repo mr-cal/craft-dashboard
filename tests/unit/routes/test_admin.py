@@ -320,11 +320,54 @@ class TestAdminDistribute:
         assert response.status_code == 200
         assert "Admin: distributed 2 schedules over 7 days" in caplog.text
 
+    def test_distribute_times_align_with_calendar_day_buckets(self) -> None:
+        """All next_refresh_at times fall within midnight-aligned calendar windows.
+
+        This is the key correctness property: the distributed times must match
+        the same midnight-aligned buckets that get_schedule_day_counts uses,
+        otherwise the admin panel shows the wrong counts.
+        """
+        schedules = [
+            SimpleNamespace(project_id=i, source="github", next_refresh_at=None)
+            for i in range(10)
+        ]
+
+        async def _override_distribute_session():
+            yield _DistributeSession(schedules)
+
+        app = _create_admin_app(session_override=_override_distribute_session)
+        before = datetime.now(UTC)
+
+        with TestClient(app) as client:
+            client.post(
+                "/admin/distribute",
+                headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
+            )
+
+        now = before
+        today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow_midnight = today_midnight + timedelta(days=1)
+
+        times = [s.next_refresh_at for s in schedules]
+        assert all(t is not None for t in times)
+        assert len(set(times)) == 10
+
+        for t in times:
+            # Must be on or after tomorrow midnight — nothing scheduled for today.
+            assert t >= tomorrow_midnight, (
+                f"{t} is before tomorrow midnight {tomorrow_midnight}"
+            )
+            # Must be within the refresh window.
+            assert t < tomorrow_midnight + timedelta(days=8)
+            # Must be a whole number of calendar days from tomorrow midnight
+            # (i.e., within some valid day bucket).
+            day_offset = (
+                t.replace(hour=0, minute=0, second=0, microsecond=0) - tomorrow_midnight
+            ).days
+            assert 0 <= day_offset < 7, f"Day offset {day_offset} out of range for {t}"
+
     def test_distribute_balances_heavy_and_light_projects(self) -> None:
-        """Heavy and light projects land on different days (greedy bin packing)."""
-        # With 2 projects and 7 days they each get their own day.
-        # The heavy project (90 issues) should be on day 0 (largest-first),
-        # the light project (10 issues) on a different day.
+        """Heavy and light projects land on different calendar days."""
         schedules = [
             SimpleNamespace(project_id=1, source="github", next_refresh_at=None),
             SimpleNamespace(project_id=2, source="github", next_refresh_at=None),
@@ -348,14 +391,15 @@ class TestAdminDistribute:
         t1, t2 = schedules[0].next_refresh_at, schedules[1].next_refresh_at
         assert t1 is not None
         assert t2 is not None
-        # The two projects must land on different calendar days.
+        # Two projects on separate calendar days, not bunched on the same day.
         assert t1.date() != t2.date()
 
     def test_distribute_balances_total_issues_across_days(self) -> None:
-        """Greedy packing keeps per-day issue totals roughly equal."""
-        # 7 projects: one with 1000 issues, six with ~170 each → total ≈ 2020.
-        # Ideal: ~288 per day. After packing the heaviest project alone on day 0,
-        # the remaining six should fill the other 6 days with ~170 each.
+        """Greedy packing keeps per-calendar-day issue totals roughly equal.
+
+        Uses the same midnight-aligned bucketing as get_schedule_day_counts so
+        we'd catch a calendar-day misalignment before it shows up in the UI.
+        """
         schedules = [
             SimpleNamespace(project_id=i, source="github", next_refresh_at=None)
             for i in range(7)
@@ -372,6 +416,7 @@ class TestAdminDistribute:
             yield _DistributeSession(schedules, issue_counts)
 
         app = _create_admin_app(session_override=_override_distribute_session)
+        before = datetime.now(UTC)
 
         with TestClient(app) as client:
             client.post(
@@ -379,45 +424,25 @@ class TestAdminDistribute:
                 headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
             )
 
-        # Group assigned times by calendar-day offset from now.
-        now = datetime.now(UTC)
-        day_issues: dict[int, int] = {}
+        # Bucket by calendar day (midnight-aligned), same as get_schedule_day_counts.
+        now = before
+        today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow_midnight = today_midnight + timedelta(days=1)
         issue_map = {0: 1000, **dict.fromkeys(range(1, 7), 170)}
+        day_issues: dict[int, int] = {}
         for s in schedules:
-            day = (s.next_refresh_at - now).days
-            day_issues[day] = day_issues.get(day, 0) + issue_map[s.project_id]
+            cal_day = (
+                s.next_refresh_at.replace(hour=0, minute=0, second=0, microsecond=0)
+                - tomorrow_midnight
+            ).days
+            day_issues[cal_day] = day_issues.get(cal_day, 0) + issue_map[s.project_id]
 
-        # No single day should have more than 60% of all issues.
+        # No single day may hold more than 60 % of all issues.
         total = sum(day_issues.values())
         for day, count in day_issues.items():
             assert count / total < 0.6, (
-                f"Day {day} has {count}/{total} issues ({count / total:.0%})"
+                f"Calendar day +{day} has {count}/{total} issues ({count / total:.0%})"
             )
-
-    def test_distribute_unique_times_for_many_projects(self) -> None:
-        """All schedules get unique times regardless of issue count."""
-        schedules = [
-            SimpleNamespace(project_id=i, source="github", next_refresh_at=None)
-            for i in range(10)
-        ]
-
-        async def _override_distribute_session():
-            yield _DistributeSession(schedules)
-
-        app = _create_admin_app(session_override=_override_distribute_session)
-
-        with TestClient(app) as client:
-            client.post(
-                "/admin/distribute",
-                headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
-            )
-
-        times = [s.next_refresh_at for s in schedules]
-        assert all(t is not None for t in times)
-        assert len(set(times)) == 10
-        now = datetime.now(UTC)
-        for t in times:
-            assert now < t <= now + timedelta(days=8)
 
 
 class TestAdminLogs:

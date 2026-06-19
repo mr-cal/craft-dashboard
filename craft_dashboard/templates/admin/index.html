@@ -67,6 +67,13 @@
 
 <h3>Project Refresh Schedule (Next 7 Days)</h3>
 <p style="font-size:0.875rem;color:var(--app-text-muted);">Number of issues scheduled for data collection each day.</p>
+{% if next_refresh %}
+<p style="font-size:0.875rem;">
+  Next scheduled refresh: <strong>{{ next_refresh.strftime('%a %b %d, %H:%M UTC') }}</strong>
+</p>
+{% else %}
+<p style="font-size:0.875rem;color:var(--app-text-muted);">No upcoming refresh scheduled. Use <em>Redistribute</em> to set one up.</p>
+{% endif %}
 <table>
   <thead>
     <tr>
