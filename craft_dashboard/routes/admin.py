@@ -188,6 +188,22 @@ async def trigger_refresh(
     _verify_origin(request)
     logger.info("Admin: refresh queued")
 
+    cmd = [
+        sys.executable,
+        str(
+            pathlib.Path(__file__).resolve().parent.parent.parent  # noqa: ASYNC240
+            / "scripts"
+            / "collect_data.py"
+        ),
+    ]
+    asyncio.create_task(
+        asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    )
+
     return JSONResponse(
         {"status": "refresh_queued", "message": "Data refresh has been queued."},
         status_code=202,
@@ -353,10 +369,11 @@ async def distribute_refresh_schedule(
 
     now = datetime.now(UTC)
     total_schedules = len(schedules)
+    total_seconds = refresh_age_days * 86400
 
     for idx, schedule in enumerate(schedules):
-        day_offset = (idx * refresh_age_days) // total_schedules
-        schedule.next_refresh_at = now + timedelta(days=day_offset)
+        offset_seconds = total_seconds * (idx + 1) / total_schedules
+        schedule.next_refresh_at = now + timedelta(seconds=offset_seconds)
 
     await session.commit()
     logger.info(

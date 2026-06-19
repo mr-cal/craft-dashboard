@@ -1,8 +1,10 @@
 """Tests for admin routes."""
 
 import logging
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -187,6 +189,33 @@ class TestAdminRefreshWithAuth:
         assert response.status_code == 202
         assert "Admin: refresh queued" in caplog.text
 
+    def test_refresh_spawns_collect_data_subprocess(self, monkeypatch) -> None:
+        """POST /admin/refresh spawns collect_data.py as a subprocess."""
+        app = _create_admin_app()
+        seen: dict[str, object] = {}
+
+        class _FakeProcess:
+            pass
+
+        async def _fake_create_subprocess_exec(*args, **kwargs):
+            seen["args"] = args
+            return _FakeProcess()
+
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.asyncio.create_subprocess_exec",
+            _fake_create_subprocess_exec,
+        )
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/admin/refresh",
+                headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
+            )
+
+        assert response.status_code == 202
+        assert "collect_data.py" in seen.get("args", ("",))[1]
+        assert seen["args"][0] == sys.executable
+
     def test_re_evaluate_requires_auth(self) -> None:
         """POST /admin/re-evaluate returns 401 without token."""
         app = _create_admin_app()
@@ -276,6 +305,51 @@ class TestAdminDistribute:
 
         assert response.status_code == 200
         assert "Admin: distributed 2 schedules over 7 days" in caplog.text
+
+    def test_distribute_spreads_evenly(self) -> None:
+        """POST /admin/distribute assigns unique, evenly-spaced refresh times."""
+        schedules = [SimpleNamespace(next_refresh_at=None) for _ in range(7)]
+
+        async def _override_distribute_session():
+            yield _DistributeSession(schedules)
+
+        app = _create_admin_app(session_override=_override_distribute_session)
+
+        with TestClient(app) as client:
+            client.post(
+                "/admin/distribute",
+                headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
+            )
+
+        times = [s.next_refresh_at for s in schedules]
+        # All times should be set and unique
+        assert all(t is not None for t in times)
+        assert len(set(times)) == len(times)
+        # Times should be in the future, within refresh_age_days
+        now = datetime.now(UTC)
+        for t in times:
+            assert now < t <= now + timedelta(days=8)
+        # Times should be strictly increasing (evenly spread)
+        for a, b in zip(times, times[1:]):
+            assert b > a
+
+    def test_distribute_no_integer_day_bunching(self) -> None:
+        """Schedules with more projects than days get unique times, not the same day."""
+        schedules = [SimpleNamespace(next_refresh_at=None) for _ in range(10)]
+
+        async def _override_distribute_session():
+            yield _DistributeSession(schedules)
+
+        app = _create_admin_app(session_override=_override_distribute_session)
+
+        with TestClient(app) as client:
+            client.post(
+                "/admin/distribute",
+                headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
+            )
+
+        times = [s.next_refresh_at for s in schedules]
+        assert len(set(times)) == 10
 
 
 class TestAdminLogs:
