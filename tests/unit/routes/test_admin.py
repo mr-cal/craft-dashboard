@@ -51,6 +51,14 @@ class _ScalarResult:
         return self._items
 
 
+class _RowResult:
+    def __init__(self, rows) -> None:
+        self._rows = rows
+
+    def __iter__(self):
+        return iter(self._rows)
+
+
 class _AdminSession:
     async def scalar(self, _query):
         return 0
@@ -75,11 +83,17 @@ class _HealthFailureSession(_AdminSession):
 
 
 class _DistributeSession(_AdminSession):
-    def __init__(self, schedules) -> None:
+    def __init__(self, schedules, issue_counts=None) -> None:
         self._schedules = schedules
+        self._issue_counts = issue_counts or []
+        self._call_count = 0
 
     async def execute(self, _query):
-        return _ScalarResult(self._schedules)
+        self._call_count += 1
+        # First call: RefreshSchedule query; second call: issue count query
+        if self._call_count == 1:
+            return _ScalarResult(self._schedules)
+        return _RowResult(self._issue_counts)
 
 
 async def _override_admin_db_session():
@@ -287,8 +301,8 @@ class TestAdminDistribute:
     def test_distribute_logs_schedule_summary(self, caplog) -> None:
         """POST /admin/distribute logs how many schedules were redistributed."""
         schedules = [
-            SimpleNamespace(next_refresh_at=None),
-            SimpleNamespace(next_refresh_at=None),
+            SimpleNamespace(project_id=1, source="github", next_refresh_at=None),
+            SimpleNamespace(project_id=2, source="github", next_refresh_at=None),
         ]
 
         async def _override_distribute_session():
@@ -306,9 +320,44 @@ class TestAdminDistribute:
         assert response.status_code == 200
         assert "Admin: distributed 2 schedules over 7 days" in caplog.text
 
-    def test_distribute_spreads_evenly(self) -> None:
-        """POST /admin/distribute assigns unique, evenly-spaced refresh times."""
-        schedules = [SimpleNamespace(next_refresh_at=None) for _ in range(7)]
+    def test_distribute_spreads_by_issue_weight(self) -> None:
+        """Projects with more issues get proportionally more time between them."""
+        # Project 1 has 10 issues, project 2 has 90 issues.
+        # Project 2 should be scheduled much later than project 1.
+        schedules = [
+            SimpleNamespace(project_id=1, source="github", next_refresh_at=None),
+            SimpleNamespace(project_id=2, source="github", next_refresh_at=None),
+        ]
+        issue_counts = [
+            SimpleNamespace(project_id=1, source="github", issue_count=10),
+            SimpleNamespace(project_id=2, source="github", issue_count=90),
+        ]
+
+        async def _override_distribute_session():
+            yield _DistributeSession(schedules, issue_counts)
+
+        app = _create_admin_app(session_override=_override_distribute_session)
+
+        with TestClient(app) as client:
+            client.post(
+                "/admin/distribute",
+                headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
+            )
+
+        t1, t2 = schedules[0].next_refresh_at, schedules[1].next_refresh_at
+        assert t1 is not None
+        assert t2 is not None
+        # With 10/100 cumulative weight, project 1 → 0.1 * 7 days = 0.7 days
+        # With 100/100 cumulative weight, project 2 → 1.0 * 7 days = 7 days
+        gap = (t2 - t1).total_seconds()
+        assert gap > 5 * 86400, f"Expected gap > 5 days, got {gap / 86400:.1f} days"
+
+    def test_distribute_unique_times_for_many_projects(self) -> None:
+        """All schedules get unique times regardless of issue count."""
+        schedules = [
+            SimpleNamespace(project_id=i, source="github", next_refresh_at=None)
+            for i in range(10)
+        ]
 
         async def _override_distribute_session():
             yield _DistributeSession(schedules)
@@ -322,34 +371,11 @@ class TestAdminDistribute:
             )
 
         times = [s.next_refresh_at for s in schedules]
-        # All times should be set and unique
         assert all(t is not None for t in times)
-        assert len(set(times)) == len(times)
-        # Times should be in the future, within refresh_age_days
+        assert len(set(times)) == 10
         now = datetime.now(UTC)
         for t in times:
             assert now < t <= now + timedelta(days=8)
-        # Times should be strictly increasing (evenly spread)
-        for a, b in zip(times, times[1:]):
-            assert b > a
-
-    def test_distribute_no_integer_day_bunching(self) -> None:
-        """Schedules with more projects than days get unique times, not the same day."""
-        schedules = [SimpleNamespace(next_refresh_at=None) for _ in range(10)]
-
-        async def _override_distribute_session():
-            yield _DistributeSession(schedules)
-
-        app = _create_admin_app(session_override=_override_distribute_session)
-
-        with TestClient(app) as client:
-            client.post(
-                "/admin/distribute",
-                headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
-            )
-
-        times = [s.next_refresh_at for s in schedules]
-        assert len(set(times)) == 10
 
 
 class TestAdminLogs:

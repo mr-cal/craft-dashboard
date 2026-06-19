@@ -342,10 +342,17 @@ async def distribute_refresh_schedule(
     authorization: str = Header(default=""),
     session: AsyncSession = Depends(get_db_session),
 ) -> JSONResponse:
-    """Distribute refresh schedules evenly over the next N days.
+    """Distribute refresh schedules evenly over the next N days by issue count.
+
+    Projects with more issues are spaced further apart so that each unit of
+    time processes roughly the same number of issues, rather than giving each
+    project an equal time slot regardless of its size.
 
     Requires admin authentication via Bearer token.
     """
+    from sqlalchemy import func
+
+    from craft_dashboard.models.issue import Issue
     from craft_dashboard.models.refresh_schedule import (
         RefreshSchedule,
     )
@@ -367,17 +374,35 @@ async def distribute_refresh_schedule(
             ),
         )
 
-    now = datetime.now(UTC)
-    total_schedules = len(schedules)
+    # Get issue count per (project_id, source) so we can weight by workload.
+    issue_counts_result = await session.execute(
+        select(
+            Issue.project_id,
+            Issue.source,
+            func.count(Issue.id).label("issue_count"),
+        ).group_by(Issue.project_id, Issue.source)
+    )
+    issue_counts: dict[tuple[int, str], int] = {
+        (row.project_id, row.source): row.issue_count for row in issue_counts_result
+    }
+
+    # Assign each schedule a weight (minimum 1 so new projects still get a slot).
+    weights = [max(1, issue_counts.get((s.project_id, s.source), 0)) for s in schedules]
+    total_weight = sum(weights)
     total_seconds = refresh_age_days * 86400
 
-    for idx, schedule in enumerate(schedules):
-        offset_seconds = total_seconds * (idx + 1) / total_schedules
-        schedule.next_refresh_at = now + timedelta(seconds=offset_seconds)
+    now = datetime.now(UTC)
+    cumulative = 0
+    for schedule, weight in zip(schedules, weights):
+        cumulative += weight
+        schedule.next_refresh_at = now + timedelta(
+            seconds=total_seconds * cumulative / total_weight
+        )
 
     await session.commit()
+    total_schedules = len(schedules)
     logger.info(
-        "Admin: distributed %d schedules over %d days",
+        "Admin: distributed %d schedules over %d days (weighted by issue count)",
         total_schedules,
         refresh_age_days,
     )
