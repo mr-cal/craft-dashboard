@@ -15,7 +15,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from craft_dashboard.llm.exceptions import LLMQuotaError
+from craft_dashboard.llm.exceptions import LLMQuotaError, LLMUnavailableError
 
 if TYPE_CHECKING:
     from craft_dashboard.settings import Settings
@@ -209,10 +209,12 @@ class LocalLLMClient:
 
     @retry(
         retry=retry_if_exception(
-            lambda exc: isinstance(exc, (httpx.TimeoutException, httpx.NetworkError))
+            lambda exc: isinstance(
+                exc, (httpx.TimeoutException, httpx.NetworkError, LLMUnavailableError)
+            )
         ),
         wait=wait_exponential(multiplier=1, min=2, max=30),
-        stop=stop_after_attempt(3),
+        stop=stop_after_attempt(5),
         reraise=True,
     )
     async def complete(
@@ -242,6 +244,11 @@ class LocalLLMClient:
             headers=headers,
             json=payload,
         )
+        if response.status_code >= 500:
+            raise LLMUnavailableError(
+                f"LLM server returned {response.status_code} — "
+                "the backend may be down or overloaded"
+            )
         response.raise_for_status()
 
         data = response.json()

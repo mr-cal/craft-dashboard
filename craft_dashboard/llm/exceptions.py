@@ -19,3 +19,7 @@ class LLMValidationError(LLMError):
 
 class LLMRateLimitError(LLMError):
     """Raised when an LLM provider returns a rate-limit response."""
+
+
+class LLMUnavailableError(LLMError):
+    """Raised when the LLM backend is unreachable or returns a server error."""
