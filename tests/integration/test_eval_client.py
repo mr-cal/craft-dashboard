@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from craft_dashboard.llm.embeddings import EmbeddingClient
 from scripts import eval_client
 
 # ---------------------------------------------------------------------------
@@ -908,10 +909,6 @@ class TestEvalClientSubmissionPayload:
         self, monkeypatch, patched_runtime
     ) -> None:
         """When embed_model is set, summary_embedding is computed and submitted."""
-        from unittest.mock import AsyncMock, patch
-
-        from craft_dashboard.llm.embeddings import EmbeddingClient
-
         fake_embedding = [0.42] * 768
 
         client_mock = _patch_http(
@@ -922,7 +919,9 @@ class TestEvalClientSubmissionPayload:
             post_responses=[httpx.Response(status_code=200)],
         )
 
-        with patch.object(EmbeddingClient, "embed", AsyncMock(return_value=fake_embedding)):
+        with patch.object(
+            EmbeddingClient, "embed", AsyncMock(return_value=fake_embedding)
+        ):
             await eval_client.run_eval_loop(
                 **{**DEFAULT_KWARGS, "embed_model": "nomic-embed-text"}
             )

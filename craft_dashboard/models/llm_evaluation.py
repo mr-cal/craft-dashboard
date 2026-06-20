@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -15,7 +16,6 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from craft_dashboard.models.base import Base

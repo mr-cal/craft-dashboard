@@ -62,6 +62,7 @@ DEFAULT_KWARGS = {
     "stale_days": 0,
     "server_ca_cert": "",
     "verbose": False,
+    "embed_model": "",
 }
 
 
@@ -210,7 +211,7 @@ async def test_run_eval_loop_processes_issue_and_stops_at_limit(
         "completion_tokens": SAMPLE_RESULT["completion_tokens"],
         "model_used": "test-model",
         "llm_backend": "local",
-        "embedding": None,
+        "summary_embedding": None,
     }
     patched_runtime["sleep"].assert_not_awaited()
     patched_runtime["llm_client"].close.assert_awaited_once()

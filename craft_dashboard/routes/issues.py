@@ -1,5 +1,6 @@
 """Issue and PR triage routes."""
 
+import contextlib
 from dataclasses import asdict
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, TypedDict, cast
@@ -271,8 +272,9 @@ async def issue_detail(
     number: str,
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
-    """Render the issue detail page with evaluation history."""
+    """Render the issue detail page with evaluation history and related issues."""
     templates: Jinja2Templates = request.app.state.templates
+    settings = request.app.state.settings
     repo = IssueRepository(session)
     issue = await repo.get_issue_detail(project, number)
     if issue is None:
@@ -280,6 +282,14 @@ async def issue_detail(
 
     evaluation_history = cast(list[dict[str, Any]], issue["evaluation_history"])
     current_evaluation = evaluation_history[0] if evaluation_history else None
+
+    related_issues: list[dict[str, Any]] = []
+    with contextlib.suppress(Exception):
+        related_issues = await repo.find_similar_issues(
+            issue_id=issue["id"],
+            top_n=settings.related_issues_top_n,
+            similarity_threshold=settings.related_issues_similarity_threshold,
+        )
 
     return templates.TemplateResponse(
         request,
@@ -289,6 +299,7 @@ async def issue_detail(
             "current_evaluation": current_evaluation,
             "evaluation_history": evaluation_history,
             "original_issue_url": _build_original_issue_url(issue),
+            "related_issues": related_issues,
         },
     )
 

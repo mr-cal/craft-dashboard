@@ -428,17 +428,13 @@ async def run_eval_loop(  # noqa: PLR0913
                             )
                             # Embed title + summary for richer signal.
                             # Title anchors the topic; summary captures semantic detail.
-                            embed_text = (
-                                f"{issue_data['title']}. {result['summary']}"
-                            )
-                            submission["summary_embedding"] = (
-                                await embedding_client.embed(embed_text)
-                            )
+                            embed_text = f"{issue_data['title']}. {result['summary']}"
+                            submission[
+                                "summary_embedding"
+                            ] = await embedding_client.embed(embed_text)
                             await embedding_client.close()
-                        except Exception as exc:  # noqa: BLE001
-                            logger.warning(
-                                "%s: embedding failed: %s", issue_ref, exc
-                            )
+                        except Exception as exc:
+                            logger.warning("%s: embedding failed: %s", issue_ref, exc)
 
                     try:
                         submit_response = await http_client.post(

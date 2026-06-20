@@ -447,6 +447,7 @@ class TestEvalResultIntegration:
         )
         assert len(evaluations) == 1
         assert list(evaluations[0].summary_embedding) == embedding
+
     """Integration tests for GET /api/eval/status."""
 
     def test_status_reports_queue_counts(self, test_db_session: AsyncSession) -> None:

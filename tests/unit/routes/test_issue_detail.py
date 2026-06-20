@@ -9,6 +9,7 @@ from craft_dashboard.app import create_app
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.views import IssueQueryResult, IssueView
 from craft_dashboard.repositories.issue_repository import IssueRepository
+from craft_dashboard.settings import Settings
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -27,6 +28,7 @@ async def _noop_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def test_client() -> AsyncGenerator[TestClient, None]:
     app = create_app()
     app.router.lifespan_context = _noop_lifespan
+    app.state.settings = Settings(_env_file=None)
 
     async def _override_session() -> AsyncGenerator[_IssueSession, None]:
         yield _IssueSession()
@@ -164,3 +166,58 @@ class TestIssueDetailRoute:
 
         assert response.status_code == 200
         assert 'href="/issues/snapcraft/321"' in response.text
+
+
+_RELATED = [
+    {
+        "id": 202,
+        "external_id": "400",
+        "title": "Similar bug in core22 builds",
+        "url": "https://github.com/canonical/snapcraft/issues/400",
+        "state": "open",
+        "project_name": "snapcraft",
+        "summary": "Closely related build failure.",
+        "similarity": 0.91,
+    }
+]
+
+
+class TestRelatedIssuesSection:
+    def test_related_issues_shown_when_present(self, test_client: TestClient) -> None:
+        with (
+            patch.object(
+                IssueRepository,
+                "get_issue_detail",
+                AsyncMock(return_value=_DETAIL),
+            ),
+            patch.object(
+                IssueRepository,
+                "find_similar_issues",
+                AsyncMock(return_value=_RELATED),
+            ),
+        ):
+            response = test_client.get("/issues/snapcraft/321")
+
+        assert response.status_code == 200
+        assert "Related Issues" in response.text
+        assert "Similar bug in core22 builds" in response.text
+        assert "0.91" in response.text
+
+    def test_related_issues_empty_shows_notice(self, test_client: TestClient) -> None:
+        with (
+            patch.object(
+                IssueRepository,
+                "get_issue_detail",
+                AsyncMock(return_value=_DETAIL),
+            ),
+            patch.object(
+                IssueRepository,
+                "find_similar_issues",
+                AsyncMock(return_value=[]),
+            ),
+        ):
+            response = test_client.get("/issues/snapcraft/321")
+
+        assert response.status_code == 200
+        assert "Related Issues" in response.text
+        assert "No related issues found" in response.text

@@ -244,7 +244,7 @@ class LocalLLMClient:
             headers=headers,
             json=payload,
         )
-        if response.status_code >= 500:
+        if response.status_code >= 500:  # noqa: PLR2004
             raise LLMUnavailableError(
                 f"LLM server returned {response.status_code} — "
                 "the backend may be down or overloaded"

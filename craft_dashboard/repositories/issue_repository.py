@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Integer as SAInteger
 from sqlalchemy import cast, func, or_, select
+from sqlalchemy import text as sa_text
 
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
@@ -348,8 +349,6 @@ class IssueRepository:
         embedding (e.g. all SQLite test fixtures, or issues not yet evaluated
         with an embedding model).
         """
-        from sqlalchemy import text as sa_text
-
         embedding_row = await self.session.execute(
             select(LLMEvaluation.summary_embedding)
             .where(LLMEvaluation.issue_id == issue_id)

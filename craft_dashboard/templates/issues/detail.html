@@ -103,6 +103,40 @@
   <p>No evaluation history available.</p>
   {% endif %}
 </section>
+
+<section class="issue-detail-card">
+  <h3>Related Issues</h3>
+  {% if related_issues %}
+  <table>
+    <thead>
+      <tr>
+        <th>Issue</th>
+        <th>Project</th>
+        <th>State</th>
+        <th>Similarity</th>
+        <th>Summary</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for rel in related_issues %}
+      <tr>
+        <td>
+          <a href="/issues/{{ rel.project_name }}/{{ rel.external_id }}">
+            #{{ rel.external_id }} {{ rel.title }}
+          </a>
+        </td>
+        <td>{{ rel.project_name }}</td>
+        <td>{{ rel.state }}</td>
+        <td>{{ rel.similarity }}</td>
+        <td>{{ rel.summary or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No related issues found. Run the eval client with an embedding model configured to enable similarity search.</p>
+  {% endif %}
+</section>
 {% endblock %}
 
 {% block scripts %}
