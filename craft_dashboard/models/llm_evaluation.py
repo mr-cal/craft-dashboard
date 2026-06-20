@@ -15,6 +15,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from craft_dashboard.models.base import Base
@@ -65,6 +66,9 @@ class LLMEvaluation(Base):
     latest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     eval_locked_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    summary_embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(768), nullable=True
     )
 
     # Relationships

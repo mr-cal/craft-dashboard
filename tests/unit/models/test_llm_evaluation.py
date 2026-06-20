@@ -47,6 +47,17 @@ class TestLLMEvaluationModel:
         fk_targets = [fk.target_fullname for fk in col.foreign_keys]
         assert "issues.id" in fk_targets
 
+    def test_summary_embedding_field_exists_and_defaults_to_none(self) -> None:
+        """summary_embedding field must exist and default to None."""
+        evaluation = LLMEvaluation(
+            issue_id=1,
+            model_name="test",
+            summary="hello",
+            latest=True,
+        )
+        assert hasattr(evaluation, "summary_embedding")
+        assert evaluation.summary_embedding is None
+
     def test_partial_index_uses_text_expression(self) -> None:
         """The partial unique index should use text() not a raw string."""
         module_path = (

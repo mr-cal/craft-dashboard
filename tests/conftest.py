@@ -3,6 +3,13 @@
 import os
 import pathlib
 
+# Patch SQLite type compiler to treat pgvector's VECTOR as TEXT.
+# Must happen before any SQLAlchemy metadata.create_all() call.
+from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
+
+if not hasattr(SQLiteTypeCompiler, "visit_VECTOR"):
+    SQLiteTypeCompiler.visit_VECTOR = lambda self, type_, **kw: "TEXT"
+
 import craft_dashboard
 import pytest
 from craft_dashboard._version import __version__
