@@ -121,7 +121,7 @@
       {% for rel in related_issues %}
       <tr>
         <td>
-          <a href="/issues/{{ rel.project_name }}/{{ rel.external_id }}">
+          <a href="/issues/{{ rel.project_name | urlencode_path }}/{{ rel.external_id }}">
             #{{ rel.external_id }} {{ rel.title }}
           </a>
         </td>

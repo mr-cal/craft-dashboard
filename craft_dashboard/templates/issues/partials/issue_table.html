@@ -64,13 +64,13 @@
       {% for issue in issues %}
       <tr>
         <td data-col="issue" style="white-space:nowrap;">
-          {{ issue.project_name }}{% if issue.source == "launchpad" %}-lp{% endif %}<br>
+          {{ issue.project_name }}<br>
           {{ "pr" if issue.issue_type == "pull_request" else "issue" }}
           <a href="{{ issue.url }}" target="_blank" rel="noopener">#{{ issue.external_id }}</a>
           {% if issue.state != "open" %}<br><span style="color:var(--app-text-muted);font-size:0.8em;">{{ issue.state }}</span>{% endif %}
         </td>
         <td data-col="title">
-          <a href="/issues/{{ issue.project_name }}/{{ issue.external_id }}">{{ issue.title|truncate(80) }}</a>
+          <a href="/issues/{{ issue.project_name | urlencode_path }}/{{ issue.external_id }}">{{ issue.title|truncate(80) }}</a>
         </td>
         <td data-col="author">{{ issue.author or "unknown" }}</td>
         <td data-col="age">{{ (issue.age_days ~ "d") if issue.age_days is not none else "?" }}</td>

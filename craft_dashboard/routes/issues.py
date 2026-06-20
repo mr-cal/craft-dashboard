@@ -169,10 +169,8 @@ class IssueSort(StrEnum):
 def _build_original_issue_url(issue: dict[str, Any]) -> str:
     """Build the upstream issue URL from issue data."""
     if issue["source"] == "launchpad":
-        return (
-            f"https://bugs.launchpad.net/{issue['project_name']}/+bug/"
-            f"{issue['external_id']}"
-        )
+        lp_name = issue["project_name"].removesuffix(" (launchpad)")
+        return f"https://bugs.launchpad.net/{lp_name}/+bug/{issue['external_id']}"
     return (
         f"https://github.com/canonical/{issue['project_name']}/issues/"
         f"{issue['external_id']}"

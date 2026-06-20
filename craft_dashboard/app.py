@@ -8,6 +8,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import cast
+from urllib.parse import quote as _url_quote
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
@@ -122,6 +123,7 @@ def create_app() -> FastAPI:
     _startup_ts = str(int(datetime.now(tz=UTC).timestamp()))
     template_globals = cast(dict[str, object], templates.env.globals)
     template_globals["cache_bust"] = _startup_ts
+    templates.env.filters["urlencode_path"] = lambda s: _url_quote(str(s), safe="")
     app.state.templates = templates
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
