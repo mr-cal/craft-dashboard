@@ -320,7 +320,7 @@ class TestSummarizeStripsThinkBlocks:
             evaluation_model="test-eval",
         )
 
-        summary, _, _, _ = await evaluator._summarize(
+        summary, _, _, _ = await evaluator.summarize(
             title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
             body="When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
             issue_type="issue",
@@ -356,7 +356,7 @@ class TestSummarizeStripsThinkBlocks:
             evaluation_model="test-eval",
         )
 
-        summary, _, _, _ = await evaluator._summarize(
+        summary, _, _, _ = await evaluator.summarize(
             title="charmcraft deploy times out on large bundles",
             body="Deploying a large bundle stalls while charmcraft waits for the controller response.",
             issue_type="issue",

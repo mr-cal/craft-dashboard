@@ -29,7 +29,7 @@ async def test_closed_issue_uses_summary_only_evaluation() -> None:
         patch(
             "craft_dashboard.llm.evaluator.build_closed_summary_prompt"
         ) as mock_closed,
-        patch.object(evaluator, "_score", new=AsyncMock()) as mock_score,
+        patch.object(evaluator, "score", new=AsyncMock()) as mock_score,
     ):
         mock_closed.return_value = [{"role": "user", "content": "test"}]
 

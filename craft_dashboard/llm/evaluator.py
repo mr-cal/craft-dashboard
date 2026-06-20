@@ -160,7 +160,7 @@ class IssueEvaluator:
         self.summary_model = summary_model
         self.evaluation_model = evaluation_model
 
-    async def _summarize(
+    async def summarize(
         self,
         *,
         title: str,
@@ -228,7 +228,7 @@ class IssueEvaluator:
             response.completion_tokens,
         )
 
-    async def _score(
+    async def score(
         self,
         *,
         title: str,
@@ -332,7 +332,7 @@ class IssueEvaluator:
             summary_tokens,
             summary_prompt,
             summary_completion,
-        ) = await self._summarize(
+        ) = await self.summarize(
             title=title,
             body=body,
             issue_type=issue_type,
@@ -358,7 +358,7 @@ class IssueEvaluator:
                 "issue_data_hash": current_hash,
             }
 
-        parsed, eval_tokens, eval_prompt, eval_completion = await self._score(
+        parsed, eval_tokens, eval_prompt, eval_completion = await self.score(
             title=title,
             body=body,
             issue_type=issue_type,
