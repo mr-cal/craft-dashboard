@@ -22,9 +22,24 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from github.GitRelease import GitRelease as GHRelease
+    from github.Repository import Repository as GHRepository
 
 _PROGRESS_LOG_INTERVAL_SECONDS = 30
 _HOTFIX_VERSION_COMPONENTS = 2
+
+
+def _tag_on_main(repo: "GHRepository", best_tag: str) -> bool:
+    """Return True if best_tag is an ancestor of main (i.e., main contains the tag).
+
+    Uses the GitHub compare API: compare(base=best_tag, head="main").
+    If behind_by == 0, main has not diverged behind the tag, meaning the tag's
+    commit is reachable from main's history.
+    """
+    try:
+        comparison = repo.compare(best_tag, "main")
+        return comparison.behind_by == 0
+    except Exception:  # noqa: BLE001
+        return False
 
 
 class RateLimitStatus(TypedDict):
@@ -700,6 +715,8 @@ class GitHubCollector:
                 )
                 meta = result.scalar_one_or_none() or {}
                 meta["commits_since_tag"] = commits_since
+                if branch_name != "main":
+                    meta["tag_on_main"] = _tag_on_main(repo, best_tag)
                 await session.execute(
                     sa.update(Release)
                     .where(
