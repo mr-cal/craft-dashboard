@@ -171,22 +171,8 @@
   <div style="flex: 1; min-width: 300px;">
     <h4>Refresh Data</h4>
     <div class="admin-form">
-      <div class="admin-form__row">
-        <label for="refresh-project">Project:</label>
-        <select id="refresh-project">
-          <option value="">All projects</option>
-          {% for proj in project_names %}
-          <option value="{{ proj }}">{{ proj }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="admin-form__row">
-        <label>
-          <input type="checkbox" id="refresh-force-schedule" />
-          Force (collect now, ignore schedule)
-        </label>
-      </div>
-      <button class="p-button--positive" id="refresh-btn" onclick="triggerRefresh()">Refresh Data</button>
+      <button class="p-button--positive" id="refresh-btn" onclick="triggerRefresh()">Refresh Now</button>
+      <p style="font-size:0.875rem;color:var(--app-text-muted);margin-top:0.5rem;">Runs the collection job. Only projects due per schedule will be refreshed.</p>
       <div id="refresh-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
     </div>
   </div>
@@ -362,13 +348,8 @@ async function callEndpoint(endpoint, btnId, statusId, successMsg, body) {
 }
 
 function triggerRefresh() {
-  const project = document.getElementById('refresh-project').value;
-  const force = document.getElementById('refresh-force-schedule').checked;
-  const target = project ? `project "${project}"` : 'all projects';
-  const forceNote = force ? ' (ignoring schedule — will collect regardless of last run)' : ' (only projects due per schedule)';
-  const confirmMsg = `Refresh data for ${target}?${forceNote} This may take several minutes.`;
-  if (!confirm(confirmMsg)) return;
-  callEndpoint('/admin/refresh', 'refresh-btn', 'refresh-status', 'Refresh queued', { project, force_schedule: force });
+  if (!confirm('Run data collection now? Only projects due per schedule will be refreshed.')) return;
+  callEndpoint('/admin/refresh', 'refresh-btn', 'refresh-status', 'Refresh queued');
 }
 
 function gatherEvalParams() {
