@@ -334,6 +334,78 @@ class IssueRepository:
             page=page,
         )
 
+    async def find_similar_issues(
+        self,
+        *,
+        issue_id: int,
+        top_n: int = 10,
+        similarity_threshold: float = 0.70,
+    ) -> list[dict[str, Any]]:
+        """Return up to top_n issues most similar to issue_id by cosine similarity.
+
+        Uses pgvector's <=> (cosine distance) operator via the HNSW index on
+        llm_evaluations.summary_embedding. Returns [] when the issue has no
+        embedding (e.g. all SQLite test fixtures, or issues not yet evaluated
+        with an embedding model).
+        """
+        from sqlalchemy import text as sa_text
+
+        embedding_row = await self.session.execute(
+            select(LLMEvaluation.summary_embedding)
+            .where(LLMEvaluation.issue_id == issue_id)
+            .where(LLMEvaluation.latest.is_(True))
+        )
+        embedding = embedding_row.scalar_one_or_none()
+        if embedding is None:
+            return []
+
+        distance_threshold = 1.0 - similarity_threshold
+
+        sql = sa_text("""
+            SELECT
+                i.id          AS id,
+                i.external_id AS external_id,
+                i.title       AS title,
+                i.url         AS url,
+                i.state       AS state,
+                p.name        AS project_name,
+                e.summary     AS summary,
+                (e.summary_embedding <=> CAST(:embedding AS vector)) AS distance
+            FROM llm_evaluations e
+            JOIN issues i ON i.id = e.issue_id
+            JOIN projects p ON p.id = i.project_id
+            WHERE e.latest = true
+              AND e.summary_embedding IS NOT NULL
+              AND e.issue_id != :issue_id
+              AND (e.summary_embedding <=> CAST(:embedding AS vector)) < :distance_threshold
+            ORDER BY distance
+            LIMIT :limit
+        """)
+
+        result = await self.session.execute(
+            sql,
+            {
+                "embedding": str(list(embedding)),
+                "issue_id": issue_id,
+                "distance_threshold": distance_threshold,
+                "limit": top_n,
+            },
+        )
+
+        return [
+            {
+                "id": row.id,
+                "external_id": row.external_id,
+                "title": row.title,
+                "url": row.url,
+                "state": row.state,
+                "project_name": row.project_name,
+                "summary": row.summary,
+                "similarity": round(1.0 - row.distance, 3),
+            }
+            for row in result
+        ]
+
     async def get_project_names(self) -> list[str]:
         """Get non-aggregate project names ordered by display_order.
 

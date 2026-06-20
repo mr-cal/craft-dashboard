@@ -1053,3 +1053,34 @@ class TestLLMStatusFilter:
         all_issues, *_ = await _query(test_db_session, llm_status="")
         no_filter, *_ = await _query(test_db_session)
         assert len(all_issues) == len(no_filter)
+
+
+class TestFindSimilarIssues:
+    """Tests for IssueRepository.find_similar_issues."""
+
+    async def test_find_similar_issues_returns_empty_when_no_embedding(
+        self, test_db_session
+    ) -> None:
+        """Returns [] if the current issue has no embedding (always in SQLite tests)."""
+        project = make_project()
+        test_db_session.add(project)
+        await test_db_session.flush()
+
+        issue = make_issue(project_id=project.id, external_id="10")
+        test_db_session.add(issue)
+        await test_db_session.flush()
+
+        test_db_session.add(make_evaluation(issue_id=issue.id, latest=True))
+        await test_db_session.flush()
+
+        repo = IssueRepository(test_db_session)
+        result = await repo.find_similar_issues(issue_id=issue.id)
+        assert result == []
+
+    async def test_find_similar_issues_returns_empty_for_unknown_issue(
+        self, test_db_session
+    ) -> None:
+        """Returns [] if the issue has no evaluation row."""
+        repo = IssueRepository(test_db_session)
+        result = await repo.find_similar_issues(issue_id=99999)
+        assert result == []
