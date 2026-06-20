@@ -215,7 +215,20 @@ async def run_eval_loop(  # noqa: PLR0913
     server_ca_cert: str,
     verbose: bool,
 ) -> None:
-    """Poll the eval API, run local evaluation, and submit results."""
+    """Poll the eval API, run single-phase evaluation, and submit results.
+
+    For each pending issue, the loop runs three steps in sequence:
+      1. Summarize — calls evaluator.summarize() to produce a text summary.
+      2. Score + Embed — runs evaluator.score() and EmbeddingClient.embed()
+         concurrently via asyncio.gather().  Embed is skipped when embed_model
+         is empty or the embedding call fails (non-fatal).
+      3. Submit — POSTs the assembled payload to /api/eval/result.
+
+    Closed/merged issues skip scoring and go straight to embed + submit.
+
+    The loop runs until *limit* issues are evaluated (limit=0 means run until
+    the server returns 204 No Content), or until a shutdown signal is received.
+    """
     signal.signal(signal.SIGINT, _signal_handler)
     console = Console()
     _setup_logging(verbose=verbose, console=console)
