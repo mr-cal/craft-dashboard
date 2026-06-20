@@ -413,7 +413,7 @@ class TestEvalResultIntegration:
             issue.labels,
             issue.comments,
         )
-        embedding = [0.1] * 768
+        embedding = [0.1] * 1024
 
         with TestClient(app) as client:
             response = client.post(

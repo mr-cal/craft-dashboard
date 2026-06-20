@@ -68,7 +68,7 @@ class LLMEvaluation(Base):
         DateTime(timezone=True), nullable=True
     )
     summary_embedding: Mapped[list[float] | None] = mapped_column(
-        Vector(768), nullable=True
+        Vector(1024), nullable=True
     )
 
     # Relationships

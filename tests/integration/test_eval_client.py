@@ -928,7 +928,7 @@ class TestEvalClientSubmissionPayload:
         self, monkeypatch, patched_runtime
     ) -> None:
         """When embed_model is set, summary_embedding is computed and submitted."""
-        fake_embedding = [0.42] * 768
+        fake_embedding = [0.42] * 1024
 
         client_mock = _patch_http(
             monkeypatch,
