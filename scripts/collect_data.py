@@ -335,7 +335,6 @@ async def _collect_github(
                         project_name,
                         project_id,
                         session,
-                        hotfix_min_version=config.hotfix_min_versions.get(project_name),
                     )
                     logger.info(
                         "  canonical/%s: releases collected (%d branches) in %s",

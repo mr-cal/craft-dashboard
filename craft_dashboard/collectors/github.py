@@ -562,18 +562,17 @@ class GitHubCollector:
         repo_name: str,
         project_id: int,
         session: AsyncSession,
-        hotfix_min_version: str | None = None,
     ) -> int:
         """Collect releases for a repository, one row per branch.
 
-        Enumerates hotfix/* branches from GitHub, finds the latest matching
-        release tag per branch, and computes commits_since_tag.
+        Enumerates ALL hotfix/* branches from GitHub (no version filter),
+        finds the latest matching release tag per branch, and computes
+        commits_since_tag and tag_on_main.
 
         Args:
             repo_name: Repository name (without org prefix).
             project_id: The database ID of the project.
             session: An async SQLAlchemy session.
-            hotfix_min_version: Minimum version string (e.g. "3.0") for hotfix branches.
 
         Returns:
             Number of branch+release rows upserted.
@@ -609,24 +608,13 @@ class GitHubCollector:
         # Determine branches to track
         branches_to_track: list[str] = ["main"]
 
-        # Parse min version filter
-        min_major, min_minor = 0, 0
-        if hotfix_min_version:
-            try:
-                parts = hotfix_min_version.split(".")
-                min_major, min_minor = int(parts[0]), int(parts[1])
-            except (ValueError, IndexError):
-                logger.warning(
-                    "Could not parse hotfix_min_version %r", hotfix_min_version
-                )
-
-        # List hotfix/* branches from GitHub
-        for branch in repo.get_branches():
-            m = hotfix_re.match(branch.name)
-            if m:
-                major, minor = int(m.group(1)), int(m.group(2))
-                if (major, minor) >= (min_major, min_minor):
-                    branches_to_track.append(branch.name)
+        # List ALL hotfix/* branches from GitHub — no version filter.
+        # The DB stores every branch so the Hotfixes page can show a complete picture.
+        branches_to_track.extend(
+            branch.name
+            for branch in repo.get_branches()
+            if hotfix_re.match(branch.name)
+        )
 
         logger.info(
             "  %s/%s: tracking branches: %s", self.org, repo_name, branches_to_track
