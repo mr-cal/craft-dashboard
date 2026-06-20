@@ -37,9 +37,10 @@ def _tag_on_main(repo: "GHRepository", best_tag: str) -> bool:
     """
     try:
         comparison = repo.compare(best_tag, "main")
-        return comparison.behind_by == 0
     except Exception:  # noqa: BLE001
         return False
+    else:
+        return comparison.behind_by == 0
 
 
 class RateLimitStatus(TypedDict):

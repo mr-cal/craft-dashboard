@@ -249,10 +249,62 @@ async def releases_page(
     # Sort by project name then branch
     filtered.sort(key=lambda r: (str(r["project_name"]), str(r["branch"])))
 
+    # --- Hotfixes table: ALL hotfix/* branches, ALL project categories ---
+    hotfix_latest = (
+        select(func.max(Release.id).label("id"))
+        .group_by(Release.project_id, Release.branch)
+        .subquery()
+    )
+
+    hotfix_result = await session.execute(
+        select(
+            Project.name.label("project_name"),
+            Release.branch,
+            Release.version,
+            Release.released_at,
+            Release.metadata_,
+        )
+        .join(Project, Release.project_id == Project.id)
+        .join(hotfix_latest, Release.id == hotfix_latest.c.id)
+        .where(Release.branch.like("hotfix/%"))
+        .order_by(Project.name, Release.branch)
+    )
+
+    hotfixes = []
+    for row in hotfix_result:
+        days_ago = None
+        if row.released_at:
+            released = (
+                row.released_at.replace(tzinfo=UTC)
+                if row.released_at.tzinfo is None
+                else row.released_at
+            )
+            days_ago = (datetime.now(tz=UTC) - released).days
+        meta = row.metadata_ or {}
+        commits_since_tag = meta.get("commits_since_tag")
+        tag_on_main = meta.get("tag_on_main")
+
+        if tag_on_main is None or commits_since_tag is None:
+            safe_to_delete = None
+        else:
+            safe_to_delete = tag_on_main and commits_since_tag == 0
+
+        hotfixes.append(
+            {
+                "project_name": row.project_name,
+                "branch": row.branch,
+                "version": row.version,
+                "released_at": row.released_at,
+                "days_ago": days_ago,
+                "commits_since_tag": commits_since_tag,
+                "safe_to_delete": safe_to_delete,
+            }
+        )
+
     return templates.TemplateResponse(
         request,
         "stats/releases.html",
-        {"releases": filtered},
+        {"releases": filtered, "hotfixes": hotfixes},
     )
 
 

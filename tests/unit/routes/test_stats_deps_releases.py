@@ -324,3 +324,169 @@ class TestReleasesPage:
 
         assert response.status_code == 200
         assert "Releases" in response.text
+
+
+class TestHotfixesSection:
+    def test_hotfixes_section_heading_shown(
+        self, test_client: TestClient, test_db_session: AsyncSession
+    ) -> None:
+        async def _seed() -> None:
+            project = _project("charmcraft")
+            test_db_session.add(project)
+            await test_db_session.flush()
+            test_db_session.add(
+                _release(project.id, branch="hotfix/4.1", version="4.1.2")
+            )
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = test_client.get("/stats/releases")
+
+        assert response.status_code == 200
+        assert "Hotfixes" in response.text
+
+    def test_hotfixes_shows_all_hotfix_branches(
+        self, test_client: TestClient, test_db_session: AsyncSession
+    ) -> None:
+        async def _seed() -> None:
+            project = _project("charmcraft")
+            test_db_session.add(project)
+            await test_db_session.flush()
+            test_db_session.add(
+                _release(project.id, branch="hotfix/4.0", version="4.0.1")
+            )
+            test_db_session.add(
+                _release(project.id, branch="hotfix/4.1", version="4.1.2")
+            )
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = test_client.get("/stats/releases")
+
+        assert response.status_code == 200
+        assert "4.0.1" in response.text
+        assert "4.1.2" in response.text
+
+    def test_hotfixes_includes_non_application_projects(
+        self, test_client: TestClient, test_db_session: AsyncSession
+    ) -> None:
+        async def _seed() -> None:
+            lib_project = _project("craft-parts", category="library")
+            test_db_session.add(lib_project)
+            await test_db_session.flush()
+            test_db_session.add(
+                _release(lib_project.id, branch="hotfix/1.5", version="1.5.3")
+            )
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = test_client.get("/stats/releases")
+
+        assert response.status_code == 200
+        assert "1.5.3" in response.text
+
+    def test_hotfixes_safe_to_delete_yes(
+        self, test_client: TestClient, test_db_session: AsyncSession
+    ) -> None:
+        async def _seed() -> None:
+            project = _project("snapcraft")
+            test_db_session.add(project)
+            await test_db_session.flush()
+            test_db_session.add(
+                _release(
+                    project.id,
+                    branch="hotfix/8.3",
+                    version="8.3.1",
+                    metadata_={"commits_since_tag": 0, "tag_on_main": True},
+                )
+            )
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = test_client.get("/stats/releases")
+
+        assert response.status_code == 200
+        assert "Yes" in response.text
+
+    def test_hotfixes_safe_to_delete_no_when_commits_exist(
+        self, test_client: TestClient, test_db_session: AsyncSession
+    ) -> None:
+        async def _seed() -> None:
+            project = _project("rockcraft")
+            test_db_session.add(project)
+            await test_db_session.flush()
+            test_db_session.add(
+                _release(
+                    project.id,
+                    branch="hotfix/1.5",
+                    version="1.5.0",
+                    metadata_={"commits_since_tag": 3, "tag_on_main": True},
+                )
+            )
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = test_client.get("/stats/releases")
+
+        assert response.status_code == 200
+        assert "No" in response.text
+
+    def test_hotfixes_safe_to_delete_no_when_tag_not_on_main(
+        self, test_client: TestClient, test_db_session: AsyncSession
+    ) -> None:
+        async def _seed() -> None:
+            project = _project("charmcraft")
+            test_db_session.add(project)
+            await test_db_session.flush()
+            test_db_session.add(
+                _release(
+                    project.id,
+                    branch="hotfix/3.1",
+                    version="3.1.0",
+                    metadata_={"commits_since_tag": 0, "tag_on_main": False},
+                )
+            )
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = test_client.get("/stats/releases")
+
+        assert response.status_code == 200
+        assert "No" in response.text
+
+    def test_hotfixes_safe_to_delete_unknown_when_no_metadata(
+        self, test_client: TestClient, test_db_session: AsyncSession
+    ) -> None:
+        async def _seed() -> None:
+            project = _project("snapcraft")
+            test_db_session.add(project)
+            await test_db_session.flush()
+            test_db_session.add(
+                _release(
+                    project.id,
+                    branch="hotfix/8.0",
+                    version="8.0.0",
+                    metadata_={},
+                )
+            )
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = test_client.get("/stats/releases")
+
+        assert response.status_code == 200
+        assert "Yes" not in response.text
+        assert "No" not in response.text
+
+    def test_hotfixes_empty_shows_placeholder(self, test_client: TestClient) -> None:
+        response = test_client.get("/stats/releases")
+
+        assert response.status_code == 200
+        assert "No hotfix branches" in response.text
