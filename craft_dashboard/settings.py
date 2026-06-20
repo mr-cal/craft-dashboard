@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     openrouter_summary_model: str = "google/gemini-2.5-flash-lite"
     openrouter_evaluation_model: str = "anthropic/claude-haiku-4.5"
 
+    # Embedding model for similarity search (used by eval_client.py).
+    # Leave blank to skip embedding generation.
+    local_llm_embedding_model: str = ""
+
+    # Related issues — shown on the issue detail page.
+    related_issues_top_n: int = 10
+    related_issues_similarity_threshold: float = 0.70
+
     # Database pool settings
     db_pool_size: int = 5
     db_max_overflow: int = 10

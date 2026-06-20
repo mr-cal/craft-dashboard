@@ -120,3 +120,22 @@ class TestValidateRequiredSecrets:
         assert any("ADMIN_TOKEN" in warning for warning in warnings)
         assert any("GITHUB_TOKEN" in warning for warning in warnings)
         assert any("EVAL_API_TOKEN" in warning for warning in warnings)
+
+
+class TestEmbeddingSettings:
+    """Tests for embedding and related-issues settings."""
+
+    def test_embedding_settings_have_defaults(self) -> None:
+        s = Settings(_env_file=None)
+        assert s.local_llm_embedding_model == ""
+        assert s.related_issues_top_n == 10
+        assert s.related_issues_similarity_threshold == 0.70
+
+    def test_embedding_settings_read_from_env(self, monkeypatch) -> None:
+        monkeypatch.setenv("LOCAL_LLM_EMBEDDING_MODEL", "nomic-embed-text")
+        monkeypatch.setenv("RELATED_ISSUES_TOP_N", "5")
+        monkeypatch.setenv("RELATED_ISSUES_SIMILARITY_THRESHOLD", "0.80")
+        s = Settings(_env_file=None)
+        assert s.local_llm_embedding_model == "nomic-embed-text"
+        assert s.related_issues_top_n == 5
+        assert s.related_issues_similarity_threshold == 0.80
