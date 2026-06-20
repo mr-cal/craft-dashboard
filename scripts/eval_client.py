@@ -36,6 +36,7 @@ from rich.progress import (
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from craft_dashboard.llm.client import LocalLLMClient
+from craft_dashboard.llm.embeddings import EmbeddingClient
 from craft_dashboard.llm.evaluator import IssueEvaluator, _compute_content_hash
 
 from scripts.eval_timing import PHASE_EVALUATE, TimingHistory
@@ -184,6 +185,7 @@ async def run_eval_loop(  # noqa: PLR0913
     llm_url: str,
     llm_api_key: str,
     ca_cert: str,
+    embed_model: str,
     poll_interval: int,
     limit: int,
     project: str,
@@ -413,8 +415,30 @@ async def run_eval_loop(  # noqa: PLR0913
                         "completion_tokens": result["completion_tokens"],
                         "model_used": evaluation_model,
                         "llm_backend": "local",
-                        "embedding": None,
+                        "summary_embedding": None,
                     }
+
+                    if embed_model and result.get("summary"):
+                        try:
+                            embedding_client = EmbeddingClient(
+                                base_url=llm_url,
+                                model=embed_model,
+                                api_key=llm_api_key,
+                                ca_cert=ca_cert,
+                            )
+                            # Embed title + summary for richer signal.
+                            # Title anchors the topic; summary captures semantic detail.
+                            embed_text = (
+                                f"{issue_data['title']}. {result['summary']}"
+                            )
+                            submission["summary_embedding"] = (
+                                await embedding_client.embed(embed_text)
+                            )
+                            await embedding_client.close()
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning(
+                                "%s: embedding failed: %s", issue_ref, exc
+                            )
 
                     try:
                         submit_response = await http_client.post(
@@ -571,6 +595,13 @@ def cli() -> None:
     help="LLM model for scoring [env: LOCAL_LLM_EVALUATION_MODEL]",
 )
 @click.option(
+    "--embed-model",
+    default="",
+    envvar="LOCAL_LLM_EMBEDDING_MODEL",
+    help="Embedding model for similarity search [env: LOCAL_LLM_EMBEDDING_MODEL]. "
+    "Leave blank to skip embedding generation.",
+)
+@click.option(
     "--poll-interval",
     default=30,
     show_default=True,
@@ -610,6 +641,7 @@ def evaluate(  # noqa: PLR0913
     token: str,
     summary_model: str,
     evaluation_model: str,
+    embed_model: str,
     llm_url: str,
     llm_api_key: str,
     ca_cert: str,
@@ -630,6 +662,7 @@ def evaluate(  # noqa: PLR0913
             token=token,
             summary_model=summary_model,
             evaluation_model=evaluation_model,
+            embed_model=embed_model,
             llm_url=llm_url,
             llm_api_key=llm_api_key,
             ca_cert=ca_cert,
