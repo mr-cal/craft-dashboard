@@ -6,7 +6,7 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
-from scripts.eval_timing import MAX_WINDOW, PHASE_DETECT, PHASE_EVALUATE, TimingHistory
+from scripts.eval_timing import MAX_WINDOW, PHASE_EVALUATE, TimingHistory
 
 if TYPE_CHECKING:
     import pathlib
@@ -30,7 +30,7 @@ class TestTimingHistoryPersistence:
 
     def test_loads_existing_data(self, tmp_path: pathlib.Path) -> None:
         path = tmp_path / "timing.json"
-        path.write_text(json.dumps({"phase1": [1.0, 2.0, 3.0]}))
+        path.write_text(json.dumps({"evaluate": [1.0, 2.0, 3.0]}))
         th = TimingHistory(path)
         assert th.sample_count(PHASE_EVALUATE) == 3
 
@@ -48,10 +48,10 @@ class TestTimingHistoryPersistence:
 
     def test_non_list_values_are_skipped(self, tmp_path: pathlib.Path) -> None:
         path = tmp_path / "timing.json"
-        path.write_text(json.dumps({"phase1": [1.0, 2.0], "phase2": "bad"}))
+        path.write_text(json.dumps({"evaluate": [1.0, 2.0], "other": "bad"}))
         th = TimingHistory(path)
         assert th.sample_count(PHASE_EVALUATE) == 2
-        assert th.sample_count(PHASE_DETECT) == 0
+        assert th.sample_count("other") == 0
 
     def test_data_survives_reload(self, tmp_path: pathlib.Path) -> None:
         path = tmp_path / "timing.json"
@@ -98,9 +98,9 @@ class TestTimingHistoryRollingWindow:
         for _ in range(5):
             th.add(PHASE_EVALUATE, 10.0)
         for _ in range(3):
-            th.add(PHASE_DETECT, 3.0)
+            th.add("other", 3.0)
         assert th.sample_count(PHASE_EVALUATE) == 5
-        assert th.sample_count(PHASE_DETECT) == 3
+        assert th.sample_count("other") == 3
 
     def test_clear_removes_phase_data(self, tmp_path: pathlib.Path) -> None:
         th = TimingHistory(tmp_path / "t.json")
