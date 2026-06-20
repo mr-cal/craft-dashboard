@@ -180,6 +180,12 @@
           {% endfor %}
         </select>
       </div>
+      <div class="admin-form__row">
+        <label>
+          <input type="checkbox" id="refresh-force-schedule" />
+          Force (collect now, ignore schedule)
+        </label>
+      </div>
       <button class="p-button--positive" id="refresh-btn" onclick="triggerRefresh()">Refresh Data</button>
       <div id="refresh-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
     </div>
@@ -320,15 +326,21 @@ async function logout() {
   }
 }
 
-async function callEndpoint(endpoint, btnId, statusId, successMsg) {
+async function callEndpoint(endpoint, btnId, statusId, successMsg, body) {
   const btn = document.getElementById(btnId);
   const statusDiv = document.getElementById(statusId);
 
   btn.disabled = true;
   statusDiv.innerHTML = '<span style="color: gray;">Running...</span>';
 
+  const fetchOpts = { method: 'POST' };
+  if (body) {
+    fetchOpts.headers = { 'Content-Type': 'application/json' };
+    fetchOpts.body = JSON.stringify(body);
+  }
+
   try {
-    const response = await fetch(endpoint, { method: 'POST' });
+    const response = await fetch(endpoint, fetchOpts);
     const data = await response.json();
     window.dispatchHxTriggers(response);
 
@@ -351,11 +363,12 @@ async function callEndpoint(endpoint, btnId, statusId, successMsg) {
 
 function triggerRefresh() {
   const project = document.getElementById('refresh-project').value;
-  const confirmMsg = project 
-    ? `Refresh data for project "${project}"? This may take several minutes.`
-    : 'Refresh all project data? This may take several minutes.';
+  const force = document.getElementById('refresh-force-schedule').checked;
+  const target = project ? `project "${project}"` : 'all projects';
+  const forceNote = force ? ' (ignoring schedule — will collect regardless of last run)' : ' (only projects due per schedule)';
+  const confirmMsg = `Refresh data for ${target}?${forceNote} This may take several minutes.`;
   if (!confirm(confirmMsg)) return;
-  callEndpoint('/admin/refresh', 'refresh-btn', 'refresh-status', 'Refresh queued');
+  callEndpoint('/admin/refresh', 'refresh-btn', 'refresh-status', 'Refresh queued', { project, force_schedule: force });
 }
 
 function gatherEvalParams() {

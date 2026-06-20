@@ -255,6 +255,7 @@ async def _collect_github(
     projects: list[str] | None = None,
     run_started_at: float | None = None,
     full_refresh: bool = False,
+    force_schedule: bool = False,
 ) -> CollectionStats:
     """Run GitHub data collection for all projects due for refresh."""
     collector = GitHubCollector(
@@ -358,7 +359,7 @@ async def _collect_github(
             )
             next_refresh = result.scalar_one_or_none()
 
-            if not is_due_for_refresh(next_refresh):
+            if not force_schedule and not is_due_for_refresh(next_refresh):
                 logger.info("Skipping %s (not due for full refresh)", project_name)
                 logger.info(
                     "Completed GitHub data for %s in %s (full refresh skipped)",
@@ -522,6 +523,7 @@ async def _main(
     projects: list[str],
     verbose: bool,
     full_refresh: bool = False,
+    force_schedule: bool = False,
 ) -> None:
     """Run data collection."""
     settings = Settings()
@@ -542,7 +544,11 @@ async def _main(
         logger.info("Issue collection limit: %d per repo", limit)
     if project_filter:
         logger.info("Project filter: %s", project_filter)
-    if full_refresh:
+    if force_schedule:
+        logger.info(
+            "Force mode: ignoring refresh schedule, collecting all projects now"
+        )
+    elif full_refresh:
         logger.info("Full collection mode enabled; ignoring saved watermarks")
     else:
         logger.info("Incremental collection mode enabled; using saved watermarks")
@@ -591,6 +597,7 @@ async def _main(
                         projects=project_filter,
                         run_started_at=run_started_at,
                         full_refresh=full_refresh,
+                        force_schedule=force_schedule,
                     ),
                 )
             )
@@ -668,16 +675,30 @@ async def _main(
     default=False,
     help="Ignore saved watermarks and run full collection where refresh is due.",
 )
+@click.option(
+    "--force-schedule",
+    is_flag=True,
+    default=False,
+    help="Ignore the refresh schedule and collect all projects now, regardless of when they were last collected.",
+)
 def main(
     source: str,
     limit: int,
     projects: tuple[str, ...],
     verbose: bool,
     full_refresh: bool,
+    force_schedule: bool,
 ) -> None:
     """Collect data from external sources."""
     asyncio.run(
-        _main(source, limit, list(projects), verbose, full_refresh=full_refresh)
+        _main(
+            source,
+            limit,
+            list(projects),
+            verbose,
+            full_refresh=full_refresh,
+            force_schedule=force_schedule,
+        )
     )
 
 

@@ -176,19 +176,36 @@ async def admin_page(
     )
 
 
+class RefreshRequest(BaseModel):
+    """Parameters for an admin data refresh."""
+
+    project: str = ""
+    force_schedule: bool = False
+
+
 @router.post("/refresh")
 async def trigger_refresh(
     request: Request,
+    body: RefreshRequest | None = None,
     authorization: str = Header(default=""),
     _session: AsyncSession = Depends(get_db_session),
 ) -> JSONResponse:
-    """Trigger a data refresh for all projects.
+    """Trigger a data refresh.
 
     Requires admin authentication via Bearer token.
+    Body fields (all optional):
+      project: only collect this project
+      force_schedule: ignore the refresh schedule and collect all/selected projects now
     """
     _require_admin_auth(request, authorization)
     _verify_origin(request)
-    logger.info("Admin: refresh queued")
+
+    params = body or RefreshRequest()
+    logger.info(
+        "Admin: refresh queued (project=%r, force_schedule=%s)",
+        params.project or "all",
+        params.force_schedule,
+    )
 
     cmd = [
         sys.executable,
@@ -198,6 +215,11 @@ async def trigger_refresh(
             / "collect_data.py"
         ),
     ]
+    if params.project:
+        cmd += ["--project", params.project]
+    if params.force_schedule:
+        cmd += ["--force-schedule"]
+
     asyncio.create_task(
         asyncio.create_subprocess_exec(
             *cmd,
@@ -206,10 +228,17 @@ async def trigger_refresh(
         )
     )
 
+    msg = "Data refresh has been queued"
+    if params.project:
+        msg += f" for {params.project}"
+    if params.force_schedule:
+        msg += " (ignoring schedule)"
+    msg += "."
+
     return JSONResponse(
-        {"status": "refresh_queued", "message": "Data refresh has been queued."},
+        {"status": "refresh_queued", "message": msg},
         status_code=202,
-        headers=_build_toast_headers("Data refresh has been queued.", "success"),
+        headers=_build_toast_headers(msg, "success"),
     )
 
 
