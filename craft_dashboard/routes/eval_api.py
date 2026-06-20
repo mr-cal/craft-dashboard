@@ -44,6 +44,7 @@ class EvalResultSubmission(BaseModel):
     completion_tokens: int = 0
     model_used: str = ""
     llm_backend: str = "local"
+    summary_embedding: list[float] | None = None
 
 
 def _require_eval_auth(request: Request, authorization: str = "") -> None:
@@ -276,6 +277,7 @@ async def submit_result(
             issue_data_hash=current_hash,
             latest=True,
             eval_locked_until=datetime.now(tz=UTC) + _LOCK_TTL,
+            summary_embedding=payload.summary_embedding,
         )
     )
 
