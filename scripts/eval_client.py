@@ -14,10 +14,7 @@ import threading
 import time
 import tty
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from typing import Any
 
 import click
 import httpx
@@ -515,67 +512,51 @@ async def run_eval_loop(  # noqa: PLR0913
 # CLI
 # ---------------------------------------------------------------------------
 
-_COMMON_OPTIONS = [
-    click.option(
-        "--server",
-        required=True,
-        envvar="EVAL_CLIENT_SERVER",
-        help="Base URL of craft-dashboard server [env: EVAL_CLIENT_SERVER]",
-    ),
-    click.option(
-        "--token",
-        required=True,
-        envvar="EVAL_API_TOKEN",
-        help="Eval API bearer token [env: EVAL_API_TOKEN]",
-    ),
-    click.option(
-        "--llm-url",
-        default="http://localhost:11434/v1",
-        show_default=True,
-        envvar="LOCAL_LLM_URL",
-        help="OpenAI-compatible LLM endpoint [env: LOCAL_LLM_URL]",
-    ),
-    click.option(
-        "--llm-api-key",
-        default="",
-        envvar="LOCAL_LLM_API_KEY",
-        help="API key for the LLM endpoint [env: LOCAL_LLM_API_KEY]",
-    ),
-    click.option(
-        "--ca-cert",
-        default="",
-        envvar="LOCAL_LLM_CA_CERT",
-        help="PEM CA cert path for LLM server TLS verification [env: LOCAL_LLM_CA_CERT]",
-    ),
-    click.option(
-        "--server-ca-cert",
-        default="",
-        envvar="EVAL_CLIENT_SERVER_CA_CERT",
-        help="PEM CA cert for verifying the server TLS cert [env: EVAL_CLIENT_SERVER_CA_CERT]",
-    ),
-    click.option(
-        "--verbose",
-        is_flag=True,
-        default=False,
-        help="Show timestamps, URLs, and model details",
-    ),
-]
 
-
-def _add_common_options(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """Apply all shared CLI options to a command."""
-    for option in reversed(_COMMON_OPTIONS):
-        fn = option(fn)
-    return fn
-
-
-@click.group()
-def cli() -> None:
-    """craft-dashboard local evaluation client."""
-
-
-@cli.command()
-@_add_common_options
+@click.command()
+@click.option(
+    "--server",
+    required=True,
+    envvar="EVAL_CLIENT_SERVER",
+    help="Base URL of craft-dashboard server [env: EVAL_CLIENT_SERVER]",
+)
+@click.option(
+    "--token",
+    required=True,
+    envvar="EVAL_API_TOKEN",
+    help="Eval API bearer token [env: EVAL_API_TOKEN]",
+)
+@click.option(
+    "--llm-url",
+    default="http://localhost:11434/v1",
+    show_default=True,
+    envvar="LOCAL_LLM_URL",
+    help="OpenAI-compatible LLM endpoint [env: LOCAL_LLM_URL]",
+)
+@click.option(
+    "--llm-api-key",
+    default="",
+    envvar="LOCAL_LLM_API_KEY",
+    help="API key for the LLM endpoint [env: LOCAL_LLM_API_KEY]",
+)
+@click.option(
+    "--ca-cert",
+    default="",
+    envvar="LOCAL_LLM_CA_CERT",
+    help="PEM CA cert path for LLM server TLS verification [env: LOCAL_LLM_CA_CERT]",
+)
+@click.option(
+    "--server-ca-cert",
+    default="",
+    envvar="EVAL_CLIENT_SERVER_CA_CERT",
+    help="PEM CA cert for verifying the server TLS cert [env: EVAL_CLIENT_SERVER_CA_CERT]",
+)
+@click.option(
+    "--verbose",
+    is_flag=True,
+    default=False,
+    help="Show timestamps, URLs, and model details",
+)
 @click.option(
     "--summary-model",
     default="llama3.2",
@@ -632,7 +613,7 @@ def cli() -> None:
     type=click.IntRange(min=0),
     help="Only evaluate stale evaluations older than N days",
 )
-def evaluate(  # noqa: PLR0913
+def cli(  # noqa: PLR0913
     server: str,
     token: str,
     summary_model: str,
@@ -651,7 +632,10 @@ def evaluate(  # noqa: PLR0913
     stale_days: int,
     verbose: bool,
 ) -> None:
-    """Run phase-1 evaluation: summarize and score issues."""
+    """craft-dashboard local evaluation client.
+
+    Evaluates issues in a single pass: summarize, then score and embed in parallel.
+    """
     asyncio.run(
         run_eval_loop(
             server=server,
