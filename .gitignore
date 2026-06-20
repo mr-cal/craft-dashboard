@@ -29,7 +29,8 @@ venv/
 htmlcov/
 
 # Environment
-.env
+.env*
+!.env.example
 .envrc
 provisioning/secrets.env
 *.sql.gz
@@ -39,3 +40,6 @@ provisioning/secrets.env
 
 # uv
 logs.txt
+
+# plans
+plans/
