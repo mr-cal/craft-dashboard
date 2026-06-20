@@ -405,17 +405,16 @@ async def distribute_refresh_schedule(
     # Use midnight-aligned day boundaries so assignments match the calendar-day
     # buckets that get_schedule_day_counts uses.  Start from tomorrow so nothing
     # is scheduled in tonight's remaining hours.
+    # Stagger within the first hour of midnight UTC so the 2 AM UTC daily cron
+    # always picks up every project scheduled for that calendar day.
     now = datetime.now(UTC)
     tomorrow_midnight = now.replace(
         hour=0, minute=0, second=0, microsecond=0
     ) + timedelta(days=1)
     for day_idx, assigned_indices in enumerate(day_assignments):
-        n = len(assigned_indices)
         day_start = tomorrow_midnight + timedelta(days=day_idx)
         for slot, orig_idx in enumerate(assigned_indices):
-            schedules[orig_idx].next_refresh_at = day_start + timedelta(
-                seconds=86400 * (slot + 1) / (n + 1)
-            )
+            schedules[orig_idx].next_refresh_at = day_start + timedelta(seconds=slot)
 
     await session.commit()
     total_schedules = len(schedules)

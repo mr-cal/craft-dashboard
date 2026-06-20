@@ -365,6 +365,12 @@ class TestAdminDistribute:
                 t.replace(hour=0, minute=0, second=0, microsecond=0) - tomorrow_midnight
             ).days
             assert 0 <= day_offset < 7, f"Day offset {day_offset} out of range for {t}"
+            # Must be before 2 AM UTC on its calendar day so the nightly 2 AM UTC
+            # cron always picks up every project scheduled for that day.
+            day_midnight = t.replace(hour=0, minute=0, second=0, microsecond=0)
+            assert t < day_midnight + timedelta(hours=2), (
+                f"{t} is at or after 2 AM UTC — cron will miss it until the next day"
+            )
 
     def test_distribute_balances_heavy_and_light_projects(self) -> None:
         """Heavy and light projects land on different calendar days."""
