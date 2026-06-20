@@ -29,21 +29,36 @@ SAMPLE_ISSUE = {
     "maintainers": ["alice"],
 }
 
-SAMPLE_RESULT = {
-    "summary": "This is a test summary for the issue evaluation.",
-    "scores": {
-        "staleness": 10,
-        "complexity": 30,
-        "support_request": 0,
-        "readiness": 50,
+# summarize returns (summary, total_tokens, prompt_tokens, completion_tokens)
+_SAMPLE_SUMMARIZE_RESULT = (
+    "This is a test summary for the issue evaluation.",
+    300,
+    200,
+    100,
+)
+# score returns (parsed_dict, total_tokens, prompt_tokens, completion_tokens)
+_SAMPLE_SCORE_RESULT = (
+    {
+        "scores": {
+            "staleness": 10,
+            "complexity": 30,
+            "support_request": 0,
+            "readiness": 50,
+            "confidence": 80,
+        },
+        "suggested_action": "needs_triage",
+        "suggested_action_reason": "Needs investigation by maintainer",
     },
-    "suggested_action": "needs_triage",
-    "suggested_action_reason": "Needs investigation by maintainer",
-    "tokens_used": 500,
-    "prompt_tokens": 300,
-    "completion_tokens": 200,
-    "issue_data_hash": "abc123",
-}
+    200,
+    100,
+    100,
+)
+
+# Combined token counts expected in submissions:
+# prompt_tokens = 200 + 100 = 300, completion_tokens = 100 + 100 = 200, tokens_used = 500
+_EXPECTED_PROMPT_TOKENS = 300
+_EXPECTED_COMPLETION_TOKENS = 200
+_EXPECTED_TOKENS_USED = 500
 
 DEFAULT_KWARGS = {
     "server": "http://localhost:8000",
@@ -126,7 +141,8 @@ def patched_runtime(monkeypatch):
     llm_client = MagicMock()
     llm_client.close = AsyncMock()
     evaluator = MagicMock()
-    evaluator.evaluate_issue = AsyncMock(return_value=SAMPLE_RESULT)
+    evaluator.summarize = AsyncMock(return_value=_SAMPLE_SUMMARIZE_RESULT)
+    evaluator.score = AsyncMock(return_value=_SAMPLE_SCORE_RESULT)
     sleep_mock = AsyncMock()
 
     # Mock progress bar to avoid rich terminal output in tests
@@ -134,6 +150,12 @@ def patched_runtime(monkeypatch):
     mock_progress.__enter__ = MagicMock(return_value=mock_progress)
     mock_progress.__exit__ = MagicMock(return_value=False)
     mock_progress.add_task = MagicMock(return_value=0)
+
+    # Capture console.print calls (used for per-issue completion lines)
+    console_prints: list[str] = []
+    mock_console = MagicMock()
+    mock_console.print = lambda *args, **kwargs: console_prints.append(str(args[0]))
+    mock_progress.console = mock_console
 
     # Mock timing history to avoid writing to ~/.craft-dashboard/
     mock_timing = MagicMock()
@@ -164,6 +186,7 @@ def patched_runtime(monkeypatch):
         "sleep": sleep_mock,
         "progress": mock_progress,
         "timing": mock_timing,
+        "console_prints": console_prints,
     }
 
 
@@ -197,22 +220,19 @@ async def test_run_eval_loop_processes_issue_and_stops_at_limit(
 
     await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
-    patched_runtime["evaluator"].evaluate_issue.assert_awaited_once()
+    patched_runtime["evaluator"].summarize.assert_awaited_once()
+    patched_runtime["evaluator"].score.assert_awaited_once()
     http_client.post.assert_awaited_once()
-    assert http_client.post.await_args.kwargs["json"] == {
-        "issue_id": 42,
-        "content_hash": "abc123",
-        "summary": SAMPLE_RESULT["summary"],
-        "scores": SAMPLE_RESULT["scores"],
-        "suggested_action": SAMPLE_RESULT["suggested_action"],
-        "suggested_action_reason": SAMPLE_RESULT["suggested_action_reason"],
-        "tokens_used": SAMPLE_RESULT["tokens_used"],
-        "prompt_tokens": SAMPLE_RESULT["prompt_tokens"],
-        "completion_tokens": SAMPLE_RESULT["completion_tokens"],
-        "model_used": "test-model",
-        "llm_backend": "local",
-        "summary_embedding": None,
-    }
+    posted = http_client.post.await_args.kwargs["json"]
+    assert posted["issue_id"] == 42
+    assert posted["summary"] == _SAMPLE_SUMMARIZE_RESULT[0]
+    assert posted["suggested_action"] == "needs_triage"
+    assert posted["prompt_tokens"] == _EXPECTED_PROMPT_TOKENS
+    assert posted["completion_tokens"] == _EXPECTED_COMPLETION_TOKENS
+    assert posted["tokens_used"] == _EXPECTED_TOKENS_USED
+    assert posted["model_used"] == "test-model"
+    assert posted["llm_backend"] == "local"
+    assert posted["summary_embedding"] is None
     patched_runtime["sleep"].assert_not_awaited()
     patched_runtime["llm_client"].close.assert_awaited_once()
 
@@ -233,7 +253,7 @@ async def test_run_eval_loop_sleeps_without_evaluating_when_no_work(
     await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
     assert http_client.get.await_count == 2  # status + next
-    patched_runtime["evaluator"].evaluate_issue.assert_not_awaited()
+    patched_runtime["evaluator"].summarize.assert_not_awaited()
     http_client.post.assert_not_awaited()
     patched_runtime["sleep"].assert_awaited_once_with(1)
 
@@ -258,7 +278,7 @@ async def test_run_eval_loop_logs_warning_and_continues_on_submit_conflict(
     with caplog.at_level(logging.WARNING):
         await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
-    patched_runtime["evaluator"].evaluate_issue.assert_awaited_once()
+    patched_runtime["evaluator"].summarize.assert_awaited_once()
     http_client.post.assert_awaited_once()
     patched_runtime["sleep"].assert_awaited_once_with(1)
     assert "content changed during evaluation" in caplog.text
@@ -268,13 +288,12 @@ async def test_run_eval_loop_logs_warning_and_continues_on_submit_conflict(
 async def test_run_eval_loop_stops_after_reaching_limit(
     monkeypatch, patched_runtime, caplog
 ) -> None:
-    first_result = deepcopy(SAMPLE_RESULT)
-    second_result = deepcopy(SAMPLE_RESULT)
-    second_result["issue_data_hash"] = "def456"
-    patched_runtime["evaluator"].evaluate_issue.side_effect = [
-        first_result,
-        second_result,
-    ]
+    patched_runtime["evaluator"].summarize = AsyncMock(
+        side_effect=[_SAMPLE_SUMMARIZE_RESULT, _SAMPLE_SUMMARIZE_RESULT]
+    )
+    patched_runtime["evaluator"].score = AsyncMock(
+        side_effect=[_SAMPLE_SCORE_RESULT, _SAMPLE_SCORE_RESULT]
+    )
     http_client = _patch_http_client(
         monkeypatch,
         get_responses=_with_status(
@@ -294,10 +313,14 @@ async def test_run_eval_loop_stops_after_reaching_limit(
     with caplog.at_level(logging.INFO):
         await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 2})
 
-    assert patched_runtime["evaluator"].evaluate_issue.await_count == 2
+    assert patched_runtime["evaluator"].summarize.await_count == 2
     assert http_client.post.await_count == 2
     assert "Done: evaluated 2 issues" in caplog.text
-    assert "Run total: 2 issues, 600 in / 400 out tokens (1000 total)" in caplog.text
+    assert (
+        f"Run total: 2 issues, {2 * _EXPECTED_PROMPT_TOKENS} in"
+        f" / {2 * _EXPECTED_COMPLETION_TOKENS} out tokens"
+        f" ({2 * _EXPECTED_TOKENS_USED} total)"
+    ) in caplog.text
 
 
 @pytest.mark.asyncio
@@ -317,19 +340,24 @@ async def test_run_eval_loop_sleeps_and_retries_after_server_error(
 
     assert http_client.get.await_count == 3  # status + 500 + issue
     patched_runtime["sleep"].assert_awaited_once_with(1)
-    patched_runtime["evaluator"].evaluate_issue.assert_awaited_once()
+    patched_runtime["evaluator"].summarize.assert_awaited_once()
     http_client.post.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_run_eval_loop_skips_submission_when_evaluator_returns_none(
+async def test_run_eval_loop_continues_after_summarize_exception(
     monkeypatch, patched_runtime, caplog
 ) -> None:
+    """If summarize raises, that issue is skipped and the loop continues."""
+
     async def request_shutdown(_seconds: int) -> None:
         eval_client.shutdown_state["requested"] = True
 
-    patched_runtime["evaluator"].evaluate_issue.return_value = None
+    patched_runtime["evaluator"].summarize = AsyncMock(
+        side_effect=RuntimeError("LLM timeout")
+    )
     patched_runtime["sleep"].side_effect = request_shutdown
+
     http_client = _patch_http_client(
         monkeypatch,
         get_responses=_with_status(
@@ -338,19 +366,36 @@ async def test_run_eval_loop_skips_submission_when_evaluator_returns_none(
         ),
     )
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.ERROR):
         await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
-    patched_runtime["evaluator"].evaluate_issue.assert_awaited_once()
     http_client.post.assert_not_awaited()
-    patched_runtime["sleep"].assert_awaited_once_with(1)
-    assert "content unchanged, skipped" in caplog.text
+    assert "summarization failed" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_run_eval_loop_logs_per_eval_token_counts(
+async def test_run_eval_loop_prints_per_issue_completion_line(
+    monkeypatch, patched_runtime
+) -> None:
+    """Each evaluated issue produces exactly one completion line via console.print."""
+    _patch_http_client(
+        monkeypatch,
+        get_responses=_with_status(httpx.Response(status_code=200, json=_make_issue())),
+        post_responses=[httpx.Response(status_code=200)],
+    )
+
+    await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+
+    printed = " ".join(patched_runtime["console_prints"])
+    assert "300 in / 200 out tokens" in printed
+    assert "needs_triage" in printed
+
+
+@pytest.mark.asyncio
+async def test_run_eval_loop_run_total_logged_after_multiple_issues(
     monkeypatch, patched_runtime, caplog
 ) -> None:
+    """Run total is logged to caplog (not console.print)."""
     _patch_http_client(
         monkeypatch,
         get_responses=_with_status(httpx.Response(status_code=200, json=_make_issue())),
@@ -360,5 +405,119 @@ async def test_run_eval_loop_logs_per_eval_token_counts(
     with caplog.at_level(logging.INFO):
         await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
-    assert "300 in / 200 out tokens" in caplog.text
     assert "Run total: 1 issues, 300 in / 200 out tokens (500 total)" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_embedding_client_created_once_for_multiple_issues(
+    monkeypatch, patched_runtime
+) -> None:
+    """EmbeddingClient is created once before the loop, not per-issue."""
+    mock_embed_client = MagicMock()
+    mock_embed_client.close = AsyncMock()
+    mock_embed_client.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
+    mock_embedding_class = MagicMock(return_value=mock_embed_client)
+    monkeypatch.setattr(eval_client, "EmbeddingClient", mock_embedding_class)
+
+    patched_runtime["evaluator"].summarize = AsyncMock(
+        side_effect=[_SAMPLE_SUMMARIZE_RESULT, _SAMPLE_SUMMARIZE_RESULT]
+    )
+    patched_runtime["evaluator"].score = AsyncMock(
+        side_effect=[_SAMPLE_SCORE_RESULT, _SAMPLE_SCORE_RESULT]
+    )
+
+    _patch_http_client(
+        monkeypatch,
+        get_responses=_with_status(
+            httpx.Response(
+                status_code=200, json=_make_issue(issue_id=1, external_id="1")
+            ),
+            httpx.Response(
+                status_code=200, json=_make_issue(issue_id=2, external_id="2")
+            ),
+        ),
+        post_responses=[
+            httpx.Response(status_code=200),
+            httpx.Response(status_code=200),
+        ],
+    )
+
+    await eval_client.run_eval_loop(
+        **{**DEFAULT_KWARGS, "limit": 2, "embed_model": "nomic-embed-text"}
+    )
+
+    assert mock_embedding_class.call_count == 1  # constructed once, not per-issue
+    mock_embed_client.close.assert_awaited_once()  # closed in finally
+
+
+@pytest.mark.asyncio
+async def test_score_and_embed_run_after_summarize(
+    monkeypatch, patched_runtime
+) -> None:
+    """Score and embed are launched concurrently after summarize completes."""
+    call_order: list[str] = []
+
+    async def fake_summarize(**_kwargs):
+        call_order.append("summarize")
+        return _SAMPLE_SUMMARIZE_RESULT
+
+    async def fake_score(**_kwargs):
+        call_order.append("score")
+        return _SAMPLE_SCORE_RESULT
+
+    mock_embed_client = MagicMock()
+
+    async def fake_embed(text):
+        call_order.append("embed")
+        return [0.1, 0.2, 0.3]
+
+    mock_embed_client.embed = fake_embed
+    mock_embed_client.close = AsyncMock()
+    monkeypatch.setattr(
+        eval_client, "EmbeddingClient", MagicMock(return_value=mock_embed_client)
+    )
+
+    patched_runtime["evaluator"].summarize = fake_summarize
+    patched_runtime["evaluator"].score = fake_score
+
+    _patch_http_client(
+        monkeypatch,
+        get_responses=_with_status(httpx.Response(status_code=200, json=_make_issue())),
+        post_responses=[httpx.Response(status_code=200)],
+    )
+
+    await eval_client.run_eval_loop(
+        **{**DEFAULT_KWARGS, "embed_model": "nomic-embed-text"}
+    )
+
+    assert call_order[0] == "summarize"
+    assert set(call_order[1:]) == {"score", "embed"}
+
+
+@pytest.mark.asyncio
+async def test_embedding_failure_does_not_abort_submission(
+    monkeypatch, patched_runtime, caplog
+) -> None:
+    """If embed raises, submission still proceeds with summary_embedding=None."""
+    mock_embed_client = MagicMock()
+    mock_embed_client.embed = AsyncMock(side_effect=RuntimeError("embed server down"))
+    mock_embed_client.close = AsyncMock()
+    monkeypatch.setattr(
+        eval_client, "EmbeddingClient", MagicMock(return_value=mock_embed_client)
+    )
+
+    http_client = _patch_http_client(
+        monkeypatch,
+        get_responses=_with_status(httpx.Response(status_code=200, json=_make_issue())),
+        post_responses=[httpx.Response(status_code=200)],
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await eval_client.run_eval_loop(
+            **{**DEFAULT_KWARGS, "embed_model": "nomic-embed-text"}
+        )
+
+    http_client.post.assert_awaited_once()
+    posted = http_client.post.await_args.kwargs["json"]
+    assert posted["summary_embedding"] is None
+    assert "embedding failed" in caplog.text
