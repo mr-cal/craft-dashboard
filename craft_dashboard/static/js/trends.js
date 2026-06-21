@@ -869,6 +869,17 @@ document.getElementById("date-end").value = today;
 document.getElementById("btn-date-apply").addEventListener("click", applyDateFilter);
 document.getElementById("btn-date-reset").addEventListener("click", resetDateFilter);
 
+// Wire up tooltip toggle
+function setTooltipsEnabled(enabled) {
+  registeredCharts.forEach((chart) => {
+    chart.options.plugins.tooltip.enabled = enabled;
+    chart.update("none");
+  });
+}
+document.getElementById("hide-tooltips").addEventListener("change", (e) => {
+  setTooltipsEnabled(!e.target.checked);
+});
+
 // Apply default date filter on page load (2021 to today)
 applyDateFilter();
 
