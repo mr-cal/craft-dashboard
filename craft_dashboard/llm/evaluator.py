@@ -7,9 +7,8 @@ from typing import Any, TypedDict
 
 from craft_dashboard.llm.client import LLMClient
 from craft_dashboard.llm.prompts import (
-    build_closed_summary_prompt,
-    build_evaluation_prompt,
-    build_summary_prompt,
+    build_closed_evaluate_prompt,
+    build_open_evaluate_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -141,145 +140,24 @@ def _compute_content_hash(
 
 
 class IssueEvaluator:
-    """Evaluates issues and PRs using an LLM via OpenRouter."""
+    """Evaluates issues and PRs using an LLM."""
 
     def __init__(
         self,
         client: LLMClient,
-        summary_model: str = "google/gemini-flash-1.5",
-        evaluation_model: str = "anthropic/claude-sonnet-4-20250514",
+        model: str = "google/gemini-flash-1.5",
     ) -> None:
         """Initialize the evaluator.
 
         Args:
             client: LLM completion client.
-            summary_model: Model to use for summarization (cheaper).
-            evaluation_model: Model to use for scoring (more capable).
+            model: Model to use for all evaluation calls.
 
         """
         self.client = client
-        self.summary_model = summary_model
-        self.evaluation_model = evaluation_model
+        self.model = model
 
-    async def summarize(
-        self,
-        *,
-        title: str,
-        body: str | None,
-        issue_type: str,
-        state: str,
-        labels: list[str],
-        age_days: int,
-        last_activity_days: int,
-        author: str,
-        is_maintainer: bool,
-        comment_count: int,
-        comments: list[IssueComment] | None = None,
-    ) -> tuple[str, int, int, int]:
-        """Generate a summary using the cheap model.
-
-        Returns:
-            Tuple of (summary text, total tokens, prompt tokens, completion tokens).
-
-        """
-        import re
-
-        if state in {"closed", "merged"}:
-            summary_messages = build_closed_summary_prompt(
-                title=title,
-                body=body,
-                issue_type=issue_type,
-                state=state,
-                labels=labels,
-                age_days=age_days,
-                last_activity_days=last_activity_days,
-                author=author,
-                is_maintainer=is_maintainer,
-                comment_count=comment_count,
-                comments=comments,
-            )
-        else:
-            summary_messages = build_summary_prompt(
-                title=title,
-                body=body,
-                issue_type=issue_type,
-                labels=labels,
-                age_days=age_days,
-                last_activity_days=last_activity_days,
-                author=author,
-                is_maintainer=is_maintainer,
-                comment_count=comment_count,
-                comments=comments,
-            )
-        # Allow enough tokens for thinking models (e.g. Qwen3) to reason
-        # before producing the actual summary.
-        response = await self.client.complete(
-            model=self.summary_model,
-            messages=summary_messages,
-            max_tokens=4096,
-        )
-        # Strip <think>...</think> reasoning blocks emitted by thinking models.
-        content = re.sub(
-            r"<think>.*?</think>", "", response.content, flags=re.DOTALL
-        ).strip()
-        return (
-            content,
-            response.total_tokens,
-            response.prompt_tokens,
-            response.completion_tokens,
-        )
-
-    async def score(
-        self,
-        *,
-        title: str,
-        body: str | None,
-        issue_type: str,
-        labels: list[str],
-        age_days: int,
-        last_activity_days: int,
-        author: str,
-        is_maintainer: bool,
-        comment_count: int,
-        comments: list[IssueComment] | None = None,
-        pr_details: IssueDetails | None = None,
-    ) -> tuple[ParsedEvaluation | None, int, int, int]:
-        """Score the issue using the more capable model.
-
-        Returns:
-            Tuple of (parsed evaluation dict or None, total tokens, prompt tokens, completion tokens).
-
-        """
-        eval_messages = build_evaluation_prompt(
-            title=title,
-            body=body,
-            issue_type=issue_type,
-            labels=labels,
-            age_days=age_days,
-            last_activity_days=last_activity_days,
-            author=author,
-            is_maintainer=is_maintainer,
-            comment_count=comment_count,
-            comments=comments,
-            pr_details=pr_details,
-        )
-        response = await self.client.complete(
-            model=self.evaluation_model,
-            messages=eval_messages,
-            max_tokens=4096,
-            response_format={"type": "json_object"},
-        )
-        parsed = _parse_evaluation_response(response.content)
-        if parsed is None:
-            logger.warning("Could not parse evaluation for: %s", title)
-        return (
-            parsed,
-            response.total_tokens,
-            response.prompt_tokens,
-            response.completion_tokens,
-        )
-
-    async def evaluate_issue(
+    async def evaluate(
         self,
         *,
         title: str,
@@ -296,7 +174,11 @@ class IssueEvaluator:
         pr_details: IssueDetails | None = None,
         existing_hash: str | None = None,
     ) -> EvaluationResult | None:
-        """Evaluate a single issue or PR.
+        """Evaluate a single issue or PR in one LLM call.
+
+        For open issues and PRs, returns summary + scores + action.
+        For closed/merged, returns summary only (scores={}, action=None).
+        Returns None when the content hash is unchanged (skip re-evaluation).
 
         Args:
             title: Issue/PR title.
@@ -314,7 +196,7 @@ class IssueEvaluator:
             existing_hash: Content hash from previous evaluation, if any.
 
         Returns:
-            Dict with summary, scores, action, tokens, and hash. None if skipped.
+            EvaluationResult dict, or None if skipped (content unchanged).
 
         """
         label_names = labels if isinstance(labels, list) else []
@@ -328,24 +210,47 @@ class IssueEvaluator:
             return None
 
         logger.debug("Evaluating: %s", title)
-        (
-            summary,
-            summary_tokens,
-            summary_prompt,
-            summary_completion,
-        ) = await self.summarize(
-            title=title,
-            body=body,
-            issue_type=issue_type,
-            state=normalized_state,
-            labels=label_names,
-            age_days=age_days,
-            last_activity_days=last_activity_days,
-            author=author,
-            is_maintainer=is_maintainer,
-            comment_count=comment_count,
-            comments=comments,
+
+        if normalized_state in {"closed", "merged"}:
+            messages = build_closed_evaluate_prompt(
+                title=title,
+                body=body,
+                issue_type=issue_type,
+                state=normalized_state,
+                labels=label_names,
+                age_days=age_days,
+                last_activity_days=last_activity_days,
+                author=author,
+                is_maintainer=is_maintainer,
+                comment_count=comment_count,
+                comments=comments,
+            )
+        else:
+            messages = build_open_evaluate_prompt(
+                title=title,
+                body=body,
+                issue_type=issue_type,
+                labels=label_names,
+                age_days=age_days,
+                last_activity_days=last_activity_days,
+                author=author,
+                is_maintainer=is_maintainer,
+                comment_count=comment_count,
+                comments=comments,
+                pr_details=pr_details,
+            )
+
+        response = await self.client.complete(
+            model=self.model,
+            messages=messages,
+            max_tokens=4096,
+            response_format={"type": "json_object"},
         )
+        parsed = _parse_evaluation_response(response.content)
+        if parsed is None:
+            logger.warning("Could not parse evaluation response for: %s", title)
+
+        summary = (parsed.get("summary") if parsed else None) or ""
 
         if normalized_state in {"closed", "merged"}:
             return {
@@ -353,34 +258,13 @@ class IssueEvaluator:
                 "scores": {},
                 "suggested_action": None,
                 "suggested_action_reason": None,
-                "tokens_used": summary_tokens,
-                "prompt_tokens": summary_prompt,
-                "completion_tokens": summary_completion,
+                "tokens_used": response.total_tokens,
+                "prompt_tokens": response.prompt_tokens,
+                "completion_tokens": response.completion_tokens,
                 "issue_data_hash": current_hash,
             }
 
-        parsed, eval_tokens, eval_prompt, eval_completion = await self.score(
-            title=title,
-            body=body,
-            issue_type=issue_type,
-            labels=label_names,
-            age_days=age_days,
-            last_activity_days=last_activity_days,
-            author=author,
-            is_maintainer=is_maintainer,
-            comment_count=comment_count,
-            comments=comments,
-            pr_details=pr_details,
-        )
-
-        total_tokens = summary_tokens + eval_tokens
-
-        scores = parsed.get("scores", {}) if parsed else {}
-        # Default confidence to 50 when the LLM omits it.
-        # The prompt asks for confidence, so omission usually means the model
-        # skipped it rather than deliberately withholding a value.  50 is
-        # a neutral "moderate confidence" default that lets the submission
-        # succeed instead of looping forever on the same issue.
+        scores = (parsed.get("scores") if parsed else None) or {}
         if "confidence" not in scores:
             scores["confidence"] = 50
 
@@ -391,8 +275,8 @@ class IssueEvaluator:
             "suggested_action_reason": parsed.get("suggested_action_reason")
             if parsed
             else None,
-            "tokens_used": total_tokens,
-            "prompt_tokens": summary_prompt + eval_prompt,
-            "completion_tokens": summary_completion + eval_completion,
+            "tokens_used": response.total_tokens,
+            "prompt_tokens": response.prompt_tokens,
+            "completion_tokens": response.completion_tokens,
             "issue_data_hash": current_hash,
         }

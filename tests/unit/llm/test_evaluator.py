@@ -104,17 +104,200 @@ class TestParseEvaluationResponse:
 class TestIssueEvaluator:
     """Tests for IssueEvaluator."""
 
-    def test_init(self) -> None:
-        """IssueEvaluator initializes with client and model config."""
+    def test_init_single_model(self) -> None:
+        """IssueEvaluator initializes with client and single model."""
         mock_client = MagicMock()
-        evaluator = IssueEvaluator(
-            client=mock_client,
-            summary_model="google/gemini-flash-1.5",
-            evaluation_model="anthropic/claude-sonnet-4-20250514",
+        evaluator = IssueEvaluator(client=mock_client, model="my-model")
+
+        assert evaluator.model == "my-model"
+        assert not hasattr(evaluator, "summary_model")
+        assert not hasattr(evaluator, "evaluation_model")
+
+    def test_init_default_model(self) -> None:
+        """IssueEvaluator has a sensible default model."""
+        mock_client = MagicMock()
+        evaluator = IssueEvaluator(client=mock_client)
+
+        assert evaluator.model == "google/gemini-flash-1.5"
+
+
+class TestEvaluateIssue:
+    """Tests for IssueEvaluator.evaluate()."""
+
+    @pytest.mark.asyncio
+    async def test_evaluate_open_issue(self) -> None:
+        """Open issues return summary + scores + action from a single LLM call."""
+        mock_response = LLMResponse(
+            content='{"summary": "Crash on startup.", "scores": {"staleness": 20, "complexity": 40, "support_request": 10, "confidence": 80}, "suggested_action": "needs_triage", "suggested_action_reason": "No maintainer response."}',
+            total_tokens=300,
+            prompt_tokens=200,
+            completion_tokens=100,
+            model="test-model",
+        )
+        mock_client = MagicMock()
+        mock_client.complete = AsyncMock(return_value=mock_response)
+        evaluator = IssueEvaluator(client=mock_client, model="test-model")
+
+        result = await evaluator.evaluate(
+            title="Crash on startup",
+            body="Steps to reproduce...",
+            issue_type="issue",
+            state="open",
+            labels=["bug"],
+            age_days=10,
+            last_activity_days=3,
+            author="alice",
+            is_maintainer=False,
+            comment_count=0,
         )
 
-        assert evaluator.summary_model == "google/gemini-flash-1.5"
-        assert evaluator.evaluation_model == "anthropic/claude-sonnet-4-20250514"
+        assert result is not None
+        assert result["summary"] == "Crash on startup."
+        assert result["scores"]["staleness"] == 20
+        assert result["suggested_action"] == "needs_triage"
+        assert result["tokens_used"] == 300
+        # Single LLM call
+        mock_client.complete.assert_awaited_once()
+        call_kwargs = mock_client.complete.call_args.kwargs
+        assert call_kwargs["model"] == "test-model"
+        assert call_kwargs["response_format"] == {"type": "json_object"}
+
+    @pytest.mark.asyncio
+    async def test_evaluate_closed_issue(self) -> None:
+        """Closed issues return summary only with empty scores."""
+        mock_response = LLMResponse(
+            content='{"summary": "Fixed by PR #42."}',
+            total_tokens=150,
+            prompt_tokens=100,
+            completion_tokens=50,
+            model="test-model",
+        )
+        mock_client = MagicMock()
+        mock_client.complete = AsyncMock(return_value=mock_response)
+        evaluator = IssueEvaluator(client=mock_client, model="test-model")
+
+        result = await evaluator.evaluate(
+            title="Old bug",
+            body="It crashed.",
+            issue_type="issue",
+            state="closed",
+            labels=[],
+            age_days=365,
+            last_activity_days=300,
+            author="bob",
+            is_maintainer=False,
+            comment_count=2,
+        )
+
+        assert result is not None
+        assert result["summary"] == "Fixed by PR #42."
+        assert result["scores"] == {}
+        assert result["suggested_action"] is None
+        # Single LLM call
+        mock_client.complete.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_evaluate_skips_unchanged_content(self) -> None:
+        """Returns None without calling LLM when content hash matches."""
+        mock_client = MagicMock()
+        mock_client.complete = AsyncMock()
+        evaluator = IssueEvaluator(client=mock_client, model="test-model")
+        existing_hash = _compute_content_hash("T", "B", "open", [])
+
+        result = await evaluator.evaluate(
+            title="T",
+            body="B",
+            issue_type="issue",
+            state="open",
+            labels=[],
+            age_days=0,
+            last_activity_days=0,
+            author="x",
+            is_maintainer=False,
+            comment_count=0,
+            existing_hash=existing_hash,
+        )
+
+        assert result is None
+        mock_client.complete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_evaluate_confidence_defaults_to_50(self) -> None:
+        """Missing confidence in scores defaults to 50."""
+        mock_response = LLMResponse(
+            content='{"summary": "X", "scores": {"staleness": 10, "complexity": 20, "support_request": 5}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
+            total_tokens=100,
+            prompt_tokens=70,
+            completion_tokens=30,
+            model="test-model",
+        )
+        mock_client = MagicMock()
+        mock_client.complete = AsyncMock(return_value=mock_response)
+        evaluator = IssueEvaluator(client=mock_client, model="test-model")
+
+        result = await evaluator.evaluate(
+            title="T",
+            body=None,
+            issue_type="issue",
+            state="open",
+            labels=[],
+            age_days=5,
+            last_activity_days=1,
+            author="x",
+            is_maintainer=False,
+            comment_count=0,
+        )
+
+        assert result is not None
+        assert result["scores"]["confidence"] == 50
+
+    @pytest.mark.asyncio
+    async def test_evaluate_passes_comments_to_prompt(self) -> None:
+        """Comments are forwarded to the prompt builder."""
+        mock_response = LLMResponse(
+            content='{"summary": "Regression.", "scores": {"staleness": 10, "complexity": 20, "support_request": 5, "confidence": 80}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
+            total_tokens=50,
+            prompt_tokens=30,
+            completion_tokens=20,
+            model="test-model",
+        )
+        mock_client = MagicMock()
+        mock_client.complete = AsyncMock(return_value=mock_response)
+        evaluator = IssueEvaluator(client=mock_client, model="test-model")
+
+        comments = [
+            {
+                "author": "craft-contributor",
+                "body": "Still seeing this on snapcraft 8.4.",
+                "created_at": "2024-01-01T00:00:00+00:00",
+                "type": "comment",
+            }
+        ]
+
+        with patch("craft_dashboard.llm.evaluator.build_open_evaluate_prompt") as mock_prompt:
+            mock_prompt.return_value = [{"role": "user", "content": "test"}]
+
+            await evaluator.evaluate(
+                title="snapcraft pack fails",
+                body="Failure details.",
+                issue_type="issue",
+                state="open",
+                labels=["bug"],
+                age_days=45,
+                last_activity_days=3,
+                author="jdoe-canonical",
+                is_maintainer=False,
+                comment_count=1,
+                comments=comments,
+            )
+
+        mock_prompt.assert_called_once()
+        call_kwargs = mock_prompt.call_args.kwargs
+        assert call_kwargs["comments"] == comments
+        assert call_kwargs["age_days"] == 45
+        assert call_kwargs["last_activity_days"] == 3
+        assert call_kwargs["comment_count"] == 1
+        assert call_kwargs["author"] == "jdoe-canonical"
 
 
 class TestComputeContentHash:
@@ -227,146 +410,5 @@ class TestComputeContentHash:
         assert hash_a == hash_b
 
 
-class TestEvaluateIssueWithComments:
-    """Tests that evaluate_issue passes comments and pr_details to prompt builders."""
-
-    @pytest.mark.asyncio
-    async def test_evaluate_passes_comments_to_prompt(self) -> None:
-        """Comments from call are forwarded to the prompt builders."""
-        mock_summary_response = LLMResponse(
-            content="Regression report for snapcraft failing with the LXD backend.",
-            total_tokens=15,
-            prompt_tokens=10,
-            completion_tokens=5,
-            model="summary-model",
-        )
-        mock_eval_response = LLMResponse(
-            content='{"scores": {"staleness": 10}, "suggested_action": "keep_open", "suggested_action_reason": "Maintainers are still reproducing the LXD failure."}',
-            total_tokens=50,
-            prompt_tokens=20,
-            completion_tokens=30,
-            model="evaluation-model",
-        )
-
-        mock_client = MagicMock()
-        mock_client.complete = AsyncMock(
-            side_effect=[mock_summary_response, mock_eval_response]
-        )
-
-        evaluator = IssueEvaluator(
-            client=mock_client,
-            summary_model="test-sum",
-            evaluation_model="test-eval",
-        )
-
-        comments = [
-            {
-                "author": "craft-contributor",
-                "body": "Still seeing this on snapcraft 8.4 with the LXD backend.",
-                "created_at": "2024-01-01T00:00:00+00:00",
-                "type": "comment",
-            }
-        ]
-
-        with (
-            patch("craft_dashboard.llm.evaluator.build_summary_prompt") as mock_sum,
-            patch("craft_dashboard.llm.evaluator.build_evaluation_prompt") as mock_eval,
-        ):
-            mock_sum.return_value = [{"role": "user", "content": "test"}]
-            mock_eval.return_value = [{"role": "user", "content": "test"}]
-
-            await evaluator.evaluate_issue(
-                title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
-                body="When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
-                issue_type="issue",
-                state="open",
-                labels=["bug", "priority-high"],
-                age_days=45,
-                last_activity_days=3,
-                author="jdoe-canonical",
-                is_maintainer=False,
-                comment_count=1,
-                comments=comments,
-            )
-
-        mock_sum.assert_called_once()
-        call_kwargs = mock_sum.call_args.kwargs
-        assert call_kwargs["comments"] == comments
-        assert call_kwargs["age_days"] == 45
-        assert call_kwargs["last_activity_days"] == 3
-        assert call_kwargs["comment_count"] == 1
-        assert call_kwargs["author"] == "jdoe-canonical"
 
 
-class TestSummarizeStripsThinkBlocks:
-    """Tests that _summarize strips <think> blocks from model responses."""
-
-    @pytest.mark.asyncio
-    async def test_strips_think_block_from_summary(self) -> None:
-        """<think>...</think> blocks from thinking models are stripped."""
-        mock_response = LLMResponse(
-            content="<think>reasoning...</think>\nA 10-day-old bug report with no activity.",
-            total_tokens=30,
-            prompt_tokens=15,
-            completion_tokens=15,
-            model="summary-model",
-        )
-        mock_client = MagicMock()
-        mock_client.complete = AsyncMock(return_value=mock_response)
-
-        evaluator = IssueEvaluator(
-            client=mock_client,
-            summary_model="test-sum",
-            evaluation_model="test-eval",
-        )
-
-        summary, _, _, _ = await evaluator.summarize(
-            title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
-            body="When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
-            issue_type="issue",
-            state="open",
-            labels=["bug", "priority-high"],
-            age_days=120,
-            last_activity_days=45,
-            author="craft-contributor",
-            is_maintainer=False,
-            comment_count=0,
-        )
-
-        assert "<think>" not in summary
-        assert "reasoning" not in summary
-        assert "10-day-old bug report" in summary
-
-    @pytest.mark.asyncio
-    async def test_summary_with_only_think_block_returns_empty(self) -> None:
-        """When the entire response is a think block, the summary is empty."""
-        mock_response = LLMResponse(
-            content="<think>I ran out of tokens while reasoning...</think>",
-            total_tokens=30,
-            prompt_tokens=15,
-            completion_tokens=15,
-            model="summary-model",
-        )
-        mock_client = MagicMock()
-        mock_client.complete = AsyncMock(return_value=mock_response)
-
-        evaluator = IssueEvaluator(
-            client=mock_client,
-            summary_model="test-sum",
-            evaluation_model="test-eval",
-        )
-
-        summary, _, _, _ = await evaluator.summarize(
-            title="charmcraft deploy times out on large bundles",
-            body="Deploying a large bundle stalls while charmcraft waits for the controller response.",
-            issue_type="issue",
-            state="open",
-            labels=["needs-triage"],
-            age_days=45,
-            last_activity_days=12,
-            author="craft-contributor",
-            is_maintainer=False,
-            comment_count=0,
-        )
-
-        assert summary == ""
