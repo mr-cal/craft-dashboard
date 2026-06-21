@@ -387,8 +387,11 @@ async def test_run_eval_loop_prints_per_issue_completion_line(
     await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
     printed = " ".join(patched_runtime["console_prints"])
-    assert "300 in / 200 out tokens" in printed
+    assert "300 in / 200 out" in printed
     assert "needs_triage" in printed
+    assert "sum " in printed
+    assert "score " in printed
+    assert "embed " in printed
 
 
 @pytest.mark.asyncio

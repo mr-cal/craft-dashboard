@@ -14,7 +14,10 @@ import threading
 import time
 import tty
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
 
 import click
 import httpx
@@ -75,6 +78,13 @@ def _format_elapsed(seconds: float) -> str:
     minutes = int(seconds // 60)
     remaining = int(seconds % 60)
     return f"{minutes}m{remaining:02d}s"
+
+
+async def _timed[T](coro: Awaitable[T]) -> tuple[T, float]:
+    """Run an awaitable and return (result, elapsed_seconds)."""
+    t = time.monotonic()
+    result = await coro
+    return result, time.monotonic() - t
 
 
 def _format_error_body(response: httpx.Response) -> str:
@@ -416,25 +426,30 @@ async def run_eval_loop(  # noqa: PLR0913
                     # --- Step 1: Summarize ---
                     try:
                         (
-                            summary,
-                            summary_tokens,
-                            summary_prompt,
-                            summary_completion,
-                        ) = await evaluator.summarize(
-                            title=issue_data["title"],
-                            body=issue_data.get("body"),
-                            issue_type=issue_data["issue_type"],
-                            state=normalized_state,
-                            labels=issue_data.get("labels", []),
-                            age_days=_days_since(issue_data.get("created_at")),
-                            last_activity_days=_days_since(
-                                issue_data.get("updated_at")
+                            (
+                                summary,
+                                summary_tokens,
+                                summary_prompt,
+                                summary_completion,
                             ),
-                            author=author,
-                            is_maintainer=author in maintainers
-                            or issue_data.get("author_association") == "MAINTAINER",
-                            comment_count=len(issue_data.get("comments", [])),
-                            comments=issue_data.get("comments"),
+                            t_sum,
+                        ) = await _timed(
+                            evaluator.summarize(
+                                title=issue_data["title"],
+                                body=issue_data.get("body"),
+                                issue_type=issue_data["issue_type"],
+                                state=normalized_state,
+                                labels=issue_data.get("labels", []),
+                                age_days=_days_since(issue_data.get("created_at")),
+                                last_activity_days=_days_since(
+                                    issue_data.get("updated_at")
+                                ),
+                                author=author,
+                                is_maintainer=author in maintainers
+                                or issue_data.get("author_association") == "MAINTAINER",
+                                comment_count=len(issue_data.get("comments", [])),
+                                comments=issue_data.get("comments"),
+                            )
                         )
                     except Exception:
                         progress.update(status_id, visible=False)
@@ -470,11 +485,11 @@ async def run_eval_loop(  # noqa: PLR0913
                                 f" | score [dim]—[/dim] | embed {embed_waiting}"
                             ),
                         )
-                        summary_embedding = await _embed_safe(
-                            embed_client, embed_text, issue_ref
+                        summary_embedding, t_embed = await _timed(
+                            _embed_safe(embed_client, embed_text, issue_ref)
                         )
+                        t_score = None
                         duration = time.monotonic() - t0
-                        elapsed = _format_elapsed(duration)
                         submission: dict[str, Any] = {
                             "issue_id": issue_data["issue_id"],
                             "content_hash": content_hash,
@@ -502,30 +517,41 @@ async def run_eval_loop(  # noqa: PLR0913
                         try:
                             (
                                 (
-                                    parsed,
-                                    eval_tokens,
-                                    eval_prompt,
-                                    eval_completion,
-                                ),
-                                summary_embedding,
-                            ) = await asyncio.gather(
-                                evaluator.score(
-                                    title=issue_data["title"],
-                                    body=issue_data.get("body"),
-                                    issue_type=issue_data["issue_type"],
-                                    labels=issue_data.get("labels", []),
-                                    age_days=_days_since(issue_data.get("created_at")),
-                                    last_activity_days=_days_since(
-                                        issue_data.get("updated_at")
+                                    (
+                                        parsed,
+                                        eval_tokens,
+                                        eval_prompt,
+                                        eval_completion,
                                     ),
-                                    author=author,
-                                    is_maintainer=author in maintainers
-                                    or issue_data.get("author_association")
-                                    == "MAINTAINER",
-                                    comment_count=len(issue_data.get("comments", [])),
-                                    comments=issue_data.get("comments"),
+                                    t_score,
                                 ),
-                                _embed_safe(embed_client, embed_text, issue_ref),
+                                (summary_embedding, t_embed),
+                            ) = await asyncio.gather(
+                                _timed(
+                                    evaluator.score(
+                                        title=issue_data["title"],
+                                        body=issue_data.get("body"),
+                                        issue_type=issue_data["issue_type"],
+                                        labels=issue_data.get("labels", []),
+                                        age_days=_days_since(
+                                            issue_data.get("created_at")
+                                        ),
+                                        last_activity_days=_days_since(
+                                            issue_data.get("updated_at")
+                                        ),
+                                        author=author,
+                                        is_maintainer=author in maintainers
+                                        or issue_data.get("author_association")
+                                        == "MAINTAINER",
+                                        comment_count=len(
+                                            issue_data.get("comments", [])
+                                        ),
+                                        comments=issue_data.get("comments"),
+                                    )
+                                ),
+                                _timed(
+                                    _embed_safe(embed_client, embed_text, issue_ref)
+                                ),
                             )
                         except Exception:
                             progress.update(status_id, visible=False)
@@ -538,7 +564,6 @@ async def run_eval_loop(  # noqa: PLR0913
                             continue
 
                         duration = time.monotonic() - t0
-                        elapsed = _format_elapsed(duration)
                         scores = parsed.get("scores", {}) if parsed else {}
                         if "confidence" not in scores:
                             scores["confidence"] = 50
@@ -617,9 +642,12 @@ async def run_eval_loop(  # noqa: PLR0913
                         eta=timing.eta(PHASE_EVALUATE, remaining),
                     )
                     action = submission.get("suggested_action") or "summary_only"
+                    score_str = _format_elapsed(t_score) if t_score is not None else "—"
+                    embed_str = _format_elapsed(t_embed)
                     progress.console.print(
                         f"[bold]{issue_ref}[/bold] — {action}"
-                        f"  [dim]{prompt_tok} in / {completion_tok} out tokens  {elapsed}[/dim]"
+                        f"  [dim]{prompt_tok} in / {completion_tok} out"
+                        f"  sum {_format_elapsed(t_sum)} score {score_str} embed {embed_str}[/dim]"
                     )
 
                     if limit > 0 and evaluated >= limit:

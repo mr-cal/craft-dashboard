@@ -1131,4 +1131,7 @@ class TestEvalClientEdgeCases:
         line = patched_runtime["console_prints"][0]
         assert "snapcraft#2695" in line
         assert "needs_triage" in line
-        assert "300 in / 200 out tokens" in line
+        assert "300 in / 200 out" in line
+        assert "sum " in line
+        assert "score " in line
+        assert "embed " in line
