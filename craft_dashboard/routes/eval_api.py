@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 from craft_dashboard.auth import verify_eval_token
 from craft_dashboard.dependencies import get_db_session
-from craft_dashboard.llm.evaluator import _compute_content_hash
+from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION, _compute_content_hash
 from craft_dashboard.llm.exceptions import LLMValidationError
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
@@ -265,6 +265,7 @@ async def submit_result(
         LLMEvaluation(
             issue_id=payload.issue_id,
             model_name=payload.model_used,
+            eval_version=CURRENT_EVAL_VERSION,
             summary=payload.summary,
             suggested_action=payload.suggested_action,
             suggested_action_reason=payload.suggested_action_reason,

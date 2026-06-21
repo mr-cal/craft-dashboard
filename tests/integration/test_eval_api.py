@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from craft_dashboard.app import create_app
 from craft_dashboard.config import DashboardConfig
 from craft_dashboard.dependencies import get_db_session
-from craft_dashboard.llm.evaluator import _compute_content_hash
+from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION, _compute_content_hash
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.settings import Settings
 from fastapi.testclient import TestClient
@@ -394,7 +394,62 @@ class TestEvalResultIntegration:
         assert evaluations[1].model_name == "haiku"
         assert evaluations[1].llm_backend == "local"
         assert evaluations[1].issue_data_hash == current_hash
+        assert evaluations[1].eval_version == CURRENT_EVAL_VERSION
         assert evaluations[1].eval_locked_until is not None
+
+    def test_submit_result_stores_current_eval_version(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(
+            id=1,
+            project_id=1,
+            external_id="42",
+            title="Regression in pack step",
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+        current_hash = _compute_content_hash(
+            issue.title,
+            issue.body,
+            issue.state,
+            issue.labels,
+            issue.comments,
+        )
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/result",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "issue_id": 1,
+                    "content_hash": current_hash,
+                    "summary": "Maintainers confirmed the regression is still reproducible.",
+                    "scores": {
+                        "staleness": 2,
+                        "complexity": 55,
+                        "support_request": 12,
+                        "confidence": 70,
+                    },
+                    "suggested_action": "keep_open",
+                    "suggested_action_reason": "The issue is actionable and still affects current builds.",
+                    "tokens_used": 120,
+                    "prompt_tokens": 80,
+                    "completion_tokens": 40,
+                    "model_used": "haiku",
+                    "llm_backend": "local",
+                },
+            )
+
+        assert response.status_code == 200
+
+        evaluations = asyncio.get_event_loop().run_until_complete(
+            _all_evaluations(test_db_session)
+        )
+        assert len(evaluations) == 1
+        assert evaluations[0].eval_version == CURRENT_EVAL_VERSION
 
     def test_submit_result_stores_embedding(
         self, test_db_session: AsyncSession

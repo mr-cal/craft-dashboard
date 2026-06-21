@@ -82,7 +82,9 @@ class TestStoreEvaluationResult:
         assert "INSERT INTO llm_evaluations" in insert_sql
         assert "ON CONFLICT (issue_id)" in insert_sql
         assert "DO UPDATE SET" in insert_sql
+        assert "eval_version" in insert_sql
         assert "summary = excluded.summary" in insert_sql
+        assert "eval_version = excluded.eval_version" in insert_sql
         assert "latest = excluded.latest" in insert_sql
 
 

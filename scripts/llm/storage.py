@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from craft_dashboard.database import get_engine, get_session_factory
+from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
@@ -75,6 +76,7 @@ async def store_evaluation_result(
     insert_stmt = insert(LLMEvaluation).values(
         issue_id=issue_id,
         model_name=model,
+        eval_version=CURRENT_EVAL_VERSION,
         summary=result["summary"],
         suggested_action=result["suggested_action"],
         suggested_action_reason=result["suggested_action_reason"],
@@ -92,6 +94,7 @@ async def store_evaluation_result(
         index_where=LLMEvaluation.latest.is_(True),
         set_={
             "model_name": insert_stmt.excluded.model_name,
+            "eval_version": insert_stmt.excluded.eval_version,
             "summary": insert_stmt.excluded.summary,
             "suggested_action": insert_stmt.excluded.suggested_action,
             "suggested_action_reason": insert_stmt.excluded.suggested_action_reason,
