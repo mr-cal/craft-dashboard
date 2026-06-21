@@ -2,75 +2,90 @@
 {% block title %}Releases - craft-dashboard{% endblock %}
 {% block content %}
 {% include "stats/partials/tabs.html" %}
-<h2>Releases</h2>
-<p>Latest release for each application and branch, with commits landed since.</p>
 
-<table>
-  <thead>
-    <tr>
-      <th>Application</th>
-      <th>Branch</th>
-      <th>Latest Tag</th>
-      <th>Commits Since Tag</th>
-      <th>Released</th>
-      <th>Days Ago</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for rel in releases %}
-    <tr>
-      <td>{{ rel.project_name }}</td>
-      <td>{{ rel.branch or "main" }}</td>
-      <td><code>{{ rel.version }}</code></td>
-      <td>{% if rel.commits_since_tag is not none %}{{ rel.commits_since_tag }}{% else %}-{% endif %}</td>
-      <td>{{ rel.released_at.strftime("%Y-%m-%d") if rel.released_at else "-" }}</td>
-      <td>{{ rel.days_ago if rel.days_ago is not none else "-" }}</td>
-    </tr>
-    {% else %}
-    <tr>
-      <td colspan="6">No release data available yet.</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="row--25-75">
+  <div class="col">
+    <h2>Releases</h2>
+    <p>Latest release for each application and branch, with commits landed since.</p>
+  </div>
+  <div class="col">
+    <table>
+      <thead>
+        <tr>
+          <th>Application</th>
+          <th>Branch</th>
+          <th>Tag</th>
+          <th>Released (days ago)</th>
+          <th>Commits Since Tag</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for rel in releases %}
+        <tr>
+          <td>{{ rel.project_name }}</td>
+          <td>{{ rel.branch or "main" }}</td>
+          <td><code>{{ rel.version }}</code></td>
+          <td>
+            {% if rel.released_at %}
+            {{ rel.released_at.strftime("%Y-%m-%d") }} ({{ rel.days_ago if rel.days_ago is not none else "-" }})
+            {% else %}-{% endif %}
+          </td>
+          <td>{% if rel.commits_since_tag is not none %}{{ rel.commits_since_tag }}{% else %}-{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5">No release data available yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
 
-<h2>Hotfixes</h2>
-<p>All <code>hotfix/*</code> branches across every project, including libraries.</p>
-
-<table>
-  <thead>
-    <tr>
-      <th>Project</th>
-      <th>Branch</th>
-      <th>Latest Tag</th>
-      <th>Commits Since Tag</th>
-      <th>Released</th>
-      <th>Days Ago</th>
-      <th data-tooltip="Safe to delete when the branch tag also exists on main and there are no extra commits on the branch since that tag." tabindex="0">Safe to Delete?</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for hf in hotfixes %}
-    <tr>
-      <td>{{ hf.project_name }}</td>
-      <td>{{ hf.branch }}</td>
-      <td><code>{{ hf.version }}</code></td>
-      <td>{% if hf.commits_since_tag is not none %}{{ hf.commits_since_tag }}{% else %}-{% endif %}</td>
-      <td>{{ hf.released_at.strftime("%Y-%m-%d") if hf.released_at else "-" }}</td>
-      <td>{{ hf.days_ago if hf.days_ago is not none else "-" }}</td>
-      {% if hf.safe_to_delete is none %}
-      <td>-</td>
-      {% elif hf.safe_to_delete %}
-      <td data-tooltip="Yes — the tag exists on main and there are no unreleased commits on this branch." tabindex="0">Yes</td>
-      {% else %}
-      <td data-tooltip="No — either the tag has not been merged into main or there are unreleased commits on this branch." tabindex="0">No</td>
-      {% endif %}
-    </tr>
-    {% else %}
-    <tr>
-      <td colspan="7">No hotfix branches found.</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="row--25-75">
+  <div class="col">
+    <h2>Hotfixes</h2>
+    <p>All <code>hotfix/*</code> branches across every project, including libraries.</p>
+  </div>
+  <div class="col">
+    <table>
+      <thead>
+        <tr>
+          <th>Project</th>
+          <th>Branch</th>
+          <th>Tag</th>
+          <th>Released (days ago)</th>
+          <th>Commits Since Tag</th>
+          <th data-tooltip="Safe to delete when the branch tag also exists on main and there are no extra commits on the branch since that tag." tabindex="0">Safe to Delete?</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for hf in hotfixes %}
+        <tr>
+          <td>{{ hf.project_name }}</td>
+          <td>{{ hf.branch }}</td>
+          <td><code>{{ hf.version }}</code></td>
+          <td>
+            {% if hf.released_at %}
+            {{ hf.released_at.strftime("%Y-%m-%d") }} ({{ hf.days_ago if hf.days_ago is not none else "-" }})
+            {% else %}-{% endif %}
+          </td>
+          <td>{% if hf.commits_since_tag is not none %}{{ hf.commits_since_tag }}{% else %}-{% endif %}</td>
+          {% if hf.safe_to_delete is none %}
+          <td>-</td>
+          {% elif hf.safe_to_delete %}
+          <td data-tooltip="Yes — the tag exists on main and there are no unreleased commits on this branch." tabindex="0">Yes</td>
+          {% else %}
+          <td data-tooltip="No — either the tag has not been merged into main or there are unreleased commits on this branch." tabindex="0">No</td>
+          {% endif %}
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6">No hotfix branches found.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
 {% endblock %}
