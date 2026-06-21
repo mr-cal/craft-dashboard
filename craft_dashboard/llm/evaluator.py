@@ -22,6 +22,7 @@ ScoreMap = dict[str, int | float]
 class ParsedEvaluation(TypedDict, total=False):
     """Parsed JSON payload returned by the evaluation model."""
 
+    summary: str
     scores: ScoreMap
     suggested_action: str
     suggested_action_reason: str

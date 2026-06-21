@@ -2,8 +2,10 @@
 
 from craft_dashboard.llm.prompts import (
     _format_comments,
+    build_closed_evaluate_prompt,
     build_closed_summary_prompt,
     build_evaluation_prompt,
+    build_open_evaluate_prompt,
     build_summary_prompt,
 )
 
@@ -355,3 +357,155 @@ class TestFormatCommentsEdgeCases:
 
         assert "jdoe-canonical" in result
         assert "Needs a reproducer from core24 users." in result
+
+
+class TestBuildOpenEvaluatePrompt:
+    """Tests for build_open_evaluate_prompt."""
+
+    def test_returns_messages_list_issue(self) -> None:
+        msgs = build_open_evaluate_prompt(
+            title="Crash on startup",
+            body="Steps: 1. Install 2. Run",
+            issue_type="issue",
+            labels=["bug"],
+            age_days=30,
+            last_activity_days=5,
+            author="alice",
+            is_maintainer=False,
+            comment_count=2,
+        )
+        assert len(msgs) == 2
+        assert msgs[0]["role"] == "system"
+        assert '"summary"' in msgs[0]["content"]
+        assert '"scores"' in msgs[0]["content"]
+        assert '"suggested_action"' in msgs[0]["content"]
+        assert "256" in msgs[0]["content"]
+        assert msgs[1]["role"] == "user"
+        assert "Crash on startup" in msgs[1]["content"]
+
+    def test_issue_system_has_support_request_score(self) -> None:
+        msgs = build_open_evaluate_prompt(
+            title="T",
+            body=None,
+            issue_type="issue",
+            labels=[],
+            age_days=0,
+            last_activity_days=0,
+            author="x",
+            is_maintainer=False,
+            comment_count=0,
+        )
+        assert "support_request" in msgs[0]["content"]
+
+    def test_pr_system_has_no_support_request_score(self) -> None:
+        msgs = build_open_evaluate_prompt(
+            title="Fix auth bug",
+            body=None,
+            issue_type="pull_request",
+            labels=[],
+            age_days=10,
+            last_activity_days=1,
+            author="bob",
+            is_maintainer=True,
+            comment_count=0,
+        )
+        assert "support_request" not in msgs[0]["content"]
+        assert "needs_review" in msgs[0]["content"]
+
+    def test_includes_pr_details(self) -> None:
+        msgs = build_open_evaluate_prompt(
+            title="Add feature",
+            body="Description",
+            issue_type="pull_request",
+            labels=[],
+            age_days=5,
+            last_activity_days=1,
+            author="dev",
+            is_maintainer=False,
+            comment_count=0,
+            pr_details={"review_status": "approved", "review_count": 2, "ci_passing": ["lint"], "ci_failing": [], "ci_pending": [], "unresolved_review_comments": 0, "diff_additions": 10, "diff_deletions": 5, "diff_files_changed": 3},
+        )
+        assert "approved" in msgs[1]["content"]
+
+    def test_no_pr_details_for_issue(self) -> None:
+        msgs = build_open_evaluate_prompt(
+            title="Bug",
+            body=None,
+            issue_type="issue",
+            labels=[],
+            age_days=0,
+            last_activity_days=0,
+            author="x",
+            is_maintainer=False,
+            comment_count=0,
+            pr_details={"review_status": "should_not_appear"},
+        )
+        assert "should_not_appear" not in msgs[1]["content"]
+
+
+class TestBuildClosedEvaluatePrompt:
+    """Tests for build_closed_evaluate_prompt."""
+
+    def test_returns_messages_list(self) -> None:
+        msgs = build_closed_evaluate_prompt(
+            title="Old bug",
+            body="It crashed",
+            issue_type="issue",
+            state="closed",
+            labels=[],
+            age_days=365,
+            last_activity_days=300,
+            author="charlie",
+            is_maintainer=False,
+            comment_count=1,
+        )
+        assert len(msgs) == 2
+        assert msgs[0]["role"] == "system"
+        assert msgs[1]["role"] == "user"
+
+    def test_system_asks_for_json_summary(self) -> None:
+        msgs = build_closed_evaluate_prompt(
+            title="T",
+            body=None,
+            issue_type="issue",
+            state="closed",
+            labels=[],
+            age_days=10,
+            last_activity_days=5,
+            author="x",
+            is_maintainer=False,
+            comment_count=0,
+        )
+        assert '"summary"' in msgs[0]["content"]
+
+    def test_system_does_not_ask_for_scores(self) -> None:
+        msgs = build_closed_evaluate_prompt(
+            title="T",
+            body=None,
+            issue_type="issue",
+            state="closed",
+            labels=[],
+            age_days=10,
+            last_activity_days=5,
+            author="x",
+            is_maintainer=False,
+            comment_count=0,
+        )
+        assert "scores" not in msgs[0]["content"]
+
+    def test_user_content_includes_state(self) -> None:
+        msgs = build_closed_evaluate_prompt(
+            title="Old bug",
+            body="It crashed",
+            issue_type="issue",
+            state="closed",
+            labels=[],
+            age_days=365,
+            last_activity_days=300,
+            author="charlie",
+            is_maintainer=False,
+            comment_count=1,
+        )
+        assert "closed" in msgs[1]["content"].lower()
+        assert "Old bug" in msgs[1]["content"]
+

@@ -378,6 +378,246 @@ def build_evaluation_prompt(
 
 
 # ---------------------------------------------------------------------------
+# Combined evaluate prompts (summary + scores in a single LLM call)
+# ---------------------------------------------------------------------------
+
+_OPEN_ISSUE_EVAL_SYSTEM = """\
+You are an expert open-source project maintainer and concise technical writer. \
+Evaluate the following GitHub issue and respond with valid JSON matching this schema:
+{
+  "summary": "<at most 256 characters — what this issue is about and its current state>",
+  "scores": {
+    "staleness": <0-100, how stale/inactive is this>,
+    "complexity": <0-100, how complex is this>,
+    "support_request": <0-100, how much this is a support request vs actual bug>,
+    "confidence": <0-100, how confident you are in the suggested action>
+  },
+  "suggested_action": "<one of: close_stale, close_not_a_bug, needs_triage, keep_open>",
+  "suggested_action_reason": "<1-3 sentences justifying the suggested action and scores>"
+}
+
+Summary guidelines: at most 256 characters of plain text. Focus on what the issue is about \
+and its current state (e.g. under discussion, needs triage, waiting to be assigned). \
+Do not include markdown. Do not start with 'This issue', 'This PR', or 'The issue'. \
+Get straight to the point.
+
+Score guidelines:
+
+- staleness: 0 = very active, 100 = completely dead. Consider the pace of open-source \
+projects:
+- {0-30}: Fresh. Under discussion, activity in the last month, or recently referenced \
+ in other issues or PRs.
+- {31-60}: Moderately stale. Activity within the last 6 months, some acknowledgement \
+that this issue is relevant, even if it's not able to be solved (i.e. it requires \
+architectural decisions or is blocked by an external dependency).
+- {61-100}: Very stale. No activity within the last year or limited maintainer \
+interaction. Clearly no longer relevant to a newer version of the project.
+
+- complexity: 0 = trivial, 100 = extremely complex. Issues that would require \
+architectural decisions or backward compatibility considerations are more \
+complex. Issues that are difficult to reproduce or don't have a simple reproducer \
+are also more complex.
+
+- support_request: 0 = actual bug or feature, 100 = support or help request with \
+using the tool
+
+- confidence: 0 = not confident the chosen action is correct, 100 = high confidence \
+the action is the correct action. High confidence means the issue is clearly one of \
+the allowed actions based on the evidence. Low confidence means the issue is \
+ambiguous, mixed signals, or would benefit from human review before deciding. You \
+should be skeptical and considerate, not overly confident without concrete evidence.
+
+Action guidelines — choose the MOST appropriate action:
+
+- needs_triage: The issue has NOT yet been assessed by a maintainer. Use \
+this when the issue lacks labels, has no maintainer response or comments, \
+has no assignee, or otherwise shows no sign of having been categorised or \
+prioritized. This is the default action for new, unlabelled issues \
+regardless of how well-written or actionable they are. A well-structured \
+bug report with clear reproduction steps still needs triage if no \
+maintainer has acknowledged, labelled, or responded to it yet.
+
+- keep_open: The issue is triaged, valid, and should remain open. Use when \
+the issue is clearly scoped, has maintainer buy-in, or is actively being \
+worked on. As long as a maintainer has triaged and acknowledged an issue,
+it should be kept open unless it's outdated. This is also appropriate if a \
+maintainer has asked for further information or changes and has been waiting \
+less than 6 months for a response from the original author.
+
+- close_stale: The issue is both inactive AND has become irrelevant. Inactivity alone \
+is NEVER a sufficient reason to close an issue. The issue must also show clear signs \
+that it is no longer applicable. Valid reasons include: the feature was implemented \
+elsewhere, the affected version is no longer supported, or the original problem is no \
+longer reproducible. Lack of maintainer engagement is not a sufficient reason alone. \
+However, if the maintainer has asked for more details and the reporter has not \
+provided details within 6 months, this may be sufficient. Always provide a concrete, \
+specific reason why the issue is no longer relevant beyond just its age or inactivity.
+
+- close_not_a_bug: The reported behaviour is working as intended, is a \
+support/usage question rather than a bug, or has been resolved through \
+configuration or documentation.
+"""
+
+_OPEN_PR_EVAL_SYSTEM = """\
+You are an expert open-source project maintainer and concise technical writer. \
+Evaluate the following GitHub pull request and respond with valid JSON matching this schema:
+{
+  "summary": "<at most 256 characters — what this PR changes and its current state>",
+  "scores": {
+    "staleness": <0-100, how stale/inactive is this>,
+    "complexity": <0-100, how complex is this>,
+    "confidence": <0-100, how confident you are in the suggested action>
+  },
+  "suggested_action": "<one of: close_stale, close_not_mergeable, needs_review, keep_open>",
+  "suggested_action_reason": "<1-3 sentences justifying the suggested action and scores>"
+}
+
+Summary guidelines: at most 256 characters of plain text. Focus on what the PR changes \
+and its current state (e.g. under review, needs changes, waiting for CI). \
+Do not include markdown. Do not start with 'This PR', 'This pull request'. \
+Get straight to the point.
+
+Score guidelines:
+
+- staleness: 0 = very active, 100 = completely dead. Consider the pace of open-source \
+projects:
+- {0-30}: Fresh. Under discussion, activity in the last month, or recently referenced \
+ in other issues or PRs.
+- {31-60}: Moderately stale. Activity within the last 6 months, some acknowledgement \
+that this issue is relevant, even if it's not able to be solved (i.e. it requires \
+architectural decisions or is blocked by an external dependency).
+- {61-100}: Very stale. No activity within the last year or limited maintainer \
+interaction. Targets an outdated version of the project. Superseded by a newer PR.
+
+- complexity: 0 = trivial, 100 = extremely complex. PRs that make architectural \
+changes or have backward compatibility considerations are more complex. PRs that \
+fix difficult to reproduce issues, impact on existing projects is difficult to
+reason about, or have extensive integration testing are also more complex.
+
+- confidence: 0 = not confident the chosen action is correct, 100 = high confidence \
+the action is the correct action. High confidence means the issue is clearly one of \
+the allowed actions based on the evidence. Low confidence means the PR is ambiguous, \
+mixed signals, or would benefit from human review before deciding. You should be \
+skeptical and considerate, not overly confident without concrete evidence.
+
+Action guidelines — choose the MOST appropriate action:
+
+- needs_review: The PR needs a maintainer review. This may also be appropriate if \
+a maintainer has already reviewed a PR and the author has made subsequent changes \
+or has asked a question of the maintainer. This is also used when a PR has sufficient \
+(2) approvals and is ready to be landed.
+
+- keep_open: The PR has been acknowledged by a maintainer, is under development, \
+or is undergoing review cycles. Also use when the PR is a draft PR or is currently \
+being developed. As long as it has received updates within 3 months, it can be kept \
+open. PRs blocked by other PRs or issues, pending external decisions, or upstream \
+changes should be kept open, regardless of their last update.
+
+- close_stale: The PR is both inactive AND has become irrelevant. Inactivity alone \
+is NEVER a sufficient reason to close a PR. The PR must also show clear signs \
+that it is no longer applicable. Valid reasons include: the feature was implemented \
+elsewhere, the affected version is no longer supported, or the original problem it \
+solves is no longer reproducible. Lack of maintainer engagement is not a sufficient \
+reason alone and neither is failing CI jobs. However, if the maintainer has asked \
+for feedback and the reporter has not addressed the feedback within 3 months, this \
+may be sufficient. Always provide a concrete, specific reason why the PR is no longer \
+relevant beyond just its age or inactivity.
+
+- close_not_mergeable: The PR makes a change that isn't appropriate or relevant, makes \
+a backward incompatible change that isn't acceptable, or otherwise makes a change \
+that isn't mergeable. This can include adding features or fixing bugs that the \
+maintainers expressly state they can't accept.
+"""
+
+_CLOSED_EVAL_SYSTEM = (
+    "You are a concise technical writer. Summarise what happened with this closed "
+    "GitHub issue or pull request. "
+    'Respond with valid JSON: {"summary": "<text>"} '
+    "Focus on the outcome: was it fixed, merged, rejected, superseded, or abandoned? "
+    "Mention any resolution or merge details. "
+    "At most 256 characters. No markdown formatting. "
+    "Do not start with 'This issue', 'This pull request', 'This PR', or 'The issue'. "
+    "Get straight to the point."
+)
+
+
+def build_open_evaluate_prompt(
+    *,
+    title: str,
+    body: str | None,
+    issue_type: str,
+    labels: list[str],
+    age_days: int = 0,
+    last_activity_days: int = 0,
+    comment_count: int = 0,
+    author: str = "unknown",
+    is_maintainer: bool = False,
+    comments: list[dict] | None = None,
+    pr_details: dict | None = None,
+) -> list[dict[str, str]]:
+    """Build a combined summary+evaluation prompt for an open issue or PR."""
+    type_label = "Pull Request" if issue_type == "pull_request" else "Issue"
+    label_str = ", ".join(labels) if labels else "none"
+    system_content = (
+        _OPEN_PR_EVAL_SYSTEM if issue_type == "pull_request" else _OPEN_ISSUE_EVAL_SYSTEM
+    )
+    comments_text = _format_comments(comments or [])
+    pr_details_text = (
+        _format_pr_details(pr_details or {}) if issue_type == "pull_request" else ""
+    )
+    user_content = (
+        f"Type: {type_label}\n"
+        f"Title: {title}\n"
+        f"Labels: {label_str}\n"
+        f"Author: {author} ({'maintainer' if is_maintainer else 'external contributor'})\n"
+        f"Age: {age_days} days\n"
+        f"Last activity: {last_activity_days} days ago\n"
+        f"Comment count: {comment_count}\n"
+        f"Body:\n{(body or '(no body)')[:3000]}"
+        f"{pr_details_text}"
+        f"{comments_text}"
+    )
+    return [
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def build_closed_evaluate_prompt(
+    *,
+    title: str,
+    body: str | None,
+    issue_type: str,
+    state: str,
+    labels: list[str],
+    age_days: int = 0,
+    last_activity_days: int = 0,
+    comment_count: int = 0,
+    author: str = "unknown",
+    is_maintainer: bool = False,
+    comments: list[dict] | None = None,
+) -> list[dict[str, str]]:
+    """Build a combined summary prompt for a closed issue or merged PR."""
+    user_content = _build_summary_user_content(
+        title=title,
+        body=body,
+        issue_type=issue_type,
+        state=state,
+        labels=labels,
+        age_days=age_days,
+        last_activity_days=last_activity_days,
+        comment_count=comment_count,
+        author=author,
+        is_maintainer=is_maintainer,
+        comments=comments,
+    )
+    return [
+        {"role": "system", "content": _CLOSED_EVAL_SYSTEM},
+        {"role": "user", "content": user_content},
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Phase 2: Duplicate detection prompts
 # ---------------------------------------------------------------------------
 
