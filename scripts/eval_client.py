@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import pathlib
 import select
 import signal
@@ -576,49 +577,10 @@ async def run_eval_loop(  # noqa: PLR0913
     help="Eval API bearer token [env: EVAL_API_TOKEN]",
 )
 @click.option(
-    "--llm-url",
-    default="http://localhost:11434/v1",
-    show_default=True,
-    envvar="LOCAL_LLM_URL",
-    help="OpenAI-compatible LLM endpoint [env: LOCAL_LLM_URL]",
-)
-@click.option(
-    "--llm-api-key",
-    default="",
-    envvar="LOCAL_LLM_API_KEY",
-    help="API key for the LLM endpoint [env: LOCAL_LLM_API_KEY]",
-)
-@click.option(
-    "--ca-cert",
-    default="",
-    envvar="LOCAL_LLM_CA_CERT",
-    help="PEM CA cert path for LLM server TLS verification [env: LOCAL_LLM_CA_CERT]",
-)
-@click.option(
-    "--server-ca-cert",
-    default="",
-    envvar="EVAL_CLIENT_SERVER_CA_CERT",
-    help="PEM CA cert for verifying the server TLS cert [env: EVAL_CLIENT_SERVER_CA_CERT]",
-)
-@click.option(
     "--verbose",
     is_flag=True,
     default=False,
     help="Show timestamps, URLs, and model details",
-)
-@click.option(
-    "--model",
-    default="qwen3.6-35b-moe-q4",
-    show_default=True,
-    envvar="LOCAL_LLM_MODEL",
-    help="LLM model for evaluation [env: LOCAL_LLM_MODEL]",
-)
-@click.option(
-    "--embed-model",
-    default="",
-    envvar="LOCAL_LLM_EMBEDDING_MODEL",
-    help="Embedding model for similarity search [env: LOCAL_LLM_EMBEDDING_MODEL]. "
-    "Leave blank to skip embedding generation.",
 )
 @click.option(
     "--poll-interval",
@@ -658,12 +620,6 @@ async def run_eval_loop(  # noqa: PLR0913
 def cli(  # noqa: PLR0913
     server: str,
     token: str,
-    model: str,
-    embed_model: str,
-    llm_url: str,
-    llm_api_key: str,
-    ca_cert: str,
-    server_ca_cert: str,
     poll_interval: int,
     limit: int,
     project: str,
@@ -677,7 +633,33 @@ def cli(  # noqa: PLR0913
 
     Evaluates issues in a single pass: evaluate (summary + scores in one LLM
     call), then embed.
+
+    LLM connection settings are read from environment variables (set in .env):
+      LOCAL_LLM_URL      — required, OpenAI-compatible endpoint
+      LOCAL_LLM_MODEL    — required, model name for evaluation
+      LOCAL_LLM_API_KEY  — optional, bearer token for the LLM endpoint
+      LOCAL_LLM_CA_CERT  — optional, PEM CA cert for LLM TLS verification
+      LOCAL_LLM_EMBEDDING_MODEL — optional, embedding model (skip if unset)
+      EVAL_CLIENT_SERVER_CA_CERT — optional, PEM CA cert for server TLS
     """
+    llm_url = os.environ.get("LOCAL_LLM_URL", "")
+    model = os.environ.get("LOCAL_LLM_MODEL", "")
+    missing = [
+        name
+        for name, val in (("LOCAL_LLM_URL", llm_url), ("LOCAL_LLM_MODEL", model))
+        if not val
+    ]
+    if missing:
+        raise click.UsageError(
+            f"Missing required environment variable(s): {', '.join(missing)}. "
+            "Set them in your .env file."
+        )
+
+    llm_api_key = os.environ.get("LOCAL_LLM_API_KEY", "")
+    ca_cert = os.environ.get("LOCAL_LLM_CA_CERT", "")
+    embed_model = os.environ.get("LOCAL_LLM_EMBEDDING_MODEL", "")
+    server_ca_cert = os.environ.get("EVAL_CLIENT_SERVER_CA_CERT", "")
+
     asyncio.run(
         run_eval_loop(
             server=server,
