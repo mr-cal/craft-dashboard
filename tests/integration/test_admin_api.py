@@ -3,11 +3,14 @@
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 import pytest
 from craft_dashboard.app import create_app
 from craft_dashboard.config import DashboardConfig
 from craft_dashboard.dependencies import get_db_session
+from craft_dashboard.models.collection_run import CollectionRun
+from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.project import Project
 from craft_dashboard.routes import admin as admin_routes
 from craft_dashboard.settings import Settings
@@ -342,3 +345,166 @@ class TestAdminLogsIntegration:
             "stdout": admin_routes.asyncio.subprocess.PIPE,
             "stderr": admin_routes.asyncio.subprocess.PIPE,
         }
+
+
+class TestCollectionRunIssuesEndpoint:
+    """Integration tests for the collection run issues expansion endpoint."""
+
+    def test_returns_issues_for_run(
+        self,
+        client: TestClient,
+        test_db_session: AsyncSession,
+    ) -> None:
+        """GET /admin/collection-runs/{id}/issues returns an HTML fragment with issues."""
+        now = datetime(2025, 6, 21, 12, 0, tzinfo=UTC)
+
+        async def _seed() -> int:
+            project = Project(
+                name="snapcraft", category="application", github_org="canonical"
+            )
+            test_db_session.add(project)
+            await test_db_session.flush()
+
+            run = CollectionRun(
+                source="github",
+                started_at=now,
+                status="completed",
+                projects_processed=1,
+                issues_collected=2,
+                errors=[],
+            )
+            test_db_session.add(run)
+            await test_db_session.flush()
+
+            test_db_session.add_all(
+                [
+                    Issue(
+                        project_id=project.id,
+                        collection_run_id=run.id,
+                        source="github",
+                        external_id="1",
+                        issue_type="issue",
+                        title="Alpha issue",
+                        state="open",
+                        author="dev",
+                        author_is_maintainer=False,
+                        author_is_bot=False,
+                        labels=[],
+                        url="https://github.com/canonical/snapcraft/issues/1",
+                        metadata_={},
+                        comments=[],
+                        last_fetched_at=now,
+                    ),
+                    Issue(
+                        project_id=project.id,
+                        collection_run_id=run.id,
+                        source="github",
+                        external_id="2",
+                        issue_type="issue",
+                        title="Beta issue",
+                        state="open",
+                        author="dev",
+                        author_is_maintainer=False,
+                        author_is_bot=False,
+                        labels=[],
+                        url="https://github.com/canonical/snapcraft/issues/2",
+                        metadata_={},
+                        comments=[],
+                        last_fetched_at=now,
+                    ),
+                ]
+            )
+            await test_db_session.commit()
+            return run.id
+
+        run_id = asyncio.get_event_loop().run_until_complete(_seed())
+        response = client.get(f"/admin/collection-runs/{run_id}/issues")
+
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert "Alpha issue" in response.text
+        assert "Beta issue" in response.text
+        assert "snapcraft" in response.text
+
+    def test_returns_empty_message_when_no_issues(
+        self,
+        client: TestClient,
+        test_db_session: AsyncSession,
+    ) -> None:
+        """Returns 'No issues collected' message for a run with no issues."""
+        now = datetime(2025, 6, 21, 12, 0, tzinfo=UTC)
+
+        async def _seed() -> int:
+            run = CollectionRun(
+                source="github",
+                started_at=now,
+                status="completed",
+                projects_processed=0,
+                issues_collected=0,
+                errors=[],
+            )
+            test_db_session.add(run)
+            await test_db_session.flush()
+            await test_db_session.commit()
+            return run.id
+
+        run_id = asyncio.get_event_loop().run_until_complete(_seed())
+        response = client.get(f"/admin/collection-runs/{run_id}/issues")
+
+        assert response.status_code == 200
+        assert "No issues collected" in response.text
+
+    def test_shows_truncation_message_when_over_limit(
+        self,
+        client: TestClient,
+        test_db_session: AsyncSession,
+    ) -> None:
+        """Shows 'Showing N of M' when run has more than 100 issues."""
+        now = datetime(2025, 6, 21, 12, 0, tzinfo=UTC)
+
+        async def _seed() -> int:
+            project = Project(
+                name="rockcraft", category="application", github_org="canonical"
+            )
+            test_db_session.add(project)
+            await test_db_session.flush()
+
+            run = CollectionRun(
+                source="github",
+                started_at=now,
+                status="completed",
+                projects_processed=1,
+                issues_collected=105,
+                errors=[],
+            )
+            test_db_session.add(run)
+            await test_db_session.flush()
+
+            issues = [
+                Issue(
+                    project_id=project.id,
+                    collection_run_id=run.id,
+                    source="github",
+                    external_id=str(i),
+                    issue_type="issue",
+                    title=f"Issue {i}",
+                    state="open",
+                    author="dev",
+                    author_is_maintainer=False,
+                    author_is_bot=False,
+                    labels=[],
+                    metadata_={},
+                    comments=[],
+                    last_fetched_at=now,
+                )
+                for i in range(105)
+            ]
+            test_db_session.add_all(issues)
+            await test_db_session.commit()
+            return run.id
+
+        run_id = asyncio.get_event_loop().run_until_complete(_seed())
+        response = client.get(f"/admin/collection-runs/{run_id}/issues")
+
+        assert response.status_code == 200
+        assert "Showing 100 of 105" in response.text

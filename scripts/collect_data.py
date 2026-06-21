@@ -256,6 +256,7 @@ async def _collect_github(
     run_started_at: float | None = None,
     full_refresh: bool = False,
     force_schedule: bool = False,
+    collection_run_id: int | None = None,
 ) -> CollectionStats:
     """Run GitHub data collection for all projects due for refresh."""
     collector = GitHubCollector(
@@ -396,6 +397,7 @@ async def _collect_github(
                     limit=limit,
                     refresh_age_days=settings.refresh_age_days,
                     since=watermark,
+                    collection_run_id=collection_run_id,
                 )
                 stats.issues_collected += issues_collected
                 logger.info(
@@ -455,6 +457,7 @@ async def _collect_launchpad(
     session_factory: object,
     projects: list[str] | None = None,
     run_started_at: float | None = None,
+    collection_run_id: int | None = None,
 ) -> CollectionStats:
     """Run Launchpad data collection for all configured projects.
 
@@ -488,7 +491,9 @@ async def _collect_launchpad(
             logger.info("Collecting Launchpad data for %s%s", lp_name, elapsed)
             try:
                 bugs_started_at = time.monotonic()
-                bug_count = await collector.collect_bugs(lp_name, project_id, session)
+                bug_count = await collector.collect_bugs(
+                    lp_name, project_id, session, collection_run_id=collection_run_id
+                )
                 stats.issues_collected += bug_count
                 logger.info(
                     "  %s: %d bugs fetched in %s",
@@ -558,11 +563,11 @@ async def _main(
 
     async def _run_source(
         source_name: str,
-        collector_call: object,
+        make_collector_call: object,
     ) -> CollectionStats:
         run = await _create_collection_run(source_name, session_factory)
         try:
-            source_stats = await collector_call
+            source_stats = await make_collector_call(run.id)
         except Exception as exc:
             await _finish_collection_run(
                 run,
@@ -589,7 +594,7 @@ async def _main(
             stats.merge(
                 await _run_source(
                     "github",
-                    _collect_github(
+                    lambda run_id: _collect_github(
                         settings,
                         config,
                         session_factory,
@@ -598,6 +603,7 @@ async def _main(
                         run_started_at=run_started_at,
                         full_refresh=full_refresh,
                         force_schedule=force_schedule,
+                        collection_run_id=run_id,
                     ),
                 )
             )
@@ -605,11 +611,12 @@ async def _main(
             stats.merge(
                 await _run_source(
                     "launchpad",
-                    _collect_launchpad(
+                    lambda run_id: _collect_launchpad(
                         config,
                         session_factory,
                         projects=project_filter,
                         run_started_at=run_started_at,
+                        collection_run_id=run_id,
                     ),
                 )
             )

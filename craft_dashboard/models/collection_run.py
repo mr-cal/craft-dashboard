@@ -1,12 +1,15 @@
 """Collection run health model."""
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, DateTime, Float, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from craft_dashboard.models.base import Base
+
+if TYPE_CHECKING:
+    from craft_dashboard.models.issue import Issue
 
 
 class CollectionRun(Base):
@@ -27,3 +30,6 @@ class CollectionRun(Base):
         JSON, default=list, nullable=False
     )
     duration_seconds: Mapped[float | None] = mapped_column(Float)
+
+    # Relationships
+    issues: Mapped[list["Issue"]] = relationship(back_populates="collection_run")

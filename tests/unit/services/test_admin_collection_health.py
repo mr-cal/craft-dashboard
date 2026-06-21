@@ -23,6 +23,7 @@ class TestAdminCollectionHealth:
             return_value=_FakeScalarResult(
                 [
                     SimpleNamespace(
+                        id=1,
                         source="launchpad",
                         started_at=now - timedelta(hours=1),
                         finished_at=now - timedelta(minutes=59),
@@ -33,6 +34,7 @@ class TestAdminCollectionHealth:
                         duration_seconds=60.0,
                     ),
                     SimpleNamespace(
+                        id=2,
                         source="github",
                         started_at=now - timedelta(hours=2),
                         finished_at=now - timedelta(hours=2) + timedelta(minutes=3),
@@ -53,3 +55,5 @@ class TestAdminCollectionHealth:
         assert runs[0]["errors"] == [{"project": "snapcraft", "error": "timeout"}]
         assert runs[1]["projects_processed"] == 3
         assert runs[1]["issues_collected"] == 12
+        assert runs[0]["id"] == 1
+        assert runs[1]["id"] == 2

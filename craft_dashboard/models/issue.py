@@ -19,6 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from craft_dashboard.models.base import Base
 
 if TYPE_CHECKING:
+    from craft_dashboard.models.collection_run import CollectionRun
     from craft_dashboard.models.llm_evaluation import LLMEvaluation
     from craft_dashboard.models.project import Project
 
@@ -63,9 +64,15 @@ class Issue(Base):
         DateTime(timezone=True),
         nullable=False,
     )
+    collection_run_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("collection_runs.id", ondelete="SET NULL"), nullable=True
+    )
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="issues")
+    collection_run: Mapped["CollectionRun | None"] = relationship(
+        back_populates="issues"
+    )
     evaluations: Mapped[list["LLMEvaluation"]] = relationship(
         back_populates="issue",
         order_by="LLMEvaluation.evaluated_at.desc()",

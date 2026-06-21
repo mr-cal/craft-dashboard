@@ -95,6 +95,7 @@ class LaunchpadCollector:
         lp_project_name: str,
         project_id: int,
         session: AsyncSession,
+        collection_run_id: int | None = None,
     ) -> int:
         """Collect bugs for a Launchpad project.
 
@@ -102,6 +103,7 @@ class LaunchpadCollector:
             lp_project_name: Launchpad project name.
             project_id: The database ID of the project.
             session: An async SQLAlchemy session.
+            collection_run_id: ID of the collection run that fetched these bugs.
 
         Returns:
             The number of bugs upserted.
@@ -176,6 +178,7 @@ class LaunchpadCollector:
                 url=bug.web_link,
                 metadata_={"importance": task.importance, "status": task.status},
                 last_fetched_at=datetime.now(tz=UTC),
+                collection_run_id=collection_run_id,
             )
             stmt = stmt.on_conflict_do_update(
                 index_elements=["project_id", "source", "external_id"],

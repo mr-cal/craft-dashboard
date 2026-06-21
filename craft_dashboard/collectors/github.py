@@ -331,6 +331,7 @@ class GitHubCollector:
         limit: int = 0,
         refresh_age_days: int = 7,
         since: datetime | None = None,
+        collection_run_id: int | None = None,
     ) -> int:
         """Collect issues and PRs for a repository.
 
@@ -344,6 +345,7 @@ class GitHubCollector:
             refresh_age_days: Issues last fetched more than this many days ago
                 are considered stale and eligible for re-fetching.
             since: Fetch only issues updated on or after this timestamp.
+            collection_run_id: ID of the collection run that fetched these issues.
 
         Returns:
             The number of issues upserted.
@@ -526,7 +528,8 @@ class GitHubCollector:
                     state,
                     comments,
                     extra_metadata,
-                )
+                ),
+                collection_run_id=collection_run_id,
             )
             stmt = stmt.on_conflict_do_update(
                 index_elements=["project_id", "source", "external_id"],

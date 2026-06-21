@@ -38,7 +38,7 @@
     </thead>
     <tbody>
       {% for run in collection_runs %}
-      <tr>
+      <tr class="run-row" data-run-id="{{ run.id }}" style="cursor: pointer;" title="Click to expand issues collected in this run">
         <td>{{ run.source }}</td>
         <td>{{ run.started_at.strftime("%Y-%m-%d %-I:%M %p") if run.started_at else "—" }}</td>
         <td>{{ run.status }}</td>
@@ -57,9 +57,35 @@
           {% endif %}
         </td>
       </tr>
+      <tr class="run-detail-row" id="run-detail-{{ run.id }}" style="display: none;">
+        <td colspan="7" id="run-detail-content-{{ run.id }}" style="padding: 0.5rem 1rem 1rem; background: var(--color-mid-light, #f5f5f5);"></td>
+      </tr>
       {% endfor %}
     </tbody>
   </table>
+  <script>
+    (function () {
+      document.querySelectorAll('.run-row').forEach(function (row) {
+        row.addEventListener('click', function () {
+          var runId = this.dataset.runId;
+          var detailRow = document.getElementById('run-detail-' + runId);
+          if (detailRow.style.display !== 'none') {
+            detailRow.style.display = 'none';
+            return;
+          }
+          detailRow.style.display = '';
+          var content = document.getElementById('run-detail-content-' + runId);
+          if (content.dataset.loaded) return;
+          content.innerHTML = '<span style="color:var(--app-text-muted)">Loading\u2026</span>';
+          htmx.ajax('GET', '/admin/collection-runs/' + runId + '/issues', {
+            target: '#run-detail-content-' + runId,
+            swap: 'innerHTML',
+          });
+          content.dataset.loaded = '1';
+        });
+      });
+    })();
+  </script>
   {% else %}
   <p style="color: var(--app-text-muted); margin-top: 1rem;">No recent collection runs.</p>
   {% endif %}

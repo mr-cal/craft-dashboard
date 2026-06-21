@@ -206,7 +206,7 @@ async def _sleep_until_next_poll(seconds: int) -> None:
         remaining -= 1
 
 
-async def run_eval_loop(  # noqa: PLR0913
+async def run_eval_loop(
     *,
     server: str,
     token: str,
@@ -617,7 +617,7 @@ async def run_eval_loop(  # noqa: PLR0913
     type=click.IntRange(min=0),
     help="Only evaluate stale evaluations older than N days",
 )
-def cli(  # noqa: PLR0913
+def cli(
     server: str,
     token: str,
     poll_interval: int,

@@ -159,7 +159,7 @@ max-args = 8
 "craft_dashboard/routes/*.py" = ["B008", "PLR0913"]
 "craft_dashboard/routes/admin.py" = ["B008", "PLR0913", "PLC0415"]
 "craft_dashboard/routes/stats.py" = ["B008", "PLR0913", "PLC0415"]
-"scripts/*.py" = ["ANN001", "BLE001", "FBT001", "FBT002", "PLC0415"]
+"scripts/*.py" = ["ANN001", "BLE001", "FBT001", "FBT002", "PLC0415", "PLR0913"]
 "__init__.py" = ["I001", "F401"]
 
 [tool.ty.environment]

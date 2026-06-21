@@ -25,4 +25,5 @@ ISSUE_UPSERT_FIELDS = [
     "updated_at",
     "closed_at",
     "last_fetched_at",
+    "collection_run_id",
 ]

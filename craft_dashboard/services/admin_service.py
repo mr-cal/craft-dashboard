@@ -45,6 +45,7 @@ class ScheduleDayCount(TypedDict):
 class CollectionRunSummary(TypedDict):
     """Recent collection run summary shown on the admin dashboard."""
 
+    id: int
     source: str
     started_at: datetime
     finished_at: datetime | None
@@ -62,6 +63,14 @@ class SystemStatus(TypedDict):
     evaluation_running: bool
     last_collection: datetime | None
     last_evaluation: datetime | None
+
+
+class IssueRef(TypedDict):
+    """Minimal issue reference shown in the collection run detail view."""
+
+    project: str
+    title: str
+    url: str | None
 
 
 _EVALUATION_SOURCES = {"llm", "evaluation"}
@@ -192,6 +201,7 @@ class AdminService:
         runs = list(result.scalars())
         return [
             {
+                "id": run.id,
                 "source": run.source,
                 "started_at": run.started_at,
                 "finished_at": run.finished_at,
@@ -203,6 +213,46 @@ class AdminService:
             }
             for run in runs
         ]
+
+    async def get_issues_for_run(
+        self,
+        run_id: int,
+        limit: int = 100,
+    ) -> tuple[list[IssueRef], int]:
+        """Return up to *limit* issues belonging to a collection run and the total count.
+
+        Args:
+            run_id: Primary key of the collection run.
+            limit: Maximum number of issues to return.
+
+        Returns:
+            A tuple of (issue list, total count).  The list is sorted by project
+            name then issue title and capped at *limit* entries.
+
+        """
+        total_result = await self.session.execute(
+            select(func.count())
+            .select_from(Issue)
+            .where(Issue.collection_run_id == run_id)
+        )
+        total = total_result.scalar_one()
+
+        rows_result = await self.session.execute(
+            select(Issue, Project.name.label("project_name"))
+            .join(Project, Issue.project_id == Project.id)
+            .where(Issue.collection_run_id == run_id)
+            .order_by(Project.name, Issue.title)
+            .limit(limit)
+        )
+        issues: list[IssueRef] = [
+            {
+                "project": row.project_name,
+                "title": row.Issue.title,
+                "url": row.Issue.url,
+            }
+            for row in rows_result
+        ]
+        return issues, total
 
     async def get_system_status(self) -> SystemStatus:
         """Get current system status (running processes, last run times)."""

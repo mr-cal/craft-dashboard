@@ -1,0 +1,31 @@
+{% if issues %}
+<table style="width: 100%; font-size: 0.875rem;">
+  <thead>
+    <tr>
+      <th style="text-align: left; padding: 0.25rem 0.5rem;">Project</th>
+      <th style="text-align: left; padding: 0.25rem 0.5rem;">Issue</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for issue in issues %}
+    <tr>
+      <td style="padding: 0.25rem 0.5rem; white-space: nowrap;">{{ issue.project }}</td>
+      <td style="padding: 0.25rem 0.5rem;">
+        {% if issue.url %}
+        <a href="{{ issue.url }}" target="_blank" rel="noopener noreferrer">{{ issue.title }}</a>
+        {% else %}
+        {{ issue.title }}
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if total > limit %}
+<p style="font-size: 0.8rem; color: var(--app-text-muted); margin: 0.5rem 0.5rem 0;">
+  Showing {{ limit }} of {{ total }} issues.
+</p>
+{% endif %}
+{% else %}
+<p style="color: var(--app-text-muted); margin: 0.25rem 0;">No issues collected in this run.</p>
+{% endif %}

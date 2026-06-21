@@ -176,6 +176,23 @@ async def admin_page(
     )
 
 
+@router.get("/collection-runs/{run_id}/issues", response_class=HTMLResponse)
+async def collection_run_issues(
+    run_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    """Return an HTML fragment listing the issues collected in a given run."""
+    templates: Jinja2Templates = request.app.state.templates
+    admin_service = AdminService(session)
+    issues, total = await admin_service.get_issues_for_run(run_id)
+    return templates.TemplateResponse(
+        request,
+        "admin/collection_run_issues.html",
+        {"issues": issues, "total": total, "limit": 100},
+    )
+
+
 class RefreshRequest(BaseModel):
     """Parameters for an admin data refresh."""
 

@@ -116,7 +116,7 @@ def _log_progress(
         )
 
 
-async def _evaluate_issues(  # noqa: PLR0913
+async def _evaluate_issues(
     session_factory: async_sessionmaker[AsyncSession],
     evaluator: IssueEvaluator,
     maintainers: set[str],

@@ -91,7 +91,7 @@ async def _clear_main(project: str, yes: bool) -> None:
         await engine.dispose()
 
 
-async def _main(  # noqa: PLR0913
+async def _main(
     project: str,
     limit: int,
     open_only: bool,
@@ -245,7 +245,7 @@ def cli(ctx: click.Context) -> None:
     default=False,
     help="Ignore any saved checkpoint and start a fresh evaluation run.",
 )
-def evaluate_cmd(  # noqa: PLR0913
+def evaluate_cmd(
     project: str,
     limit: int,
     open_only: bool,
