@@ -1103,4 +1103,3 @@ class TestEvalClientEdgeCases:
         assert "needs_triage" in line
         assert "300 in / 200 out" in line
         assert "eval " in line
-        assert "embed " in line

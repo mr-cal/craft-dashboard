@@ -376,7 +376,6 @@ async def test_run_eval_loop_prints_per_issue_completion_line(
     assert "300 in / 200 out" in printed
     assert "needs_triage" in printed
     assert "eval " in printed
-    assert "embed " in printed
 
 
 @pytest.mark.asyncio

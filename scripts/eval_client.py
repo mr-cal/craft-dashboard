@@ -115,7 +115,7 @@ def _make_progress(console: Console, total: int | None) -> Progress:  # noqa: AR
     """Create a rich Progress bar for the eval loop.
 
     Returns a Progress configured for two tasks:
-    - Row 0 (status): spinner + description showing the current issue's phase status.
+    - Row 0 (status): spinner + description showing the current issue being evaluated.
     - Row 1 (overall): full bar with count, percentage, ETA, and elapsed time.
     """
     return Progress(
@@ -233,6 +233,9 @@ async def run_eval_loop(  # noqa: PLR0913
          Skipped when embed_model is empty or the embedding call fails
          (non-fatal).
       3. Submit — POSTs the assembled payload to /api/eval/result.
+
+    Steps 2 and 3 are typically fast (embed is ~0s); the LLM call in step 1
+    dominates the wall time.
 
     The loop runs until *limit* issues are evaluated (limit=0 means run until
     the server returns 204 No Content), or until a shutdown signal is received.
@@ -457,16 +460,7 @@ async def run_eval_loop(  # noqa: PLR0913
 
                     # Embed title + summary for richer semantic signal
                     embed_text = f"{issue_data['title']}. {result['summary']}"
-                    embed_waiting = "[dim]—[/dim]" if embed_client is None else "⠋"
-                    progress.update(
-                        status_id,
-                        description=(
-                            f"[dim]{issue_ref}:[/dim] eval [green]✓[/green]"
-                            f" | embed {embed_waiting}"
-                        ),
-                    )
-
-                    summary_embedding, t_embed = await _timed(
+                    summary_embedding, _ = await _timed(
                         _embed_safe(embed_client, embed_text, issue_ref)
                     )
                     duration = time.monotonic() - t0
@@ -542,7 +536,7 @@ async def run_eval_loop(  # noqa: PLR0913
                     progress.console.print(
                         f"[bold]{issue_ref}[/bold] — {action}"
                         f"  [dim]{prompt_tok} in / {completion_tok} out"
-                        f"  eval {_format_elapsed(t_eval)} embed {_format_elapsed(t_embed)}[/dim]"
+                        f"  eval {_format_elapsed(t_eval)}[/dim]"
                     )
 
                     if limit > 0 and evaluated >= limit:
@@ -614,7 +608,7 @@ async def run_eval_loop(  # noqa: PLR0913
 )
 @click.option(
     "--model",
-    default="llama3.2",
+    default="qwen3.6-35b-moe-q4",
     show_default=True,
     envvar="LOCAL_LLM_MODEL",
     help="LLM model for evaluation [env: LOCAL_LLM_MODEL]",
