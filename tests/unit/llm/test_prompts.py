@@ -16,8 +16,8 @@ class TestTruncateBody:
     def test_none_returns_no_body_placeholder(self) -> None:
         assert _truncate_body(None) == "(no body)"
 
-    def test_empty_string_returns_no_body_placeholder(self) -> None:
-        assert _truncate_body("") == "(no body)"
+    def test_empty_string_returned_unchanged(self) -> None:
+        assert _truncate_body("") == ""
 
     def test_body_exactly_at_head_limit_not_truncated(self) -> None:
         body = "x" * 12000

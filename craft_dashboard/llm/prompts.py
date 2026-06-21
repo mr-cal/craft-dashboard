@@ -12,7 +12,7 @@ def _truncate_body(body: str | None) -> str:
     6,000 characters (most recent update / resolution). Bodies shorter
     than 18,000 characters are returned unchanged. None becomes '(no body)'.
     """
-    if not body:
+    if body is None:
         return "(no body)"
     if len(body) <= _BODY_HEAD + _BODY_TAIL:
         return body
