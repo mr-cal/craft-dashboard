@@ -226,7 +226,7 @@ async def run_eval_loop(  # noqa: PLR0913
 ) -> None:
     """Poll the eval API, run single-phase evaluation, and submit results.
 
-    For each pending issue, the loop runs two steps in sequence:
+    For each pending issue, the loop runs three steps in sequence:
       1. Evaluate — calls evaluator.evaluate() to produce summary + scores in
          a single LLM call.  Closed/merged issues produce summary only.
       2. Embed — runs EmbeddingClient.embed() on the title + summary text.
