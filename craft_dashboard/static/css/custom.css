@@ -596,6 +596,19 @@ html.is-dark-theme .theme-toggle__icon--moon {
   visibility: visible;
 }
 
+/* Vanilla Framework uses th[aria-sort]::after for sort indicator icons (specificity
+ * 0,1,3 for ascending; 0,1,2 for descending), which is higher than [data-tooltip]::after
+ * (specificity 0,1,1). This overrides our tooltip content with "" on sorted columns.
+ * Fix: use table[role="grid"] th[data-tooltip]::after (specificity 0,2,3) to win. */
+table[role="grid"] th[data-tooltip]::after {
+  content: attr(data-tooltip);
+  height: auto;
+  width: max-content;
+  background-image: none;
+  margin: 0;
+  transform: translateX(-50%);
+}
+
 /* Ensure table layout doesn't clip tooltips */
 table thead {
   overflow: visible;
