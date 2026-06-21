@@ -63,6 +63,7 @@ class LLMEvaluation(Base):
         nullable=False,
     )
     issue_data_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    eval_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     eval_locked_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

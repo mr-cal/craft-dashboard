@@ -27,6 +27,7 @@ class TestLLMEvaluationModel:
             "tokens_used",
             "evaluated_at",
             "issue_data_hash",
+            "eval_version",
             "latest",
         }
         assert expected.issubset(column_names)
@@ -57,6 +58,17 @@ class TestLLMEvaluationModel:
         )
         assert hasattr(evaluation, "summary_embedding")
         assert evaluation.summary_embedding is None
+
+    def test_eval_version_field_exists_and_defaults_to_none(self) -> None:
+        """eval_version field must exist and default to None."""
+        evaluation = LLMEvaluation(
+            issue_id=1,
+            model_name="test",
+            summary="hello",
+            latest=True,
+        )
+        assert hasattr(evaluation, "eval_version")
+        assert evaluation.eval_version is None
 
     def test_partial_index_uses_text_expression(self) -> None:
         """The partial unique index should use text() not a raw string."""
