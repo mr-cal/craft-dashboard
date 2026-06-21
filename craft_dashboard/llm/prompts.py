@@ -1,5 +1,23 @@
 """Prompt templates for LLM evaluation of issues and PRs."""
 
+_BODY_HEAD = 12_000
+_BODY_TAIL = 6_000
+_BODY_SEPARATOR = "\n\n[... truncated ...]\n\n"
+
+
+def _truncate_body(body: str | None) -> str:
+    """Truncate issue body to head + tail for LLM prompts.
+
+    Keeps the first 12,000 characters (problem description) and the last
+    6,000 characters (most recent update / resolution). Bodies shorter
+    than 18,000 characters are returned unchanged. None becomes '(no body)'.
+    """
+    if not body:
+        return "(no body)"
+    if len(body) <= _BODY_HEAD + _BODY_TAIL:
+        return body
+    return body[:_BODY_HEAD] + _BODY_SEPARATOR + body[-_BODY_TAIL:]
+
 
 def _format_comments(comments: list[dict]) -> str:
     """Format a list of comment dicts into a readable prompt section.
@@ -81,7 +99,7 @@ def _build_summary_user_content(
         f"Age: {age_days} days\n"
         f"Last activity: {last_activity_days} days ago\n"
         f"Comment count: {comment_count}\n"
-        f"Body:\n{(body or '(no body)')[:3000]}"
+        f"Body:\n{_truncate_body(body)}"
         f"{comments_text}"
     )
 
@@ -284,7 +302,7 @@ def build_open_evaluate_prompt(
         f"Age: {age_days} days\n"
         f"Last activity: {last_activity_days} days ago\n"
         f"Comment count: {comment_count}\n"
-        f"Body:\n{(body or '(no body)')[:3000]}"
+        f"Body:\n{_truncate_body(body)}"
         f"{pr_details_text}"
         f"{comments_text}"
     )

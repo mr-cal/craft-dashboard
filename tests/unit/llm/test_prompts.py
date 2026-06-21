@@ -2,9 +2,51 @@
 
 from craft_dashboard.llm.prompts import (
     _format_comments,
+    _truncate_body,
     build_closed_evaluate_prompt,
     build_open_evaluate_prompt,
 )
+
+
+class TestTruncateBody:
+    def test_short_body_returned_unchanged(self) -> None:
+        body = "short body"
+        assert _truncate_body(body) == "short body"
+
+    def test_none_returns_no_body_placeholder(self) -> None:
+        assert _truncate_body(None) == "(no body)"
+
+    def test_empty_string_returns_no_body_placeholder(self) -> None:
+        assert _truncate_body("") == "(no body)"
+
+    def test_body_exactly_at_head_limit_not_truncated(self) -> None:
+        body = "x" * 12000
+        assert _truncate_body(body) == body
+
+    def test_body_exactly_at_head_plus_tail_limit_not_truncated(self) -> None:
+        body = "x" * 18000
+        assert _truncate_body(body) == body
+
+    def test_long_body_keeps_head_and_tail(self) -> None:
+        head = "A" * 12000
+        middle = "M" * 5000
+        tail = "Z" * 6000
+        body = head + middle + tail
+        result = _truncate_body(body)
+        assert result.startswith("A" * 12000)
+        assert result.endswith("Z" * 6000)
+        assert "\n\n[... truncated ...]\n\n" in result
+
+    def test_long_body_drops_middle(self) -> None:
+        body = "A" * 12000 + "DROPPED" * 1000 + "Z" * 6000
+        result = _truncate_body(body)
+        assert "DROPPED" not in result
+
+    def test_truncated_body_length_is_head_plus_tail_plus_separator(self) -> None:
+        body = "x" * 20000
+        result = _truncate_body(body)
+        separator = "\n\n[... truncated ...]\n\n"
+        assert len(result) == 12000 + len(separator) + 6000
 
 
 class TestFormatCommentsEdgeCases:
@@ -132,7 +174,17 @@ class TestBuildOpenEvaluatePrompt:
             author="dev",
             is_maintainer=False,
             comment_count=0,
-            pr_details={"review_status": "approved", "review_count": 2, "ci_passing": ["lint"], "ci_failing": [], "ci_pending": [], "unresolved_review_comments": 0, "diff_additions": 10, "diff_deletions": 5, "diff_files_changed": 3},
+            pr_details={
+                "review_status": "approved",
+                "review_count": 2,
+                "ci_passing": ["lint"],
+                "ci_failing": [],
+                "ci_pending": [],
+                "unresolved_review_comments": 0,
+                "diff_additions": 10,
+                "diff_deletions": 5,
+                "diff_files_changed": 3,
+            },
         )
         assert "approved" in msgs[1]["content"]
 
@@ -217,4 +269,3 @@ class TestBuildClosedEvaluatePrompt:
         )
         assert "closed" in msgs[1]["content"].lower()
         assert "Old bug" in msgs[1]["content"]
-
