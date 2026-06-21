@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from scripts.llm.validation import validate_evaluation_result
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.orm import aliased
 
 if TYPE_CHECKING:
@@ -75,6 +75,18 @@ async def _fetch_issue_and_latest_evaluation(
 ) -> tuple[Issue, str, LLMEvaluation | None] | None:
     latest_evaluation = aliased(LLMEvaluation)
     now = datetime.now(tz=UTC)
+    old_version = or_(
+        latest_evaluation.eval_version.is_(None),
+        latest_evaluation.eval_version != CURRENT_EVAL_VERSION,
+    )
+    priority = case(
+        (latest_evaluation.id.is_(None) & (Issue.state == "open"), 1),
+        (latest_evaluation.id.is_(None) & (Issue.state != "open"), 2),
+        (old_version & (Issue.state == "open"), 3),
+        (old_version & (Issue.state != "open"), 4),
+        else_=5,
+    )
+    open_first = case((Issue.state == "open", 0), else_=1)
     query = (
         select(Issue, Project.name, latest_evaluation)
         .join(Project, Issue.project_id == Project.id)
@@ -89,7 +101,7 @@ async def _fetch_issue_and_latest_evaluation(
                 latest_evaluation.eval_locked_until <= now,
             )
         )
-        .order_by(Issue.id)
+        .order_by(priority, open_first, Issue.id)
     )
 
     if open_only:
@@ -144,6 +156,7 @@ async def _fetch_issue_and_latest_evaluation(
             and stale_days <= 0
             and not incomplete
             and has_complete_evaluation
+            and evaluation.eval_version == CURRENT_EVAL_VERSION
             and evaluation.issue_data_hash == current_hash
         ):
             continue

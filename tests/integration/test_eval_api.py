@@ -224,6 +224,7 @@ class TestEvalNextIntegration:
                 "support_request": 0,
                 "readiness": 0,
             },
+            eval_version=CURRENT_EVAL_VERSION,
             issue_data_hash=issue_hash,
         )
         asyncio.get_event_loop().run_until_complete(
@@ -244,6 +245,365 @@ class TestEvalNextIntegration:
         assert skipped.status_code == 204
         assert forced.status_code == 200
         assert forced.json()["issue_id"] == 1
+
+
+class TestEvalNextPriorityOrdering:
+    """Priority ordering tests for GET /api/eval/next."""
+
+    def test_unevaluated_open_before_unevaluated_closed(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        closed_issue = make_issue(
+            id=1,
+            project_id=1,
+            external_id="1",
+            title="Closed issue",
+            state="closed",
+        )
+        open_issue = make_issue(
+            id=2,
+            project_id=1,
+            external_id="2",
+            title="Open issue",
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, closed_issue, open_issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            self.client = client
+            first = self.client.get(
+                "/api/eval/next?open_only=false",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            second = self.client.get(
+                "/api/eval/next?open_only=false",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()["issue_id"] == 2
+        assert second.json()["issue_id"] == 1
+
+    def test_unevaluated_before_old_version(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        old_issue = make_issue(
+            id=1,
+            project_id=1,
+            external_id="1",
+            title="Old version issue",
+        )
+        unevaluated_issue = make_issue(
+            id=2,
+            project_id=1,
+            external_id="2",
+            title="Unevaluated issue",
+        )
+        old_issue_hash = _compute_content_hash(
+            old_issue.title,
+            old_issue.body,
+            old_issue.state,
+            old_issue.labels,
+            old_issue.comments,
+        )
+        old_evaluation = make_evaluation(
+            id=1,
+            issue_id=1,
+            latest=True,
+            summary="This summary is intentionally long enough.",
+            suggested_action="keep_open",
+            suggested_action_reason="This still needs attention from maintainers.",
+            scores={
+                "staleness": 1,
+                "complexity": 1,
+                "support_request": 1,
+                "readiness": 1,
+            },
+            eval_version=CURRENT_EVAL_VERSION - 1,
+            issue_data_hash=old_issue_hash,
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(
+                test_db_session,
+                project,
+                old_issue,
+                unevaluated_issue,
+                old_evaluation,
+            )
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            self.client = client
+            first = self.client.get(
+                "/api/eval/next", headers={"Authorization": f"Bearer {token}"}
+            )
+            second = self.client.get(
+                "/api/eval/next", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()["issue_id"] == 2
+        assert second.json()["issue_id"] == 1
+
+    def test_old_version_before_current_version_with_hash_change(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        current_version_issue = make_issue(
+            id=1,
+            project_id=1,
+            external_id="1",
+            title="Current version changed",
+        )
+        old_version_issue = make_issue(
+            id=2,
+            project_id=1,
+            external_id="2",
+            title="Old version issue",
+        )
+        current_version_evaluation = make_evaluation(
+            id=1,
+            issue_id=1,
+            latest=True,
+            summary="This summary is intentionally long enough.",
+            suggested_action="keep_open",
+            suggested_action_reason="This issue changed since the last evaluation.",
+            scores={
+                "staleness": 1,
+                "complexity": 1,
+                "support_request": 1,
+                "readiness": 1,
+            },
+            eval_version=CURRENT_EVAL_VERSION,
+            issue_data_hash="stale-hash",
+        )
+        old_version_evaluation = make_evaluation(
+            id=2,
+            issue_id=2,
+            latest=True,
+            summary="This summary is intentionally long enough.",
+            suggested_action="keep_open",
+            suggested_action_reason="This issue needs reevaluation on the old version.",
+            scores={
+                "staleness": 2,
+                "complexity": 2,
+                "support_request": 2,
+                "readiness": 2,
+            },
+            eval_version=CURRENT_EVAL_VERSION - 1,
+            issue_data_hash="older-stale-hash",
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(
+                test_db_session,
+                project,
+                current_version_issue,
+                old_version_issue,
+                current_version_evaluation,
+                old_version_evaluation,
+            )
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            self.client = client
+            first = self.client.get(
+                "/api/eval/next", headers={"Authorization": f"Bearer {token}"}
+            )
+            second = self.client.get(
+                "/api/eval/next", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()["issue_id"] == 2
+        assert second.json()["issue_id"] == 1
+
+    def test_old_version_open_before_old_version_closed(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        closed_issue = make_issue(
+            id=1,
+            project_id=1,
+            external_id="1",
+            title="Closed old version issue",
+            state="closed",
+        )
+        open_issue = make_issue(
+            id=2,
+            project_id=1,
+            external_id="2",
+            title="Open old version issue",
+        )
+        closed_evaluation = make_evaluation(
+            id=1,
+            issue_id=1,
+            latest=True,
+            summary="This summary is intentionally long enough.",
+            suggested_action="close",
+            suggested_action_reason="This old-version evaluation must be refreshed.",
+            scores={},
+            eval_version=CURRENT_EVAL_VERSION - 1,
+            issue_data_hash="old-closed-hash",
+        )
+        open_evaluation = make_evaluation(
+            id=2,
+            issue_id=2,
+            latest=True,
+            summary="This summary is intentionally long enough.",
+            suggested_action="keep_open",
+            suggested_action_reason="This old-version evaluation must be refreshed.",
+            scores={
+                "staleness": 1,
+                "complexity": 1,
+                "support_request": 1,
+                "readiness": 1,
+            },
+            eval_version=CURRENT_EVAL_VERSION - 1,
+            issue_data_hash="old-open-hash",
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(
+                test_db_session,
+                project,
+                closed_issue,
+                open_issue,
+                closed_evaluation,
+                open_evaluation,
+            )
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            self.client = client
+            first = self.client.get(
+                "/api/eval/next?open_only=false",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            second = self.client.get(
+                "/api/eval/next?open_only=false",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()["issue_id"] == 2
+        assert second.json()["issue_id"] == 1
+
+    def test_current_version_hash_change_open_before_closed(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        closed_issue = make_issue(
+            id=1,
+            project_id=1,
+            external_id="1",
+            title="Closed changed issue",
+            state="closed",
+        )
+        open_issue = make_issue(
+            id=2,
+            project_id=1,
+            external_id="2",
+            title="Open changed issue",
+        )
+        closed_evaluation = make_evaluation(
+            id=1,
+            issue_id=1,
+            latest=True,
+            summary="This summary is intentionally long enough.",
+            suggested_action="close",
+            suggested_action_reason="This issue changed after the last evaluation.",
+            scores={},
+            eval_version=CURRENT_EVAL_VERSION,
+            issue_data_hash="stale-closed-hash",
+        )
+        open_evaluation = make_evaluation(
+            id=2,
+            issue_id=2,
+            latest=True,
+            summary="This summary is intentionally long enough.",
+            suggested_action="keep_open",
+            suggested_action_reason="This issue changed after the last evaluation.",
+            scores={
+                "staleness": 1,
+                "complexity": 1,
+                "support_request": 1,
+                "readiness": 1,
+            },
+            eval_version=CURRENT_EVAL_VERSION,
+            issue_data_hash="stale-open-hash",
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(
+                test_db_session,
+                project,
+                closed_issue,
+                open_issue,
+                closed_evaluation,
+                open_evaluation,
+            )
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            self.client = client
+            first = self.client.get(
+                "/api/eval/next?open_only=false",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            second = self.client.get(
+                "/api/eval/next?open_only=false",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()["issue_id"] == 2
+        assert second.json()["issue_id"] == 1
+
+    def test_same_priority_uses_issue_id_as_tiebreaker(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        higher_id_issue = make_issue(
+            id=2,
+            project_id=1,
+            external_id="2",
+            title="Higher id issue",
+        )
+        lower_id_issue = make_issue(
+            id=1,
+            project_id=1,
+            external_id="1",
+            title="Lower id issue",
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, higher_id_issue, lower_id_issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            self.client = client
+            first = self.client.get(
+                "/api/eval/next", headers={"Authorization": f"Bearer {token}"}
+            )
+            second = self.client.get(
+                "/api/eval/next", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()["issue_id"] == 1
+        assert second.json()["issue_id"] == 2
 
 
 class TestEvalResultIntegration:
