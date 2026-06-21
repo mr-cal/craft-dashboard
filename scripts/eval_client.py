@@ -209,8 +209,7 @@ async def run_eval_loop(  # noqa: PLR0913
     *,
     server: str,
     token: str,
-    summary_model: str,
-    evaluation_model: str,
+    model: str,
     llm_url: str,
     llm_api_key: str,
     ca_cert: str,
@@ -227,14 +226,13 @@ async def run_eval_loop(  # noqa: PLR0913
 ) -> None:
     """Poll the eval API, run single-phase evaluation, and submit results.
 
-    For each pending issue, the loop runs three steps in sequence:
-      1. Summarize — calls evaluator.summarize() to produce a text summary.
-      2. Score + Embed — runs evaluator.score() and EmbeddingClient.embed()
-         concurrently via asyncio.gather().  Embed is skipped when embed_model
-         is empty or the embedding call fails (non-fatal).
+    For each pending issue, the loop runs two steps in sequence:
+      1. Evaluate — calls evaluator.evaluate() to produce summary + scores in
+         a single LLM call.  Closed/merged issues produce summary only.
+      2. Embed — runs EmbeddingClient.embed() on the title + summary text.
+         Skipped when embed_model is empty or the embedding call fails
+         (non-fatal).
       3. Submit — POSTs the assembled payload to /api/eval/result.
-
-    Closed/merged issues skip scoring and go straight to embed + submit.
 
     The loop runs until *limit* issues are evaluated (limit=0 means run until
     the server returns 204 No Content), or until a shutdown signal is received.
@@ -262,8 +260,7 @@ async def run_eval_loop(  # noqa: PLR0913
     )
     evaluator = IssueEvaluator(
         client=llm_client,
-        summary_model=summary_model,
-        evaluation_model=evaluation_model,
+        model=model,
     )
     embed_client: EmbeddingClient | None = None
     if embed_model:
@@ -311,14 +308,14 @@ async def run_eval_loop(  # noqa: PLR0913
                         total_open,
                         already_pct,
                         server_pending,
-                        evaluation_model,
+                        model,
                     )
             except httpx.HTTPError:
                 logger.info(
                     "Connected to %s%s, model=%s",
                     server_url,
                     filter_desc,
-                    evaluation_model,
+                    model,
                 )
 
             _start_keyboard_monitor()
@@ -417,24 +414,16 @@ async def run_eval_loop(  # noqa: PLR0913
                     # Show live status line for this issue
                     progress.update(
                         status_id,
-                        description=f"[dim]{issue_ref}:[/dim] summarize…",
+                        description=f"[dim]{issue_ref}:[/dim] eval…",
                         visible=True,
                     )
 
                     t0 = time.monotonic()
 
-                    # --- Step 1: Summarize ---
+                    # Single evaluate call handles open, closed, and merged
                     try:
-                        (
-                            (
-                                summary,
-                                summary_tokens,
-                                summary_prompt,
-                                summary_completion,
-                            ),
-                            t_sum,
-                        ) = await _timed(
-                            evaluator.summarize(
+                        result, t_eval = await _timed(
+                            evaluator.evaluate(
                                 title=issue_data["title"],
                                 body=issue_data.get("body"),
                                 issue_type=issue_data["issue_type"],
@@ -455,139 +444,47 @@ async def run_eval_loop(  # noqa: PLR0913
                         progress.update(status_id, visible=False)
                         elapsed = _format_elapsed(time.monotonic() - t0)
                         logger.exception(
-                            "%s: summarization failed after %s",
+                            "%s: evaluation failed after %s",
                             issue_ref,
                             elapsed,
                         )
                         continue
 
-                    # Embed title + summary for richer signal.
-                    # Title anchors the topic; summary captures semantic detail.
-                    embed_text = f"{issue_data['title']}. {summary}"
+                    if result is None:
+                        # content hash unchanged — server should not have sent this
+                        logger.warning("%s: content unchanged, skipping", issue_ref)
+                        continue
 
-                    # Helper: safely compute embedding, log and swallow failures
-
-                    content_hash = _compute_content_hash(
-                        issue_data["title"],
-                        issue_data.get("body"),
-                        normalized_state,
-                        issue_data.get("labels", []),
-                        issue_data.get("comments"),
-                    )
+                    # Embed title + summary for richer semantic signal
+                    embed_text = f"{issue_data['title']}. {result['summary']}"
                     embed_waiting = "[dim]—[/dim]" if embed_client is None else "⠋"
+                    progress.update(
+                        status_id,
+                        description=(
+                            f"[dim]{issue_ref}:[/dim] eval [green]✓[/green]"
+                            f" | embed {embed_waiting}"
+                        ),
+                    )
 
-                    # --- Step 2a: Closed/merged — skip scoring ---
-                    if normalized_state in {"closed", "merged"}:
-                        progress.update(
-                            status_id,
-                            description=(
-                                f"[dim]{issue_ref}:[/dim] summarize [green]✓[/green]"
-                                f" | score [dim]—[/dim] | embed {embed_waiting}"
-                            ),
-                        )
-                        summary_embedding, t_embed = await _timed(
-                            _embed_safe(embed_client, embed_text, issue_ref)
-                        )
-                        t_score = None
-                        duration = time.monotonic() - t0
-                        submission: dict[str, Any] = {
-                            "issue_id": issue_data["issue_id"],
-                            "content_hash": content_hash,
-                            "summary": summary,
-                            "scores": {},
-                            "suggested_action": None,
-                            "suggested_action_reason": None,
-                            "tokens_used": summary_tokens,
-                            "prompt_tokens": summary_prompt,
-                            "completion_tokens": summary_completion,
-                            "model_used": evaluation_model,
-                            "llm_backend": "local",
-                            "summary_embedding": summary_embedding,
-                        }
+                    summary_embedding, t_embed = await _timed(
+                        _embed_safe(embed_client, embed_text, issue_ref)
+                    )
+                    duration = time.monotonic() - t0
 
-                    # --- Step 2b: Open — score and embed in parallel ---
-                    else:
-                        progress.update(
-                            status_id,
-                            description=(
-                                f"[dim]{issue_ref}:[/dim] summarize [green]✓[/green]"
-                                f" | score ⠋ | embed {embed_waiting}"
-                            ),
-                        )
-                        try:
-                            (
-                                (
-                                    (
-                                        parsed,
-                                        eval_tokens,
-                                        eval_prompt,
-                                        eval_completion,
-                                    ),
-                                    t_score,
-                                ),
-                                (summary_embedding, t_embed),
-                            ) = await asyncio.gather(
-                                _timed(
-                                    evaluator.score(
-                                        title=issue_data["title"],
-                                        body=issue_data.get("body"),
-                                        issue_type=issue_data["issue_type"],
-                                        labels=issue_data.get("labels", []),
-                                        age_days=_days_since(
-                                            issue_data.get("created_at")
-                                        ),
-                                        last_activity_days=_days_since(
-                                            issue_data.get("updated_at")
-                                        ),
-                                        author=author,
-                                        is_maintainer=author in maintainers
-                                        or issue_data.get("author_association")
-                                        == "MAINTAINER",
-                                        comment_count=len(
-                                            issue_data.get("comments", [])
-                                        ),
-                                        comments=issue_data.get("comments"),
-                                    )
-                                ),
-                                _timed(
-                                    _embed_safe(embed_client, embed_text, issue_ref)
-                                ),
-                            )
-                        except Exception:
-                            progress.update(status_id, visible=False)
-                            elapsed = _format_elapsed(time.monotonic() - t0)
-                            logger.exception(
-                                "%s: scoring failed after %s",
-                                issue_ref,
-                                elapsed,
-                            )
-                            continue
-
-                        duration = time.monotonic() - t0
-                        scores = parsed.get("scores", {}) if parsed else {}
-                        if "confidence" not in scores:
-                            scores["confidence"] = 50
-
-                        submission = {
-                            "issue_id": issue_data["issue_id"],
-                            "content_hash": content_hash,
-                            "summary": summary,
-                            "scores": scores,
-                            "suggested_action": parsed.get("suggested_action")
-                            if parsed
-                            else None,
-                            "suggested_action_reason": parsed.get(
-                                "suggested_action_reason"
-                            )
-                            if parsed
-                            else None,
-                            "tokens_used": summary_tokens + eval_tokens,
-                            "prompt_tokens": summary_prompt + eval_prompt,
-                            "completion_tokens": summary_completion + eval_completion,
-                            "model_used": evaluation_model,
-                            "llm_backend": "local",
-                            "summary_embedding": summary_embedding,
-                        }
+                    submission: dict[str, Any] = {
+                        "issue_id": issue_data["issue_id"],
+                        "content_hash": result["issue_data_hash"],
+                        "summary": result["summary"],
+                        "scores": result["scores"],
+                        "suggested_action": result["suggested_action"],
+                        "suggested_action_reason": result["suggested_action_reason"],
+                        "tokens_used": result["tokens_used"],
+                        "prompt_tokens": result["prompt_tokens"],
+                        "completion_tokens": result["completion_tokens"],
+                        "model_used": model,
+                        "llm_backend": "local",
+                        "summary_embedding": summary_embedding,
+                    }
 
                     # Hide status row before submitting
                     progress.update(status_id, visible=False)
@@ -642,12 +539,10 @@ async def run_eval_loop(  # noqa: PLR0913
                         eta=timing.eta(PHASE_EVALUATE, remaining),
                     )
                     action = submission.get("suggested_action") or "summary_only"
-                    score_str = _format_elapsed(t_score) if t_score is not None else "—"
-                    embed_str = _format_elapsed(t_embed)
                     progress.console.print(
                         f"[bold]{issue_ref}[/bold] — {action}"
                         f"  [dim]{prompt_tok} in / {completion_tok} out"
-                        f"  sum {_format_elapsed(t_sum)} score {score_str} embed {embed_str}[/dim]"
+                        f"  eval {_format_elapsed(t_eval)} embed {_format_elapsed(t_embed)}[/dim]"
                     )
 
                     if limit > 0 and evaluated >= limit:
@@ -718,18 +613,11 @@ async def run_eval_loop(  # noqa: PLR0913
     help="Show timestamps, URLs, and model details",
 )
 @click.option(
-    "--summary-model",
+    "--model",
     default="llama3.2",
     show_default=True,
-    envvar="LOCAL_LLM_SUMMARY_MODEL",
-    help="LLM model for summarization [env: LOCAL_LLM_SUMMARY_MODEL]",
-)
-@click.option(
-    "--evaluation-model",
-    default="llama3.2",
-    show_default=True,
-    envvar="LOCAL_LLM_EVALUATION_MODEL",
-    help="LLM model for scoring [env: LOCAL_LLM_EVALUATION_MODEL]",
+    envvar="LOCAL_LLM_MODEL",
+    help="LLM model for evaluation [env: LOCAL_LLM_MODEL]",
 )
 @click.option(
     "--embed-model",
@@ -776,8 +664,7 @@ async def run_eval_loop(  # noqa: PLR0913
 def cli(  # noqa: PLR0913
     server: str,
     token: str,
-    summary_model: str,
-    evaluation_model: str,
+    model: str,
     embed_model: str,
     llm_url: str,
     llm_api_key: str,
@@ -794,14 +681,14 @@ def cli(  # noqa: PLR0913
 ) -> None:
     """craft-dashboard local evaluation client.
 
-    Evaluates issues in a single pass: summarize, then score and embed in parallel.
+    Evaluates issues in a single pass: evaluate (summary + scores in one LLM
+    call), then embed.
     """
     asyncio.run(
         run_eval_loop(
             server=server,
             token=token,
-            summary_model=summary_model,
-            evaluation_model=evaluation_model,
+            model=model,
             embed_model=embed_model,
             llm_url=llm_url,
             llm_api_key=llm_api_key,

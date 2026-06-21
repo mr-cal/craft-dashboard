@@ -29,33 +29,25 @@ SAMPLE_ISSUE = {
     "maintainers": ["alice"],
 }
 
-# summarize returns (summary, total_tokens, prompt_tokens, completion_tokens)
-_SAMPLE_SUMMARIZE_RESULT = (
-    "This is a test summary for the issue evaluation.",
-    300,
-    200,
-    100,
-)
-# score returns (parsed_dict, total_tokens, prompt_tokens, completion_tokens)
-_SAMPLE_SCORE_RESULT = (
-    {
-        "scores": {
-            "staleness": 10,
-            "complexity": 30,
-            "support_request": 0,
-            "readiness": 50,
-            "confidence": 80,
-        },
-        "suggested_action": "needs_triage",
-        "suggested_action_reason": "Needs investigation by maintainer",
+# evaluate returns EvaluationResult TypedDict
+_SAMPLE_EVALUATE_RESULT = {
+    "summary": "This is a test summary for the issue evaluation.",
+    "scores": {
+        "staleness": 10,
+        "complexity": 30,
+        "support_request": 0,
+        "readiness": 50,
+        "confidence": 80,
     },
-    200,
-    100,
-    100,
-)
+    "suggested_action": "needs_triage",
+    "suggested_action_reason": "Needs investigation by maintainer",
+    "tokens_used": 500,
+    "prompt_tokens": 300,
+    "completion_tokens": 200,
+    "issue_data_hash": "unit_test_eval_hash",
+}
 
-# Combined token counts expected in submissions:
-# prompt_tokens = 200 + 100 = 300, completion_tokens = 100 + 100 = 200, tokens_used = 500
+# Expected token counts from the evaluate result
 _EXPECTED_PROMPT_TOKENS = 300
 _EXPECTED_COMPLETION_TOKENS = 200
 _EXPECTED_TOKENS_USED = 500
@@ -63,8 +55,7 @@ _EXPECTED_TOKENS_USED = 500
 DEFAULT_KWARGS = {
     "server": "http://localhost:8000",
     "token": "test-token",
-    "summary_model": "test-model",
-    "evaluation_model": "test-model",
+    "model": "test-model",
     "llm_url": "http://localhost:11434/v1",
     "llm_api_key": "",
     "ca_cert": "",
@@ -141,8 +132,7 @@ def patched_runtime(monkeypatch):
     llm_client = MagicMock()
     llm_client.close = AsyncMock()
     evaluator = MagicMock()
-    evaluator.summarize = AsyncMock(return_value=_SAMPLE_SUMMARIZE_RESULT)
-    evaluator.score = AsyncMock(return_value=_SAMPLE_SCORE_RESULT)
+    evaluator.evaluate = AsyncMock(return_value=_SAMPLE_EVALUATE_RESULT)
     sleep_mock = AsyncMock()
 
     # Mock progress bar to avoid rich terminal output in tests
@@ -220,12 +210,11 @@ async def test_run_eval_loop_processes_issue_and_stops_at_limit(
 
     await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
-    patched_runtime["evaluator"].summarize.assert_awaited_once()
-    patched_runtime["evaluator"].score.assert_awaited_once()
+    patched_runtime["evaluator"].evaluate.assert_awaited_once()
     http_client.post.assert_awaited_once()
     posted = http_client.post.await_args.kwargs["json"]
     assert posted["issue_id"] == 42
-    assert posted["summary"] == _SAMPLE_SUMMARIZE_RESULT[0]
+    assert posted["summary"] == _SAMPLE_EVALUATE_RESULT["summary"]
     assert posted["suggested_action"] == "needs_triage"
     assert posted["prompt_tokens"] == _EXPECTED_PROMPT_TOKENS
     assert posted["completion_tokens"] == _EXPECTED_COMPLETION_TOKENS
@@ -253,7 +242,7 @@ async def test_run_eval_loop_sleeps_without_evaluating_when_no_work(
     await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
     assert http_client.get.await_count == 2  # status + next
-    patched_runtime["evaluator"].summarize.assert_not_awaited()
+    patched_runtime["evaluator"].evaluate.assert_not_awaited()
     http_client.post.assert_not_awaited()
     patched_runtime["sleep"].assert_awaited_once_with(1)
 
@@ -278,7 +267,7 @@ async def test_run_eval_loop_logs_warning_and_continues_on_submit_conflict(
     with caplog.at_level(logging.WARNING):
         await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
-    patched_runtime["evaluator"].summarize.assert_awaited_once()
+    patched_runtime["evaluator"].evaluate.assert_awaited_once()
     http_client.post.assert_awaited_once()
     patched_runtime["sleep"].assert_awaited_once_with(1)
     assert "content changed during evaluation" in caplog.text
@@ -288,11 +277,8 @@ async def test_run_eval_loop_logs_warning_and_continues_on_submit_conflict(
 async def test_run_eval_loop_stops_after_reaching_limit(
     monkeypatch, patched_runtime, caplog
 ) -> None:
-    patched_runtime["evaluator"].summarize = AsyncMock(
-        side_effect=[_SAMPLE_SUMMARIZE_RESULT, _SAMPLE_SUMMARIZE_RESULT]
-    )
-    patched_runtime["evaluator"].score = AsyncMock(
-        side_effect=[_SAMPLE_SCORE_RESULT, _SAMPLE_SCORE_RESULT]
+    patched_runtime["evaluator"].evaluate = AsyncMock(
+        side_effect=[_SAMPLE_EVALUATE_RESULT, _SAMPLE_EVALUATE_RESULT]
     )
     http_client = _patch_http_client(
         monkeypatch,
@@ -313,7 +299,7 @@ async def test_run_eval_loop_stops_after_reaching_limit(
     with caplog.at_level(logging.INFO):
         await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 2})
 
-    assert patched_runtime["evaluator"].summarize.await_count == 2
+    assert patched_runtime["evaluator"].evaluate.await_count == 2
     assert http_client.post.await_count == 2
     assert "Done: evaluated 2 issues" in caplog.text
     assert (
@@ -340,20 +326,20 @@ async def test_run_eval_loop_sleeps_and_retries_after_server_error(
 
     assert http_client.get.await_count == 3  # status + 500 + issue
     patched_runtime["sleep"].assert_awaited_once_with(1)
-    patched_runtime["evaluator"].summarize.assert_awaited_once()
+    patched_runtime["evaluator"].evaluate.assert_awaited_once()
     http_client.post.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_run_eval_loop_continues_after_summarize_exception(
+async def test_run_eval_loop_continues_after_evaluate_exception(
     monkeypatch, patched_runtime, caplog
 ) -> None:
-    """If summarize raises, that issue is skipped and the loop continues."""
+    """If evaluate raises, that issue is skipped and the loop continues."""
 
     async def request_shutdown(_seconds: int) -> None:
         eval_client.shutdown_state["requested"] = True
 
-    patched_runtime["evaluator"].summarize = AsyncMock(
+    patched_runtime["evaluator"].evaluate = AsyncMock(
         side_effect=RuntimeError("LLM timeout")
     )
     patched_runtime["sleep"].side_effect = request_shutdown
@@ -370,7 +356,7 @@ async def test_run_eval_loop_continues_after_summarize_exception(
         await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
     http_client.post.assert_not_awaited()
-    assert "summarization failed" in caplog.text
+    assert "evaluation failed" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -389,8 +375,7 @@ async def test_run_eval_loop_prints_per_issue_completion_line(
     printed = " ".join(patched_runtime["console_prints"])
     assert "300 in / 200 out" in printed
     assert "needs_triage" in printed
-    assert "sum " in printed
-    assert "score " in printed
+    assert "eval " in printed
     assert "embed " in printed
 
 
@@ -422,11 +407,8 @@ async def test_embedding_client_created_once_for_multiple_issues(
     mock_embedding_class = MagicMock(return_value=mock_embed_client)
     monkeypatch.setattr(eval_client, "EmbeddingClient", mock_embedding_class)
 
-    patched_runtime["evaluator"].summarize = AsyncMock(
-        side_effect=[_SAMPLE_SUMMARIZE_RESULT, _SAMPLE_SUMMARIZE_RESULT]
-    )
-    patched_runtime["evaluator"].score = AsyncMock(
-        side_effect=[_SAMPLE_SCORE_RESULT, _SAMPLE_SCORE_RESULT]
+    patched_runtime["evaluator"].evaluate = AsyncMock(
+        side_effect=[_SAMPLE_EVALUATE_RESULT, _SAMPLE_EVALUATE_RESULT]
     )
 
     _patch_http_client(
@@ -454,19 +436,13 @@ async def test_embedding_client_created_once_for_multiple_issues(
 
 
 @pytest.mark.asyncio
-async def test_score_and_embed_run_after_summarize(
-    monkeypatch, patched_runtime
-) -> None:
-    """Score and embed are launched concurrently after summarize completes."""
+async def test_evaluate_then_embed_run_in_serial(monkeypatch, patched_runtime) -> None:
+    """Embed runs after evaluate completes (serial flow)."""
     call_order: list[str] = []
 
-    async def fake_summarize(**_kwargs):
-        call_order.append("summarize")
-        return _SAMPLE_SUMMARIZE_RESULT
-
-    async def fake_score(**_kwargs):
-        call_order.append("score")
-        return _SAMPLE_SCORE_RESULT
+    async def fake_evaluate(**_kwargs):
+        call_order.append("evaluate")
+        return _SAMPLE_EVALUATE_RESULT
 
     mock_embed_client = MagicMock()
 
@@ -480,8 +456,7 @@ async def test_score_and_embed_run_after_summarize(
         eval_client, "EmbeddingClient", MagicMock(return_value=mock_embed_client)
     )
 
-    patched_runtime["evaluator"].summarize = fake_summarize
-    patched_runtime["evaluator"].score = fake_score
+    patched_runtime["evaluator"].evaluate = fake_evaluate
 
     _patch_http_client(
         monkeypatch,
@@ -493,8 +468,7 @@ async def test_score_and_embed_run_after_summarize(
         **{**DEFAULT_KWARGS, "embed_model": "nomic-embed-text"}
     )
 
-    assert call_order[0] == "summarize"
-    assert set(call_order[1:]) == {"score", "embed"}
+    assert call_order == ["evaluate", "embed"]
 
 
 @pytest.mark.asyncio

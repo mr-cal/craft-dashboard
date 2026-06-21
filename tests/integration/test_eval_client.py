@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from craft_dashboard.llm.embeddings import EmbeddingClient
-from craft_dashboard.llm.evaluator import _compute_content_hash
 from scripts import eval_client
 
 # ---------------------------------------------------------------------------
@@ -66,8 +65,7 @@ REAL_ISSUE_SNAPCRAFT = {
 DEFAULT_KWARGS = {
     "server": "http://localhost:8000",
     "token": "test-token",
-    "summary_model": "test-model",
-    "evaluation_model": "test-model",
+    "model": "test-model",
     "embed_model": "",
     "llm_url": "http://localhost:11434/v1",
     "llm_api_key": "",
@@ -164,40 +162,21 @@ REAL_ISSUE_PR = {
     "maintainers": ["alice-canonical"],
 }
 
-SAMPLE_SUMMARIZE_RESULT = (
-    "This is a detailed summary of the issue and its context.",
-    300,
-    200,
-    100,
-)
-
-SAMPLE_SCORE_RESULT = (
-    {
-        "scores": {
-            "staleness": 45,
-            "complexity": 30,
-            "support_request": 80,
-            "confidence": 65,
-        },
-        "suggested_action": "needs_triage",
-        "suggested_action_reason": "Issue lacks maintainer labels and has no "
-        "prior assessment from the core team.",
+SAMPLE_EVALUATE_RESULT: dict[str, Any] = {
+    "summary": "This is a detailed summary of the issue and its context.",
+    "scores": {
+        "staleness": 45,
+        "complexity": 30,
+        "support_request": 80,
+        "confidence": 65,
     },
-    200,
-    100,
-    100,
-)
-
-# Keep for backward-compat with hash/field assertion helpers below
-SAMPLE_EVAL_RESULT: dict[str, Any] = {
-    "summary": SAMPLE_SUMMARIZE_RESULT[0],
-    "scores": SAMPLE_SCORE_RESULT[0]["scores"],
     "suggested_action": "needs_triage",
     "suggested_action_reason": "Issue lacks maintainer labels and has no "
     "prior assessment from the core team.",
     "tokens_used": 500,
     "prompt_tokens": 300,
     "completion_tokens": 200,
+    "issue_data_hash": "sample_eval_hash_abc123",
 }
 
 
@@ -257,8 +236,7 @@ def patched_runtime(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     llm_client.close = AsyncMock()
 
     evaluator = MagicMock()
-    evaluator.summarize = AsyncMock(return_value=SAMPLE_SUMMARIZE_RESULT)
-    evaluator.score = AsyncMock(return_value=SAMPLE_SCORE_RESULT)
+    evaluator.evaluate = AsyncMock(return_value=SAMPLE_EVALUATE_RESULT)
 
     sleep_mock = AsyncMock()
 
@@ -347,7 +325,7 @@ class TestEvalClientHappyPath:
         await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
         # Evaluator was called with data derived from the real issue
-        call_kwargs = patched_runtime["evaluator"].summarize.call_args.kwargs
+        call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         assert call_kwargs["title"] == "Build fails on arm64 after kernel update"
         assert call_kwargs["issue_type"] == "issue"
         assert call_kwargs["state"] == "open"
@@ -370,22 +348,20 @@ class TestEvalClientHappyPath:
     ) -> None:
         """Multiple issues from different projects are evaluated sequentially."""
         issues = [REAL_ISSUE_SNAPCRAFT, REAL_ISSUE_LANDSCAPE, REAL_ISSUE_CHARM]
-        score_results = [
-            (SAMPLE_SCORE_RESULT[0], 200, 100, 100),
-            (
-                {**SAMPLE_SCORE_RESULT[0], "suggested_action": "keep_open"},
-                200,
-                100,
-                100,
-            ),
-            (
-                {**SAMPLE_SCORE_RESULT[0], "suggested_action": "close_stale"},
-                200,
-                100,
-                100,
-            ),
+        evaluate_results = [
+            SAMPLE_EVALUATE_RESULT,
+            {
+                **SAMPLE_EVALUATE_RESULT,
+                "suggested_action": "keep_open",
+                "issue_data_hash": "hash_landscape",
+            },
+            {
+                **SAMPLE_EVALUATE_RESULT,
+                "suggested_action": "close_stale",
+                "issue_data_hash": "hash_charm",
+            },
         ]
-        patched_runtime["evaluator"].score.side_effect = score_results
+        patched_runtime["evaluator"].evaluate.side_effect = evaluate_results
 
         get_responses = _with_status(
             httpx.Response(status_code=200, json=issues[0]),
@@ -401,22 +377,22 @@ class TestEvalClientHappyPath:
 
         await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 3})
 
-        assert patched_runtime["evaluator"].summarize.call_count == 3
+        assert patched_runtime["evaluator"].evaluate.call_count == 3
         assert (
-            patched_runtime["evaluator"].summarize.call_args_list[0].kwargs["title"]
+            patched_runtime["evaluator"].evaluate.call_args_list[0].kwargs["title"]
             == issues[0]["title"]
         )
         assert (
-            patched_runtime["evaluator"].summarize.call_args_list[1].kwargs["title"]
+            patched_runtime["evaluator"].evaluate.call_args_list[1].kwargs["title"]
             == issues[1]["title"]
         )
         assert (
-            patched_runtime["evaluator"].summarize.call_args_list[2].kwargs["title"]
+            patched_runtime["evaluator"].evaluate.call_args_list[2].kwargs["title"]
             == issues[2]["title"]
         )
 
         # Verify each project name was extracted correctly
-        calls = patched_runtime["evaluator"].summarize.call_args_list
+        calls = patched_runtime["evaluator"].evaluate.call_args_list
         assert calls[0].kwargs["author"] == "bob-remote"
         assert calls[1].kwargs["author"] == "viewer-user"
         assert calls[2].kwargs["author"] == "new-contributor"
@@ -436,7 +412,7 @@ class TestEvalClientHappyPath:
 
         await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
-        call_kwargs = patched_runtime["evaluator"].summarize.call_args.kwargs
+        call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         assert call_kwargs["issue_type"] == "pull_request"
         assert call_kwargs["labels"] == ["enhancement", "ready-for-review"]
 
@@ -462,7 +438,7 @@ class TestEvalClientHappyPath:
 
         await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
-        call_kwargs = patched_runtime["evaluator"].summarize.call_args.kwargs
+        call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         assert call_kwargs["is_maintainer"] is True
         assert call_kwargs["author"] == "alice-canonical"
 
@@ -471,9 +447,9 @@ class TestEvalClientHappyPath:
         self, monkeypatch, patched_runtime, caplog
     ) -> None:
         """If the evaluator raises, the error is logged and the next issue is fetched."""
-        patched_runtime["evaluator"].summarize.side_effect = [
+        patched_runtime["evaluator"].evaluate.side_effect = [
             Exception("LLM timeout"),
-            SAMPLE_SUMMARIZE_RESULT,
+            SAMPLE_EVALUATE_RESULT,
         ]
         _patch_http(
             monkeypatch,
@@ -489,10 +465,10 @@ class TestEvalClientHappyPath:
             await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 1})
 
         assert "LLM timeout" in caplog.text
-        # Summarize was called twice (error + success), but only one was submitted
-        assert patched_runtime["evaluator"].summarize.call_count == 2
+        # evaluate was called twice (error + success), but only one was submitted
+        assert patched_runtime["evaluator"].evaluate.call_count == 2
         assert (
-            patched_runtime["evaluator"].summarize.call_args_list[0].kwargs["title"]
+            patched_runtime["evaluator"].evaluate.call_args_list[0].kwargs["title"]
             == REAL_ISSUE_SNAPCRAFT["title"]
         )
 
@@ -611,7 +587,7 @@ class TestEvalClientErrorPaths:
         # 500 causes a sleep before retrying
         patched_runtime["sleep"].assert_awaited_once()
         # Evaluator was NOT called (the retry never happened before shutdown)
-        patched_runtime["evaluator"].summarize.assert_not_awaited()
+        patched_runtime["evaluator"].evaluate.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_invalid_json_from_server_is_handled(
@@ -749,7 +725,7 @@ class TestEvalClientFlowControl:
 
         await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
-        assert patched_runtime["evaluator"].summarize.call_count == 2
+        assert patched_runtime["evaluator"].evaluate.call_count == 2
 
     @pytest.mark.asyncio
     async def test_limit_two_stops_after_two(
@@ -773,7 +749,7 @@ class TestEvalClientFlowControl:
             await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 2})
 
         assert "Done: evaluated 2 issues" in caplog.text
-        assert patched_runtime["evaluator"].summarize.call_count == 2
+        assert patched_runtime["evaluator"].evaluate.call_count == 2
         # The third issue was never evaluated
         assert "charmhub" not in caplog.text
 
@@ -798,24 +774,30 @@ class TestEvalClientFlowControl:
         await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
         patched_runtime["sleep"].assert_awaited_once()
-        patched_runtime["evaluator"].summarize.assert_not_awaited()
+        patched_runtime["evaluator"].evaluate.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_token_counts_accumulate_across_issues(
         self, monkeypatch, patched_runtime, caplog
     ) -> None:
         """Token counts are accumulated and logged at the end of the run."""
-        summary_result_1 = (SAMPLE_SUMMARIZE_RESULT[0], 300, 200, 100)
-        score_result_1 = (SAMPLE_SCORE_RESULT[0], 200, 100, 100)
-        summary_result_2 = (SAMPLE_SUMMARIZE_RESULT[0], 400, 250, 150)
-        score_result_2 = (SAMPLE_SCORE_RESULT[0], 300, 150, 150)
-        patched_runtime["evaluator"].summarize.side_effect = [
-            summary_result_1,
-            summary_result_2,
-        ]
-        patched_runtime["evaluator"].score.side_effect = [
-            score_result_1,
-            score_result_2,
+        evaluate_result_1 = {
+            **SAMPLE_EVALUATE_RESULT,
+            "tokens_used": 500,
+            "prompt_tokens": 300,
+            "completion_tokens": 200,
+            "issue_data_hash": "hash1",
+        }
+        evaluate_result_2 = {
+            **SAMPLE_EVALUATE_RESULT,
+            "tokens_used": 700,
+            "prompt_tokens": 400,
+            "completion_tokens": 300,
+            "issue_data_hash": "hash2",
+        }
+        patched_runtime["evaluator"].evaluate.side_effect = [
+            evaluate_result_1,
+            evaluate_result_2,
         ]
 
         _patch_http(
@@ -870,37 +852,31 @@ class TestEvalClientSubmissionPayload:
         assert submit_json["llm_backend"] == "local"
         assert submit_json["summary_embedding"] is None
 
-        # Content hash is computed locally from issue data
-        expected_hash = _compute_content_hash(
-            REAL_ISSUE_SNAPCRAFT["title"],
-            REAL_ISSUE_SNAPCRAFT.get("body"),
-            REAL_ISSUE_SNAPCRAFT["state"].lower(),
-            REAL_ISSUE_SNAPCRAFT.get("labels", []),
-            REAL_ISSUE_SNAPCRAFT.get("comments"),
-        )
-        assert submit_json["content_hash"] == expected_hash
+        # Content hash comes from the evaluator's result (issue_data_hash)
+        assert submit_json["content_hash"] == SAMPLE_EVALUATE_RESULT["issue_data_hash"]
 
         # Evaluator result fields
-        assert submit_json["summary"] == SAMPLE_EVAL_RESULT["summary"]
-        assert submit_json["scores"] == SAMPLE_EVAL_RESULT["scores"]
-        assert submit_json["suggested_action"] == SAMPLE_EVAL_RESULT["suggested_action"]
+        assert submit_json["summary"] == SAMPLE_EVALUATE_RESULT["summary"]
+        assert submit_json["scores"] == SAMPLE_EVALUATE_RESULT["scores"]
+        assert (
+            submit_json["suggested_action"]
+            == SAMPLE_EVALUATE_RESULT["suggested_action"]
+        )
         assert (
             submit_json["suggested_action_reason"]
-            == SAMPLE_EVAL_RESULT["suggested_action_reason"]
+            == SAMPLE_EVALUATE_RESULT["suggested_action_reason"]
         )
 
-        # Token fields: combined from summarize + score
-        # summarize: tokens=300, prompt=200, completion=100
-        # score:     tokens=200, prompt=100, completion=100
+        # Token fields from evaluate() result
         assert submit_json["tokens_used"] == 500
         assert submit_json["prompt_tokens"] == 300
         assert submit_json["completion_tokens"] == 200
 
     @pytest.mark.asyncio
-    async def test_submission_uses_locally_computed_hash_not_server_hash(
+    async def test_submission_uses_evaluator_hash_not_server_hash(
         self, monkeypatch, patched_runtime
     ) -> None:
-        """The content_hash is computed locally from issue data, not from the server's current_hash."""
+        """The content_hash comes from the evaluator result, not from the server's current_hash."""
         client_mock = _patch_http(
             monkeypatch,
             get_responses=_with_status(
@@ -912,15 +888,8 @@ class TestEvalClientSubmissionPayload:
         await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
         submit_json = client_mock.post.call_args.kwargs["json"]
-        expected_hash = _compute_content_hash(
-            REAL_ISSUE_SNAPCRAFT["title"],
-            REAL_ISSUE_SNAPCRAFT.get("body"),
-            REAL_ISSUE_SNAPCRAFT["state"].lower(),
-            REAL_ISSUE_SNAPCRAFT.get("labels", []),
-            REAL_ISSUE_SNAPCRAFT.get("comments"),
-        )
-        assert submit_json["content_hash"] == expected_hash
-        # The server's current_hash is not reused verbatim
+        # Hash comes from evaluator mock's issue_data_hash, not the server's current_hash
+        assert submit_json["content_hash"] == SAMPLE_EVALUATE_RESULT["issue_data_hash"]
         assert submit_json["content_hash"] != REAL_ISSUE_SNAPCRAFT["current_hash"]
 
     @pytest.mark.asyncio
@@ -986,7 +955,7 @@ class TestEvalClientEdgeCases:
 
         await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
-        call_kwargs = patched_runtime["evaluator"].summarize.call_args.kwargs
+        call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         assert call_kwargs["comment_count"] == 0
         assert call_kwargs["comments"] == []
 
@@ -1015,7 +984,7 @@ class TestEvalClientEdgeCases:
 
         await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
-        call_kwargs = patched_runtime["evaluator"].summarize.call_args.kwargs
+        call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         assert call_kwargs["comment_count"] == 15
         assert len(call_kwargs["comments"]) == 15
 
@@ -1036,7 +1005,7 @@ class TestEvalClientEdgeCases:
 
         await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
-        call_kwargs = patched_runtime["evaluator"].summarize.call_args.kwargs
+        call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         assert call_kwargs["labels"] == []
 
     @pytest.mark.asyncio
@@ -1056,7 +1025,7 @@ class TestEvalClientEdgeCases:
 
         await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
-        call_kwargs = patched_runtime["evaluator"].summarize.call_args.kwargs
+        call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         assert call_kwargs["body"] is None
 
     @pytest.mark.asyncio
@@ -1074,7 +1043,7 @@ class TestEvalClientEdgeCases:
 
         await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
-        call_kwargs = patched_runtime["evaluator"].summarize.call_args.kwargs
+        call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         # REAL_ISSUE_SNAPCRAFT created_at = 2026-04-01, so age should be ~75 days
         assert call_kwargs["age_days"] >= 70
         assert call_kwargs["age_days"] <= 80
@@ -1107,7 +1076,7 @@ class TestEvalClientEdgeCases:
         await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
         # Both issues were evaluated despite the first submission failing
-        assert patched_runtime["evaluator"].summarize.call_count == 2
+        assert patched_runtime["evaluator"].evaluate.call_count == 2
         # Only the second issue produced a completion line (first submission failed)
         assert len(patched_runtime["console_prints"]) == 1
 
@@ -1132,6 +1101,5 @@ class TestEvalClientEdgeCases:
         assert "snapcraft#2695" in line
         assert "needs_triage" in line
         assert "300 in / 200 out" in line
-        assert "sum " in line
-        assert "score " in line
+        assert "eval " in line
         assert "embed " in line
