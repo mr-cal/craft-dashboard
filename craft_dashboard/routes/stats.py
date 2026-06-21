@@ -774,7 +774,11 @@ async def stats_triage(
         .where(LLMEvaluation.latest.is_(True))
         .group_by(LLMEvaluation.suggested_action)
     )
-    action_counts = {row.suggested_action: row.count for row in result}
+    action_counts = {
+        row.suggested_action: row.count
+        for row in result
+        if row.suggested_action is not None
+    }
 
     return templates.TemplateResponse(
         request,

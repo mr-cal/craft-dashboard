@@ -216,10 +216,10 @@ class TestReleaseCollectionIndependentOfRefresh:
         gh_collector.collect_issues.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_releases_not_collected_for_non_application(
+    async def test_releases_collected_for_libraries(
         self, monkeypatch, caplog
     ) -> None:
-        """Libraries should NOT have releases collected."""
+        """Libraries should also have releases collected (for hotfix branch tracking)."""
         token = ("tok", "en")[0] + ("tok", "en")[1]
         settings = SimpleNamespace(github_token=token, refresh_age_days=7)
         config = SimpleNamespace(
@@ -234,7 +234,7 @@ class TestReleaseCollectionIndependentOfRefresh:
         dep_collector.collect_dependencies = AsyncMock(return_value=0)
         gh_collector = MagicMock()
         gh_collector.collect_issues = AsyncMock(return_value=0)
-        gh_collector.collect_releases = AsyncMock(return_value=0)
+        gh_collector.collect_releases = AsyncMock(return_value=2)
 
         monkeypatch.setattr(
             collect_data,
@@ -267,7 +267,8 @@ class TestReleaseCollectionIndependentOfRefresh:
             run_started_at=collect_data.time.monotonic(),
         )
 
-        gh_collector.collect_releases.assert_not_called()
+        gh_collector.collect_releases.assert_called_once()
+        assert "releases collected (2 branches)" in caplog.text
 
 
 class TestCollectLaunchpadLogging:

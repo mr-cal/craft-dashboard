@@ -330,26 +330,25 @@ async def _collect_github(
                     exc_info=True,
                 )
 
-            if project_name in config.craft_applications:
-                try:
-                    releases_started_at = time.monotonic()
-                    release_count = await collector.collect_releases(
-                        project_name,
-                        project_id,
-                        session,
-                    )
-                    logger.info(
-                        "  canonical/%s: releases collected (%d branches) in %s",
-                        project_name,
-                        release_count,
-                        _format_duration(time.monotonic() - releases_started_at),
-                    )
-                except Exception:
-                    logger.warning(
-                        "Failed to collect releases for %s",
-                        project_name,
-                        exc_info=True,
-                    )
+            try:
+                releases_started_at = time.monotonic()
+                release_count = await collector.collect_releases(
+                    project_name,
+                    project_id,
+                    session,
+                )
+                logger.info(
+                    "  canonical/%s: releases collected (%d branches) in %s",
+                    project_name,
+                    release_count,
+                    _format_duration(time.monotonic() - releases_started_at),
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to collect releases for %s",
+                    project_name,
+                    exc_info=True,
+                )
 
             # Check refresh schedule
             result = await session.execute(
