@@ -1,8 +1,8 @@
 """add_collection_run_id_to_issues
 
-Revision ID: b1c2d3e4f5a6
-Revises: fa02b11af7dc
-Create Date: 2026-06-21 00:00:00.000000
+Revision ID: c4d5e6f7a8b9
+Revises: d1b3f5a46924
+Create Date: 2026-06-21 14:00:00.000000
 
 """
 
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "b1c2d3e4f5a6"
-down_revision: str | None = "fa02b11af7dc"
+revision: str = "c4d5e6f7a8b9"
+down_revision: str | None = "d1b3f5a46924"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
