@@ -1,9 +1,6 @@
 """Prompt templates for LLM evaluation of issues and PRs."""
 
 
-
-
-
 def _format_comments(comments: list[dict]) -> str:
     """Format a list of comment dicts into a readable prompt section.
 
@@ -87,7 +84,6 @@ def _build_summary_user_content(
         f"Body:\n{(body or '(no body)')[:3000]}"
         f"{comments_text}"
     )
-
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +268,9 @@ def build_open_evaluate_prompt(
     type_label = "Pull Request" if issue_type == "pull_request" else "Issue"
     label_str = ", ".join(labels) if labels else "none"
     system_content = (
-        _OPEN_PR_EVAL_SYSTEM if issue_type == "pull_request" else _OPEN_ISSUE_EVAL_SYSTEM
+        _OPEN_PR_EVAL_SYSTEM
+        if issue_type == "pull_request"
+        else _OPEN_ISSUE_EVAL_SYSTEM
     )
     comments_text = _format_comments(comments or [])
     pr_details_text = (
@@ -331,7 +329,7 @@ def build_closed_evaluate_prompt(
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: Duplicate detection prompts
+# Duplicate detection prompts
 # ---------------------------------------------------------------------------
 
 _DUPLICATE_CHECK_SYSTEM = """\
@@ -402,7 +400,7 @@ def build_duplicate_summary_rewrite_prompt(
     """Build a prompt to rewrite a summary noting the detected duplicate(s).
 
     Args:
-        original_summary: The original phase-1 summary.
+        original_summary: The issue summary.
         duplicate_refs: List of human-readable references, e.g. ["snapcraft#123",
             "craft-parts#45"]. Used as-is in the rewrite.
 

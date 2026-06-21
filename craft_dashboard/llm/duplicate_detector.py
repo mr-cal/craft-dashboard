@@ -1,4 +1,4 @@
-"""Phase 2 duplicate detection: embed, search, confirm with LLM, update."""
+"""Duplicate detection: embed, search, confirm with LLM, update."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ FindSimilarFn = Callable[..., Awaitable[list[dict[str, Any]]]]
 class DuplicateDetector:
     """Detect duplicate issues using embeddings + LLM confirmation.
 
-    Phase 2 orchestrator. For a given issue:
+    For a given issue:
     1. Embed the summary.
     2. Find nearest neighbours (candidates) via the injected find_similar_fn.
     3. For each candidate, ask the LLM whether it's a true duplicate.
@@ -64,7 +64,7 @@ class DuplicateDetector:
             issue_id: DB ID of the issue being checked.
             project_name: Project name (for cross-project context in prompts).
             title: Issue title.
-            summary: Phase-1 generated summary.
+            summary: Issue summary.
             embedding: Pre-computed embedding for this issue's summary.
             find_similar_fn: Async callable that accepts (embedding, exclude_issue_id)
                 and returns a list of candidate dicts with keys:
@@ -137,7 +137,7 @@ class DuplicateDetector:
         """Rewrite a summary to note the detected duplicate(s).
 
         Args:
-            original_summary: The original phase-1 summary.
+            original_summary: The original issue summary.
             duplicate_refs: Human-readable refs, e.g. ["snapcraft#123"].
 
         Returns:
