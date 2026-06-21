@@ -184,7 +184,7 @@ class LaunchpadCollector:
                     for field in ISSUE_UPSERT_FIELDS
                 }
                 | {
-                    "metadata": stmt.excluded.metadata_,
+                    "metadata": stmt.excluded.metadata,
                 },
             )
             await session.execute(stmt)
