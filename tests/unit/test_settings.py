@@ -36,9 +36,7 @@ class TestSettings:
         assert settings.admin_token == _EXPECTED_ADMIN_TOKEN
         assert settings.debug is True
 
-    def test_model_uses_openrouter_setting(
-        self, monkeypatch
-    ) -> None:
+    def test_model_uses_openrouter_setting(self, monkeypatch) -> None:
         """Derived model property follows the OpenRouter setting."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
 

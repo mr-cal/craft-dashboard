@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION
 from craft_dashboard.llm.exceptions import (
     LLMQuotaError,
     LLMRateLimitError,
@@ -74,9 +75,7 @@ class TestEvaluateIssues:
                 issue_data_hash=None,
             ),
         ]
-        evaluator = SimpleNamespace(
-            evaluate=AsyncMock(), model="eval-model"
-        )
+        evaluator = SimpleNamespace(evaluate=AsyncMock(), model="eval-model")
         fetch_targets = AsyncMock(return_value=targets)
         monkeypatch.setattr(
             "scripts.llm.orchestrator.fetch_issue_evaluation_targets", fetch_targets
@@ -108,11 +107,13 @@ class TestEvaluateIssues:
                 issue=_make_issue(issue_id=1),
                 project_name="charmcraft",
                 issue_data_hash="old-hash",
+                eval_version=CURRENT_EVAL_VERSION - 1,
             ),
             IssueEvaluationTarget(
                 issue=_make_issue(issue_id=2, issue_type="pull_request"),
                 project_name="snapcraft",
                 issue_data_hash="same-hash",
+                eval_version=CURRENT_EVAL_VERSION,
             ),
         ]
         evaluator = SimpleNamespace(
@@ -149,7 +150,7 @@ class TestEvaluateIssues:
         assert persisted_kwargs["llm_backend"] == "local"
 
         first_call = evaluator.evaluate.await_args_list[0].kwargs
-        assert first_call["existing_hash"] == "old-hash"
+        assert first_call["existing_hash"] is None
         assert first_call["is_maintainer"] is True
         assert first_call["comment_count"] == 1
         assert first_call["pr_details"] is None

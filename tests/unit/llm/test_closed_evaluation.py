@@ -48,7 +48,10 @@ async def test_closed_issue_uses_summary_only_evaluation() -> None:
         )
 
     assert result is not None
-    assert result["summary"] == "Fixed by the core24 migration patch and closed after confirmation."
+    assert (
+        result["summary"]
+        == "Fixed by the core24 migration patch and closed after confirmation."
+    )
     assert result["scores"] == {}
     assert result["suggested_action"] is None
     assert result["suggested_action_reason"] is None
@@ -102,4 +105,3 @@ async def test_state_change_triggers_reevaluation_with_new_hash() -> None:
     assert open_hash is not None
     assert closed_hash is not None
     assert open_hash["issue_data_hash"] != closed_hash["issue_data_hash"]
-

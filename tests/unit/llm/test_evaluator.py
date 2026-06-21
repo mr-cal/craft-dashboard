@@ -274,7 +274,9 @@ class TestEvaluateIssue:
             }
         ]
 
-        with patch("craft_dashboard.llm.evaluator.build_open_evaluate_prompt") as mock_prompt:
+        with patch(
+            "craft_dashboard.llm.evaluator.build_open_evaluate_prompt"
+        ) as mock_prompt:
             mock_prompt.return_value = [{"role": "user", "content": "test"}]
 
             await evaluator.evaluate(
@@ -408,7 +410,3 @@ class TestComputeContentHash:
         )
 
         assert hash_a == hash_b
-
-
-
-

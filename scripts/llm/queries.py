@@ -6,10 +6,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
-from sqlalchemy import Integer, Select, and_, cast, or_, select
+from sqlalchemy import Integer, Select, and_, case, cast, or_, select
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -22,6 +23,7 @@ class IssueEvaluationTarget:
     issue: Issue
     project_name: str
     issue_data_hash: str | None
+    eval_version: int | None = None
 
 
 IssueFilter = tuple[str, int, int]
@@ -34,19 +36,32 @@ def _build_issue_query(
     issue_filters: list[IssueFilter] | None = None,
     incomplete: bool = False,
     stale_days: int = 0,
-) -> Select[tuple[Issue, str, str | None]]:
+) -> Select[tuple[Issue, str, str | None, int | None]]:
     """Build the query used to find issues that may need evaluation."""
+    old_version = or_(
+        LLMEvaluation.eval_version.is_(None),
+        LLMEvaluation.eval_version != CURRENT_EVAL_VERSION,
+    )
+    priority = case(
+        (LLMEvaluation.id.is_(None) & (Issue.state == "open"), 1),
+        (LLMEvaluation.id.is_(None) & (Issue.state != "open"), 2),
+        (old_version & (Issue.state == "open"), 3),
+        (old_version & (Issue.state != "open"), 4),
+        else_=5,
+    )
     query = (
         select(
             Issue,
             Project.name.label("project_name"),
             LLMEvaluation.issue_data_hash,
+            LLMEvaluation.eval_version,
         )
         .join(Project, Issue.project_id == Project.id)
         .outerjoin(
             LLMEvaluation,
             (LLMEvaluation.issue_id == Issue.id) & LLMEvaluation.latest.is_(True),
         )
+        .order_by(priority, Issue.id)
     )
 
     if open_only:
@@ -122,6 +137,7 @@ async def fetch_issue_evaluation_targets(
                 issue=row[0],
                 project_name=row.project_name,
                 issue_data_hash=row.issue_data_hash,
+                eval_version=row.eval_version,
             )
             for row in result.all()
         ]

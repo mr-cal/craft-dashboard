@@ -18,9 +18,7 @@ class TestSettingsValidation:
         with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
             Settings.validate_config(settings)
 
-    def test_openrouter_model_drives_derived_model_property(
-        self, monkeypatch
-    ) -> None:
+    def test_openrouter_model_drives_derived_model_property(self, monkeypatch) -> None:
         """Derived model property follows the OpenRouter setting."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         settings = Settings(

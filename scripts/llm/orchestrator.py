@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict
 
 import httpx
+from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION
 from craft_dashboard.llm.exceptions import (
     LLMQuotaError,
     LLMRateLimitError,
@@ -196,7 +197,15 @@ async def _evaluate_issues(  # noqa: PLR0913
     quota_exhausted = False
     for idx, target in enumerate(targets, start=1):
         issue = target.issue
-        existing_hash = None if force else target.issue_data_hash
+        existing_hash = (
+            None
+            if force
+            else (
+                target.issue_data_hash
+                if target.eval_version == CURRENT_EVAL_VERSION
+                else None
+            )
+        )
         labels = issue.labels if isinstance(issue.labels, list) else []
 
         now = datetime.now(tz=UTC)
