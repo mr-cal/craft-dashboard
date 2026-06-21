@@ -40,14 +40,12 @@ class DuplicateDetector:
         *,
         embedding_client: EmbeddingClient,
         llm_client: LLMClient,
-        evaluation_model: str,
-        summary_model: str,
+        model: str,
         confidence_threshold: int = 70,
     ) -> None:
         self.embedding_client = embedding_client
         self.llm_client = llm_client
-        self.evaluation_model = evaluation_model
-        self.summary_model = summary_model
+        self.model = model
         self.confidence_threshold = confidence_threshold
 
     async def check_duplicates(
@@ -100,7 +98,7 @@ class DuplicateDetector:
             )
             try:
                 response = await self.llm_client.complete(
-                    model=self.evaluation_model,
+                    model=self.model,
                     messages=messages,
                     max_tokens=512,
                     response_format={"type": "json_object"},
@@ -151,7 +149,7 @@ class DuplicateDetector:
             duplicate_refs=duplicate_refs,
         )
         response = await self.llm_client.complete(
-            model=self.summary_model,
+            model=self.model,
             messages=messages,
             max_tokens=512,
         )

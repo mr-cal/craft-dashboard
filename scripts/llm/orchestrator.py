@@ -94,7 +94,7 @@ async def _evaluate_issue_with_retries(
         reraise=True,
     ):
         with attempt:
-            return await evaluator.evaluate_issue(**issue_kwargs)
+            return await evaluator.evaluate(**issue_kwargs)
     msg = f"Retry loop exited unexpectedly for {issue_ref}"
     raise RuntimeError(msg)
 
@@ -300,7 +300,7 @@ async def _evaluate_issues(  # noqa: PLR0913
             session_factory,
             issue_id=issue.id,
             result=result,
-            evaluation_model=evaluator.evaluation_model,
+            model=evaluator.model,
             llm_backend=llm_backend,
         )
 

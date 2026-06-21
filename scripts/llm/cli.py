@@ -130,8 +130,7 @@ async def _main(  # noqa: PLR0913
     client = create_llm_client(settings)
     evaluator = IssueEvaluator(
         client=client,
-        summary_model=settings.summary_model,
-        evaluation_model=settings.evaluation_model,
+        model=settings.model,
     )
 
     issue_filters = None
@@ -147,9 +146,8 @@ async def _main(  # noqa: PLR0913
         force = True
 
     logger.info(
-        "Using openrouter backend (summary=%s, eval=%s, open_only=%s, force=%s)",
-        settings.summary_model,
-        settings.evaluation_model,
+        "Using openrouter backend (model=%s, open_only=%s, force=%s)",
+        settings.model,
         open_only,
         force,
     )

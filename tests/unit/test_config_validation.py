@@ -18,18 +18,16 @@ class TestSettingsValidation:
         with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
             Settings.validate_config(settings)
 
-    def test_openrouter_models_drive_derived_model_properties(
+    def test_openrouter_model_drives_derived_model_property(
         self, monkeypatch
     ) -> None:
-        """Derived model properties follow the OpenRouter settings."""
+        """Derived model property follows the OpenRouter setting."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         settings = Settings(
-            openrouter_summary_model="google/gemini-2.5-flash",
-            openrouter_evaluation_model="anthropic/claude-haiku-4.5",
+            openrouter_model="google/gemini-2.5-flash",
         )
 
-        assert settings.summary_model == "google/gemini-2.5-flash"
-        assert settings.evaluation_model == "anthropic/claude-haiku-4.5"
+        assert settings.model == "google/gemini-2.5-flash"
 
     def test_validate_config_rejects_missing_config_file(self, monkeypatch) -> None:
         """Validation rejects config paths that do not exist."""

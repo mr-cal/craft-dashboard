@@ -36,19 +36,17 @@ class TestSettings:
         assert settings.admin_token == _EXPECTED_ADMIN_TOKEN
         assert settings.debug is True
 
-    def test_summary_and_evaluation_models_use_openrouter_settings(
+    def test_model_uses_openrouter_setting(
         self, monkeypatch
     ) -> None:
-        """Derived model properties always follow the OpenRouter settings."""
+        """Derived model property follows the OpenRouter setting."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
 
         settings = Settings(
-            openrouter_summary_model="google/gemini-2.5-flash",
-            openrouter_evaluation_model="anthropic/claude-haiku-4.5",
+            openrouter_model="google/gemini-2.5-flash",
         )
 
-        assert settings.summary_model == "google/gemini-2.5-flash"
-        assert settings.evaluation_model == "anthropic/claude-haiku-4.5"
+        assert settings.model == "google/gemini-2.5-flash"
 
     def test_ignores_removed_local_llm_environment_variables(self, monkeypatch) -> None:
         """Removed local LLM env vars no longer appear in server settings."""

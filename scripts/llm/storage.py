@@ -68,13 +68,13 @@ async def store_evaluation_result(
     *,
     issue_id: int,
     result: EvaluationResult,
-    evaluation_model: str,
+    model: str,
     llm_backend: str,
 ) -> None:
     """Store a fresh LLM evaluation and mark it as the latest row."""
     insert_stmt = insert(LLMEvaluation).values(
         issue_id=issue_id,
-        model_name=evaluation_model,
+        model_name=model,
         summary=result["summary"],
         suggested_action=result["suggested_action"],
         suggested_action_reason=result["suggested_action_reason"],

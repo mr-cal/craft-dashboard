@@ -27,8 +27,7 @@ class Settings(BaseSettings):
     enable_server_eval: bool = True
 
     # OpenRouter model settings
-    openrouter_summary_model: str = "google/gemini-2.5-flash-lite"
-    openrouter_evaluation_model: str = "anthropic/claude-haiku-4.5"
+    openrouter_model: str = "google/gemini-2.5-flash-lite"
 
     # Embedding model for similarity search (used by eval_client.py).
     # Leave blank to skip embedding generation.
@@ -46,14 +45,9 @@ class Settings(BaseSettings):
     refresh_age_days: int = 7
 
     @property
-    def summary_model(self) -> str:
-        """Return the summary model for server-side evaluation."""
-        return self.openrouter_summary_model
-
-    @property
-    def evaluation_model(self) -> str:
-        """Return the evaluation model for server-side evaluation."""
-        return self.openrouter_evaluation_model
+    def model(self) -> str:
+        """Return the model for server-side evaluation."""
+        return self.openrouter_model
 
     @property
     def config_path(self) -> Path:

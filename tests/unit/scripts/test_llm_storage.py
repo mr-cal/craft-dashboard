@@ -63,7 +63,7 @@ class TestStoreEvaluationResult:
                 "completion_tokens": 78,
                 "issue_data_hash": "abc123",
             },
-            evaluation_model="eval-model",
+            model="eval-model",
             llm_backend="local",
         )
 

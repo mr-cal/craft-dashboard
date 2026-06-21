@@ -33,8 +33,7 @@ def _make_detector(
     detector = DuplicateDetector(
         embedding_client=embedding_client,
         llm_client=llm_client,
-        evaluation_model="eval-model",
-        summary_model="summary-model",
+        model="eval-model",
     )
     return detector, embedding_client, llm_client
 
