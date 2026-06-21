@@ -11,6 +11,11 @@ from craft_dashboard.llm.prompts import (
     build_open_evaluate_prompt,
 )
 
+#: Evaluation version produced by the current prompt set.
+#: Increment this whenever a prompt change is expected to alter LLM output
+#: quality or structure (e.g. new body truncation rules, schema changes).
+CURRENT_EVAL_VERSION: int = 2
+
 logger = logging.getLogger(__name__)
 
 IssueComment = dict[str, Any]
