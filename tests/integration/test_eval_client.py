@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1044,9 +1045,9 @@ class TestEvalClientEdgeCases:
         await eval_client.run_eval_loop(**DEFAULT_KWARGS)
 
         call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
-        # REAL_ISSUE_SNAPCRAFT created_at = 2026-04-01, so age should be ~75 days
-        assert call_kwargs["age_days"] >= 70
-        assert call_kwargs["age_days"] <= 80
+        created_at = datetime(2026, 4, 1, 10, 0, 0, tzinfo=timezone.utc)
+        expected_age = (datetime.now(tz=timezone.utc) - created_at).days
+        assert call_kwargs["age_days"] == expected_age
 
     @pytest.mark.asyncio
     async def test_run_continues_after_failed_submission(
