@@ -216,9 +216,7 @@ class TestReleaseCollectionIndependentOfRefresh:
         gh_collector.collect_issues.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_releases_collected_for_libraries(
-        self, monkeypatch, caplog
-    ) -> None:
+    async def test_releases_collected_for_libraries(self, monkeypatch, caplog) -> None:
         """Libraries should also have releases collected (for hotfix branch tracking)."""
         token = ("tok", "en")[0] + ("tok", "en")[1]
         settings = SimpleNamespace(github_token=token, refresh_age_days=7)
