@@ -41,7 +41,17 @@
       <tr class="run-row" data-run-id="{{ run.id }}" style="cursor: pointer;" title="Click to expand issues collected in this run">
         <td>{{ run.source }}</td>
         <td>{{ run.started_at.strftime("%Y-%m-%d %-I:%M %p") if run.started_at else "—" }}</td>
-        <td>{{ run.status }}</td>
+        <td>
+          {% if run.status == "failed" %}
+          <span style="color: var(--color-error, #c0392b); font-weight: 600;">{{ run.status }}</span>
+          {% elif run.status == "running" %}
+          <span style="color: var(--color-warning, #e67e22);">{{ run.status }}</span>
+          {% elif run.errors %}
+          <span style="color: var(--color-warning, #e67e22);" title="Completed with errors">{{ run.status }} ⚠</span>
+          {% else %}
+          {{ run.status }}
+          {% endif %}
+        </td>
         <td>{{ run.projects_processed }}</td>
         <td>{{ run.issues_collected }}</td>
         <td>{{ "{:.1f}s".format(run.duration_seconds) if run.duration_seconds is not none else "—" }}</td>
