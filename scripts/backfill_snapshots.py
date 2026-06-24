@@ -182,18 +182,26 @@ def compute_snapshot_for_date(
     }
 
 
-def backfill_project(session: Session, project: Project) -> None:
+def backfill_project(
+    session: Session,
+    project: Project,
+    filtered_issue_ids: set[str] | None = None,
+) -> None:
     """Backfill snapshots for a single project.
 
     Args:
         session: Database session
         project: Project to backfill
+        filtered_issue_ids: Set of external_id strings to exclude from snapshots
 
     """
     print(f"Backfilling {project.name}...")
 
     # Fetch all issues for this project
-    result = session.execute(select(Issue).where(Issue.project_id == project.id))
+    q = select(Issue).where(Issue.project_id == project.id)
+    if filtered_issue_ids:
+        q = q.where(~Issue.external_id.in_(filtered_issue_ids))
+    result = session.execute(q)
     issues = list(result.scalars())
 
     if not issues:
@@ -273,7 +281,11 @@ def backfill_project(session: Session, project: Project) -> None:
     print(f"  ✓ Backfilled {len(snapshots_to_upsert)} snapshots for {project.name}")
 
 
-def backfill_cross_project(session: Session, all_projects: list[Project]) -> None:
+def backfill_cross_project(
+    session: Session,
+    all_projects: list[Project],
+    filtered_issues: dict[str, list[str]] | None = None,
+) -> None:
     """Compute cross-project aggregate snapshots with true medians.
 
     Loads all issues across all projects and computes a true cross-project
@@ -303,13 +315,23 @@ def backfill_cross_project(session: Session, all_projects: list[Project]) -> Non
 
     # Load ALL issues across all real projects
     project_ids = [p.id for p in all_projects if p.name != "all-projects"]
-    all_issues = list(
-        session.execute(
-            select(Issue)
-            .where(Issue.project_id.in_(project_ids))
-            .where(Issue.created_at.isnot(None))
-        ).scalars()
+    q = (
+        select(Issue, Project.name.label("project_name"))
+        .join(Project, Issue.project_id == Project.id)
+        .where(Issue.project_id.in_(project_ids))
+        .where(Issue.created_at.isnot(None))
     )
+    rows = session.execute(q).all()
+    # Apply per-project filtering
+    all_issues = []
+    for row in rows:
+        issue = row[0]
+        project_name = row[1]
+        if filtered_issues:
+            excluded = filtered_issues.get(project_name, [])
+            if issue.external_id in excluded:
+                continue
+        all_issues.append(issue)
     print(f"  Loaded {len(all_issues)} issues across {len(project_ids)} projects")
 
     if not all_issues:
@@ -391,6 +413,10 @@ def main() -> None:
     os.chdir(app_dir)
 
     settings = Settings()
+    from craft_dashboard.config import load_config
+
+    config = load_config(Path(settings.config_file))
+    filtered_issues: dict[str, list[str]] = config.filtered_issues
 
     # Convert async URL to sync URL for synchronous SQLAlchemy
     sync_db_url = settings.database_url.replace(
@@ -405,15 +431,22 @@ def main() -> None:
         projects = list(result.scalars())
 
         print(f"Found {len(projects)} projects to backfill")
+        if filtered_issues:
+            print(f"Filtering out issues: {filtered_issues}")
         print("")
 
         for project in projects:
             if project.name == "all-projects":
                 continue
-            backfill_project(session, project)
+            project_filtered = set(filtered_issues.get(project.name, []))
+            backfill_project(
+                session, project, filtered_issue_ids=project_filtered or None
+            )
             print("")
 
-        backfill_cross_project(session, projects)
+        backfill_cross_project(
+            session, projects, filtered_issues=filtered_issues or None
+        )
         print("")
 
         print("✓ Backfill complete!")
