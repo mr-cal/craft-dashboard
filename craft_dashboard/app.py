@@ -20,7 +20,7 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from craft_dashboard.config import DashboardConfig, load_config
+from craft_dashboard.config import load_config
 from craft_dashboard.database import get_engine, get_session_factory
 from craft_dashboard.dependencies import get_db_session, set_session_factory
 from craft_dashboard.routes.admin import router as admin_router
@@ -118,7 +118,6 @@ def create_app() -> FastAPI:
     app.add_exception_handler(RateLimitExceeded, _slowapi_rate_limit_handler)
 
     app.state.settings = settings
-    app.state.config = DashboardConfig()
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
     # Cache-bust static assets using app startup timestamp
     _startup_ts = str(int(datetime.now(tz=UTC).timestamp()))

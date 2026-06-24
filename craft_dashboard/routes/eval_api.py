@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.auth import verify_eval_token
-from craft_dashboard.dependencies import get_db_session
+from craft_dashboard.dependencies import get_config, get_db_session
 from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION, _compute_content_hash
 from craft_dashboard.llm.exceptions import LLMValidationError
 from craft_dashboard.models.issue import Issue
@@ -202,7 +202,7 @@ async def next_issue(
         force=force,
         incomplete=incomplete,
         stale_days=stale_days,
-        filtered_issues=request.app.state.config.filtered_issues,
+        filtered_issues=get_config(request).filtered_issues,
     )
     if row is None:
         return Response(status_code=204)
@@ -240,7 +240,7 @@ async def next_issue(
         "created_at": issue.created_at.isoformat() if issue.created_at else None,
         "updated_at": issue.updated_at.isoformat() if issue.updated_at else None,
         "current_hash": _current_content_hash(issue),
-        "maintainers": list(request.app.state.config.maintainers),
+        "maintainers": list(get_config(request).maintainers),
     }
 
 
@@ -332,7 +332,7 @@ async def eval_status(
 
     now = datetime.now(tz=UTC)
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    excl = _build_excluded_issues_condition(request.app.state.config.filtered_issues)
+    excl = _build_excluded_issues_condition(get_config(request).filtered_issues)
 
     locked = await session.scalar(
         select(func.count(LLMEvaluation.id)).where(
@@ -467,7 +467,7 @@ async def embed_next(
     """Return the next evaluated issue that needs an embedding, if any."""
     _require_eval_auth(request, authorization)
 
-    excl = _build_excluded_issues_condition(request.app.state.config.filtered_issues)
+    excl = _build_excluded_issues_condition(get_config(request).filtered_issues)
     now = datetime.now(tz=UTC)
     embed_q = (
         select(LLMEvaluation, Issue.title, Issue.external_id, Project.name)

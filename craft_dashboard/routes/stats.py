@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException
 
-from craft_dashboard.dependencies import get_db_session
+from craft_dashboard.dependencies import get_config, get_db_session
 from craft_dashboard.models.dependency import Dependency
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
@@ -120,7 +120,7 @@ async def dependencies_data(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Return dependency data as JSON for the chart."""
-    config = request.app.state.config
+    config = get_config(request)
     libs = sorted(config.craft_libraries)
 
     result = await session.execute(
@@ -748,7 +748,7 @@ async def stats_triage(
 ) -> HTMLResponse:
     """Show LLM triage statistics."""
     templates: Jinja2Templates = request.app.state.templates
-    excl = _build_excluded_issues_condition(request.app.state.config.filtered_issues)
+    excl = _build_excluded_issues_condition(get_config(request).filtered_issues)
 
     total_open_q = (
         select(func.count())

@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from craft_dashboard.dependencies import get_db_session
+from craft_dashboard.dependencies import get_config, get_db_session
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.snapshot import Snapshot
@@ -35,7 +35,7 @@ async def index(
     templates: Jinja2Templates = request.app.state.templates
 
     # Summary counts
-    excl = _build_excluded_issues_condition(request.app.state.config.filtered_issues)
+    excl = _build_excluded_issues_condition(get_config(request).filtered_issues)
     project_count = await session.scalar(
         select(func.count(Project.id)).where(Project.category != "aggregate")
     )

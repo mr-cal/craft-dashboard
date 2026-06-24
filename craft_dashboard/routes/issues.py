@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException
 
-from craft_dashboard.dependencies import get_db_session
+from craft_dashboard.dependencies import get_config, get_db_session
 from craft_dashboard.models.views import IssueFilters, IssueView
 from craft_dashboard.repositories.issue_repository import IssueRepository
 
@@ -216,7 +216,7 @@ async def issue_list(
         session,
         filters=filters,
         scores=scores,
-        filtered_issues=request.app.state.config.filtered_issues,
+        filtered_issues=get_config(request).filtered_issues,
     )
 
     return templates.TemplateResponse(
@@ -264,7 +264,7 @@ async def issue_table_partial(
         session,
         filters=filters,
         scores=scores,
-        filtered_issues=request.app.state.config.filtered_issues,
+        filtered_issues=get_config(request).filtered_issues,
     )
 
     return templates.TemplateResponse(
@@ -284,9 +284,7 @@ async def issue_detail(
     """Render the issue detail page with evaluation history and related issues."""
     templates: Jinja2Templates = request.app.state.templates
     settings = request.app.state.settings
-    repo = IssueRepository(
-        session, filtered_issues=request.app.state.config.filtered_issues
-    )
+    repo = IssueRepository(session, filtered_issues=get_config(request).filtered_issues)
     issue = await repo.get_issue_detail(project, number)
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
@@ -348,9 +346,7 @@ async def issue_export(
         per_page=PER_PAGE_ALL,
         llm_status=llm_status,
     )
-    repo = IssueRepository(
-        session, filtered_issues=request.app.state.config.filtered_issues
-    )
+    repo = IssueRepository(session, filtered_issues=get_config(request).filtered_issues)
     result = await repo.search(filters)
     payload = jsonable_encoder([asdict(issue) for issue in result.issues])
 
