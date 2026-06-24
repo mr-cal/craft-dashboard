@@ -348,6 +348,7 @@ async def generate_snapshot(
     session: AsyncSession,
     maintainers: set[str],
     bots: set[str] | None = None,
+    filtered_issue_ids: set[str] | None = None,
 ) -> None:
     """Generate a daily snapshot for a project.
 
@@ -359,6 +360,7 @@ async def generate_snapshot(
         session: An async SQLAlchemy session.
         maintainers: Set of maintainer usernames.
         bots: Optional set of configured bot usernames.
+        filtered_issue_ids: Optional set of external issue IDs to exclude.
 
     """
     from sqlalchemy import select
@@ -373,17 +375,18 @@ async def generate_snapshot(
         Snapshot,
     )
 
-    result = await session.execute(
-        select(
-            Issue.issue_type,
-            Issue.state,
-            Issue.author,
-            Issue.author_is_bot,
-            Issue.labels,
-            Issue.created_at,
-            Issue.closed_at,
-        ).where(Issue.project_id == project_id)
-    )
+    issues_q = select(
+        Issue.issue_type,
+        Issue.state,
+        Issue.author,
+        Issue.author_is_bot,
+        Issue.labels,
+        Issue.created_at,
+        Issue.closed_at,
+    ).where(Issue.project_id == project_id)
+    if filtered_issue_ids:
+        issues_q = issues_q.where(~Issue.external_id.in_(filtered_issue_ids))
+    result = await session.execute(issues_q)
 
     issues = [
         {
@@ -425,12 +428,14 @@ async def generate_cross_project_snapshot(
     session: AsyncSession,
     maintainers: set[str],
     bots: set[str] | None = None,
+    filtered_issues: dict[str, list[str]] | None = None,
 ) -> None:
     """Generate a cross-project aggregate snapshot with true medians.
 
     Queries all open issues across all real projects (not aggregate) and
     computes the true cross-project median ages for today.
     """
+    from sqlalchemy import and_
     from sqlalchemy import select as sa_select
     from sqlalchemy.dialects.postgresql import insert
 
@@ -457,24 +462,39 @@ async def generate_cross_project_snapshot(
     )
     agg_project_id = agg_result.scalar_one()
 
-    # Get all real project IDs
+    # Get all real project IDs (and their names for per-project filtering)
     proj_result = await session.execute(
-        sa_select(Project.id).where(Project.category != "aggregate")
+        sa_select(Project.id, Project.name).where(Project.category != "aggregate")
     )
-    project_ids = list(proj_result.scalars())
+    proj_rows = list(proj_result)
+    project_ids = [row.id for row in proj_rows]
 
-    # Query all issues across all real projects
-    result = await session.execute(
-        sa_select(
-            Issue.issue_type,
-            Issue.state,
-            Issue.author,
-            Issue.author_is_bot,
-            Issue.labels,
-            Issue.created_at,
-            Issue.closed_at,
-        ).where(Issue.project_id.in_(project_ids))
-    )
+    # Query all issues across all real projects, excluding filtered issues
+    issues_q = sa_select(
+        Issue.issue_type,
+        Issue.state,
+        Issue.author,
+        Issue.author_is_bot,
+        Issue.labels,
+        Issue.created_at,
+        Issue.closed_at,
+    ).where(Issue.project_id.in_(project_ids))
+    if filtered_issues:
+        exclusion_conditions = [
+            and_(Issue.project_id == row.id, Issue.external_id.in_(ids))
+            for row in proj_rows
+            if (ids := filtered_issues.get(row.name))
+        ]
+        if exclusion_conditions:
+            from sqlalchemy import or_ as sa_or
+
+            combined = (
+                sa_or(*exclusion_conditions)
+                if len(exclusion_conditions) > 1
+                else exclusion_conditions[0]
+            )
+            issues_q = issues_q.where(~combined)
+    result = await session.execute(issues_q)
 
     issues = [
         {

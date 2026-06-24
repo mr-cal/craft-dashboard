@@ -27,6 +27,7 @@ class DashboardConfig(BaseModel):
     launchpad_maintainers: list[str] = Field(default_factory=list)
     bots: list[str] = Field(default_factory=list)
     hotfix_min_versions: dict[str, str] = Field(default_factory=dict)
+    filtered_issues: dict[str, list[str]] = Field(default_factory=dict)
 
     @classmethod
     def validate(cls, value: object) -> DashboardConfig:
@@ -81,5 +82,12 @@ def load_config(config_path: Path) -> DashboardConfig:
     if "schedule" in normalized and isinstance(normalized["schedule"], dict):
         schedule = normalized.pop("schedule")
         normalized["schedule_days"] = schedule.get("days", [])
+    if "issues" in normalized:
+        issues_section = normalized.pop("issues")
+        if isinstance(issues_section, dict) and "filter" in issues_section:
+            normalized["filtered_issues"] = {
+                project: [str(n) for n in ids]
+                for project, ids in issues_section["filter"].items()
+            }
 
     return DashboardConfig(**normalized)

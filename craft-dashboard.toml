@@ -78,6 +78,10 @@ bots = [
     "renovate[bot]",
 ]
 
+[issues.filter]
+# Dependency Dashboard bot issues — not real work items
+snapcraft = [4472]
+
 [hotfix-min-versions]
 charmcraft = "3.0"
 snapcraft = "8.0"

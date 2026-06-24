@@ -23,6 +23,9 @@ from craft_dashboard.llm.exceptions import LLMValidationError
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
+from craft_dashboard.repositories.issue_repository import (
+    _build_excluded_issues_condition,
+)
 
 router = APIRouter(prefix="/api/eval")
 limiter = Limiter(key_func=get_remote_address)
@@ -79,6 +82,7 @@ async def _fetch_issue_and_latest_evaluation(
     force: bool = False,
     incomplete: bool = False,
     stale_days: int = 0,
+    filtered_issues: dict[str, list[str]] | None = None,
 ) -> tuple[Issue, str, LLMEvaluation | None] | None:
     latest_evaluation = aliased(LLMEvaluation)
     now = datetime.now(tz=UTC)
@@ -110,6 +114,10 @@ async def _fetch_issue_and_latest_evaluation(
         )
         .order_by(priority, open_first, Issue.id)
     )
+
+    excl = _build_excluded_issues_condition(filtered_issues or {})
+    if excl is not None:
+        query = query.where(excl)
 
     if open_only:
         query = query.where(Issue.state == "open")
@@ -194,6 +202,7 @@ async def next_issue(
         force=force,
         incomplete=incomplete,
         stale_days=stale_days,
+        filtered_issues=request.app.state.config.filtered_issues,
     )
     if row is None:
         return Response(status_code=204)
@@ -323,6 +332,7 @@ async def eval_status(
 
     now = datetime.now(tz=UTC)
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    excl = _build_excluded_issues_condition(request.app.state.config.filtered_issues)
 
     locked = await session.scalar(
         select(func.count(LLMEvaluation.id)).where(
@@ -348,6 +358,8 @@ async def eval_status(
         base_query = base_query.where(Issue.state == "open")
     if project:
         base_query = base_query.where(Project.name == project)
+    if excl is not None:
+        base_query = base_query.where(excl)
     total_open = await session.scalar(
         select(func.count()).select_from(base_query.subquery())
     )
@@ -370,6 +382,8 @@ async def eval_status(
             pending_query = pending_query.where(Issue.state == "open")
         if project:
             pending_query = pending_query.where(Project.name == project)
+        if excl is not None:
+            pending_query = pending_query.where(excl)
 
         if incomplete:
             pending_query = pending_query.where(
@@ -413,8 +427,11 @@ async def eval_status(
             select(func.count()).select_from(pending_query.subquery())
         )
 
-    pending_embeddings = await session.scalar(
-        select(func.count(LLMEvaluation.id)).where(
+    pending_embeddings_q = (
+        select(func.count(LLMEvaluation.id))
+        .join(Issue, LLMEvaluation.issue_id == Issue.id)
+        .join(Project, Issue.project_id == Project.id)
+        .where(
             LLMEvaluation.latest.is_(True),
             LLMEvaluation.model_name != "pending",
             LLMEvaluation.summary.isnot(None),
@@ -422,6 +439,9 @@ async def eval_status(
             LLMEvaluation.summary_embedding.is_(None),
         )
     )
+    if excl is not None:
+        pending_embeddings_q = pending_embeddings_q.where(excl)
+    pending_embeddings = await session.scalar(pending_embeddings_q)
 
     return {
         "pending": pending or 0,
@@ -447,8 +467,9 @@ async def embed_next(
     """Return the next evaluated issue that needs an embedding, if any."""
     _require_eval_auth(request, authorization)
 
+    excl = _build_excluded_issues_condition(request.app.state.config.filtered_issues)
     now = datetime.now(tz=UTC)
-    result = await session.execute(
+    embed_q = (
         select(LLMEvaluation, Issue.title, Issue.external_id, Project.name)
         .join(Issue, LLMEvaluation.issue_id == Issue.id)
         .join(Project, Issue.project_id == Project.id)
@@ -466,6 +487,9 @@ async def embed_next(
         .order_by(Issue.id)
         .limit(1)
     )
+    if excl is not None:
+        embed_q = embed_q.where(excl)
+    result = await session.execute(embed_q)
     row = result.first()
     if row is None:
         return Response(status_code=204)

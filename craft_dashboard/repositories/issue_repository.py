@@ -90,16 +90,42 @@ def _serialize_evaluation(evaluation: LLMEvaluation) -> dict[str, Any]:
     }
 
 
+def _build_excluded_issues_condition(
+    filtered_issues: dict[str, list[str]],
+) -> ColumnElement[bool] | None:
+    """Return a NOT(...) clause excluding configured issue numbers.
+
+    Returns None when filtered_issues is empty (no WHERE clause needed).
+    Requires that Issue and Project are already joined in the calling query.
+    """
+    conditions = [
+        (Project.name == project_name) & Issue.external_id.in_(ids)
+        for project_name, ids in filtered_issues.items()
+        if ids
+    ]
+    if not conditions:
+        return None
+    combined = or_(*conditions) if len(conditions) > 1 else conditions[0]
+    return ~combined
+
+
 class IssueRepository:
     """Repository for issue-related read queries."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        filtered_issues: dict[str, list[str]] | None = None,
+    ) -> None:
         self.session = session
+        self.filtered_issues = filtered_issues or {}
 
     async def get_issue_detail(
         self, project_name: str, external_id: str
     ) -> dict[str, Any] | None:
         """Get a single issue with its evaluation history."""
+        if external_id in self.filtered_issues.get(project_name, []):
+            return None
         issue_row = (
             await self.session.execute(
                 select(
@@ -174,6 +200,10 @@ class IssueRepository:
                 (LLMEvaluation.issue_id == Issue.id) & LLMEvaluation.latest.is_(True),
             )
         )
+
+        excl = _build_excluded_issues_condition(self.filtered_issues)
+        if excl is not None:
+            query = query.where(excl)
 
         if filters.state:
             state_list = [s.strip() for s in filters.state.split(",") if s.strip()]

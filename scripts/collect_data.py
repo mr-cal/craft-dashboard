@@ -412,6 +412,8 @@ async def _collect_github(
                     session,
                     set(config.maintainers),
                     bots=bots,
+                    filtered_issue_ids=set(config.filtered_issues.get(project_name, []))
+                    or None,
                 )
                 logger.info(
                     "  Generated snapshot for %s in %s",
@@ -507,6 +509,8 @@ async def _collect_launchpad(
                     session,
                     set(config.launchpad_maintainers),
                     bots=bots,
+                    filtered_issue_ids=set(config.filtered_issues.get(lp_name, []))
+                    or None,
                 )
                 await _upsert_collection_watermark(session, project_id, "launchpad")
                 logger.info(
@@ -635,6 +639,7 @@ async def _main(
                     session,
                     set(config.maintainers),
                     bots=bots,
+                    filtered_issues=config.filtered_issues or None,
                 )
             logger.info(
                 "Cross-project snapshot generated in %s",

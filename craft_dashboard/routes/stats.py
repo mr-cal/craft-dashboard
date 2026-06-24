@@ -15,6 +15,9 @@ from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.release import Release
 from craft_dashboard.models.snapshot import Snapshot
+from craft_dashboard.repositories.issue_repository import (
+    _build_excluded_issues_condition,
+)
 
 if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
@@ -745,35 +748,44 @@ async def stats_triage(
 ) -> HTMLResponse:
     """Show LLM triage statistics."""
     templates: Jinja2Templates = request.app.state.templates
+    excl = _build_excluded_issues_condition(request.app.state.config.filtered_issues)
 
-    total_open = (
-        await session.scalar(
-            select(func.count()).select_from(Issue).where(Issue.state == "open")
-        )
-        or 0
+    total_open_q = (
+        select(func.count())
+        .select_from(Issue)
+        .join(Project, Issue.project_id == Project.id)
+        .where(Issue.state == "open")
     )
+    if excl is not None:
+        total_open_q = total_open_q.where(excl)
+    total_open = (await session.scalar(total_open_q)) or 0
 
-    evaluated_count = (
-        await session.scalar(
-            select(func.count(func.distinct(LLMEvaluation.issue_id)))
-            .select_from(LLMEvaluation)
-            .join(Issue, LLMEvaluation.issue_id == Issue.id)
-            .where(Issue.state == "open")
-            .where(LLMEvaluation.latest.is_(True))
-        )
-        or 0
+    evaluated_q = (
+        select(func.count(func.distinct(LLMEvaluation.issue_id)))
+        .select_from(LLMEvaluation)
+        .join(Issue, LLMEvaluation.issue_id == Issue.id)
+        .join(Project, Issue.project_id == Project.id)
+        .where(Issue.state == "open")
+        .where(LLMEvaluation.latest.is_(True))
     )
+    if excl is not None:
+        evaluated_q = evaluated_q.where(excl)
+    evaluated_count = (await session.scalar(evaluated_q)) or 0
 
-    result = await session.execute(
+    action_q = (
         select(
             LLMEvaluation.suggested_action,
             func.count().label("count"),
         )
         .join(Issue, LLMEvaluation.issue_id == Issue.id)
+        .join(Project, Issue.project_id == Project.id)
         .where(Issue.state == "open")
         .where(LLMEvaluation.latest.is_(True))
         .group_by(LLMEvaluation.suggested_action)
     )
+    if excl is not None:
+        action_q = action_q.where(excl)
+    result = await session.execute(action_q)
     action_counts = {
         row.suggested_action: row.count
         for row in result

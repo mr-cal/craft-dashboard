@@ -65,6 +65,7 @@ class TestCollectGithubWatermarks:
             hotfix_min_versions={},
             refresh_interval_days=7,
             bots=[],
+            filtered_issues={},
         )
         watermark = datetime(2025, 1, 5, 12, 0, tzinfo=UTC)
 
@@ -134,6 +135,7 @@ class TestCollectGithubWatermarks:
             hotfix_min_versions={},
             refresh_interval_days=7,
             bots=[],
+            filtered_issues={},
         )
         watermark = datetime(2025, 1, 5, 12, 0, tzinfo=UTC)
 

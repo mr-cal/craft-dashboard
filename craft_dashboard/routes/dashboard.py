@@ -12,6 +12,9 @@ from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.snapshot import Snapshot
+from craft_dashboard.repositories.issue_repository import (
+    _build_excluded_issues_condition,
+)
 
 if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
@@ -32,19 +35,25 @@ async def index(
     templates: Jinja2Templates = request.app.state.templates
 
     # Summary counts
+    excl = _build_excluded_issues_condition(request.app.state.config.filtered_issues)
     project_count = await session.scalar(
         select(func.count(Project.id)).where(Project.category != "aggregate")
     )
-    open_issues = await session.scalar(
-        select(func.count(Issue.id)).where(
-            Issue.state == "open", Issue.issue_type == "issue"
-        )
+    open_issues_q = (
+        select(func.count(Issue.id))
+        .join(Project, Issue.project_id == Project.id)
+        .where(Issue.state == "open", Issue.issue_type == "issue")
     )
-    open_prs = await session.scalar(
-        select(func.count(Issue.id)).where(
-            Issue.state == "open", Issue.issue_type == "pull_request"
-        )
+    open_prs_q = (
+        select(func.count(Issue.id))
+        .join(Project, Issue.project_id == Project.id)
+        .where(Issue.state == "open", Issue.issue_type == "pull_request")
     )
+    if excl is not None:
+        open_issues_q = open_issues_q.where(excl)
+        open_prs_q = open_prs_q.where(excl)
+    open_issues = await session.scalar(open_issues_q)
+    open_prs = await session.scalar(open_prs_q)
 
     # Get the most recent aggregate snapshot
     latest_snap = await session.execute(
@@ -77,16 +86,17 @@ async def index(
         pr_change = None
 
     # Per-project summary
+    open_issue_filter = [Issue.state == "open", Issue.issue_type == "issue"]
+    open_pr_filter = [Issue.state == "open", Issue.issue_type == "pull_request"]
+    if excl is not None:
+        open_issue_filter.append(excl)
+        open_pr_filter.append(excl)
     project_stats = await session.execute(
         select(
             Project.name,
             Project.category,
-            func.count(Issue.id)
-            .filter(Issue.state == "open", Issue.issue_type == "issue")
-            .label("open_issues"),
-            func.count(Issue.id)
-            .filter(Issue.state == "open", Issue.issue_type == "pull_request")
-            .label("open_prs"),
+            func.count(Issue.id).filter(*open_issue_filter).label("open_issues"),
+            func.count(Issue.id).filter(*open_pr_filter).label("open_prs"),
         )
         .outerjoin(Issue, Issue.project_id == Project.id)
         .where(Project.category != "aggregate")

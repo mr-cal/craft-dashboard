@@ -1151,3 +1151,96 @@ class TestEmbedResultIntegration:
             )
 
         assert response.status_code == 422
+
+
+class TestFilteredIssuesIntegration:
+    """Integration tests for filtered_issues config in eval queue and embed queue."""
+
+    def _create_app_with_filter(
+        self,
+        test_db_session: AsyncSession,
+        filtered_issues: dict,
+    ) -> tuple[FastAPI, str]:
+        app = create_app()
+        app.router.lifespan_context = _noop_lifespan
+        app.state.config = DashboardConfig(
+            maintainers=["alice"], filtered_issues=filtered_issues
+        )
+        app.state.settings = Settings()
+        app.state.settings.eval_api_token = _TEST_EVAL_TOKEN
+
+        async def _override() -> AsyncGenerator[AsyncSession, None]:
+            yield test_db_session
+
+        app.dependency_overrides[get_db_session] = _override
+        return app, _TEST_EVAL_TOKEN
+
+    def test_eval_next_skips_filtered_issue(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        """Filtered issues must not appear in the eval queue."""
+        project = make_project(id=1, name="snapcraft")
+        filtered_issue = make_issue(
+            id=1, project_id=1, external_id="4472", title="Dependency Dashboard"
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, filtered_issue)
+        )
+        app, token = self._create_app_with_filter(
+            test_db_session, {"snapcraft": ["4472"]}
+        )
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/next", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert response.status_code == 204
+
+    def test_embed_next_skips_filtered_issue(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        """Filtered issues must not appear in the embed queue."""
+        project = make_project(id=1, name="snapcraft")
+        filtered_issue = make_issue(
+            id=1, project_id=1, external_id="4472", title="Dependency Dashboard"
+        )
+        evaluation = make_evaluation(
+            id=1, issue_id=1, summary="Bot issue.", latest=True
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, filtered_issue, evaluation)
+        )
+        app, token = self._create_app_with_filter(
+            test_db_session, {"snapcraft": ["4472"]}
+        )
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/embed-next", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert response.status_code == 204
+
+    def test_non_filtered_issue_still_returned(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        """Issues not in filtered_issues must still be returned normally."""
+        project = make_project(id=1, name="snapcraft")
+        normal_issue = make_issue(
+            id=1, project_id=1, external_id="100", title="Real bug"
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, normal_issue)
+        )
+        app, token = self._create_app_with_filter(
+            test_db_session, {"snapcraft": ["4472"]}
+        )
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/next", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert response.status_code == 200
+        assert response.json()["external_id"] == "100"

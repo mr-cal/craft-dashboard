@@ -69,3 +69,40 @@ class TestDashboardConfig:
 
         with pytest.raises(tomllib.TOMLDecodeError):
             load_config(config_file)
+
+    def test_load_config_parses_filtered_issues(self, tmp_path: pathlib.Path) -> None:
+        """[issues.filter] is parsed into filtered_issues as string IDs."""
+        config_file = tmp_path / "craft-dashboard.toml"
+        config_file.write_text(
+            textwrap.dedent("""\
+                craft-applications = ["snapcraft"]
+                maintainers = ["alice"]
+
+                [issues.filter]
+                snapcraft = [4472, 100]
+                charmcraft = [9999]
+            """)
+        )
+
+        config = load_config(config_file)
+
+        assert config.filtered_issues == {
+            "snapcraft": ["4472", "100"],
+            "charmcraft": ["9999"],
+        }
+
+    def test_load_config_no_filtered_issues_defaults_to_empty_dict(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Config without [issues.filter] has filtered_issues={}."""
+        config_file = tmp_path / "craft-dashboard.toml"
+        config_file.write_text(
+            textwrap.dedent("""\
+                craft-applications = ["snapcraft"]
+                maintainers = ["alice"]
+            """)
+        )
+
+        config = load_config(config_file)
+
+        assert config.filtered_issues == {}

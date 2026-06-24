@@ -111,9 +111,10 @@ async def _build_issue_context(
     *,
     filters: IssueFilters,
     scores: str,
+    filtered_issues: dict[str, list[str]] | None = None,
 ) -> IssueTemplateContext:
     """Build the template context for issue list rendering."""
-    repo = IssueRepository(session)
+    repo = IssueRepository(session, filtered_issues=filtered_issues)
     result = await repo.search(filters)
     project_names = await repo.get_project_names()
 
@@ -211,7 +212,12 @@ async def issue_list(
         items_per_page=effective_per_page,
         llm_status=llm_status,
     )
-    context = await _build_issue_context(session, filters=filters, scores=scores)
+    context = await _build_issue_context(
+        session,
+        filters=filters,
+        scores=scores,
+        filtered_issues=request.app.state.config.filtered_issues,
+    )
 
     return templates.TemplateResponse(
         request,
@@ -254,7 +260,12 @@ async def issue_table_partial(
         items_per_page=effective_per_page,
         llm_status=llm_status,
     )
-    context = await _build_issue_context(session, filters=filters, scores=scores)
+    context = await _build_issue_context(
+        session,
+        filters=filters,
+        scores=scores,
+        filtered_issues=request.app.state.config.filtered_issues,
+    )
 
     return templates.TemplateResponse(
         request,
@@ -273,7 +284,9 @@ async def issue_detail(
     """Render the issue detail page with evaluation history and related issues."""
     templates: Jinja2Templates = request.app.state.templates
     settings = request.app.state.settings
-    repo = IssueRepository(session)
+    repo = IssueRepository(
+        session, filtered_issues=request.app.state.config.filtered_issues
+    )
     issue = await repo.get_issue_detail(project, number)
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
@@ -320,7 +333,7 @@ async def issue_export(
     llm_status: str = Query("", alias="llm_status"),
 ) -> JSONResponse:
     """Export all matching issues as JSON."""
-    del request, scores, per_page
+    del scores, per_page
 
     filters = _build_issue_filters(
         project=project,
@@ -335,7 +348,9 @@ async def issue_export(
         per_page=PER_PAGE_ALL,
         llm_status=llm_status,
     )
-    repo = IssueRepository(session)
+    repo = IssueRepository(
+        session, filtered_issues=request.app.state.config.filtered_issues
+    )
     result = await repo.search(filters)
     payload = jsonable_encoder([asdict(issue) for issue in result.issues])
 

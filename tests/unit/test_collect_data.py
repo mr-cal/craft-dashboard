@@ -106,6 +106,7 @@ class TestCollectGithubLogging:
             maintainers=["alice"],
             hotfix_min_versions={},
             refresh_interval_days=7,
+            filtered_issues={},
         )
         dep_collector = MagicMock()
         dep_collector.collect_dependencies = AsyncMock(return_value=7)
@@ -173,6 +174,7 @@ class TestReleaseCollectionIndependentOfRefresh:
             maintainers=["alice"],
             hotfix_min_versions={},
             refresh_interval_days=7,
+            filtered_issues={},
         )
         dep_collector = MagicMock()
         dep_collector.collect_dependencies = AsyncMock(return_value=0)
@@ -227,6 +229,7 @@ class TestReleaseCollectionIndependentOfRefresh:
             maintainers=["alice"],
             hotfix_min_versions={},
             refresh_interval_days=7,
+            filtered_issues={},
         )
         dep_collector = MagicMock()
         dep_collector.collect_dependencies = AsyncMock(return_value=0)
@@ -279,6 +282,7 @@ class TestCollectLaunchpadLogging:
             craft_projects=[],
             maintainers=["alice"],
             launchpad_maintainers=["alice"],
+            filtered_issues={},
         )
         lp_collector = MagicMock()
         lp_collector.collect_bugs = AsyncMock(return_value=150)
