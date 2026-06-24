@@ -928,6 +928,7 @@ class TestEvalResultIntegration:
             "evaluated_today": 1,
             "total_evaluated": 1,
             "total_open": 4,
+            "pending_embeddings": 1,
         }
 
 

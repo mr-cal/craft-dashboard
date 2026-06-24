@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 HTTP_OK = httpx.codes.OK
 HTTP_NO_CONTENT = httpx.codes.NO_CONTENT
 HTTP_CONFLICT = httpx.codes.CONFLICT
+HTTP_TOO_MANY = httpx.codes.TOO_MANY_REQUESTS
 shutdown_state = {"requested": False}
 paused_state = {"paused": False}
 
@@ -348,6 +349,13 @@ async def run_evaluate_loop(
                         await _sleep_until_next_poll(poll_interval)
                         continue
 
+                    if response.status_code == HTTP_TOO_MANY:
+                        logger.warning(
+                            "Rate limited by server, backing off %ds", poll_interval * 6
+                        )
+                        await _sleep_until_next_poll(poll_interval * 6)
+                        continue
+
                     if response.status_code != HTTP_OK:
                         logger.error(
                             "Server returned %d from %s: %s",
@@ -561,7 +569,24 @@ async def run_embed_loop(
             timeout=30.0,
             verify=verify,
         ) as http_client:
-            logger.info("Connected to %s — embedding model=%s", server_url, embed_model)
+            try:
+                status_resp = await http_client.get("/api/eval/status", headers=headers)
+                if status_resp.status_code == HTTP_OK:
+                    pending_embeddings = status_resp.json().get("pending_embeddings", 0)
+                    logger.info(
+                        "Connected to %s — %d issues pending embedding | model=%s",
+                        server_url,
+                        pending_embeddings,
+                        embed_model,
+                    )
+                else:
+                    logger.info(
+                        "Connected to %s — embedding model=%s", server_url, embed_model
+                    )
+            except httpx.HTTPError:
+                logger.info(
+                    "Connected to %s — embedding model=%s", server_url, embed_model
+                )
             _start_keyboard_monitor()
             if sys.stdin.isatty():
                 logger.info("Press space to pause/unpause")
@@ -603,6 +628,13 @@ async def run_embed_loop(
                     if response.status_code == HTTP_NO_CONTENT:
                         logger.info("No work available, polling in %ds", poll_interval)
                         await _sleep_until_next_poll(poll_interval)
+                        continue
+
+                    if response.status_code == HTTP_TOO_MANY:
+                        logger.warning(
+                            "Rate limited by server, backing off %ds", poll_interval * 6
+                        )
+                        await _sleep_until_next_poll(poll_interval * 6)
                         continue
 
                     if response.status_code != HTTP_OK:

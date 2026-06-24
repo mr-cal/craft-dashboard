@@ -413,12 +413,23 @@ async def eval_status(
             select(func.count()).select_from(pending_query.subquery())
         )
 
+    pending_embeddings = await session.scalar(
+        select(func.count(LLMEvaluation.id)).where(
+            LLMEvaluation.latest.is_(True),
+            LLMEvaluation.model_name != "pending",
+            LLMEvaluation.summary.isnot(None),
+            LLMEvaluation.summary != "",
+            LLMEvaluation.summary_embedding.is_(None),
+        )
+    )
+
     return {
         "pending": pending or 0,
         "locked": locked or 0,
         "evaluated_today": evaluated_today or 0,
         "total_evaluated": total_evaluated or 0,
         "total_open": total_open or 0,
+        "pending_embeddings": pending_embeddings or 0,
     }
 
 
@@ -426,7 +437,7 @@ _EMBED_LOCK_TTL = timedelta(minutes=5)
 
 
 @router.get("/embed-next", response_model=None)
-@limiter.limit("30/minute")
+@limiter.limit("300/minute")
 async def embed_next(
     request: Request,
     *,

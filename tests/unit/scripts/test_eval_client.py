@@ -427,6 +427,15 @@ _SAMPLE_EMBED_WORK = {
     "embed_text": "Test issue. This is a test summary for the issue evaluation.",
 }
 
+_SAMPLE_STATUS = {
+    "pending_embeddings": 5,
+    "pending": 2,
+    "locked": 0,
+    "evaluated_today": 1,
+    "total_evaluated": 10,
+    "total_open": 20,
+}
+
 
 @pytest.fixture
 def patched_embed_runtime(monkeypatch):
@@ -470,7 +479,10 @@ async def test_run_embed_loop_processes_issue_and_stops_at_limit(
 ) -> None:
     http_client = _patch_http_client(
         monkeypatch,
-        get_responses=[httpx.Response(status_code=200, json=_SAMPLE_EMBED_WORK)],
+        get_responses=[
+            httpx.Response(status_code=200, json=_SAMPLE_STATUS),
+            httpx.Response(status_code=200, json=_SAMPLE_EMBED_WORK),
+        ],
         post_responses=[httpx.Response(status_code=200)],
     )
 
@@ -497,12 +509,15 @@ async def test_run_embed_loop_sleeps_when_no_work(
     patched_embed_runtime["sleep"].side_effect = request_shutdown
     http_client = _patch_http_client(
         monkeypatch,
-        get_responses=[httpx.Response(status_code=204)],
+        get_responses=[
+            httpx.Response(status_code=200, json=_SAMPLE_STATUS),
+            httpx.Response(status_code=204),
+        ],
     )
 
     await eval_client.run_embed_loop(**{**_EMBED_DEFAULT_KWARGS, "limit": 0})
 
-    assert http_client.get.await_count == 1
+    assert http_client.get.await_count == 2
     patched_embed_runtime["embed_client"].embed.assert_not_awaited()
     http_client.post.assert_not_awaited()
     patched_embed_runtime["sleep"].assert_awaited_once_with(1)
@@ -525,6 +540,7 @@ async def test_run_embed_loop_skips_and_continues_when_embed_fails(
     http_client = _patch_http_client(
         monkeypatch,
         get_responses=[
+            httpx.Response(status_code=200, json=_SAMPLE_STATUS),
             httpx.Response(status_code=200, json=_SAMPLE_EMBED_WORK),
             httpx.Response(status_code=204),
         ],
@@ -543,7 +559,10 @@ async def test_run_embed_loop_prints_per_issue_completion_line(
 ) -> None:
     _patch_http_client(
         monkeypatch,
-        get_responses=[httpx.Response(status_code=200, json=_SAMPLE_EMBED_WORK)],
+        get_responses=[
+            httpx.Response(status_code=200, json=_SAMPLE_STATUS),
+            httpx.Response(status_code=200, json=_SAMPLE_EMBED_WORK),
+        ],
         post_responses=[httpx.Response(status_code=200)],
     )
 
