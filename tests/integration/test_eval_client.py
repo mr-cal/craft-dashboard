@@ -67,7 +67,6 @@ DEFAULT_KWARGS = {
     "server": "http://localhost:8000",
     "token": "test-token",
     "model": "test-model",
-    "embed_model": "",
     "llm_url": "http://localhost:11434/v1",
     "llm_api_key": "",
     "ca_cert": "",
@@ -323,7 +322,7 @@ class TestEvalClientHappyPath:
             post_responses=[httpx.Response(status_code=200)],
         )
 
-        await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+        await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
         # Evaluator was called with data derived from the real issue
         call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
@@ -376,7 +375,7 @@ class TestEvalClientHappyPath:
             monkeypatch, get_responses=get_responses, post_responses=post_responses
         )
 
-        await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 3})
+        await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 3})
 
         assert patched_runtime["evaluator"].evaluate.call_count == 3
         assert (
@@ -411,7 +410,7 @@ class TestEvalClientHappyPath:
             post_responses=[httpx.Response(status_code=200)],
         )
 
-        await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+        await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
         call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         assert call_kwargs["issue_type"] == "pull_request"
@@ -437,7 +436,7 @@ class TestEvalClientHappyPath:
             post_responses=[httpx.Response(status_code=200)],
         )
 
-        await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+        await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
         call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         assert call_kwargs["is_maintainer"] is True
@@ -463,7 +462,7 @@ class TestEvalClientHappyPath:
         )
 
         with caplog.at_level(logging.ERROR):
-            await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 1})
+            await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 1})
 
         assert "LLM timeout" in caplog.text
         # evaluate was called twice (error + success), but only one was submitted
@@ -500,7 +499,7 @@ class TestEvalClientErrorPaths:
         )
 
         with patch.object(eval_client, "logger") as mock_logger:
-            await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
+            await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
         mock_logger.error.assert_called_once()
         assert "401" in str(mock_logger.error.call_args)
@@ -529,7 +528,7 @@ class TestEvalClientErrorPaths:
         )
 
         with caplog.at_level(logging.ERROR):
-            await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
+            await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
         assert "submit failed 422" in caplog.text
         assert "confidence" in caplog.text
@@ -561,7 +560,7 @@ class TestEvalClientErrorPaths:
         )
 
         with caplog.at_level(logging.WARNING):
-            await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
+            await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
         assert "content changed during evaluation" in caplog.text
 
@@ -583,7 +582,7 @@ class TestEvalClientErrorPaths:
             post_responses=[],
         )
 
-        await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
+        await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
         # 500 causes a sleep before retrying
         patched_runtime["sleep"].assert_awaited_once()
@@ -608,7 +607,7 @@ class TestEvalClientErrorPaths:
         )
 
         with patch.object(eval_client, "logger") as mock_logger:
-            await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
+            await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
         mock_logger.error.assert_called_once()
         assert "invalid JSON" in str(mock_logger.error.call_args)
@@ -632,7 +631,7 @@ class TestEvalClientErrorPaths:
         )
 
         with patch.object(eval_client, "logger") as mock_logger:
-            await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
+            await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
         assert "Cannot connect" in str(mock_logger.error.call_args)
         patched_runtime["sleep"].assert_awaited_once()
@@ -660,7 +659,7 @@ class TestEvalClientErrorPaths:
         )
 
         with caplog.at_level(logging.WARNING):
-            await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
+            await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
         assert "hash mismatch" in caplog.text
 
@@ -684,7 +683,7 @@ class TestEvalClientErrorPaths:
         )
 
         with caplog.at_level(logging.ERROR):
-            await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
+            await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
         assert "submit failed 500" in caplog.text
         # No completion line is printed on failed submission
@@ -724,7 +723,7 @@ class TestEvalClientFlowControl:
             ],
         )
 
-        await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
+        await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
         assert patched_runtime["evaluator"].evaluate.call_count == 2
 
@@ -747,7 +746,7 @@ class TestEvalClientFlowControl:
         )
 
         with caplog.at_level(logging.INFO):
-            await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 2})
+            await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 2})
 
         assert "Done: evaluated 2 issues" in caplog.text
         assert patched_runtime["evaluator"].evaluate.call_count == 2
@@ -772,7 +771,7 @@ class TestEvalClientFlowControl:
             ),
         )
 
-        await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
+        await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
         patched_runtime["sleep"].assert_awaited_once()
         patched_runtime["evaluator"].evaluate.assert_not_awaited()
@@ -815,7 +814,7 @@ class TestEvalClientFlowControl:
         )
 
         with caplog.at_level(logging.INFO):
-            await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 2})
+            await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 2})
 
         assert (
             "Run total: 2 issues, 700 in / 500 out tokens (1200 total)" in caplog.text
@@ -843,7 +842,7 @@ class TestEvalClientSubmissionPayload:
             post_responses=[httpx.Response(status_code=200)],
         )
 
-        await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+        await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
         submit_json = client_mock.post.call_args.kwargs["json"]
 
@@ -886,7 +885,7 @@ class TestEvalClientSubmissionPayload:
             post_responses=[httpx.Response(status_code=200)],
         )
 
-        await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+        await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
         submit_json = client_mock.post.call_args.kwargs["json"]
         # Hash comes from evaluator mock's issue_data_hash, not the server's current_hash
@@ -894,12 +893,10 @@ class TestEvalClientSubmissionPayload:
         assert submit_json["content_hash"] != REAL_ISSUE_SNAPCRAFT["current_hash"]
 
     @pytest.mark.asyncio
-    async def test_submission_includes_embedding_when_embed_model_set(
+    async def test_submission_always_has_no_embedding(
         self, monkeypatch, patched_runtime
     ) -> None:
-        """When embed_model is set, summary_embedding is computed and submitted."""
-        fake_embedding = [0.42] * 1024
-
+        """evaluate subcommand never computes embeddings — always submits None."""
         client_mock = _patch_http(
             monkeypatch,
             get_responses=_with_status(
@@ -908,30 +905,7 @@ class TestEvalClientSubmissionPayload:
             post_responses=[httpx.Response(status_code=200)],
         )
 
-        with patch.object(
-            EmbeddingClient, "embed", AsyncMock(return_value=fake_embedding)
-        ):
-            await eval_client.run_eval_loop(
-                **{**DEFAULT_KWARGS, "embed_model": "nomic-embed-text"}
-            )
-
-        submit_json = client_mock.post.call_args.kwargs["json"]
-        assert submit_json["summary_embedding"] == fake_embedding
-
-    @pytest.mark.asyncio
-    async def test_submission_has_no_embedding_when_embed_model_empty(
-        self, monkeypatch, patched_runtime
-    ) -> None:
-        """When embed_model is empty, summary_embedding is None."""
-        client_mock = _patch_http(
-            monkeypatch,
-            get_responses=_with_status(
-                httpx.Response(status_code=200, json=REAL_ISSUE_SNAPCRAFT)
-            ),
-            post_responses=[httpx.Response(status_code=200)],
-        )
-
-        await eval_client.run_eval_loop(**DEFAULT_KWARGS)  # embed_model=""
+        await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
         submit_json = client_mock.post.call_args.kwargs["json"]
         assert submit_json["summary_embedding"] is None
@@ -954,7 +928,7 @@ class TestEvalClientEdgeCases:
             post_responses=[httpx.Response(status_code=200)],
         )
 
-        await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+        await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
         call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         assert call_kwargs["comment_count"] == 0
@@ -983,7 +957,7 @@ class TestEvalClientEdgeCases:
             post_responses=[httpx.Response(status_code=200)],
         )
 
-        await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+        await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
         call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         assert call_kwargs["comment_count"] == 15
@@ -1004,7 +978,7 @@ class TestEvalClientEdgeCases:
             post_responses=[httpx.Response(status_code=200)],
         )
 
-        await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+        await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
         call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         assert call_kwargs["labels"] == []
@@ -1024,7 +998,7 @@ class TestEvalClientEdgeCases:
             post_responses=[httpx.Response(status_code=200)],
         )
 
-        await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+        await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
         call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         assert call_kwargs["body"] is None
@@ -1042,7 +1016,7 @@ class TestEvalClientEdgeCases:
             post_responses=[httpx.Response(status_code=200)],
         )
 
-        await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+        await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
         call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         created_at = datetime(2026, 4, 1, 10, 0, 0, tzinfo=UTC)
@@ -1074,7 +1048,7 @@ class TestEvalClientEdgeCases:
             ],
         )
 
-        await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
+        await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
         # Both issues were evaluated despite the first submission failing
         assert patched_runtime["evaluator"].evaluate.call_count == 2
@@ -1094,7 +1068,7 @@ class TestEvalClientEdgeCases:
             post_responses=[httpx.Response(status_code=200)],
         )
 
-        await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+        await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
         # Per-issue completion line is printed via progress.console.print
         assert len(patched_runtime["console_prints"]) == 1

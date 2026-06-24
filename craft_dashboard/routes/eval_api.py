@@ -47,6 +47,13 @@ class EvalResultSubmission(BaseModel):
     summary_embedding: list[float] | None = None
 
 
+class EmbedResultSubmission(BaseModel):
+    """Request body for a submitted embedding result."""
+
+    issue_id: int
+    summary_embedding: list[float]
+
+
 def _require_eval_auth(request: Request, authorization: str = "") -> None:
     """Require a valid eval API bearer token."""
     eval_api_token = request.app.state.settings.eval_api_token
@@ -413,3 +420,81 @@ async def eval_status(
         "total_evaluated": total_evaluated or 0,
         "total_open": total_open or 0,
     }
+
+
+_EMBED_LOCK_TTL = timedelta(minutes=5)
+
+
+@router.get("/embed-next", response_model=None)
+@limiter.limit("30/minute")
+async def embed_next(
+    request: Request,
+    *,
+    authorization: str = Header(default=""),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any] | Response:
+    """Return the next evaluated issue that needs an embedding, if any."""
+    _require_eval_auth(request, authorization)
+
+    now = datetime.now(tz=UTC)
+    result = await session.execute(
+        select(LLMEvaluation, Issue.title)
+        .join(Issue, LLMEvaluation.issue_id == Issue.id)
+        .where(
+            LLMEvaluation.latest.is_(True),
+            LLMEvaluation.model_name != "pending",
+            LLMEvaluation.summary.isnot(None),
+            LLMEvaluation.summary != "",
+            LLMEvaluation.summary_embedding.is_(None),
+            or_(
+                LLMEvaluation.eval_locked_until.is_(None),
+                LLMEvaluation.eval_locked_until <= now,
+            ),
+        )
+        .order_by(Issue.id)
+        .limit(1)
+    )
+    row = result.first()
+    if row is None:
+        return Response(status_code=204)
+
+    evaluation, title = row
+    evaluation.eval_locked_until = now + _EMBED_LOCK_TTL
+    await session.commit()
+
+    embed_text = f"{title}. {evaluation.summary}"
+    return {"issue_id": evaluation.issue_id, "embed_text": embed_text}
+
+
+@router.post("/embed-result")
+async def submit_embed_result(
+    request: Request,
+    payload: EmbedResultSubmission,
+    *,
+    authorization: str = Header(default=""),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Store an embedding for a previously evaluated issue."""
+    _require_eval_auth(request, authorization)
+
+    if not payload.summary_embedding:
+        raise HTTPException(
+            status_code=422, detail="summary_embedding must not be empty"
+        )
+
+    result = await session.execute(
+        select(LLMEvaluation).where(
+            LLMEvaluation.issue_id == payload.issue_id,
+            LLMEvaluation.latest.is_(True),
+        )
+    )
+    evaluation = result.scalar_one_or_none()
+    if evaluation is None:
+        raise HTTPException(
+            status_code=404, detail="No evaluation found for this issue"
+        )
+
+    evaluation.summary_embedding = payload.summary_embedding
+    evaluation.eval_locked_until = None
+    await session.commit()
+    return {"status": "stored", "issue_id": payload.issue_id}

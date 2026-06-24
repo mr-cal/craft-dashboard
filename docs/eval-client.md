@@ -2,11 +2,13 @@
 
 ## Overview
 
-The eval client is a local worker for pull-based issue evaluation. It has two phases:
+The eval client is a local worker for pull-based issue evaluation. It has two independent subcommands:
 
-**Phase 1 – evaluate:** pulls issues from the server, runs them through your local LLM (summarization and scoring), and pushes results back.
+**`evaluate`** — pulls issues from the server, runs them through your local LLM (summarization and scoring), and pushes results back. Embeddings are **not** computed here.
 
-**Phase 2 – detect-duplicates:** runs after phase 1 is complete. Computes vector embeddings for each summary, finds near-neighbours via the server, and uses the LLM to confirm duplicates. Requires pgvector on the server.
+**`embed`** — pulls evaluated issues that have no embedding yet, computes vector embeddings for each summary, and pushes the embeddings back. Requires an embedding-capable model at your LLM endpoint.
+
+Running them separately means evaluation can be delegated to collaborators who have access to an LLM but not to the embedding endpoint.
 
 ## Prerequisites
 
@@ -67,28 +69,27 @@ uv run scripts/eval_client.py evaluate --limit 10
 
 # Evaluate open issues for a specific project with a remote LLM
 uv run scripts/eval_client.py evaluate --project snapcraft --open-only \
-  --summary-model Qwen3-35B --evaluation-model Qwen3-35B \
   --llm-url https://192.168.1.64:8443/v1 \
   --ca-cert ~/.config/local-llm/cert.pem
 
-# After phase 1 is complete, detect duplicates
-uv run scripts/eval_client.py detect-duplicates
+# After evaluating, compute and store embeddings
+uv run scripts/eval_client.py embed --limit 10
 ```
 
-By default phase 1 polls every 30 seconds when no work is available and
-continues until you stop it. Use `--limit` for bounded runs.
+By default both subcommands poll every 30 seconds when no work is available and
+continue until you stop them. Use `--limit` for bounded runs.
 
 For the full list of options and their corresponding environment variables:
 
 ```bash
 uv run scripts/eval_client.py --help
 uv run scripts/eval_client.py evaluate --help
-uv run scripts/eval_client.py detect-duplicates --help
+uv run scripts/eval_client.py embed --help
 ```
 
-## Phase 2: duplicate detection
+## The `embed` subcommand
 
-Phase 2 requires:
+`embed` requires:
 
 1. **pgvector** installed on the PostgreSQL server
 2. An **embedding model** served at the same `LOCAL_LLM_URL` endpoint
@@ -99,19 +100,22 @@ Set `LOCAL_LLM_EMBEDDING_MODEL` in your `.env` to the embedding model name. For 
 LOCAL_LLM_EMBEDDING_MODEL=nomic-embed-text
 ```
 
-The `evaluate` subcommand computes embeddings during phase 1 if `LOCAL_LLM_EMBEDDING_MODEL` is set (recommended). Phase 2 then only needs to run LLM confirmation — it does not re-embed.
-
-Use `--cosine-threshold` to tune how aggressively candidates are selected. A lower value (e.g. `0.10`) is more conservative; a higher value (e.g. `0.25`) finds more candidates to compare. The default is `0.15`.
+Use `--cosine-threshold` on the `detect-duplicates` subcommand to tune how
+aggressively duplicate candidates are selected. A lower value (e.g. `0.10`) is
+more conservative; a higher value (e.g. `0.25`) finds more candidates to
+compare. The default is `0.15`.
 
 ## Architecture note
 
 Evaluation is pull-based:
 
 - `GET /api/eval/next` returns the next issue to evaluate,
-- `POST /api/eval/result` stores the finished evaluation,
-- `GET /api/eval/duplicate-work` returns the next batch for phase 2,
+- `POST /api/eval/result` stores the finished evaluation (without embedding),
+- `GET /api/eval/embed-next` returns the next evaluated issue that needs an embedding,
+- `POST /api/eval/embed-result` stores the embedding for an evaluated issue,
+- `GET /api/eval/duplicate-work` returns the next batch for duplicate detection,
 - `POST /api/eval/similar` finds near-neighbours by cosine distance,
-- `POST /api/eval/duplicate-result` stores the phase-2 result,
+- `POST /api/eval/duplicate-result` stores the duplicate-detection result,
 - `GET /api/eval/status` reports queue progress,
 - the client initiates every connection over HTTPS,
 - the server never opens an outbound connection to your machine or local LLM.

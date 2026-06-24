@@ -929,3 +929,222 @@ class TestEvalResultIntegration:
             "total_evaluated": 1,
             "total_open": 4,
         }
+
+
+class TestEmbedNextIntegration:
+    """Integration tests for GET /api/eval/embed-next."""
+
+    def test_embed_next_requires_auth(self, test_db_session: AsyncSession) -> None:
+        app, _token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get("/api/eval/embed-next")
+
+        assert response.status_code == 401
+
+    def test_embed_next_returns_204_when_no_pending_embeddings(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/embed-next", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert response.status_code == 204
+
+    def test_embed_next_returns_issue_with_evaluation_and_no_embedding(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(id=1, project_id=1, title="Build fails on arm64")
+        evaluation = make_evaluation(
+            id=1,
+            issue_id=1,
+            summary="Arm64 build regression after kernel update.",
+            latest=True,
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue, evaluation)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/embed-next", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["issue_id"] == 1
+        assert (
+            data["embed_text"]
+            == "Build fails on arm64. Arm64 build regression after kernel update."
+        )
+
+    def test_embed_next_skips_issue_already_embedded(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(id=1, project_id=1, title="Already embedded issue")
+        evaluation = make_evaluation(
+            id=1,
+            issue_id=1,
+            summary="This issue already has an embedding.",
+            latest=True,
+            summary_embedding=[0.1] * 1024,
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue, evaluation)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/embed-next", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert response.status_code == 204
+
+    def test_embed_next_skips_pending_evaluation(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(id=1, project_id=1, title="Pending issue")
+        evaluation = make_evaluation(
+            id=1,
+            issue_id=1,
+            model_name="pending",
+            summary=None,
+            latest=True,
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue, evaluation)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/embed-next", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert response.status_code == 204
+
+    def test_embed_next_locks_returned_issue(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(id=1, project_id=1, title="Needs embedding")
+        evaluation = make_evaluation(
+            id=1,
+            issue_id=1,
+            summary="A complete summary.",
+            latest=True,
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue, evaluation)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/embed-next", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert response.status_code == 200
+
+        evaluations = asyncio.get_event_loop().run_until_complete(
+            _all_evaluations(test_db_session)
+        )
+        assert evaluations[0].eval_locked_until is not None
+        assert evaluations[0].eval_locked_until.replace(tzinfo=UTC) > datetime.now(
+            tz=UTC
+        )
+
+        # Second call should return 204 because the issue is now locked
+        with TestClient(app) as client:
+            second_response = client.get(
+                "/api/eval/embed-next", headers={"Authorization": f"Bearer {token}"}
+            )
+        assert second_response.status_code == 204
+
+
+class TestEmbedResultIntegration:
+    """Integration tests for POST /api/eval/embed-result."""
+
+    def test_embed_result_requires_auth(self, test_db_session: AsyncSession) -> None:
+        app, _token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/embed-result",
+                json={"issue_id": 1, "summary_embedding": [0.1, 0.2]},
+            )
+
+        assert response.status_code == 401
+
+    def test_embed_result_stores_embedding(self, test_db_session: AsyncSession) -> None:
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(id=1, project_id=1)
+        evaluation = make_evaluation(
+            id=1, issue_id=1, summary="Summary text.", latest=True
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue, evaluation)
+        )
+        app, token = _create_eval_app(test_db_session)
+        embedding = [0.1] * 1024
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/embed-result",
+                json={"issue_id": 1, "summary_embedding": embedding},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "stored", "issue_id": 1}
+
+        evaluations = asyncio.get_event_loop().run_until_complete(
+            _all_evaluations(test_db_session)
+        )
+        assert (
+            evaluations[0].summary_embedding == embedding
+            or list(evaluations[0].summary_embedding) == embedding
+        )
+        assert evaluations[0].eval_locked_until is None
+
+    def test_embed_result_returns_404_for_unknown_issue(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/embed-result",
+                json={"issue_id": 9999, "summary_embedding": [0.1, 0.2]},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert response.status_code == 404
+
+    def test_embed_result_returns_422_for_empty_embedding(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(id=1, project_id=1)
+        evaluation = make_evaluation(id=1, issue_id=1, latest=True)
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue, evaluation)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/embed-result",
+                json={"issue_id": 1, "summary_embedding": []},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert response.status_code == 422

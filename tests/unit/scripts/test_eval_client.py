@@ -68,7 +68,6 @@ DEFAULT_KWARGS = {
     "stale_days": 0,
     "server_ca_cert": "",
     "verbose": False,
-    "embed_model": "",
 }
 
 
@@ -199,7 +198,7 @@ def _patch_http_client(
 
 
 @pytest.mark.asyncio
-async def test_run_eval_loop_processes_issue_and_stops_at_limit(
+async def test_run_evaluate_loop_processes_issue_and_stops_at_limit(
     monkeypatch, patched_runtime
 ) -> None:
     http_client = _patch_http_client(
@@ -208,7 +207,7 @@ async def test_run_eval_loop_processes_issue_and_stops_at_limit(
         post_responses=[httpx.Response(status_code=200)],
     )
 
-    await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+    await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
     patched_runtime["evaluator"].evaluate.assert_awaited_once()
     http_client.post.assert_awaited_once()
@@ -227,7 +226,7 @@ async def test_run_eval_loop_processes_issue_and_stops_at_limit(
 
 
 @pytest.mark.asyncio
-async def test_run_eval_loop_sleeps_without_evaluating_when_no_work(
+async def test_run_evaluate_loop_sleeps_without_evaluating_when_no_work(
     monkeypatch, patched_runtime
 ) -> None:
     async def request_shutdown(_seconds: int) -> None:
@@ -239,7 +238,7 @@ async def test_run_eval_loop_sleeps_without_evaluating_when_no_work(
         get_responses=_with_status(httpx.Response(status_code=204)),
     )
 
-    await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
+    await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
     assert http_client.get.await_count == 2  # status + next
     patched_runtime["evaluator"].evaluate.assert_not_awaited()
@@ -248,7 +247,7 @@ async def test_run_eval_loop_sleeps_without_evaluating_when_no_work(
 
 
 @pytest.mark.asyncio
-async def test_run_eval_loop_logs_warning_and_continues_on_submit_conflict(
+async def test_run_evaluate_loop_logs_warning_and_continues_on_submit_conflict(
     monkeypatch, patched_runtime, caplog
 ) -> None:
     async def request_shutdown(_seconds: int) -> None:
@@ -265,7 +264,7 @@ async def test_run_eval_loop_logs_warning_and_continues_on_submit_conflict(
     )
 
     with caplog.at_level(logging.WARNING):
-        await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
+        await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
     patched_runtime["evaluator"].evaluate.assert_awaited_once()
     http_client.post.assert_awaited_once()
@@ -274,7 +273,7 @@ async def test_run_eval_loop_logs_warning_and_continues_on_submit_conflict(
 
 
 @pytest.mark.asyncio
-async def test_run_eval_loop_stops_after_reaching_limit(
+async def test_run_evaluate_loop_stops_after_reaching_limit(
     monkeypatch, patched_runtime, caplog
 ) -> None:
     patched_runtime["evaluator"].evaluate = AsyncMock(
@@ -297,7 +296,7 @@ async def test_run_eval_loop_stops_after_reaching_limit(
     )
 
     with caplog.at_level(logging.INFO):
-        await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 2})
+        await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 2})
 
     assert patched_runtime["evaluator"].evaluate.await_count == 2
     assert http_client.post.await_count == 2
@@ -310,7 +309,7 @@ async def test_run_eval_loop_stops_after_reaching_limit(
 
 
 @pytest.mark.asyncio
-async def test_run_eval_loop_sleeps_and_retries_after_server_error(
+async def test_run_evaluate_loop_sleeps_and_retries_after_server_error(
     monkeypatch, patched_runtime
 ) -> None:
     http_client = _patch_http_client(
@@ -322,7 +321,7 @@ async def test_run_eval_loop_sleeps_and_retries_after_server_error(
         post_responses=[_response(200)],
     )
 
-    await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+    await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
     assert http_client.get.await_count == 3  # status + 500 + issue
     patched_runtime["sleep"].assert_awaited_once_with(1)
@@ -331,7 +330,7 @@ async def test_run_eval_loop_sleeps_and_retries_after_server_error(
 
 
 @pytest.mark.asyncio
-async def test_run_eval_loop_continues_after_evaluate_exception(
+async def test_run_evaluate_loop_continues_after_evaluate_exception(
     monkeypatch, patched_runtime, caplog
 ) -> None:
     """If evaluate raises, that issue is skipped and the loop continues."""
@@ -353,14 +352,14 @@ async def test_run_eval_loop_continues_after_evaluate_exception(
     )
 
     with caplog.at_level(logging.ERROR):
-        await eval_client.run_eval_loop(**{**DEFAULT_KWARGS, "limit": 0})
+        await eval_client.run_evaluate_loop(**{**DEFAULT_KWARGS, "limit": 0})
 
     http_client.post.assert_not_awaited()
     assert "evaluation failed" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_run_eval_loop_prints_per_issue_completion_line(
+async def test_run_evaluate_loop_prints_per_issue_completion_line(
     monkeypatch, patched_runtime
 ) -> None:
     """Each evaluated issue produces exactly one completion line via console.print."""
@@ -370,7 +369,7 @@ async def test_run_eval_loop_prints_per_issue_completion_line(
         post_responses=[httpx.Response(status_code=200)],
     )
 
-    await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+    await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
     printed = " ".join(patched_runtime["console_prints"])
     assert "300 in / 200 out" in printed
@@ -379,7 +378,7 @@ async def test_run_eval_loop_prints_per_issue_completion_line(
 
 
 @pytest.mark.asyncio
-async def test_run_eval_loop_run_total_logged_after_multiple_issues(
+async def test_run_evaluate_loop_run_total_logged_after_multiple_issues(
     monkeypatch, patched_runtime, caplog
 ) -> None:
     """Run total is logged to caplog (not console.print)."""
@@ -390,110 +389,173 @@ async def test_run_eval_loop_run_total_logged_after_multiple_issues(
     )
 
     with caplog.at_level(logging.INFO):
-        await eval_client.run_eval_loop(**DEFAULT_KWARGS)
+        await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
     assert "Run total: 1 issues, 300 in / 200 out tokens (500 total)" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_embedding_client_created_once_for_multiple_issues(
+async def test_run_evaluate_loop_summary_embedding_is_always_none(
     monkeypatch, patched_runtime
 ) -> None:
-    """EmbeddingClient is created once before the loop, not per-issue."""
-    mock_embed_client = MagicMock()
-    mock_embed_client.close = AsyncMock()
-    mock_embed_client.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
-    mock_embedding_class = MagicMock(return_value=mock_embed_client)
-    monkeypatch.setattr(eval_client, "EmbeddingClient", mock_embedding_class)
-
-    patched_runtime["evaluator"].evaluate = AsyncMock(
-        side_effect=[_SAMPLE_EVALUATE_RESULT, _SAMPLE_EVALUATE_RESULT]
-    )
-
-    _patch_http_client(
-        monkeypatch,
-        get_responses=_with_status(
-            httpx.Response(
-                status_code=200, json=_make_issue(issue_id=1, external_id="1")
-            ),
-            httpx.Response(
-                status_code=200, json=_make_issue(issue_id=2, external_id="2")
-            ),
-        ),
-        post_responses=[
-            httpx.Response(status_code=200),
-            httpx.Response(status_code=200),
-        ],
-    )
-
-    await eval_client.run_eval_loop(
-        **{**DEFAULT_KWARGS, "limit": 2, "embed_model": "nomic-embed-text"}
-    )
-
-    assert mock_embedding_class.call_count == 1  # constructed once, not per-issue
-    mock_embed_client.close.assert_awaited_once()  # closed in finally
-
-
-@pytest.mark.asyncio
-async def test_evaluate_then_embed_run_in_serial(monkeypatch, patched_runtime) -> None:
-    """Embed runs after evaluate completes (serial flow)."""
-    call_order: list[str] = []
-
-    async def fake_evaluate(**_kwargs):
-        call_order.append("evaluate")
-        return _SAMPLE_EVALUATE_RESULT
-
-    mock_embed_client = MagicMock()
-
-    async def fake_embed(text):
-        call_order.append("embed")
-        return [0.1, 0.2, 0.3]
-
-    mock_embed_client.embed = fake_embed
-    mock_embed_client.close = AsyncMock()
-    monkeypatch.setattr(
-        eval_client, "EmbeddingClient", MagicMock(return_value=mock_embed_client)
-    )
-
-    patched_runtime["evaluator"].evaluate = fake_evaluate
-
-    _patch_http_client(
-        monkeypatch,
-        get_responses=_with_status(httpx.Response(status_code=200, json=_make_issue())),
-        post_responses=[httpx.Response(status_code=200)],
-    )
-
-    await eval_client.run_eval_loop(
-        **{**DEFAULT_KWARGS, "embed_model": "nomic-embed-text"}
-    )
-
-    assert call_order == ["evaluate", "embed"]
-
-
-@pytest.mark.asyncio
-async def test_embedding_failure_does_not_abort_submission(
-    monkeypatch, patched_runtime, caplog
-) -> None:
-    """If embed raises, submission still proceeds with summary_embedding=None."""
-    mock_embed_client = MagicMock()
-    mock_embed_client.embed = AsyncMock(side_effect=RuntimeError("embed server down"))
-    mock_embed_client.close = AsyncMock()
-    monkeypatch.setattr(
-        eval_client, "EmbeddingClient", MagicMock(return_value=mock_embed_client)
-    )
-
+    """evaluate subcommand never computes embeddings — always submits None."""
     http_client = _patch_http_client(
         monkeypatch,
         get_responses=_with_status(httpx.Response(status_code=200, json=_make_issue())),
         post_responses=[httpx.Response(status_code=200)],
     )
 
-    with caplog.at_level(logging.WARNING):
-        await eval_client.run_eval_loop(
-            **{**DEFAULT_KWARGS, "embed_model": "nomic-embed-text"}
-        )
+    await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
 
     http_client.post.assert_awaited_once()
     posted = http_client.post.await_args.kwargs["json"]
     assert posted["summary_embedding"] is None
+
+
+# ---------------------------------------------------------------------------
+# run_embed_loop tests
+# ---------------------------------------------------------------------------
+
+_EMBED_DEFAULT_KWARGS = {
+    "server": "http://localhost:8000",
+    "token": "test-token",
+    "llm_url": "http://localhost:11434/v1",
+    "llm_api_key": "",
+    "ca_cert": "",
+    "embed_model": "nomic-embed-text",
+    "poll_interval": 1,
+    "limit": 1,
+    "server_ca_cert": "",
+    "verbose": False,
+}
+
+_SAMPLE_EMBED_WORK = {
+    "issue_id": 42,
+    "embed_text": "Test issue. This is a test summary for the issue evaluation.",
+}
+
+
+@pytest.fixture
+def patched_embed_runtime(monkeypatch):
+    embed_client = MagicMock()
+    embed_client.close = AsyncMock()
+    embed_client.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
+    sleep_mock = AsyncMock()
+
+    mock_progress = MagicMock()
+    mock_progress.__enter__ = MagicMock(return_value=mock_progress)
+    mock_progress.__exit__ = MagicMock(return_value=False)
+    mock_progress.add_task = MagicMock(return_value=0)
+
+    console_prints: list[str] = []
+    mock_console = MagicMock()
+    mock_console.print = lambda *args, **kwargs: console_prints.append(str(args[0]))
+    mock_progress.console = mock_console
+
+    monkeypatch.setattr(
+        eval_client, "EmbeddingClient", MagicMock(return_value=embed_client)
+    )
+    monkeypatch.setattr(eval_client, "_sleep_until_next_poll", sleep_mock)
+    monkeypatch.setattr(eval_client.signal, "signal", MagicMock())
+    monkeypatch.setattr(eval_client, "_start_keyboard_monitor", MagicMock())
+    monkeypatch.setattr(
+        eval_client, "_make_progress", MagicMock(return_value=mock_progress)
+    )
+    monkeypatch.setattr(eval_client, "_setup_logging", MagicMock())
+
+    return {
+        "embed_client": embed_client,
+        "sleep": sleep_mock,
+        "progress": mock_progress,
+        "console_prints": console_prints,
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_embed_loop_processes_issue_and_stops_at_limit(
+    monkeypatch, patched_embed_runtime
+) -> None:
+    http_client = _patch_http_client(
+        monkeypatch,
+        get_responses=[httpx.Response(status_code=200, json=_SAMPLE_EMBED_WORK)],
+        post_responses=[httpx.Response(status_code=200)],
+    )
+
+    await eval_client.run_embed_loop(**_EMBED_DEFAULT_KWARGS)
+
+    patched_embed_runtime["embed_client"].embed.assert_awaited_once_with(
+        _SAMPLE_EMBED_WORK["embed_text"]
+    )
+    http_client.post.assert_awaited_once()
+    posted = http_client.post.await_args.kwargs["json"]
+    assert posted["issue_id"] == 42
+    assert posted["summary_embedding"] == [0.1, 0.2, 0.3]
+    patched_embed_runtime["sleep"].assert_not_awaited()
+    patched_embed_runtime["embed_client"].close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_embed_loop_sleeps_when_no_work(
+    monkeypatch, patched_embed_runtime
+) -> None:
+    async def request_shutdown(_seconds: int) -> None:
+        eval_client.shutdown_state["requested"] = True
+
+    patched_embed_runtime["sleep"].side_effect = request_shutdown
+    http_client = _patch_http_client(
+        monkeypatch,
+        get_responses=[httpx.Response(status_code=204)],
+    )
+
+    await eval_client.run_embed_loop(**{**_EMBED_DEFAULT_KWARGS, "limit": 0})
+
+    assert http_client.get.await_count == 1
+    patched_embed_runtime["embed_client"].embed.assert_not_awaited()
+    http_client.post.assert_not_awaited()
+    patched_embed_runtime["sleep"].assert_awaited_once_with(1)
+
+
+@pytest.mark.asyncio
+async def test_run_embed_loop_skips_and_continues_when_embed_fails(
+    monkeypatch, patched_embed_runtime, caplog
+) -> None:
+    """If embedding raises, that issue is skipped (no POST) and the loop continues."""
+
+    async def request_shutdown(_seconds: int) -> None:
+        eval_client.shutdown_state["requested"] = True
+
+    patched_embed_runtime["embed_client"].embed = AsyncMock(
+        side_effect=RuntimeError("embed server down")
+    )
+    patched_embed_runtime["sleep"].side_effect = request_shutdown
+
+    http_client = _patch_http_client(
+        monkeypatch,
+        get_responses=[
+            httpx.Response(status_code=200, json=_SAMPLE_EMBED_WORK),
+            httpx.Response(status_code=204),
+        ],
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await eval_client.run_embed_loop(**{**_EMBED_DEFAULT_KWARGS, "limit": 0})
+
+    http_client.post.assert_not_awaited()
     assert "embedding failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_run_embed_loop_prints_per_issue_completion_line(
+    monkeypatch, patched_embed_runtime
+) -> None:
+    _patch_http_client(
+        monkeypatch,
+        get_responses=[httpx.Response(status_code=200, json=_SAMPLE_EMBED_WORK)],
+        post_responses=[httpx.Response(status_code=200)],
+    )
+
+    await eval_client.run_embed_loop(**_EMBED_DEFAULT_KWARGS)
+
+    printed = " ".join(patched_embed_runtime["console_prints"])
+    assert "issue#42" in printed
+    assert "embed " in printed

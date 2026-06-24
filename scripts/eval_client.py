@@ -206,7 +206,7 @@ async def _sleep_until_next_poll(seconds: int) -> None:
         remaining -= 1
 
 
-async def run_eval_loop(
+async def run_evaluate_loop(
     *,
     server: str,
     token: str,
@@ -214,7 +214,6 @@ async def run_eval_loop(
     llm_url: str,
     llm_api_key: str,
     ca_cert: str,
-    embed_model: str,
     poll_interval: int,
     limit: int,
     project: str,
@@ -225,18 +224,14 @@ async def run_eval_loop(
     server_ca_cert: str,
     verbose: bool,
 ) -> None:
-    """Poll the eval API, run single-phase evaluation, and submit results.
+    """Poll the eval API, run LLM evaluation (summary + scores), and submit results.
 
-    For each pending issue, the loop runs three steps in sequence:
+    For each pending issue the loop runs two steps in sequence:
       1. Evaluate — calls evaluator.evaluate() to produce summary + scores in
          a single LLM call.  Closed/merged issues produce summary only.
-      2. Embed — runs EmbeddingClient.embed() on the title + summary text.
-         Skipped when embed_model is empty or the embedding call fails
-         (non-fatal).
-      3. Submit — POSTs the assembled payload to /api/eval/result.
-
-    Steps 2 and 3 are typically fast (embed is ~0s); the LLM call in step 1
-    dominates the wall time.
+      2. Submit — POSTs the assembled payload to /api/eval/result with
+         summary_embedding=None.  Embeddings are computed separately by the
+         ``embed`` subcommand.
 
     The loop runs until *limit* issues are evaluated (limit=0 means run until
     the server returns 204 No Content), or until a shutdown signal is received.
@@ -266,14 +261,6 @@ async def run_eval_loop(
         client=llm_client,
         model=model,
     )
-    embed_client: EmbeddingClient | None = None
-    if embed_model:
-        embed_client = EmbeddingClient(
-            base_url=llm_base_url,
-            model=embed_model,
-            api_key=llm_api_key,
-            ca_cert=ca_cert,
-        )
     timing = TimingHistory()
     filter_parts = []
     if project:
@@ -459,11 +446,6 @@ async def run_eval_loop(
                         logger.warning("%s: content unchanged, skipping", issue_ref)
                         continue
 
-                    # Embed title + summary for richer semantic signal
-                    embed_text = f"{issue_data['title']}. {result['summary']}"
-                    summary_embedding, _ = await _timed(
-                        _embed_safe(embed_client, embed_text, issue_ref)
-                    )
                     duration = time.monotonic() - t0
 
                     submission: dict[str, Any] = {
@@ -478,7 +460,7 @@ async def run_eval_loop(
                         "completion_tokens": result["completion_tokens"],
                         "model_used": model,
                         "llm_backend": "local",
-                        "summary_embedding": summary_embedding,
+                        "summary_embedding": None,
                     }
 
                     # Hide status row before submitting
@@ -554,8 +536,188 @@ async def run_eval_loop(
                     )
     finally:
         await llm_client.close()
-        if embed_client is not None:
-            await embed_client.close()
+
+
+async def run_embed_loop(
+    *,
+    server: str,
+    token: str,
+    llm_url: str,
+    llm_api_key: str,
+    ca_cert: str,
+    embed_model: str,
+    poll_interval: int,
+    limit: int,
+    server_ca_cert: str,
+    verbose: bool,
+) -> None:
+    """Poll the embed API, compute embeddings, and submit results.
+
+    For each evaluated issue that has no embedding yet:
+      1. Fetch — GET /api/eval/embed-next returns issue_id and embed_text.
+      2. Embed — runs EmbeddingClient.embed() on embed_text.
+      3. Submit — POSTs {issue_id, summary_embedding} to /api/eval/embed-result.
+
+    The loop runs until *limit* issues are embedded (limit=0 means run until
+    the server returns 204 No Content), or until a shutdown signal is received.
+    """
+    signal.signal(signal.SIGINT, _signal_handler)
+    console = Console()
+    _setup_logging(verbose=verbose, console=console)
+
+    server_url = server.rstrip("/")
+    llm_base_url = llm_url.rstrip("/")
+    verify: bool | str = server_ca_cert if server_ca_cert else True
+    headers = {"Authorization": f"Bearer {token}"}
+
+    embed_client = EmbeddingClient(
+        base_url=llm_base_url,
+        model=embed_model,
+        api_key=llm_api_key,
+        ca_cert=ca_cert,
+    )
+
+    try:
+        async with httpx.AsyncClient(
+            base_url=server_url,
+            timeout=30.0,
+            verify=verify,
+        ) as http_client:
+            logger.info("Connected to %s — embedding model=%s", server_url, embed_model)
+            _start_keyboard_monitor()
+            if sys.stdin.isatty():
+                logger.info("Press space to pause/unpause")
+
+            progress = _make_progress(console, limit if limit > 0 else None)
+            with progress:
+                status_id = progress.add_task("", total=None, visible=False, eta="")
+                overall_id = progress.add_task(
+                    "Embedding issues",
+                    total=limit if limit > 0 else None,
+                    eta="?",
+                )
+
+                embedded = 0
+                while not shutdown_state["requested"]:
+                    if paused_state["paused"]:
+                        await asyncio.sleep(0.5)
+                        continue
+
+                    try:
+                        response = await http_client.get(
+                            "/api/eval/embed-next",
+                            headers=headers,
+                        )
+                    except httpx.ConnectError as exc:
+                        hint = (
+                            " (server may not be using TLS — try http:// instead of https://)"
+                            if "SSL" in str(exc) or "wrong version" in str(exc).lower()
+                            else ""
+                        )
+                        logger.error("Cannot connect to %s%s", server_url, hint)  # noqa: TRY400
+                        await _sleep_until_next_poll(poll_interval)
+                        continue
+                    except httpx.HTTPError as exc:
+                        logger.error(  # noqa: TRY400
+                            "HTTP error fetching work from %s: %s", server_url, exc
+                        )
+                        await _sleep_until_next_poll(poll_interval)
+                        continue
+
+                    if response.status_code == HTTP_NO_CONTENT:
+                        logger.info("No work available, polling in %ds", poll_interval)
+                        await _sleep_until_next_poll(poll_interval)
+                        continue
+
+                    if response.status_code != HTTP_OK:
+                        logger.error(
+                            "Server returned %d from %s: %s",
+                            response.status_code,
+                            response.url,
+                            _format_error_body(response),
+                        )
+                        await _sleep_until_next_poll(poll_interval)
+                        continue
+
+                    try:
+                        issue_data = response.json()
+                    except ValueError:
+                        logger.error(  # noqa: TRY400
+                            "Server returned invalid JSON: %s",
+                            _format_error_body(response),
+                        )
+                        await _sleep_until_next_poll(poll_interval)
+                        continue
+
+                    issue_id = issue_data["issue_id"]
+                    embed_text = issue_data["embed_text"]
+                    issue_ref = f"issue#{issue_id}"
+
+                    progress.update(
+                        status_id,
+                        description=f"[dim]{issue_ref}:[/dim] embed…",
+                        visible=True,
+                    )
+
+                    t0 = time.monotonic()
+                    embedding, t_embed = await _timed(
+                        _embed_safe(embed_client, embed_text, issue_ref)
+                    )
+
+                    if embedding is None:
+                        progress.update(status_id, visible=False)
+                        logger.warning("%s: embedding failed, skipping", issue_ref)
+                        continue
+
+                    progress.update(status_id, visible=False)
+
+                    try:
+                        submit_response = await http_client.post(
+                            "/api/eval/embed-result",
+                            json={"issue_id": issue_id, "summary_embedding": embedding},
+                            headers=headers,
+                        )
+                    except httpx.ConnectError:
+                        logger.error(  # noqa: TRY400
+                            "%s: lost connection to server while submitting",
+                            issue_ref,
+                        )
+                        continue
+                    except httpx.HTTPError as exc:
+                        logger.error(  # noqa: TRY400
+                            "%s: HTTP error submitting embedding: %s",
+                            issue_ref,
+                            exc,
+                        )
+                        continue
+
+                    if submit_response.status_code != HTTP_OK:
+                        logger.error(
+                            "%s: embed submit failed %d from %s: %s",
+                            issue_ref,
+                            submit_response.status_code,
+                            submit_response.url,
+                            _format_error_body(submit_response),
+                        )
+                        continue
+
+                    embedded += 1
+                    duration = time.monotonic() - t0
+                    progress.update(overall_id, advance=1)
+                    progress.console.print(
+                        f"[bold]{issue_ref}[/bold]"
+                        f"  [dim]embed {_format_elapsed(t_embed)}"
+                        f"  total {_format_elapsed(duration)}[/dim]"
+                    )
+
+                    if limit > 0 and embedded >= limit:
+                        logger.info("Done: embedded %d issues", limit)
+                        break
+
+                if embedded > 0:
+                    logger.info("Run total: %d issues embedded", embedded)
+    finally:
+        await embed_client.close()
 
 
 # ---------------------------------------------------------------------------
@@ -563,7 +725,7 @@ async def run_eval_loop(
 # ---------------------------------------------------------------------------
 
 
-@click.command()
+@click.group()
 @click.option(
     "--server",
     required=True,
@@ -582,6 +744,25 @@ async def run_eval_loop(
     default=False,
     help="Show timestamps, URLs, and model details",
 )
+@click.pass_context
+def cli(ctx: click.Context, server: str, token: str, verbose: bool) -> None:
+    r"""craft-dashboard local eval client.
+
+    Two subcommands run the two phases independently:
+
+    \b
+      evaluate  — pull issues, run LLM summary + scoring, submit results.
+      embed     — pull evaluated issues without embeddings, compute and submit.
+
+    Run each subcommand with --help for its full option list.
+    """
+    ctx.ensure_object(dict)
+    ctx.obj["server"] = server
+    ctx.obj["token"] = token
+    ctx.obj["verbose"] = verbose
+
+
+@cli.command("evaluate")
 @click.option(
     "--poll-interval",
     default=30,
@@ -617,9 +798,9 @@ async def run_eval_loop(
     type=click.IntRange(min=0),
     help="Only evaluate stale evaluations older than N days",
 )
-def cli(
-    server: str,
-    token: str,
+@click.pass_context
+def evaluate_cmd(
+    ctx: click.Context,
     poll_interval: int,
     limit: int,
     project: str,
@@ -627,20 +808,19 @@ def cli(
     force: bool,
     incomplete: bool,
     stale_days: int,
-    verbose: bool,
 ) -> None:
-    """craft-dashboard local evaluation client.
+    r"""Pull issues from the server and evaluate them (summary + scores).
 
-    Evaluates issues in a single pass: evaluate (summary + scores in one LLM
-    call), then embed.
+    Embeddings are NOT computed here — run the ``embed`` subcommand afterwards.
 
     LLM connection settings are read from environment variables (set in .env):
-      LOCAL_LLM_URL      — required, OpenAI-compatible endpoint
-      LOCAL_LLM_MODEL    — required, model name for evaluation
-      LOCAL_LLM_API_KEY  — optional, bearer token for the LLM endpoint
-      LOCAL_LLM_CA_CERT  — optional, PEM CA cert for LLM TLS verification
-      LOCAL_LLM_EMBEDDING_MODEL — optional, embedding model (skip if unset)
-      EVAL_CLIENT_SERVER_CA_CERT — optional, PEM CA cert for server TLS
+
+    \b
+      LOCAL_LLM_URL    — required, OpenAI-compatible endpoint
+      LOCAL_LLM_MODEL  — required, model name for evaluation
+      LOCAL_LLM_API_KEY           — optional, bearer token for the LLM endpoint
+      LOCAL_LLM_CA_CERT           — optional, PEM CA cert for LLM TLS
+      EVAL_CLIENT_SERVER_CA_CERT  — optional, PEM CA cert for server TLS
     """
     llm_url = os.environ.get("LOCAL_LLM_URL", "")
     model = os.environ.get("LOCAL_LLM_MODEL", "")
@@ -657,15 +837,14 @@ def cli(
 
     llm_api_key = os.environ.get("LOCAL_LLM_API_KEY", "")
     ca_cert = os.environ.get("LOCAL_LLM_CA_CERT", "")
-    embed_model = os.environ.get("LOCAL_LLM_EMBEDDING_MODEL", "")
     server_ca_cert = os.environ.get("EVAL_CLIENT_SERVER_CA_CERT", "")
+    obj = ctx.obj
 
     asyncio.run(
-        run_eval_loop(
-            server=server,
-            token=token,
+        run_evaluate_loop(
+            server=obj["server"],
+            token=obj["token"],
             model=model,
-            embed_model=embed_model,
             llm_url=llm_url,
             llm_api_key=llm_api_key,
             ca_cert=ca_cert,
@@ -677,7 +856,78 @@ def cli(
             incomplete=incomplete,
             stale_days=stale_days,
             server_ca_cert=server_ca_cert,
-            verbose=verbose,
+            verbose=obj["verbose"],
+        )
+    )
+
+
+@cli.command("embed")
+@click.option(
+    "--poll-interval",
+    default=30,
+    show_default=True,
+    type=click.IntRange(min=1),
+    help="Seconds between polls when no work is available",
+)
+@click.option(
+    "--limit",
+    default=0,
+    show_default=True,
+    type=click.IntRange(min=0),
+    help="Max embeddings before exit (0=unlimited)",
+)
+@click.pass_context
+def embed_cmd(
+    ctx: click.Context,
+    poll_interval: int,
+    limit: int,
+) -> None:
+    r"""Compute embeddings for evaluated issues that have none yet.
+
+    Run after ``evaluate`` to add vector embeddings to completed evaluations.
+
+    Embedding settings are read from environment variables (set in .env):
+
+    \b
+      LOCAL_LLM_URL             — required, OpenAI-compatible endpoint
+      LOCAL_LLM_EMBEDDING_MODEL — required, embedding model name
+      LOCAL_LLM_API_KEY           — optional, bearer token for the LLM endpoint
+      LOCAL_LLM_CA_CERT           — optional, PEM CA cert for LLM TLS
+      EVAL_CLIENT_SERVER_CA_CERT  — optional, PEM CA cert for server TLS
+    """
+    llm_url = os.environ.get("LOCAL_LLM_URL", "")
+    embed_model = os.environ.get("LOCAL_LLM_EMBEDDING_MODEL", "")
+    missing = [
+        name
+        for name, val in (
+            ("LOCAL_LLM_URL", llm_url),
+            ("LOCAL_LLM_EMBEDDING_MODEL", embed_model),
+        )
+        if not val
+    ]
+    if missing:
+        raise click.UsageError(
+            f"Missing required environment variable(s): {', '.join(missing)}. "
+            "Set them in your .env file."
+        )
+
+    llm_api_key = os.environ.get("LOCAL_LLM_API_KEY", "")
+    ca_cert = os.environ.get("LOCAL_LLM_CA_CERT", "")
+    server_ca_cert = os.environ.get("EVAL_CLIENT_SERVER_CA_CERT", "")
+    obj = ctx.obj
+
+    asyncio.run(
+        run_embed_loop(
+            server=obj["server"],
+            token=obj["token"],
+            llm_url=llm_url,
+            llm_api_key=llm_api_key,
+            ca_cert=ca_cert,
+            embed_model=embed_model,
+            poll_interval=poll_interval,
+            limit=limit,
+            server_ca_cert=server_ca_cert,
+            verbose=obj["verbose"],
         )
     )
 
