@@ -569,6 +569,7 @@ async def run_embed_loop(
             timeout=30.0,
             verify=verify,
         ) as http_client:
+            pending_embeddings = 0
             try:
                 status_resp = await http_client.get("/api/eval/status", headers=headers)
                 if status_resp.status_code == HTTP_OK:
@@ -591,11 +592,15 @@ async def run_embed_loop(
             if sys.stdin.isatty():
                 logger.info("Press space to pause/unpause")
 
-            progress = _make_progress(console, limit if limit > 0 else None)
+            # Progress bar total: use the explicit limit, or fall back to
+            # the server's pending count (so the bar shows meaningful progress
+            # rather than an unbounded spinner when no limit is given).
+            task_total = limit if limit > 0 else (pending_embeddings or None)
+            progress = _make_progress(console, task_total)
             with progress:
                 overall_id = progress.add_task(
                     "Embedding issues",
-                    total=limit if limit > 0 else None,
+                    total=task_total,
                 )
 
                 embedded = 0
