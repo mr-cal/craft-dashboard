@@ -438,8 +438,9 @@ async def embed_next(
 
     now = datetime.now(tz=UTC)
     result = await session.execute(
-        select(LLMEvaluation, Issue.title)
+        select(LLMEvaluation, Issue.title, Issue.external_id, Project.name)
         .join(Issue, LLMEvaluation.issue_id == Issue.id)
+        .join(Project, Issue.project_id == Project.id)
         .where(
             LLMEvaluation.latest.is_(True),
             LLMEvaluation.model_name != "pending",
@@ -458,12 +459,17 @@ async def embed_next(
     if row is None:
         return Response(status_code=204)
 
-    evaluation, title = row
+    evaluation, title, external_id, project_name = row
     evaluation.eval_locked_until = now + _EMBED_LOCK_TTL
     await session.commit()
 
     embed_text = f"{title}. {evaluation.summary}"
-    return {"issue_id": evaluation.issue_id, "embed_text": embed_text}
+    return {
+        "issue_id": evaluation.issue_id,
+        "project_name": project_name,
+        "external_id": external_id,
+        "embed_text": embed_text,
+    }
 
 
 @router.post("/embed-result")

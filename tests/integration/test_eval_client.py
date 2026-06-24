@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from craft_dashboard.llm.embeddings import EmbeddingClient
 from scripts import eval_client
 
 # ---------------------------------------------------------------------------
@@ -252,10 +251,6 @@ def patched_runtime(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     mock_console.print = lambda *args, **kwargs: console_prints.append(str(args[0]))
     mock_progress.console = mock_console
 
-    mock_timing = MagicMock()
-    mock_timing.add = MagicMock()
-    mock_timing.eta = MagicMock(return_value="?")
-
     monkeypatch.setattr(
         eval_client, "LocalLLMClient", MagicMock(return_value=llm_client)
     )
@@ -268,9 +263,6 @@ def patched_runtime(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(
         eval_client, "_make_progress", MagicMock(return_value=mock_progress)
     )
-    monkeypatch.setattr(
-        eval_client, "TimingHistory", MagicMock(return_value=mock_timing)
-    )
     monkeypatch.setattr(eval_client, "_setup_logging", MagicMock())
 
     return {
@@ -278,7 +270,6 @@ def patched_runtime(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "evaluator": evaluator,
         "sleep": sleep_mock,
         "progress": mock_progress,
-        "timing": mock_timing,
         "console_prints": console_prints,
     }
 

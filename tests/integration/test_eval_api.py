@@ -978,6 +978,8 @@ class TestEmbedNextIntegration:
         assert response.status_code == 200
         data = response.json()
         assert data["issue_id"] == 1
+        assert data["project_name"] == "snapcraft"
+        assert data["external_id"] == issue.external_id
         assert (
             data["embed_text"]
             == "Build fails on arm64. Arm64 build regression after kernel update."

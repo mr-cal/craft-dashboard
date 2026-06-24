@@ -146,11 +146,6 @@ def patched_runtime(monkeypatch):
     mock_console.print = lambda *args, **kwargs: console_prints.append(str(args[0]))
     mock_progress.console = mock_console
 
-    # Mock timing history to avoid writing to ~/.craft-dashboard/
-    mock_timing = MagicMock()
-    mock_timing.add = MagicMock()
-    mock_timing.eta = MagicMock(return_value="?")
-
     monkeypatch.setattr(
         eval_client, "LocalLLMClient", MagicMock(return_value=llm_client)
     )
@@ -163,9 +158,6 @@ def patched_runtime(monkeypatch):
     monkeypatch.setattr(
         eval_client, "_make_progress", MagicMock(return_value=mock_progress)
     )
-    monkeypatch.setattr(
-        eval_client, "TimingHistory", MagicMock(return_value=mock_timing)
-    )
     # Suppress rich console output from _setup_logging in tests
     monkeypatch.setattr(eval_client, "_setup_logging", MagicMock())
 
@@ -174,7 +166,6 @@ def patched_runtime(monkeypatch):
         "evaluator": evaluator,
         "sleep": sleep_mock,
         "progress": mock_progress,
-        "timing": mock_timing,
         "console_prints": console_prints,
     }
 
@@ -431,6 +422,8 @@ _EMBED_DEFAULT_KWARGS = {
 
 _SAMPLE_EMBED_WORK = {
     "issue_id": 42,
+    "project_name": "snapcraft",
+    "external_id": "2691",
     "embed_text": "Test issue. This is a test summary for the issue evaluation.",
 }
 
@@ -557,5 +550,5 @@ async def test_run_embed_loop_prints_per_issue_completion_line(
     await eval_client.run_embed_loop(**_EMBED_DEFAULT_KWARGS)
 
     printed = " ".join(patched_embed_runtime["console_prints"])
-    assert "issue#42" in printed
+    assert "snapcraft#2691" in printed
     assert "embed " in printed

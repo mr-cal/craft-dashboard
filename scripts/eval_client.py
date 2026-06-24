@@ -41,8 +41,6 @@ from craft_dashboard.llm.client import LocalLLMClient
 from craft_dashboard.llm.embeddings import EmbeddingClient
 from craft_dashboard.llm.evaluator import IssueEvaluator, _compute_content_hash
 
-from scripts.eval_timing import PHASE_EVALUATE, TimingHistory
-
 logger = logging.getLogger(__name__)
 
 HTTP_OK = httpx.codes.OK
@@ -113,19 +111,13 @@ def _format_error_body(response: httpx.Response) -> str:
 
 
 def _make_progress(console: Console, total: int | None) -> Progress:  # noqa: ARG001
-    """Create a rich Progress bar for the eval loop.
-
-    Returns a Progress configured for two tasks:
-    - Row 0 (status): spinner + description showing the current issue being evaluated.
-    - Row 1 (overall): full bar with count, percentage, ETA, and elapsed time.
-    """
+    """Create a rich Progress bar for the eval loop."""
     return Progress(
         SpinnerColumn(),
         TextColumn("[bold]{task.description}"),
         BarColumn(),
         TaskProgressColumn(),
         MofNCompleteColumn(),
-        TextColumn("[cyan]ETA: {task.fields[eta]}"),
         TimeElapsedColumn(),
         console=console,
         transient=False,
@@ -261,7 +253,6 @@ async def run_evaluate_loop(
         client=llm_client,
         model=model,
     )
-    timing = TimingHistory()
     filter_parts = []
     if project:
         filter_parts.append(project)
@@ -316,11 +307,9 @@ async def run_evaluate_loop(
             task_total = total_remaining if total_remaining > 0 else None
             progress = _make_progress(console, task_total)
             with progress:
-                status_id = progress.add_task("", total=None, visible=False, eta="")
                 overall_id = progress.add_task(
                     "Evaluating issues",
                     total=task_total,
-                    eta=timing.eta(PHASE_EVALUATE, total_remaining),
                 )
 
                 evaluated = 0
@@ -402,11 +391,9 @@ async def run_evaluate_loop(
                     maintainers = set(issue_data.get("maintainers", []))
                     normalized_state = issue_data["state"].lower()
 
-                    # Show live status line for this issue
                     progress.update(
-                        status_id,
+                        overall_id,
                         description=f"[dim]{issue_ref}:[/dim] eval…",
-                        visible=True,
                     )
 
                     t0 = time.monotonic()
@@ -432,7 +419,7 @@ async def run_evaluate_loop(
                             )
                         )
                     except Exception:
-                        progress.update(status_id, visible=False)
+                        progress.update(overall_id, description="Evaluating issues")
                         elapsed = _format_elapsed(time.monotonic() - t0)
                         logger.exception(
                             "%s: evaluation failed after %s",
@@ -445,8 +432,6 @@ async def run_evaluate_loop(
                         # content hash unchanged — server should not have sent this
                         logger.warning("%s: content unchanged, skipping", issue_ref)
                         continue
-
-                    duration = time.monotonic() - t0
 
                     submission: dict[str, Any] = {
                         "issue_id": issue_data["issue_id"],
@@ -462,9 +447,6 @@ async def run_evaluate_loop(
                         "llm_backend": "local",
                         "summary_embedding": None,
                     }
-
-                    # Hide status row before submitting
-                    progress.update(status_id, visible=False)
 
                     try:
                         submit_response = await http_client.post(
@@ -508,12 +490,8 @@ async def run_evaluate_loop(
                     completion_tok = submission["completion_tokens"]
                     total_prompt_tokens += prompt_tok
                     total_completion_tokens += completion_tok
-                    timing.add(PHASE_EVALUATE, duration)
-                    remaining = max(0, (task_total or evaluated) - evaluated)
                     progress.update(
-                        overall_id,
-                        advance=1,
-                        eta=timing.eta(PHASE_EVALUATE, remaining),
+                        overall_id, advance=1, description="Evaluating issues"
                     )
                     action = submission.get("suggested_action") or "summary_only"
                     progress.console.print(
@@ -590,11 +568,9 @@ async def run_embed_loop(
 
             progress = _make_progress(console, limit if limit > 0 else None)
             with progress:
-                status_id = progress.add_task("", total=None, visible=False, eta="")
                 overall_id = progress.add_task(
                     "Embedding issues",
                     total=limit if limit > 0 else None,
-                    eta="?",
                 )
 
                 embedded = 0
@@ -651,12 +627,13 @@ async def run_embed_loop(
 
                     issue_id = issue_data["issue_id"]
                     embed_text = issue_data["embed_text"]
-                    issue_ref = f"issue#{issue_id}"
+                    issue_ref = (
+                        f"{issue_data['project_name']}#{issue_data['external_id']}"
+                    )
 
                     progress.update(
-                        status_id,
+                        overall_id,
                         description=f"[dim]{issue_ref}:[/dim] embed…",
-                        visible=True,
                     )
 
                     t0 = time.monotonic()
@@ -665,11 +642,8 @@ async def run_embed_loop(
                     )
 
                     if embedding is None:
-                        progress.update(status_id, visible=False)
                         logger.warning("%s: embedding failed, skipping", issue_ref)
                         continue
-
-                    progress.update(status_id, visible=False)
 
                     try:
                         submit_response = await http_client.post(
@@ -703,7 +677,9 @@ async def run_embed_loop(
 
                     embedded += 1
                     duration = time.monotonic() - t0
-                    progress.update(overall_id, advance=1)
+                    progress.update(
+                        overall_id, advance=1, description="Embedding issues"
+                    )
                     progress.console.print(
                         f"[bold]{issue_ref}[/bold]"
                         f"  [dim]embed {_format_elapsed(t_embed)}"
