@@ -96,20 +96,23 @@ creation and closure dates. Run this after the first data collection to
 populate the trends charts with history going back to each project's earliest
 issue.
 
-Run it **on your local machine** (not inside the container) from the repo root,
-with `DATABASE_URL` pointing at the production database:
+The script uses a synchronous SQLAlchemy engine (psycopg2), so `psycopg2-binary`
+must be available. It is installed in the Docker image and in the `dev`
+dependency group.
 
-```bash
-DATABASE_URL=postgresql+asyncpg://<user>:<password>@<host>/craft_dashboard \
-  uv run scripts/backfill_snapshots.py
-```
-
-If you are running locally with Docker Compose and want to target the dev
-database, you can forward the port first:
+**Local dev (Docker Compose)** — run it inside the container where the database
+is already reachable:
 
 ```bash
 docker compose up -d
-DATABASE_URL=postgresql+asyncpg://craft_dashboard:devpassword@localhost:5432/craft_dashboard \
+docker compose exec app uv run scripts/backfill_snapshots.py
+```
+
+**Production** — run it on your local machine, pointing at the production
+database:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://<user>:<password>@<host>/craft_dashboard \
   uv run scripts/backfill_snapshots.py
 ```
 
