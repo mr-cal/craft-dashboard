@@ -99,7 +99,7 @@ issue.
 Run it inside the production container, where `DATABASE_URL` is already set:
 
 ```bash
-podman exec -i vps-infra_craft-dashboard_1 uv run scripts/backfill_snapshots.py
+podman exec -i vps-infra_craft-dashboard_1 python scripts/backfill_snapshots.py
 ```
 
 The script reads all issues from the database and writes snapshot rows for
