@@ -78,9 +78,26 @@ bots = [
     "renovate[bot]",
 ]
 
+# filter renovate dependency dashboards
 [issues.filter]
-# Dependency Dashboard bot issues — not real work items
-snapcraft = [4472]
+charmcraft = [947]
+craft-actions = [3]
+craft-application = [1]
+craft-archives = [1]
+craft-artifacts = [1]
+craft-cli = [153]
+craft-grammar = [24]
+craft-parts = [445]
+craft-platforms = [1]
+craft-providers = [323]
+craft-store = [93]
+debcraft = [1]
+imagecraft = [1]
+rockcraft = [295]
+snapcraft = [2048, 4472]
+snapcraft-rocks = [7]
+starbase = [3]
+starflow = [33]
 
 [hotfix-min-versions]
 charmcraft = "3.0"
