@@ -518,7 +518,7 @@ class TestComputeSnapshotCounts:
         assert result["median_age_bots"] == 40
 
     def test_median_age_combines_issues_and_prs(self) -> None:
-        """Combined median_age should follow starcraft-stats across issues and PRs."""
+        """Combined median_age should combine issues and PRs using the median-date algorithm."""
         issues = [
             {
                 **_issue("open", author="external-user", created_days_ago=0),

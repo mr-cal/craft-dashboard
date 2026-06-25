@@ -96,25 +96,26 @@ creation and closure dates. Run this after the first data collection to
 populate the trends charts with history going back to each project's earliest
 issue.
 
+Run it **on your local machine** (not inside the container) from the repo root,
+with `DATABASE_URL` pointing at the production database:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://<user>:<password>@<host>/craft_dashboard \
+  uv run scripts/backfill_snapshots.py
 ```
-uv run scripts/backfill_snapshots.py
+
+If you are running locally with Docker Compose and want to target the dev
+database, you can forward the port first:
+
+```bash
+docker compose up -d
+DATABASE_URL=postgresql+asyncpg://craft_dashboard:devpassword@localhost:5432/craft_dashboard \
+  uv run scripts/backfill_snapshots.py
 ```
 
-This is a synchronous script (uses the sync SQLAlchemy engine). It reads all
-issues from the database and writes snapshot rows for every day from the
-earliest `created_at` to today.
-
-It also computes cross-project aggregate snapshots (for the "all-projects"
-synthetic project).
-
-### migrate_csv.py
-
-One-time migration script for importing data from the old starcraft-stats CSV
-format. Not needed for new deployments.
-
-```
-uv run scripts/migrate_csv.py --data-dir /path/to/starcraft-stats/html/data
-```
+The script reads all issues from the database and writes snapshot rows for
+every day from the earliest `created_at` to today. It also computes
+cross-project aggregate snapshots for the "all-projects" synthetic project.
 
 ### lp_bug_report.py
 

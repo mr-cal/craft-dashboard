@@ -41,7 +41,7 @@ class Snapshot(Base):
     median_issue_age_bots: Mapped[int] = mapped_column(Integer, default=0)
     median_pr_age_bots: Mapped[int] = mapped_column(Integer, default=0)
 
-    # Combined median ages (issues + PRs together, matches starcraft-stats)
+    # Combined median ages (issues + PRs together)
     median_age: Mapped[int] = mapped_column(Integer, default=0)
     nm_median_age: Mapped[int] = mapped_column(Integer, default=0)
     median_age_internal: Mapped[int] = mapped_column(Integer, default=0)

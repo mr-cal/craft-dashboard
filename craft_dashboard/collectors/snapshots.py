@@ -31,8 +31,8 @@ def _increment_counts(
         counts[f"{prefix}_{type_key}_bots"] += 1
 
 
-def _starcraft_get_median_date(dates: list[datetime]) -> datetime:
-    """Replicate starcraft-stats median-date behavior exactly."""
+def _get_median_date(dates: list[datetime]) -> datetime:
+    """Return the median datetime from a list."""
     sorted_dates = sorted(dates)
     n = len(sorted_dates)
     if n % 2 == 0:
@@ -43,12 +43,12 @@ def _starcraft_get_median_date(dates: list[datetime]) -> datetime:
     return sorted_dates[n // 2]
 
 
-def _starcraft_get_median_age(
+def _get_median_age(
     dates: list[datetime], reference_date: datetime
 ) -> int | None:
-    """Replicate starcraft-stats median-age behavior exactly."""
+    """Return the median age in days, or None if the list is empty."""
     if dates:
-        return (reference_date - _starcraft_get_median_date(dates)).days
+        return (reference_date - _get_median_date(dates)).days
     return None
 
 
@@ -205,7 +205,7 @@ def compute_snapshot_counts(
         "median_age_bots": date_buckets["bots"],
     }
     for field, dates in median_sources.items():
-        if (median_age := _starcraft_get_median_age(dates, today_dt)) is not None:
+        if (median_age := _get_median_age(dates, today_dt)) is not None:
             counts[field] = median_age
 
     return counts
