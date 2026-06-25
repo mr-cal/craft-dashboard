@@ -16,8 +16,9 @@ DEFAULT_PATH: pathlib.Path = (
 )
 MAX_WINDOW: int = 100
 
-# Phase key used throughout the eval client
+# Phase keys used throughout the eval client
 PHASE_EVALUATE = "evaluate"
+PHASE_EMBED = "embed"
 
 
 class TimingHistory:

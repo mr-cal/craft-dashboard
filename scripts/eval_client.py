@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Awaitable
 
+    from rich.progress import Task as RichTask
+
 import click
 import httpx
 from dotenv import load_dotenv
@@ -29,18 +31,22 @@ from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
     Progress,
+    ProgressColumn,
     SpinnerColumn,
     TaskProgressColumn,
     TextColumn,
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
+from rich.text import Text
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from craft_dashboard.llm.client import LocalLLMClient
 from craft_dashboard.llm.embeddings import EmbeddingClient
 from craft_dashboard.llm.evaluator import IssueEvaluator, _compute_content_hash
+from eval_timing import PHASE_EMBED, PHASE_EVALUATE, TimingHistory
 
 logger = logging.getLogger(__name__)
 
@@ -112,15 +118,48 @@ def _format_error_body(response: httpx.Response) -> str:
     return (text[:_MAX_ERROR_BODY] + "…") if len(text) > _MAX_ERROR_BODY else text
 
 
-def _make_progress(console: Console, total: int | None) -> Progress:  # noqa: ARG001
+class TimingEtaColumn(ProgressColumn):
+    """ETA column backed by persistent TimingHistory.
+
+    Uses historical per-item durations to estimate completion time, so the ETA
+    is available immediately from the first item (not just after Rich has
+    accumulated enough in-run samples).
+    """
+
+    def __init__(self, history: TimingHistory, phase: str) -> None:
+        self._history = history
+        self._phase = phase
+        super().__init__()
+
+    def render(self, task: RichTask) -> Text:
+        """Render the ETA for the given Rich task."""
+        if task.finished:
+            return Text("—")
+        if task.total is None:
+            return Text("?")
+        remaining = max(0, int(task.total - task.completed))
+        return Text(self._history.eta(self._phase, remaining))
+
+
+def _make_progress(
+    console: Console,
+    total: int | None,  # noqa: ARG001
+    timing: TimingHistory | None = None,
+    phase: str | None = None,
+) -> Progress:
     """Create a rich Progress bar for the eval loop."""
+    eta_col: ProgressColumn = (
+        TimingEtaColumn(timing, phase)
+        if timing is not None and phase is not None
+        else TimeRemainingColumn()
+    )
     return Progress(
         SpinnerColumn(),
         TextColumn("[bold]{task.description}"),
         BarColumn(),
         TaskProgressColumn(),
         MofNCompleteColumn(),
-        TimeRemainingColumn(),
+        eta_col,
         TimeElapsedColumn(),
         console=console,
         transient=False,
@@ -308,7 +347,8 @@ async def run_evaluate_loop(
                 logger.info("Press space to pause/unpause")
 
             task_total = total_remaining if total_remaining > 0 else None
-            progress = _make_progress(console, task_total)
+            timing = TimingHistory()
+            progress = _make_progress(console, task_total, timing, PHASE_EVALUATE)
             with progress:
                 overall_id = progress.add_task(
                     "Evaluating issues",
@@ -496,6 +536,7 @@ async def run_evaluate_loop(
                         continue
 
                     evaluated += 1
+                    timing.add(PHASE_EVALUATE, t_eval)
                     prompt_tok = submission["prompt_tokens"]
                     completion_tok = submission["completion_tokens"]
                     total_prompt_tokens += prompt_tok
@@ -598,7 +639,8 @@ async def run_embed_loop(
             # the server's pending count (so the bar shows meaningful progress
             # rather than an unbounded spinner when no limit is given).
             task_total = limit if limit > 0 else (pending_embeddings or None)
-            progress = _make_progress(console, task_total)
+            timing = TimingHistory()
+            progress = _make_progress(console, task_total, timing, PHASE_EMBED)
             with progress:
                 overall_id = progress.add_task(
                     "Embedding issues",
@@ -715,6 +757,7 @@ async def run_embed_loop(
                         continue
 
                     embedded += 1
+                    timing.add(PHASE_EMBED, t_embed)
                     duration = time.monotonic() - t0
                     progress.update(
                         overall_id, advance=1, description="Embedding issues"
