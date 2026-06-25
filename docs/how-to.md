@@ -96,24 +96,10 @@ creation and closure dates. Run this after the first data collection to
 populate the trends charts with history going back to each project's earliest
 issue.
 
-The script uses a synchronous SQLAlchemy engine (psycopg2), so `psycopg2-binary`
-must be available. It is installed in the Docker image and in the `dev`
-dependency group.
-
-**Local dev (Docker Compose)** — run it inside the container where the database
-is already reachable:
+Run it inside the production container, where `DATABASE_URL` is already set:
 
 ```bash
-docker compose up -d
-docker compose exec app uv run scripts/backfill_snapshots.py
-```
-
-**Production** — run it on your local machine, pointing at the production
-database:
-
-```bash
-DATABASE_URL=postgresql+asyncpg://<user>:<password>@<host>/craft_dashboard \
-  uv run scripts/backfill_snapshots.py
+podman exec -i vps-infra_craft-dashboard_1 uv run scripts/backfill_snapshots.py
 ```
 
 The script reads all issues from the database and writes snapshot rows for
