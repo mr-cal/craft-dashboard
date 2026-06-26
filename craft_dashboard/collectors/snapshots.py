@@ -43,9 +43,7 @@ def _get_median_date(dates: list[datetime]) -> datetime:
     return sorted_dates[n // 2]
 
 
-def _get_median_age(
-    dates: list[datetime], reference_date: datetime
-) -> int | None:
+def _get_median_age(dates: list[datetime], reference_date: datetime) -> int | None:
     """Return the median age in days, or None if the list is empty."""
     if dates:
         return (reference_date - _get_median_date(dates)).days

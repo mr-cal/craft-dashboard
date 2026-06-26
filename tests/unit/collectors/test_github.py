@@ -295,7 +295,7 @@ class TestCollectIssuesExceptionHandling:
             side_effect=self._fake_insert,
         )
 
-        count = await collector.collect_issues("repo", 1, session)
+        count = await collector.collect_issues("repo", 1, session, state="all")
 
         assert count == 1
         session.commit.assert_awaited_once()
@@ -321,7 +321,7 @@ class TestCollectIssuesExceptionHandling:
         )
 
         with pytest.raises(RuntimeError, match="boom"):
-            await collector.collect_issues("repo", 1, session)
+            await collector.collect_issues("repo", 1, session, state="all")
 
     async def test_collect_issues_catches_github_exception_fetching_pr_details(
         self, mocker
@@ -340,7 +340,7 @@ class TestCollectIssuesExceptionHandling:
             side_effect=self._fake_insert,
         )
 
-        count = await collector.collect_issues("repo", 1, session)
+        count = await collector.collect_issues("repo", 1, session, state="all")
 
         assert count == 1
         session.commit.assert_awaited_once()
@@ -363,7 +363,7 @@ class TestCollectIssuesExceptionHandling:
         )
 
         with pytest.raises(RuntimeError, match="boom"):
-            await collector.collect_issues("repo", 1, session)
+            await collector.collect_issues("repo", 1, session, state="all")
 
 
 class TestFetchPRDetails:

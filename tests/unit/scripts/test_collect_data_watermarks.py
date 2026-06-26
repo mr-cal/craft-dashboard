@@ -116,6 +116,7 @@ class TestCollectGithubWatermarks:
             projects=["snapcraft"],
             run_started_at=collect_data.time.monotonic(),
             full_refresh=False,
+            mode="full",
         )
 
         assert gh_collector.collect_issues.await_args.kwargs["since"] == watermark
@@ -185,6 +186,7 @@ class TestCollectGithubWatermarks:
             projects=["snapcraft"],
             run_started_at=collect_data.time.monotonic(),
             full_refresh=True,
+            mode="full",
         )
 
         assert gh_collector.collect_issues.await_args.kwargs["since"] is None

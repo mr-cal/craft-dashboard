@@ -257,8 +257,26 @@ async def _collect_github(
     full_refresh: bool = False,
     force_schedule: bool = False,
     collection_run_id: int | None = None,
+    mode: str = "open",
 ) -> CollectionStats:
-    """Run GitHub data collection for all projects due for refresh."""
+    """Run GitHub data collection for all projects.
+
+    Args:
+        settings: Application settings.
+        config: Dashboard configuration.
+        session_factory: Async session factory.
+        limit: Max issues per repository (0 = all).
+        projects: Project names to collect; None means all configured.
+        run_started_at: Monotonic start time for elapsed logging.
+        full_refresh: If True, ignore watermarks for closed-issue pass.
+        force_schedule: If True, ignore per-project schedule for closed pass.
+        collection_run_id: ID of the active collection run.
+        mode: Collection mode — "open" collects open issues for every project
+            on every run (no schedule gate); "full" collects all issues
+            (open + closed) per the per-project refresh schedule; "all"
+            forces a full collection for every project regardless of schedule.
+
+    """
     collector = GitHubCollector(
         token=settings.github_token,
         org="canonical",
@@ -350,6 +368,68 @@ async def _collect_github(
                     exc_info=True,
                 )
 
+            # --- Phase A: Open issues (runs in every mode) ---
+            # Always refresh all open issues regardless of schedule.
+            # This runs on every call so the Issues dashboard stays current.
+            if mode != "full":
+                # "open" mode: open issues only (no full-refresh pass)
+                # "all" mode: open issues first, then full-refresh below
+                try:
+                    open_started_at = time.monotonic()
+                    open_collected = await collector.collect_issues(
+                        project_name,
+                        project_id,
+                        session,
+                        limit=limit,
+                        state="open",
+                        collection_run_id=collection_run_id,
+                    )
+                    stats.issues_collected += open_collected
+                    logger.info(
+                        "  canonical/%s: open issues collected (%d) in %s",
+                        project_name,
+                        open_collected,
+                        _format_duration(time.monotonic() - open_started_at),
+                    )
+
+                    snapshot_started_at = time.monotonic()
+                    await generate_snapshot(
+                        project_id,
+                        session,
+                        set(config.maintainers),
+                        bots=bots,
+                        filtered_issue_ids=set(
+                            config.filtered_issues.get(project_name, [])
+                        )
+                        or None,
+                    )
+                    logger.info(
+                        "  Generated snapshot for %s in %s",
+                        project_name,
+                        _format_duration(time.monotonic() - snapshot_started_at),
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "Failed to collect open GitHub issues for %s", project_name
+                    )
+                    stats.errors.append({"project": project_name, "error": str(exc)})
+                    async with session_factory() as err_session:
+                        await record_refresh_error(
+                            project_id, "github", str(exc), err_session
+                        )
+
+                if mode == "open":
+                    # Open-only mode: done with this project.
+                    logger.info(
+                        "Completed GitHub open-issue collection for %s in %s",
+                        project_name,
+                        _format_duration(time.monotonic() - project_started_at),
+                    )
+                    continue
+
+            # --- Phase B: Full refresh (open + closed) — schedule-gated ---
+            # Runs in "full" mode (respects schedule) and "all" mode (force all).
+
             # Check refresh schedule
             result = await session.execute(
                 select(RefreshSchedule.next_refresh_at).where(
@@ -359,7 +439,11 @@ async def _collect_github(
             )
             next_refresh = result.scalar_one_or_none()
 
-            if not force_schedule and not is_due_for_refresh(next_refresh):
+            if (
+                mode == "full"
+                and not force_schedule
+                and not is_due_for_refresh(next_refresh)
+            ):
                 logger.info("Skipping %s (not due for full refresh)", project_name)
                 logger.info(
                     "Completed GitHub data for %s in %s (full refresh skipped)",
@@ -397,6 +481,7 @@ async def _collect_github(
                     refresh_age_days=settings.refresh_age_days,
                     since=watermark,
                     collection_run_id=collection_run_id,
+                    state="all",
                 )
                 stats.issues_collected += issues_collected
                 logger.info(
@@ -532,6 +617,7 @@ async def _main(
     verbose: bool,
     full_refresh: bool = False,
     force_schedule: bool = False,
+    mode: str = "open",
 ) -> None:
     """Run data collection."""
     settings = Settings()
@@ -560,6 +646,7 @@ async def _main(
         logger.info("Full collection mode enabled; ignoring saved watermarks")
     else:
         logger.info("Incremental collection mode enabled; using saved watermarks")
+    logger.info("Collection mode: %s", mode)
 
     run_started_at = time.monotonic()
     stats = CollectionStats()
@@ -607,6 +694,7 @@ async def _main(
                         full_refresh=full_refresh,
                         force_schedule=force_schedule,
                         collection_run_id=run_id,
+                        mode=mode,
                     ),
                 )
             )
@@ -692,6 +780,17 @@ async def _main(
     default=False,
     help="Ignore the refresh schedule and collect all projects now, regardless of when they were last collected.",
 )
+@click.option(
+    "--mode",
+    type=click.Choice(["open", "full", "all"]),
+    default="open",
+    help=(
+        "Collection mode: 'open' (default) refreshes open issues for every project on "
+        "every run with no schedule gate; 'full' refreshes all issues (open + closed) "
+        "per the per-project schedule; 'all' forces a full collection for every project "
+        "regardless of schedule."
+    ),
+)
 def main(
     source: str,
     limit: int,
@@ -699,6 +798,7 @@ def main(
     verbose: bool,
     full_refresh: bool,
     force_schedule: bool,
+    mode: str,
 ) -> None:
     """Collect data from external sources."""
     asyncio.run(
@@ -709,6 +809,7 @@ def main(
             verbose,
             full_refresh=full_refresh,
             force_schedule=force_schedule,
+            mode=mode,
         )
     )
 

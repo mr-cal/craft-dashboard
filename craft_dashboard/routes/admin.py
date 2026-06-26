@@ -155,6 +155,7 @@ async def admin_page(
     recent_stats = await admin_service.get_seven_day_token_stats()
     collection_runs = await admin_service.get_recent_collection_runs()
     next_refresh = await admin_service.get_next_scheduled_refresh()
+    project_refresh_list = await admin_service.get_project_refresh_list()
 
     return templates.TemplateResponse(
         request,
@@ -163,6 +164,7 @@ async def admin_page(
             "project_names": project_names,
             "schedule_days": schedule_days,
             "next_refresh": next_refresh,
+            "project_refresh_list": project_refresh_list,
             "total_evaluations": lifetime_stats["evaluations"],
             "total_tokens": lifetime_stats["tokens"],
             "total_prompt_tokens": lifetime_stats["prompt_tokens"],

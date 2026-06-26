@@ -4,7 +4,7 @@ import hashlib
 import logging
 import time
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
 import github
 import sqlalchemy as sa
@@ -332,6 +332,7 @@ class GitHubCollector:
         refresh_age_days: int = 7,
         since: datetime | None = None,
         collection_run_id: int | None = None,
+        state: Literal["open", "closed", "all"] = "open",
     ) -> int:
         """Collect issues and PRs for a repository.
 
@@ -343,9 +344,14 @@ class GitHubCollector:
             session: An async SQLAlchemy session.
             limit: Maximum number of issues to fetch per repo (0 = all).
             refresh_age_days: Issues last fetched more than this many days ago
-                are considered stale and eligible for re-fetching.
-            since: Fetch only issues updated on or after this timestamp.
+                are considered stale and eligible for re-fetching. Only used
+                when state is not "open".
+            since: Fetch only issues updated on or after this timestamp. Only
+                used when state is not "open".
             collection_run_id: ID of the collection run that fetched these issues.
+            state: Which issues to fetch — "open" (always refreshed, no schedule
+                gate), "closed" (closed issues only), or "all" (open + closed).
+                Default is "open".
 
         Returns:
             The number of issues upserted.
@@ -359,79 +365,92 @@ class GitHubCollector:
             Issue,
         )
 
-        # Count how many existing issues are due for refresh
-        cutoff = datetime.now(tz=UTC) - timedelta(days=refresh_age_days)
-        stale_where = sa.and_(
-            Issue.project_id == project_id,
-            Issue.source == "github",
-            sa.or_(
-                Issue.last_fetched_at.is_(None),
-                Issue.last_fetched_at < cutoff,
-            ),
-        )
-        due_count_result = await session.execute(
-            sa.select(sa.func.count()).select_from(Issue).where(stale_where)
-        )
-        due_count = due_count_result.scalar_one()
-
-        # Also check whether this project has any issues at all (fresh-project detection).
-        total_result = await session.execute(
-            sa.select(sa.func.count())
-            .select_from(Issue)
-            .where(Issue.project_id == project_id, Issue.source == "github")
-        )
-        total_count = total_result.scalar_one()
-
-        if since is None and due_count == 0 and total_count > 0:
-            logger.info(
-                "  %s/%s: no issues due for refresh, skipping", self.org, repo_name
-            )
-            return 0
-
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
 
-        if since is not None:
-            since_date = since.replace(tzinfo=UTC) if since.tzinfo is None else since
+        if state == "open":
+            # Always fetch all currently-open issues; no schedule gate.
+            # The per-issue updated_at skip below handles efficiency.
+            gh_issues = repo.get_issues(state="open", sort="updated", direction="desc")
             logger.info(
-                "  %s/%s: using watermark since %s",
+                "  %s/%s: collecting open issues%s",
                 self.org,
                 repo_name,
-                since_date.isoformat(),
+                f", limit: {limit}" if limit else "",
             )
         else:
-            # Use 'since' based on the oldest last_fetched_at of due issues so we
-            # never miss a state transition that happened while the system was offline.
-            # Cap at 90 days to bound the amount of data fetched on a long outage.
-            _max_lookback = datetime.now(tz=UTC) - timedelta(days=90)
-            oldest_fetch_result = await session.execute(
-                sa.select(sa.func.min(Issue.last_fetched_at))
-                .select_from(Issue)
-                .where(stale_where)
+            # Count how many existing issues are due for refresh
+            cutoff = datetime.now(tz=UTC) - timedelta(days=refresh_age_days)
+            stale_where = sa.and_(
+                Issue.project_id == project_id,
+                Issue.source == "github",
+                sa.or_(
+                    Issue.last_fetched_at.is_(None),
+                    Issue.last_fetched_at < cutoff,
+                ),
             )
-            oldest_fetch = oldest_fetch_result.scalar_one_or_none()
-            if oldest_fetch is not None:
-                oldest_fetch_tz = (
-                    oldest_fetch.replace(tzinfo=UTC)
-                    if oldest_fetch.tzinfo is None
-                    else oldest_fetch
+            due_count_result = await session.execute(
+                sa.select(sa.func.count()).select_from(Issue).where(stale_where)
+            )
+            due_count = due_count_result.scalar_one()
+
+            # Also check whether this project has any issues at all (fresh-project detection).
+            total_result = await session.execute(
+                sa.select(sa.func.count())
+                .select_from(Issue)
+                .where(Issue.project_id == project_id, Issue.source == "github")
+            )
+            total_count = total_result.scalar_one()
+
+            if since is None and due_count == 0 and total_count > 0:
+                logger.info(
+                    "  %s/%s: no issues due for refresh, skipping", self.org, repo_name
                 )
-                since_date = max(oldest_fetch_tz - timedelta(days=1), _max_lookback)
+                return 0
+
+            if since is not None:
+                since_date = (
+                    since.replace(tzinfo=UTC) if since.tzinfo is None else since
+                )
+                logger.info(
+                    "  %s/%s: using watermark since %s",
+                    self.org,
+                    repo_name,
+                    since_date.isoformat(),
+                )
             else:
-                # Fresh project with no issues yet: fetch the last 90 days.
-                since_date = _max_lookback
+                # Use 'since' based on the oldest last_fetched_at of due issues so we
+                # never miss a state transition that happened while the system was offline.
+                # Cap at 90 days to bound the amount of data fetched on a long outage.
+                _max_lookback = datetime.now(tz=UTC) - timedelta(days=90)
+                oldest_fetch_result = await session.execute(
+                    sa.select(sa.func.min(Issue.last_fetched_at))
+                    .select_from(Issue)
+                    .where(stale_where)
+                )
+                oldest_fetch = oldest_fetch_result.scalar_one_or_none()
+                if oldest_fetch is not None:
+                    oldest_fetch_tz = (
+                        oldest_fetch.replace(tzinfo=UTC)
+                        if oldest_fetch.tzinfo is None
+                        else oldest_fetch
+                    )
+                    since_date = max(oldest_fetch_tz - timedelta(days=1), _max_lookback)
+                else:
+                    # Fresh project with no issues yet: fetch the last 90 days.
+                    since_date = _max_lookback
 
-        gh_issues = repo.get_issues(
-            state="all", sort="updated", direction="desc", since=since_date
-        )
+            gh_issues = repo.get_issues(
+                state=state, sort="updated", direction="desc", since=since_date
+            )
 
-        logger.info(
-            "  %s/%s: starting collection (%d issues due for refresh, fetching updated since %s)%s",
-            self.org,
-            repo_name,
-            due_count,
-            since_date.strftime("%Y-%m-%d"),
-            f", limit: {limit}" if limit else "",
-        )
+            logger.info(
+                "  %s/%s: starting full collection (%d issues due for refresh, fetching updated since %s)%s",
+                self.org,
+                repo_name,
+                due_count,
+                since_date.strftime("%Y-%m-%d"),
+                f", limit: {limit}" if limit else "",
+            )
 
         count = 0
         skipped = 0
@@ -444,7 +463,7 @@ class GitHubCollector:
                 )
                 break
 
-            issue_type, state = _classify_issue(gh_issue)
+            issue_type, issue_state = _classify_issue(gh_issue)
 
             # Skip if the issue hasn't changed since we last fetched it.
             # Use updated_at comparison rather than a fixed age window so that
@@ -485,7 +504,7 @@ class GitHubCollector:
                 repo_name,
                 gh_issue.number,
                 issue_type,
-                state,
+                issue_state,
             )
 
             # Fetch comments for all items (open and closed)
@@ -525,7 +544,7 @@ class GitHubCollector:
                     gh_issue,
                     project_id,
                     issue_type,
-                    state,
+                    issue_state,
                     comments,
                     extra_metadata,
                 ),

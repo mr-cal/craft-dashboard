@@ -101,11 +101,14 @@
   {% endif %}
 </section>
 
-<h3>Project Refresh Schedule (Next 7 Days)</h3>
-<p style="font-size:0.875rem;color:var(--app-text-muted);">Number of issues scheduled for data collection each day.</p>
+<h3>Project Full-Refresh Schedule</h3>
+<p style="font-size:0.875rem;color:var(--app-text-muted);">
+  Open issues are refreshed on every run (every 4 hours).
+  This table shows when each project's full refresh (open + closed) is next scheduled.
+</p>
 {% if next_refresh %}
 <p style="font-size:0.875rem;">
-  Next scheduled refresh: <strong><time id="next-refresh-time" datetime="{{ next_refresh.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ next_refresh.strftime('%a %b %d, %H:%M UTC') }}</time></strong>
+  Next scheduled full refresh: <strong><time id="next-refresh-time" datetime="{{ next_refresh.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ next_refresh.strftime('%a %b %d, %H:%M UTC') }}</time></strong>
 </p>
 <script>
   (function () {
@@ -123,22 +126,56 @@
 {% else %}
 <p style="font-size:0.875rem;color:var(--app-text-muted);">No upcoming refresh scheduled. Use <em>Redistribute</em> to set one up.</p>
 {% endif %}
+{% if project_refresh_list %}
 <table>
   <thead>
     <tr>
-      {% for day in schedule_days %}
-      <th {% if day.is_today %}style="font-weight: bold;"{% endif %}>{{ day.date }}</th>
-      {% endfor %}
+      <th>Project</th>
+      <th>Last Full Refresh</th>
+      <th>Next Full Refresh</th>
+      <th>Status</th>
     </tr>
   </thead>
   <tbody>
+    {% for entry in project_refresh_list %}
     <tr>
-      {% for day in schedule_days %}
-      <td style="text-align:center;{% if day.is_today %}font-weight:bold;{% endif %}">{{ day.count }}</td>
-      {% endfor %}
+      <td>{{ entry.project }}</td>
+      <td style="font-size:0.875rem;">
+        {% if entry.last_refreshed_at %}
+        <time datetime="{{ entry.last_refreshed_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">
+          {{ entry.last_refreshed_at.strftime('%Y-%m-%d %H:%M UTC') }}
+        </time>
+        {% else %}
+        <span style="color:var(--app-text-muted);">never</span>
+        {% endif %}
+      </td>
+      <td style="font-size:0.875rem;">
+        {% if entry.next_refresh_at %}
+        <time datetime="{{ entry.next_refresh_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">
+          {{ entry.next_refresh_at.strftime('%Y-%m-%d %H:%M UTC') }}
+        </time>
+        {% else %}
+        <span style="color:var(--app-text-muted);">not scheduled</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if entry.consecutive_failures > 0 %}
+        <span style="color:var(--app-negative);" title="{{ entry.consecutive_failures }} consecutive failure(s)">⚠ {{ entry.consecutive_failures }} error(s)</span>
+        {% elif entry.is_overdue %}
+        <span style="color:var(--app-caution);">overdue</span>
+        {% elif entry.next_refresh_at is none %}
+        <span style="color:var(--app-text-muted);">–</span>
+        {% else %}
+        <span style="color:var(--app-positive);">✓</span>
+        {% endif %}
+      </td>
     </tr>
+    {% endfor %}
   </tbody>
 </table>
+{% else %}
+<p style="font-size:0.875rem;color:var(--app-text-muted);">No refresh schedule data. Run a full collection first.</p>
+{% endif %}
 
 <div style="margin-top: 0.75rem; font-size: 0.875rem; display: flex; gap: 1rem;">
   <a href="/issues?llm_status=no_llm&state=open">View issues with no LLM data</a>

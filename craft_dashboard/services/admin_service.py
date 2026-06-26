@@ -34,6 +34,16 @@ class ProjectSchedule(TypedDict):
     days: list[int]
 
 
+class ProjectRefreshEntry(TypedDict):
+    """Per-project full-refresh schedule entry shown on the admin dashboard."""
+
+    project: str
+    next_refresh_at: datetime | None
+    last_refreshed_at: datetime | None
+    consecutive_failures: int
+    is_overdue: bool
+
+
 class ScheduleDayCount(TypedDict):
     """Upcoming scheduled issue count for a calendar day."""
 
@@ -170,6 +180,45 @@ class AdminService:
                 }
             )
         return schedule_days
+
+    async def get_project_refresh_list(self) -> list[ProjectRefreshEntry]:
+        """Get per-project full-refresh schedule sorted by next_refresh_at.
+
+        Returns projects with their scheduled full-refresh timing (open+closed
+        issues). Projects with overdue or missing schedules appear first.
+        """
+        result = await self.session.execute(
+            select(
+                Project.name,
+                RefreshSchedule.next_refresh_at,
+                RefreshSchedule.last_refreshed_at,
+                RefreshSchedule.consecutive_failures,
+            )
+            .join(RefreshSchedule, RefreshSchedule.project_id == Project.id)
+            .where(Project.category != "aggregate")
+            .where(RefreshSchedule.source == "github")
+            .order_by(
+                RefreshSchedule.next_refresh_at.asc().nullsfirst(),
+                Project.name,
+            )
+        )
+        return [
+            {
+                "project": row.name,
+                "next_refresh_at": _ensure_utc(row.next_refresh_at),
+                "last_refreshed_at": _ensure_utc(row.last_refreshed_at),
+                "consecutive_failures": row.consecutive_failures,
+                "is_overdue": self._is_overdue(row.next_refresh_at),
+            }
+            for row in result
+        ]
+
+    def _is_overdue(self, next_refresh_at: datetime | None) -> bool:
+        """Return True if next_refresh_at is in the past."""
+        if next_refresh_at is None:
+            return False
+        utc_ts = _ensure_utc(next_refresh_at)
+        return utc_ts is not None and utc_ts <= datetime.now(UTC)
 
     async def get_next_scheduled_refresh(self) -> datetime | None:
         """Return the earliest future next_refresh_at across all schedules."""

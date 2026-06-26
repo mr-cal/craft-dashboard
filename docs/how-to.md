@@ -20,12 +20,27 @@ podman exec -i vps-infra_craft-dashboard_1 python scripts/<script>.py
 Fetches issues, PRs, releases, and dependencies from GitHub and Launchpad.
 Generates daily snapshots after each project's collection.
 
+Two collection modes are used in production:
+
+**Open-issue refresh** (`--mode open`, default): runs every 4 hours, always
+refreshes all open GitHub issues for every project — no schedule gate.
+
+**Full refresh** (`--mode full`): runs once daily, refreshes all issues
+(open + closed) per the per-project schedule (`refresh-interval-days` in
+`craft-dashboard.toml`, default 7 days). Also collects Launchpad bugs.
+
 ```
-# full collection (all configured repos, all sources)
-uv run scripts/collect_data.py --source all
+# open-issue refresh (default mode)
+uv run scripts/collect_data.py --source github --mode open
+
+# full collection (all configured repos, all sources, per-project schedule)
+uv run scripts/collect_data.py --source all --mode full
+
+# force full collection for all projects, ignore schedule
+uv run scripts/collect_data.py --source all --mode all
 
 # GitHub only
-uv run scripts/collect_data.py --source github
+uv run scripts/collect_data.py --source github --mode full
 
 # Launchpad only
 uv run scripts/collect_data.py --source launchpad
@@ -40,18 +55,20 @@ uv run scripts/collect_data.py --source github --limit 25
 uv run scripts/collect_data.py --source github --project snapcraft -v
 ```
 
-In production, this runs as a daily cron job at 2 AM UTC:
+In production, two cron jobs run:
 
 ```bash
-# local
-docker compose exec -T app python scripts/collect_data.py --source all
-# production
-podman exec -i vps-infra_craft-dashboard_1 python scripts/collect_data.py --source all
+# Open-issue refresh — every 4 hours
+podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source github --mode open
+
+# Full collection (open + closed issues, launchpad) — daily at 2 AM UTC
+podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source all --mode full
 ```
 
-The script respects the refresh schedule. If a project was recently fetched, it
-skips the full issue fetch but still collects dependencies and releases. To
-force a full refresh of all projects, see "Force-refresh all data" below.
+The full-refresh mode (`--mode full`) respects the per-project refresh schedule.
+If a project is not yet due, it skips the issue fetch but still collects
+dependencies and releases. To force a full refresh of all projects, see
+"Force-refresh all data" below.
 
 ### run_llm.py
 
@@ -119,22 +136,23 @@ DATABASE_URL=postgresql+asyncpg://... uv run scripts/lp_bug_report.py
 
 ### Force-refresh all data
 
-The collector skips projects that are not due for refresh. To force a full
-re-fetch of everything, reset all refresh schedules via the admin endpoint:
+The full-refresh collector (`--mode full`) skips projects not yet due. To force
+a re-fetch of everything regardless of schedule, use `--mode all`:
+
+```bash
+# local
+docker compose exec -T app python scripts/collect_data.py --source all --mode all
+# production
+podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source all --mode all
+```
+
+Alternatively, reset all refresh schedules via the admin endpoint, then run
+a `--mode full` collection:
 
 ```bash
 curl -X POST https://craft-dashboard.name/admin/distribute \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Origin: https://craft-dashboard.name"
-```
-
-Then trigger a collection:
-
-```bash
-# local
-docker compose exec -T app python scripts/collect_data.py --source all
-# production
-podman exec -i vps-infra_craft-dashboard_1 python scripts/collect_data.py --source all
 ```
 
 ### Distribute refresh schedules

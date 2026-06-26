@@ -143,6 +143,7 @@ class TestCollectGithubLogging:
             _make_session_factory(),
             projects=["snapcraft"],
             run_started_at=collect_data.time.monotonic(),
+            mode="full",
         )
 
         assert result.projects_processed == {"snapcraft"}
@@ -211,6 +212,7 @@ class TestReleaseCollectionIndependentOfRefresh:
             _make_session_factory(),
             projects=["snapcraft"],
             run_started_at=collect_data.time.monotonic(),
+            mode="full",
         )
 
         gh_collector.collect_releases.assert_called_once()

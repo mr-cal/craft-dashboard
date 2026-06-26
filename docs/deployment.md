@@ -167,15 +167,20 @@ podman exec -i vps-infra_postgres_1 pg_dump -U craft_dashboard craft_dashboard |
 
 ## Scheduled tasks
 
-Data collection and LLM evaluation run as cron jobs on the host.
+Data collection and LLM evaluation run as cron jobs on the host (see
+`~/dev/cal/vps-infra/cron.d/collect-data` for the live configuration).
 
 In production (Podman), use `podman exec` instead of `docker compose exec`:
 
 ```bash
 # /etc/cron.d/craft-dashboard
 
-# Data collection — daily at 2 AM UTC
-0 2 * * * root podman exec -i vps-infra_craft-dashboard_1 python scripts/collect_data.py --source all
+# Open-issue refresh — every 4 hours (keeps Issues dashboard current)
+0 */4 * * * root podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source github --mode open
+
+# Full collection (open + closed issues, launchpad) — daily at 2 AM UTC
+# Refreshes closed issues per the per-project schedule (refresh-interval-days).
+0 2 * * * root podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source all --mode full
 
 # LLM evaluation — daily at 6 AM UTC (only if ENABLE_SERVER_EVAL=true)
 0 6 * * * root podman exec -i vps-infra_craft-dashboard_1 python scripts/run_llm.py evaluate --open-only
