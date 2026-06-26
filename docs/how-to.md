@@ -168,8 +168,13 @@ curl -X POST https://craft-dashboard.name/admin/distribute \
 
 ### Update .env in production
 
-pydantic-settings reads `.env` at startup. Edit the file on the server then
-restart the app container to apply the changes:
+pydantic-settings reads `.env` at startup. After editing `/opt/vps-infra/.env`
+on the server, redeploy by re-running the
+[vps-infra deploy workflow](https://github.com/mr-cal/vps-infra/actions/workflows/deploy.yml)
+on GitHub (click **Run workflow** → **Run workflow**). This pulls the latest
+image and restarts the container with the new environment.
+
+Alternatively, restart the container directly on the server:
 
 ```bash
 nano /opt/vps-infra/.env

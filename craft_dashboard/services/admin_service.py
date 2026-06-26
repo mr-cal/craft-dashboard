@@ -42,6 +42,8 @@ class ProjectRefreshEntry(TypedDict):
     last_refreshed_at: datetime | None
     consecutive_failures: int
     is_overdue: bool
+    days_until_next: int | None
+    days_since_last: int | None
 
 
 class ScheduleDayCount(TypedDict):
@@ -209,6 +211,8 @@ class AdminService:
                 "last_refreshed_at": _ensure_utc(row.last_refreshed_at),
                 "consecutive_failures": row.consecutive_failures,
                 "is_overdue": self._is_overdue(row.next_refresh_at),
+                "days_until_next": _days_delta(_ensure_utc(row.next_refresh_at)),
+                "days_since_last": _days_delta(_ensure_utc(row.last_refreshed_at)),
             }
             for row in result
         ]
@@ -364,3 +368,10 @@ def _next_occurrence(now: datetime, target_day: int) -> datetime:
     """Return the next occurrence of the target weekday preserving time."""
     day_offset = (target_day - now.weekday()) % 7
     return now + timedelta(days=day_offset)
+
+
+def _days_delta(ts: datetime | None) -> int | None:
+    """Return whole days from now to *ts* (positive = future, negative = past)."""
+    if ts is None:
+        return None
+    return (ts - datetime.now(UTC)).days

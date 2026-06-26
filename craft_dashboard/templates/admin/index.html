@@ -127,52 +127,61 @@
 <p style="font-size:0.875rem;color:var(--app-text-muted);">No upcoming refresh scheduled. Use <em>Redistribute</em> to set one up.</p>
 {% endif %}
 {% if project_refresh_list %}
-<table>
-  <thead>
-    <tr>
-      <th>Project</th>
-      <th>Last Full Refresh</th>
-      <th>Next Full Refresh</th>
-      <th>Status</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for entry in project_refresh_list %}
-    <tr>
-      <td>{{ entry.project }}</td>
-      <td style="font-size:0.875rem;">
-        {% if entry.last_refreshed_at %}
-        <time datetime="{{ entry.last_refreshed_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">
-          {{ entry.last_refreshed_at.strftime('%Y-%m-%d %H:%M UTC') }}
-        </time>
-        {% else %}
-        <span style="color:var(--app-text-muted);">never</span>
-        {% endif %}
-      </td>
-      <td style="font-size:0.875rem;">
-        {% if entry.next_refresh_at %}
-        <time datetime="{{ entry.next_refresh_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">
-          {{ entry.next_refresh_at.strftime('%Y-%m-%d %H:%M UTC') }}
-        </time>
-        {% else %}
-        <span style="color:var(--app-text-muted);">not scheduled</span>
-        {% endif %}
-      </td>
-      <td>
-        {% if entry.consecutive_failures > 0 %}
-        <span style="color:var(--app-negative);" title="{{ entry.consecutive_failures }} consecutive failure(s)">⚠ {{ entry.consecutive_failures }} error(s)</span>
-        {% elif entry.is_overdue %}
-        <span style="color:var(--app-caution);">overdue</span>
-        {% elif entry.next_refresh_at is none %}
-        <span style="color:var(--app-text-muted);">–</span>
-        {% else %}
-        <span style="color:var(--app-positive);">✓</span>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="row--25-75">
+  <div class="col"></div>
+  <div class="col">
+    <table>
+      <thead>
+        <tr>
+          <th>Project</th>
+          <th>Last Full Refresh</th>
+          <th>Next Full Refresh</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in project_refresh_list %}
+        <tr>
+          <td>{{ entry.project }}</td>
+          <td style="font-size:0.875rem;">
+            {% if entry.last_refreshed_at %}
+              {% set d = entry.days_since_last %}
+              {% if d is none %}
+                {{ entry.last_refreshed_at.strftime('%Y-%m-%d') }}
+              {% elif d >= 0 %}
+                {{ entry.last_refreshed_at.strftime('%Y-%m-%d') }} (today)
+              {% elif d == -1 %}
+                {{ entry.last_refreshed_at.strftime('%Y-%m-%d') }} (1 day ago)
+              {% else %}
+                {{ entry.last_refreshed_at.strftime('%Y-%m-%d') }} ({{ (-d) }} days ago)
+              {% endif %}
+            {% else %}
+            <span style="color:var(--app-text-muted);">never</span>
+            {% endif %}
+          </td>
+          <td style="font-size:0.875rem;">
+            {% if entry.next_refresh_at %}
+              {% set d = entry.days_until_next %}
+              {% if d is none %}
+                {{ entry.next_refresh_at.strftime('%Y-%m-%d') }}
+              {% elif d < 0 %}
+                <span style="color:var(--app-caution);">{{ entry.next_refresh_at.strftime('%Y-%m-%d') }} ({{ (-d) }} day{{ 's' if (-d) != 1 else '' }} overdue)</span>
+              {% elif d == 0 %}
+                {{ entry.next_refresh_at.strftime('%Y-%m-%d') }} (today)
+              {% elif d == 1 %}
+                {{ entry.next_refresh_at.strftime('%Y-%m-%d') }} (tomorrow)
+              {% else %}
+                {{ entry.next_refresh_at.strftime('%Y-%m-%d') }} (in {{ d }} days)
+              {% endif %}
+            {% else %}
+            <span style="color:var(--app-text-muted);">not scheduled</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
 {% else %}
 <p style="font-size:0.875rem;color:var(--app-text-muted);">No refresh schedule data. Run a full collection first.</p>
 {% endif %}
