@@ -278,8 +278,11 @@
       <div style="flex: 1; min-width: 200px;">
         <h4>Refresh Data</h4>
         <div class="admin-form">
-          <button class="p-button--positive" id="refresh-btn" onclick="triggerRefresh()">Refresh Now</button>
-          <p style="font-size:0.875rem;color:var(--app-text-muted);margin-top:0.5rem;">Runs the collection job. Only projects due per schedule will be refreshed.</p>
+          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+            <button class="p-button--positive" id="refresh-open-btn" onclick="triggerRefreshOpen()">Refresh Open Issues</button>
+            <button class="p-button--neutral" id="refresh-full-btn" onclick="triggerRefreshFull()">Run Full Refresh</button>
+          </div>
+          <p style="font-size:0.875rem;color:var(--app-text-muted);margin-top:0.5rem;"><strong>Refresh Open Issues</strong> fetches all open issues now (same as the 4-hour cron). <strong>Run Full Refresh</strong> fetches open + closed for projects due on the schedule.</p>
           <div id="refresh-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
         </div>
       </div>
@@ -449,9 +452,14 @@ async function callEndpoint(endpoint, btnId, statusId, successMsg, body) {
   }
 }
 
-function triggerRefresh() {
-  if (!confirm('Run data collection now? Only projects due per schedule will be refreshed.')) return;
-  callEndpoint('/admin/refresh', 'refresh-btn', 'refresh-status', 'Refresh queued');
+function triggerRefreshOpen() {
+  if (!confirm('Refresh all open issues now? (same as the 4-hour cron)')) return;
+  callEndpoint('/admin/refresh', 'refresh-open-btn', 'refresh-status', 'Open issue refresh queued', { mode: 'open' });
+}
+
+function triggerRefreshFull() {
+  if (!confirm('Run full refresh now? Only projects due per schedule will get open+closed issues refreshed.')) return;
+  callEndpoint('/admin/refresh', 'refresh-full-btn', 'refresh-status', 'Full refresh queued', { mode: 'full' });
 }
 
 function gatherEvalParams() {

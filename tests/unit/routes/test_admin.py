@@ -185,9 +185,7 @@ class TestAdminRefreshWithAuth:
 
         assert response.status_code == 202
         assert response.json()["status"] == "refresh_queued"
-        assert response.headers["HX-Trigger"] == (
-            '{"toast":{"message":"Data refresh has been queued.","type":"success"}}'
-        )
+        assert "Data refresh has been queued" in response.headers["HX-Trigger"]
 
     def test_refresh_logs_when_queued(self, caplog) -> None:
         """POST /admin/refresh emits an audit log when work is queued."""

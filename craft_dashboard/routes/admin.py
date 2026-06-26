@@ -200,6 +200,7 @@ class RefreshRequest(BaseModel):
 
     project: str = ""
     force_schedule: bool = False
+    mode: str = "open"  # "open" | "full" | "all"
 
 
 @router.post("/refresh")
@@ -221,8 +222,9 @@ async def trigger_refresh(
 
     params = body or RefreshRequest()
     logger.info(
-        "Admin: refresh queued (project=%r, force_schedule=%s)",
+        "Admin: refresh queued (project=%r, mode=%s, force_schedule=%s)",
         params.project or "all",
+        params.mode,
         params.force_schedule,
     )
 
@@ -238,6 +240,8 @@ async def trigger_refresh(
         cmd += ["--project", params.project]
     if params.force_schedule:
         cmd += ["--force-schedule"]
+    if params.mode:
+        cmd += ["--mode", params.mode]
 
     asyncio.create_task(
         asyncio.create_subprocess_exec(
@@ -250,8 +254,14 @@ async def trigger_refresh(
     msg = "Data refresh has been queued"
     if params.project:
         msg += f" for {params.project}"
+    mode_labels = {
+        "open": "open issues only",
+        "full": "scheduled full refresh",
+        "all": "all issues (forced)",
+    }
+    msg += f" ({mode_labels.get(params.mode, params.mode)})"
     if params.force_schedule:
-        msg += " (ignoring schedule)"
+        msg += ", ignoring schedule"
     msg += "."
 
     return JSONResponse(
