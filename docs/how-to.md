@@ -2,12 +2,12 @@
 
 ## Scripts
 
-All scripts live in `scripts/`. In local development they run inside the Docker
+All scripts live in `scripts/`. In local development they run inside the Podman
 Compose app container. In production they run inside the Podman container.
 
 **Local:**
 ```bash
-docker compose exec -T app python scripts/<script>.py
+podman compose exec -T app python scripts/<script>.py
 ```
 
 **Production:**
@@ -95,9 +95,9 @@ In production, this runs as a daily cron job at 6 AM UTC:
 
 ```bash
 # local
-docker compose exec -T app python scripts/run_llm.py evaluate --open-only
+podman compose exec -T app python scripts/run_llm.py evaluate --open-only
 # production
-podman exec -i vps-infra_craft-dashboard_1 python scripts/run_llm.py evaluate --open-only
+podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/run_llm.py evaluate --open-only
 ```
 
 The evaluator hashes issue content and skips unchanged issues, so daily runs
@@ -141,7 +141,7 @@ a re-fetch of everything regardless of schedule, use `--mode all`:
 
 ```bash
 # local
-docker compose exec -T app python scripts/collect_data.py --source all --mode all
+podman compose exec -T app python scripts/collect_data.py --source all --mode all
 # production
 podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source all --mode all
 ```
@@ -166,12 +166,25 @@ curl -X POST https://craft-dashboard.name/admin/distribute \
   -H "Origin: https://craft-dashboard.name"
 ```
 
+### Update .env in production
+
+pydantic-settings reads `.env` at startup. Edit the file on the server then
+restart the app container to apply the changes:
+
+```bash
+nano /opt/vps-infra/.env
+podman restart vps-infra_craft-dashboard_1
+```
+
+The container restarts in a few seconds; Alembic migrations run on startup
+but skip if the schema is already current.
+
 ### Check logs
 
 ```bash
 # local
-docker compose logs -f app
-docker compose logs -f postgres
+podman compose logs -f app
+podman compose logs -f postgres
 
 # production
 podman logs -f vps-infra_craft-dashboard_1
@@ -182,7 +195,7 @@ podman logs -f vps-infra_postgres_1
 
 ```bash
 # local
-docker compose exec postgres psql -U craft_dashboard craft_dashboard
+podman compose exec postgres psql -U craft_dashboard craft_dashboard
 
 # production
 podman exec -it vps-infra_postgres_1 psql -U craft_dashboard craft_dashboard
@@ -218,11 +231,11 @@ GROUP BY p.name;
 **Local:**
 
 ```bash
-docker compose stop app
-docker compose exec postgres dropdb -U craft_dashboard craft_dashboard
-docker compose exec postgres createdb -U craft_dashboard craft_dashboard
-gunzip -c backup.sql.gz | docker compose exec -T postgres psql -U craft_dashboard craft_dashboard
-docker compose up -d
+podman compose stop app
+podman compose exec postgres dropdb -U craft_dashboard craft_dashboard
+podman compose exec postgres createdb -U craft_dashboard craft_dashboard
+gunzip -c backup.sql.gz | podman compose exec -T postgres psql -U craft_dashboard craft_dashboard
+podman compose up -d
 ```
 
 **Production:**
@@ -259,7 +272,7 @@ Remove all LLM evaluation results to start fresh or re-evaluate everything:
 
 ```bash
 # local
-docker compose exec -T postgres psql -U craft_dashboard craft_dashboard \
+podman compose exec -T postgres psql -U craft_dashboard craft_dashboard \
   -c "DELETE FROM llm_evaluations;"
 
 # production
@@ -271,7 +284,7 @@ To delete evaluations for a specific project only:
 
 ```bash
 # local
-docker compose exec -T postgres psql -U craft_dashboard craft_dashboard \
+podman compose exec -T postgres psql -U craft_dashboard craft_dashboard \
   -c "DELETE FROM llm_evaluations WHERE issue_id IN (SELECT id FROM issues WHERE project_id = (SELECT id FROM projects WHERE name = 'snapcraft'));"
 
 # production

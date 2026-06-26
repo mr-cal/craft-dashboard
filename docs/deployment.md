@@ -1,7 +1,7 @@
 # Deployment
 
 craft-dashboard runs as a container alongside a PostgreSQL container.
-Locally it uses Docker Compose. In production it runs under Podman,
+Locally it uses Podman Compose. In production it runs under Podman,
 managed by the [vps-infra](https://github.com/mr-cal/vps-infra) repo.
 
 ## CI deployment
@@ -35,7 +35,7 @@ local database credentials are:
 | User     | `craft_dashboard` |
 | Password | `devpassword` |
 | Database | `craft_dashboard` |
-| Host     | `postgres` (Docker service name) |
+| Host     | `postgres` (Podman Compose service name) |
 
 For **production**, `.env` must include `DATABASE_URL` with real credentials.
 The DB password is stored as a Podman secret (not in `.env`). See the
@@ -64,12 +64,29 @@ OPENROUTER_API_KEY=<your key>
 
 See `.env.example` for all available settings.
 
-## Local development with Docker
+### Reloading .env in production
 
-The `docker-compose.yml` file provides a full local stack:
+pydantic-settings reads `.env` at startup. To apply changes after editing the
+file on the server:
+
+```bash
+# Edit the file (SSH into the server first)
+nano /opt/vps-infra/.env
+
+# Restart the app container to pick up the new values
+podman restart vps-infra_craft-dashboard_1
+```
+
+The container restarts in a few seconds; Alembic migrations run on startup
+but skip if the schema is already current.
+
+## Local development with Podman
+
+The `docker-compose.yml` file provides a full local stack and works with
+`podman compose`:
 
 ```
-docker compose up --build
+podman compose up --build
 ```
 
 This starts:
@@ -82,7 +99,7 @@ immediately. Visit `http://localhost:8000/` to see the dashboard.
 To stop and remove all data:
 
 ```
-docker compose down -v
+podman compose down -v
 ```
 
 ## Production deployment
@@ -97,7 +114,7 @@ manual operations.
 
 ## Migrating data
 
-### Import from a SQL dump (local Docker)
+### Import from a SQL dump (local)
 
 Import the dump **before** starting the app. The app runs Alembic migrations on
 startup; if you import into an already-migrated database, the restore will fail
@@ -105,29 +122,29 @@ with "relation already exists" errors.
 
 ```bash
 # 1. Start only the database
-docker compose up -d postgres
+podman compose up -d postgres
 
 # 2. Wait for it to be healthy, then import
 gunzip -c craft-dashboard-initial.sql.gz | \
-  docker compose exec -T postgres psql -U craft_dashboard craft_dashboard
+  podman compose exec -T postgres psql -U craft_dashboard craft_dashboard
 
 # 3. Start the app (Alembic sees the existing schema and skips migrations)
-docker compose up -d
+podman compose up -d
 ```
 
-If you already ran `docker compose up` and the database has been migrated,
+If you already ran `podman compose up` and the database has been migrated,
 drop and recreate the database before importing:
 
 ```bash
-docker compose stop app
+podman compose stop app
 
-docker compose exec postgres dropdb -U craft_dashboard craft_dashboard
-docker compose exec postgres createdb -U craft_dashboard craft_dashboard
+podman compose exec postgres dropdb -U craft_dashboard craft_dashboard
+podman compose exec postgres createdb -U craft_dashboard craft_dashboard
 
 gunzip -c craft-dashboard-initial.sql.gz | \
-  docker compose exec -T postgres psql -U craft_dashboard craft_dashboard
+  podman compose exec -T postgres psql -U craft_dashboard craft_dashboard
 
-docker compose up -d
+podman compose up -d
 ```
 
 ### Import from a SQL dump (production Podman)
@@ -151,10 +168,10 @@ cd /opt/vps-infra
 podman-compose -f docker-compose.craft-dashboard.yml up -d
 ```
 
-### Export a dump (local Docker)
+### Export a dump (local)
 
 ```
-docker compose exec -T postgres pg_dump -U craft_dashboard craft_dashboard | \
+podman compose exec -T postgres pg_dump -U craft_dashboard craft_dashboard | \
   gzip > craft-dashboard-$(date +%Y%m%d).sql.gz
 ```
 
@@ -168,7 +185,8 @@ podman exec -i vps-infra_postgres_1 pg_dump -U craft_dashboard craft_dashboard |
 ## Scheduled tasks
 
 Data collection and LLM evaluation run as cron jobs on the host (see
-`~/dev/cal/vps-infra/cron.d/collect-data` for the live configuration).
+[`cron.d/collect-data`](https://github.com/mr-cal/vps-infra/blob/main/cron.d/collect-data)
+in vps-infra for the live configuration).
 
 In production (Podman), use `podman exec` instead of `docker compose exec`:
 
@@ -183,7 +201,7 @@ In production (Podman), use `podman exec` instead of `docker compose exec`:
 0 2 * * * root podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source all --mode full
 
 # LLM evaluation — daily at 6 AM UTC (only if ENABLE_SERVER_EVAL=true)
-0 6 * * * root podman exec -i vps-infra_craft-dashboard_1 python scripts/run_llm.py evaluate --open-only
+0 6 * * * root podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/run_llm.py evaluate --open-only
 
 # Database backup — daily at 3 AM UTC
 0 3 * * * root podman exec -i vps-infra_postgres_1 pg_dump -U craft_dashboard craft_dashboard | gzip > /opt/vps-infra/backups/craft-dashboard-$(date +\%Y\%m\%d).sql.gz
