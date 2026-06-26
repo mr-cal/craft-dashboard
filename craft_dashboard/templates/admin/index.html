@@ -1,135 +1,150 @@
 {% extends "base.html" %}
 {% block title %}Admin - craft-dashboard{% endblock %}
 {% block content %}
-<h2>Admin</h2>
-
-<section class="card" style="margin-bottom: 1.5rem;">
-  <h3 style="margin-top: 0;">System Status</h3>
-  <div
-    data-system-status-poller
-    hx-get="/admin/status"
-    hx-trigger="load, every 60s"
-    hx-swap="none"
-    hx-indicator="#loading-indicator"
-  >
-    <div class="system-status-badges" aria-label="Collection and evaluation status">
-      <span class="system-status-indicator" data-system-status-kind="collection" title="Collection idle">
-        <span class="system-status-dot"></span>
-        <span>Collection</span>
-      </span>
-      <span class="system-status-indicator" data-system-status-kind="evaluation" title="Evaluation idle">
-        <span class="system-status-dot"></span>
-        <span>Evaluation</span>
-      </span>
-    </div>
-  </div>
-  {% if collection_runs %}
-  <table style="margin-top: 1rem;">
-    <thead>
-      <tr>
-        <th>Source</th>
-        <th>Started</th>
-        <th>Status</th>
-        <th>Projects</th>
-        <th>Issues</th>
-        <th>Duration</th>
-        <th>Errors</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for run in collection_runs %}
-      <tr class="run-row" data-run-id="{{ run.id }}" style="cursor: pointer;" title="Click to expand issues collected in this run">
-        <td>{{ run.source }}</td>
-        <td>{{ run.started_at.strftime("%Y-%m-%d %-I:%M %p") if run.started_at else "—" }}</td>
-        <td>
-          {% if run.status == "failed" %}
-          <span style="color: var(--color-error, #c0392b); font-weight: 600;">{{ run.status }}</span>
-          {% elif run.status == "running" %}
-          <span style="color: var(--color-warning, #e67e22);">{{ run.status }}</span>
-          {% elif run.errors %}
-          <span style="color: var(--color-warning, #e67e22);" title="Completed with errors">{{ run.status }} ⚠</span>
-          {% else %}
-          {{ run.status }}
-          {% endif %}
-        </td>
-        <td>{{ run.projects_processed }}</td>
-        <td>{{ run.issues_collected }}</td>
-        <td>{{ "{:.1f}s".format(run.duration_seconds) if run.duration_seconds is not none else "—" }}</td>
-        <td>
-          {% if run.errors %}
-          <ul style="margin: 0; padding-left: 1rem;">
-            {% for error in run.errors %}
-            <li>{{ error.project or error.source or "run" }}: {{ error.error }}</li>
-            {% endfor %}
-          </ul>
-          {% else %}
-          —
-          {% endif %}
-        </td>
-      </tr>
-      <tr class="run-detail-row" id="run-detail-{{ run.id }}" style="display: none;">
-        <td colspan="7" id="run-detail-content-{{ run.id }}" style="padding: 0.5rem 1rem 1rem; background: var(--color-mid-light, #f5f5f5);"></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <script>
-    (function () {
-      document.querySelectorAll('.run-row').forEach(function (row) {
-        row.addEventListener('click', function () {
-          var runId = this.dataset.runId;
-          var detailRow = document.getElementById('run-detail-' + runId);
-          if (detailRow.style.display !== 'none') {
-            detailRow.style.display = 'none';
-            return;
-          }
-          detailRow.style.display = '';
-          var content = document.getElementById('run-detail-content-' + runId);
-          if (content.dataset.loaded) return;
-          content.innerHTML = '<span style="color:var(--app-text-muted)">Loading\u2026</span>';
-          htmx.ajax('GET', '/admin/collection-runs/' + runId + '/issues', {
-            target: '#run-detail-content-' + runId,
-            swap: 'innerHTML',
-          });
-          content.dataset.loaded = '1';
-        });
-      });
-    })();
-  </script>
-  {% else %}
-  <p style="color: var(--app-text-muted); margin-top: 1rem;">No recent collection runs.</p>
-  {% endif %}
-</section>
-
-<h3>Project Full-Refresh Schedule</h3>
-<p style="font-size:0.875rem;color:var(--app-text-muted);">
-  Open issues are refreshed on every run (every 4 hours).
-  This table shows when each project's full refresh (open + closed) is next scheduled.
-</p>
-{% if next_refresh %}
-<p style="font-size:0.875rem;">
-  Next scheduled full refresh: <strong><time id="next-refresh-time" datetime="{{ next_refresh.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ next_refresh.strftime('%a %b %d, %H:%M UTC') }}</time></strong>
-</p>
-<script>
-  (function () {
-    var el = document.getElementById('next-refresh-time');
-    if (!el) return;
-    try {
-      var d = new Date(el.getAttribute('datetime'));
-      el.textContent = d.toLocaleString(undefined, {
-        weekday: 'short', month: 'short', day: 'numeric',
-        hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
-      });
-    } catch (e) {}
-  })();
-</script>
-{% else %}
-<p style="font-size:0.875rem;color:var(--app-text-muted);">No upcoming refresh scheduled. Use <em>Redistribute</em> to set one up.</p>
-{% endif %}
-{% if project_refresh_list %}
 <div class="row--25-75">
-  <div class="col"></div>
   <div class="col">
+    <h2>Admin</h2>
+    <h3>System Status</h3>
+    <p>Collection and evaluation run history. Click any row to see which issues were collected.</p>
+  </div>
+  <div class="col">
+    <div
+      data-system-status-poller
+      hx-get="/admin/status"
+      hx-trigger="load, every 60s"
+      hx-swap="none"
+      hx-indicator="#loading-indicator"
+    >
+      <div class="system-status-badges" aria-label="Collection and evaluation status">
+        <span class="system-status-indicator" data-system-status-kind="collection" title="Collection idle">
+          <span class="system-status-dot"></span>
+          <span>Collection</span>
+        </span>
+        <span class="system-status-indicator" data-system-status-kind="evaluation" title="Evaluation idle">
+          <span class="system-status-dot"></span>
+          <span>Evaluation</span>
+        </span>
+      </div>
+    </div>
+    {% if collection_runs %}
+    <table style="margin-top: 1rem;">
+      <thead>
+        <tr>
+          <th>Source</th>
+          <th>Started</th>
+          <th>Status</th>
+          <th>Projects</th>
+          <th>Issues</th>
+          <th>Duration</th>
+          <th>Errors</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in collection_runs %}
+        <tr class="run-row" data-run-id="{{ run.id }}" style="cursor: pointer;" title="Click to expand issues collected in this run">
+          <td>{{ run.source }}</td>
+          <td>
+            {% if run.started_at %}
+            <time class="local-time" datetime="{{ run.started_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ run.started_at.strftime('%Y-%m-%d %H:%M UTC') }}</time>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if run.status == "failed" %}
+            <span style="color: var(--color-error, #c0392b); font-weight: 600;">{{ run.status }}</span>
+            {% elif run.status == "running" %}
+            <span style="color: var(--color-warning, #e67e22);">{{ run.status }}</span>
+            {% elif run.errors %}
+            <span style="color: var(--color-warning, #e67e22);" title="Completed with errors">{{ run.status }} ⚠</span>
+            {% else %}
+            {{ run.status }}
+            {% endif %}
+          </td>
+          <td>{{ run.projects_processed }}</td>
+          <td>{{ run.issues_collected }}</td>
+          <td>{{ "{:.1f}s".format(run.duration_seconds) if run.duration_seconds is not none else "—" }}</td>
+          <td>
+            {% if run.errors %}
+            <ul style="margin: 0; padding-left: 1rem;">
+              {% for error in run.errors %}
+              <li>{{ error.project or error.source or "run" }}: {{ error.error }}</li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            —
+            {% endif %}
+          </td>
+        </tr>
+        <tr class="run-detail-row" id="run-detail-{{ run.id }}" style="display: none;">
+          <td colspan="7" id="run-detail-content-{{ run.id }}" style="padding: 0.5rem 1rem 1rem; background: var(--color-mid-light, #f5f5f5);"></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <script>
+      (function () {
+        document.querySelectorAll('.run-row').forEach(function (row) {
+          row.addEventListener('click', function () {
+            var runId = this.dataset.runId;
+            var detailRow = document.getElementById('run-detail-' + runId);
+            if (detailRow.style.display !== 'none') {
+              detailRow.style.display = 'none';
+              return;
+            }
+            detailRow.style.display = '';
+            var content = document.getElementById('run-detail-content-' + runId);
+            if (content.dataset.loaded) return;
+            content.innerHTML = '<span style="color:var(--app-text-muted)">Loading\u2026</span>';
+            htmx.ajax('GET', '/admin/collection-runs/' + runId + '/issues', {
+              target: '#run-detail-content-' + runId,
+              swap: 'innerHTML',
+            });
+            content.dataset.loaded = '1';
+          });
+        });
+        document.querySelectorAll('time.local-time').forEach(function (el) {
+          try {
+            var d = new Date(el.getAttribute('datetime'));
+            el.textContent = d.toLocaleString(undefined, {
+              year: 'numeric', month: '2-digit', day: '2-digit',
+              hour: '2-digit', minute: '2-digit',
+            });
+          } catch (e) {}
+        });
+      })();
+    </script>
+    {% else %}
+    <p style="color: var(--app-text-muted); margin-top: 1rem;">No recent collection runs.</p>
+    {% endif %}
+  </div>
+</div>
+
+<hr class="p-rule" />
+
+<div class="row--25-75">
+  <div class="col">
+    <h3>Project Full-Refresh Schedule</h3>
+    <p>Open issues are refreshed on every run (every 4 hours). This table shows when each project's full refresh (open + closed issues) is next scheduled.</p>
+    {% if next_refresh %}
+    <p style="font-size:0.875rem;">Next full refresh: <strong><time id="next-refresh-time" datetime="{{ next_refresh.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ next_refresh.strftime('%Y-%m-%d %H:%M UTC') }}</time></strong></p>
+    <script>
+      (function () {
+        var el = document.getElementById('next-refresh-time');
+        if (!el) return;
+        try {
+          var d = new Date(el.getAttribute('datetime'));
+          el.textContent = d.toLocaleString(undefined, {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit',
+          });
+        } catch (e) {}
+      })();
+    </script>
+    {% else %}
+    <p style="font-size:0.875rem;color:var(--app-text-muted);">No upcoming refresh scheduled. Use <em>Redistribute</em> to set one up.</p>
+    {% endif %}
+  </div>
+  <div class="col">
+    {% if project_refresh_list %}
     <table>
       <thead>
         <tr>
@@ -145,9 +160,7 @@
           <td style="font-size:0.875rem;">
             {% if entry.last_refreshed_at %}
               {% set d = entry.days_since_last %}
-              {% if d is none %}
-                {{ entry.last_refreshed_at.strftime('%Y-%m-%d') }}
-              {% elif d >= 0 %}
+              {% if d is none or d >= 0 %}
                 {{ entry.last_refreshed_at.strftime('%Y-%m-%d') }} (today)
               {% elif d == -1 %}
                 {{ entry.last_refreshed_at.strftime('%Y-%m-%d') }} (1 day ago)
@@ -180,141 +193,148 @@
         {% endfor %}
       </tbody>
     </table>
-  </div>
-</div>
-{% else %}
-<p style="font-size:0.875rem;color:var(--app-text-muted);">No refresh schedule data. Run a full collection first.</p>
-{% endif %}
-
-<div style="margin-top: 0.75rem; font-size: 0.875rem; display: flex; gap: 1rem;">
-  <a href="/issues?llm_status=no_llm&state=open">View issues with no LLM data</a>
-  <a href="/issues?llm_status=partial_llm&state=open">View issues with incomplete LLM data</a>
-</div>
-
-<hr class="p-rule" />
-
-<h3>LLM Token Usage</h3>
-<h4>Last 7 Days</h4>
-<table>
-  <thead>
-    <tr>
-      <th>Evaluations</th>
-      <th>Total Tokens</th>
-      <th>Input Tokens</th>
-      <th>Output Tokens</th>
-      <th>Avg Tokens per Eval</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>{{ "{:,}".format(recent_evaluations) }}</td>
-      <td>{{ "{:,}".format(recent_tokens) }}</td>
-      <td>{{ "{:,}".format(recent_prompt_tokens) }}</td>
-      <td>{{ "{:,}".format(recent_completion_tokens) }}</td>
-      <td>{{ "{:,.0f}".format(recent_tokens / recent_evaluations) if recent_evaluations > 0 else "N/A" }}</td>
-    </tr>
-  </tbody>
-</table>
-
-<h4>Lifetime</h4>
-<table>
-  <thead>
-    <tr>
-      <th>Evaluations</th>
-      <th>Total Tokens</th>
-      <th>Input Tokens</th>
-      <th>Output Tokens</th>
-      <th>Avg Tokens per Eval</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>{{ "{:,}".format(total_evaluations) }}</td>
-      <td>{{ "{:,}".format(total_tokens) }}</td>
-      <td>{{ "{:,}".format(total_prompt_tokens) }}</td>
-      <td>{{ "{:,}".format(total_completion_tokens) }}</td>
-      <td>{{ "{:,.0f}".format(total_tokens / total_evaluations) if total_evaluations > 0 else "N/A" }}</td>
-    </tr>
-  </tbody>
-</table>
-
-<hr class="p-rule" />
-
-<h3>Admin Actions</h3>
-<div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-  <label for="admin-token" id="admin-token-label">Admin Token:</label>
-  <input type="password" id="admin-token" placeholder="Enter admin token" style="width: 300px;" />
-  <button class="p-button--neutral" id="save-token-btn" onclick="saveToken()">Save Token</button>
-  <button class="p-button--neutral" id="logout-btn" onclick="logout()" style="display: none;">Log out</button>
-  <small id="token-status"></small>
-</div>
-
-<div style="display: flex; gap: 2rem; flex-wrap: wrap;">
-  <div style="flex: 1; min-width: 300px;">
-    <h4>Refresh Data</h4>
-    <div class="admin-form">
-      <button class="p-button--positive" id="refresh-btn" onclick="triggerRefresh()">Refresh Now</button>
-      <p style="font-size:0.875rem;color:var(--app-text-muted);margin-top:0.5rem;">Runs the collection job. Only projects due per schedule will be refreshed.</p>
-      <div id="refresh-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
-    </div>
-  </div>
-
-  <div style="flex: 1; min-width: 300px;">
-    <h4>Re-evaluate Issues</h4>
-    <div class="admin-form">
-      <div class="admin-form__row">
-        <label for="eval-project">Project:</label>
-        <select id="eval-project">
-          <option value="">All projects</option>
-          {% for proj in project_names %}
-          <option value="{{ proj }}">{{ proj }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="admin-form__row">
-        <label for="eval-limit">Limit:</label>
-        <input type="number" id="eval-limit" value="0" min="0" placeholder="0 = unlimited" />
-      </div>
-      <div class="admin-form__row">
-        <label for="eval-stale-days">Stale days:</label>
-        <input type="number" id="eval-stale-days" value="0" min="0" placeholder="0 = disabled" />
-      </div>
-      <div class="admin-form__row">
-        <label>
-          <input type="checkbox" id="eval-force" /> Force (ignore content hash)
-        </label>
-      </div>
-      <div class="admin-form__row">
-        <label>
-          <input type="checkbox" id="eval-incomplete" /> Incomplete only (missing summary/scores)
-        </label>
-      </div>
-      <div class="admin-form__row">
-        <label>
-          <input type="checkbox" id="eval-open-only" checked /> Open issues only
-        </label>
-      </div>
-      <div style="display:flex;gap:0.5rem;">
-        <button class="p-button--positive" id="evaluate-btn" onclick="triggerEvaluate()">Run Evaluation</button>
-        <button class="p-button--neutral" id="dry-run-btn" onclick="triggerDryRun()">Dry Run</button>
-      </div>
-      <div id="evaluate-status" style="margin-top:0.5rem;font-size:0.875rem;"></div>
-    </div>
-  </div>
-
-  <div style="flex: 1; min-width: 300px;">
-    <h4>Schedule Management</h4>
-    <div class="admin-form">
-      <button class="p-button--neutral" id="distribute-btn" onclick="triggerDistribute()">Redistribute Schedule</button>
-      <div id="distribute-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
-    </div>
+    {% else %}
+    <p style="font-size:0.875rem;color:var(--app-text-muted);">No refresh schedule data. Run a full collection first.</p>
+    {% endif %}
   </div>
 </div>
 
 <hr class="p-rule" />
-<h3>Service Logs</h3>
-<button class="p-button--neutral" id="logs-btn" onclick="loadLogs()">Refresh Logs</button>
-<pre id="logs-output" style="max-height: 400px; overflow-y: auto; font-size: 0.75rem; background: var(--app-surface-muted); border: 1px solid var(--app-border); padding: 1rem; white-space: pre-wrap; margin-top: 1rem;">(click Refresh Logs to load)</pre>
+
+<div class="row--25-75">
+  <div class="col">
+    <h3>LLM Token Usage</h3>
+    <p>Token consumption by the LLM evaluation pipeline.</p>
+    <div style="font-size: 0.875rem; display: flex; flex-direction: column; gap: 0.25rem; margin-top: 1rem;">
+      <a href="/issues?llm_status=no_llm&state=open">View issues with no LLM data</a>
+      <a href="/issues?llm_status=partial_llm&state=open">View issues with incomplete LLM data</a>
+    </div>
+  </div>
+  <div class="col">
+    <h4>Last 7 Days</h4>
+    <table>
+      <thead>
+        <tr>
+          <th>Evaluations</th>
+          <th>Total Tokens</th>
+          <th>Input Tokens</th>
+          <th>Output Tokens</th>
+          <th>Avg Tokens per Eval</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>{{ "{:,}".format(recent_evaluations) }}</td>
+          <td>{{ "{:,}".format(recent_tokens) }}</td>
+          <td>{{ "{:,}".format(recent_prompt_tokens) }}</td>
+          <td>{{ "{:,}".format(recent_completion_tokens) }}</td>
+          <td>{{ "{:,.0f}".format(recent_tokens / recent_evaluations) if recent_evaluations > 0 else "N/A" }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <h4>Lifetime</h4>
+    <table>
+      <thead>
+        <tr>
+          <th>Evaluations</th>
+          <th>Total Tokens</th>
+          <th>Input Tokens</th>
+          <th>Output Tokens</th>
+          <th>Avg Tokens per Eval</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>{{ "{:,}".format(total_evaluations) }}</td>
+          <td>{{ "{:,}".format(total_tokens) }}</td>
+          <td>{{ "{:,}".format(total_prompt_tokens) }}</td>
+          <td>{{ "{:,}".format(total_completion_tokens) }}</td>
+          <td>{{ "{:,.0f}".format(total_tokens / total_evaluations) if total_evaluations > 0 else "N/A" }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<hr class="p-rule" />
+
+<div class="row--25-75">
+  <div class="col">
+    <h3>Admin Actions</h3>
+    <div style="margin-bottom: 1rem; display: flex; flex-direction: column; gap: 0.5rem;">
+      <label for="admin-token" id="admin-token-label">Admin Token:</label>
+      <input type="password" id="admin-token" placeholder="Enter admin token" style="width: 100%;" />
+      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+        <button class="p-button--neutral" id="save-token-btn" onclick="saveToken()">Save Token</button>
+        <button class="p-button--neutral" id="logout-btn" onclick="logout()" style="display: none;">Log out</button>
+        <small id="token-status"></small>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
+      <div style="flex: 1; min-width: 200px;">
+        <h4>Refresh Data</h4>
+        <div class="admin-form">
+          <button class="p-button--positive" id="refresh-btn" onclick="triggerRefresh()">Refresh Now</button>
+          <p style="font-size:0.875rem;color:var(--app-text-muted);margin-top:0.5rem;">Runs the collection job. Only projects due per schedule will be refreshed.</p>
+          <div id="refresh-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
+        </div>
+      </div>
+
+      <div style="flex: 1; min-width: 200px;">
+        <h4>Re-evaluate Issues</h4>
+        <div class="admin-form">
+          <div class="admin-form__row">
+            <label for="eval-project">Project:</label>
+            <select id="eval-project">
+              <option value="">All projects</option>
+              {% for proj in project_names %}
+              <option value="{{ proj }}">{{ proj }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="admin-form__row">
+            <label for="eval-limit">Limit:</label>
+            <input type="number" id="eval-limit" value="0" min="0" placeholder="0 = unlimited" />
+          </div>
+          <div class="admin-form__row">
+            <label for="eval-stale-days">Stale days:</label>
+            <input type="number" id="eval-stale-days" value="0" min="0" placeholder="0 = disabled" />
+          </div>
+          <div class="admin-form__row">
+            <label>
+              <input type="checkbox" id="eval-force" /> Force (ignore content hash)
+            </label>
+          </div>
+          <div class="admin-form__row">
+            <label>
+              <input type="checkbox" id="eval-incomplete" /> Incomplete only (missing summary/scores)
+            </label>
+          </div>
+          <div class="admin-form__row">
+            <label>
+              <input type="checkbox" id="eval-open-only" checked /> Open issues only
+            </label>
+          </div>
+          <div style="display:flex;gap:0.5rem;">
+            <button class="p-button--positive" id="evaluate-btn" onclick="triggerEvaluate()">Run Evaluation</button>
+            <button class="p-button--neutral" id="dry-run-btn" onclick="triggerDryRun()">Dry Run</button>
+          </div>
+          <div id="evaluate-status" style="margin-top:0.5rem;font-size:0.875rem;"></div>
+        </div>
+      </div>
+
+      <div style="flex: 1; min-width: 200px;">
+        <h4>Schedule Management</h4>
+        <div class="admin-form">
+          <button class="p-button--neutral" id="distribute-btn" onclick="triggerDistribute()">Redistribute Schedule</button>
+          <div id="distribute-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>
 function setTokenStatus(message, color) {
@@ -357,7 +377,6 @@ async function saveToken() {
 
     if (response.ok) {
       setAuthenticated(true);
-      await loadLogs();
     } else {
       setAuthenticated(false);
       setTokenStatus(`✗ ${data.detail || 'Authentication failed'}`, 'red');
@@ -381,7 +400,6 @@ async function logout() {
     if (response.ok) {
       setAuthenticated(false);
       setTokenStatus('Logged out', 'gray');
-      document.getElementById('logs-output').textContent = '(click Refresh Logs to load)';
     } else {
       const data = await response.json();
       setTokenStatus(`✗ ${data.detail || 'Logout failed'}`, 'red');
@@ -520,31 +538,11 @@ function triggerDistribute() {
   callEndpoint('/admin/distribute', 'distribute-btn', 'distribute-status', 'Schedule redistributed');
 }
 
-async function loadLogs() {
-  document.getElementById('logs-btn').disabled = true;
-  document.getElementById('logs-output').textContent = 'Loading...';
-  try {
-    const resp = await fetch('/admin/logs');
-    if (resp.status === 401) {
-      setAuthenticated(false);
-      setTokenStatus('✗ Authentication required', 'red');
-      document.getElementById('logs-output').textContent = 'Authenticate to load logs.';
-      return;
-    }
-    document.getElementById('logs-output').textContent = resp.ok ? await resp.text() : `Error: ${resp.status}`;
-  } catch (error) {
-    document.getElementById('logs-output').textContent = `Error: ${error.message}`;
-  } finally {
-    document.getElementById('logs-btn').disabled = false;
-  }
-}
-
 async function initializeAdminSession() {
   try {
     const response = await fetch('/admin/health');
     if (response.ok) {
       setAuthenticated(true);
-      await loadLogs();
       return;
     }
   } catch (error) {
