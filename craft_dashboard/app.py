@@ -120,6 +120,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("craft-dashboard shutdown complete")
 
 
+_DURATION_MINUTE = 60
+_DURATION_HOUR = 3600
+
+
+def _format_duration_seconds(seconds: float) -> str:
+    """Format a duration in seconds as a human-readable string (e.g. '2m 15s')."""
+    total = int(seconds)
+    if total < _DURATION_MINUTE:
+        return f"{total}s"
+    minutes, secs = divmod(total, _DURATION_MINUTE)
+    if total < _DURATION_HOUR:
+        return f"{minutes}m {secs}s"
+    hours, mins = divmod(minutes, _DURATION_MINUTE)
+    return f"{hours}h {mins}m {secs}s"
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -158,6 +174,7 @@ def create_app() -> FastAPI:
     template_globals = cast(dict[str, object], templates.env.globals)
     template_globals["cache_bust"] = _startup_ts
     templates.env.filters["urlencode_path"] = lambda s: _url_quote(str(s), safe="")
+    templates.env.filters["format_duration"] = _format_duration_seconds
     app.state.templates = templates
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 

@@ -63,7 +63,7 @@
           </td>
           <td>{{ run.projects_processed }}</td>
           <td>{{ run.issues_collected }}</td>
-          <td>{{ "{:.1f}s".format(run.duration_seconds) if run.duration_seconds is not none else "—" }}</td>
+          <td>{{ run.duration_seconds | format_duration if run.duration_seconds is not none else "—" }}</td>
           <td>
             {% if run.errors %}
             <ul style="margin: 0; padding-left: 1rem;">
