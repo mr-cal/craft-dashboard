@@ -17,12 +17,13 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.config import load_config
 from craft_dashboard.database import get_engine, get_session_factory
 from craft_dashboard.dependencies import get_db_session, set_session_factory
+from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.routes.admin import router as admin_router
 from craft_dashboard.routes.dashboard import router as dashboard_router
 from craft_dashboard.routes.eval_api import limiter as eval_api_limiter
@@ -79,6 +80,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     for warning in settings.validate_required_secrets():
         logger.warning("⚠️  %s", warning)
+
+    # Mark any runs that were "running" when the process last died as interrupted.
+    # This happens when the container is restarted mid-collection.
+    try:
+        async with session_factory() as session:
+            stuck = await session.scalars(
+                select(CollectionRun).where(CollectionRun.status == "running")
+            )
+            stuck_runs = list(stuck)
+            if stuck_runs:
+                now = datetime.now(UTC)
+                for run in stuck_runs:
+                    run.status = "interrupted"
+                    run.finished_at = now
+                    if run.started_at:
+                        run.duration_seconds = (now - run.started_at).total_seconds()
+                    run.errors = (run.errors or []) + [
+                        {
+                            "source": run.source,
+                            "error": "Process was killed (container restart or OOM)",
+                        }
+                    ]
+                await session.commit()
+                logger.warning(
+                    "Marked %d interrupted collection run(s) as 'interrupted': ids=%s",
+                    len(stuck_runs),
+                    [r.id for r in stuck_runs],
+                )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Could not check for interrupted collection runs on startup", exc_info=True
+        )
+
     logger.info("craft-dashboard started")
     yield
     logger.info("craft-dashboard shutting down, disposing database connections...")

@@ -51,6 +51,8 @@
           <td>
             {% if run.status == "failed" %}
             <span style="color: var(--color-error, #c0392b); font-weight: 600;">{{ run.status }}</span>
+            {% elif run.status == "interrupted" %}
+            <span style="color: var(--app-caution, #e67e22);" title="Process was killed mid-run (container restart or OOM)">{{ run.status }}</span>
             {% elif run.status == "running" %}
             <span style="color: var(--color-warning, #e67e22);">{{ run.status }}</span>
             {% elif run.errors %}
