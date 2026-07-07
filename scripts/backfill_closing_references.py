@@ -67,11 +67,15 @@ _BATCH_LOG_INTERVAL = 50
 def main(projects: tuple[str, ...], dry_run: bool, force_all: bool) -> None:
     """Backfill closing_references for closed GitHub issues."""
     settings = Settings()
-    engine = create_engine(settings.database_url)
+    # Convert async URL to sync URL for synchronous SQLAlchemy
+    sync_db_url = settings.database_url.replace(
+        "postgresql+asyncpg://", "postgresql://"
+    )
+    engine = create_engine(sync_db_url)
 
     import github as pygithub
 
-    gh = pygithub.Github(settings.github_token)
+    gh = pygithub.Github(auth=pygithub.Auth.Token(settings.github_token))
 
     if dry_run:
         logger.info("Dry-run mode — no database writes.")
