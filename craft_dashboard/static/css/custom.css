@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
   --app-background: #f7f7f7;
   --app-surface: #fff;
   --app-surface-muted: #f8f9fa;
@@ -50,6 +50,45 @@ html.is-dark-theme {
   --app-toast-success-bg: #22a746;
   --app-toast-info-bg: #4788f0;
   --app-toast-text: #fff;
+}
+
+/*
+ * Mirror dark-theme variables via media query so Dark Reader (and browsers)
+ * recognise native dark-mode support and don't apply a second transformation.
+ * Guarded by :not([data-theme="light"]) so an explicit user preference wins.
+ */
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) {
+    color-scheme: dark;
+    --app-background: #13161b;
+    --app-surface: #1b1f27;
+    --app-surface-muted: #232834;
+    --app-text: #f3f3f3;
+    --app-text-muted: #c7c7c7;
+    --app-border: #4b5563;
+    --app-border-strong: #3c4657;
+    --app-filter-background: #1b1f27;
+    --app-sort-active: #22344f;
+    --app-row-hover: #252b36;
+    --app-chip-background: #394150;
+    --app-chip-text: #f5f5f5;
+    --app-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+    --app-score-high: #ff6b7a;
+    --app-score-medium: #ffd166;
+    --app-score-low: #6ddf8d;
+    --app-action-background: #596273;
+    --app-tooltip-background: #0f131a;
+    --app-tooltip-text: #fff;
+    --app-toast-error-bg: #da3450;
+    --app-toast-success-bg: #22a746;
+    --app-toast-info-bg: #4788f0;
+    --app-toast-text: #fff;
+  }
+
+  /* Link colour is hardcoded, not a CSS variable — override explicitly */
+  html:not([data-theme="light"]) a {
+    color: #cfe8ff;
+  }
 }
 
 html.is-dark-theme h1,
