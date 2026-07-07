@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import click
+from github import GithubException
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
@@ -86,6 +87,42 @@ def _format_duration(seconds: float) -> str:
         parts.append(f"{minutes}m")
     parts.append(f"{secs}s")
     return " ".join(parts)
+
+
+_GITHUB_RETRY_ATTEMPTS = 3
+_GITHUB_RETRY_BASE_SLEEP = 30  # seconds; doubles each attempt
+
+
+async def _retry_github(coro_fn: object, description: str) -> object:
+    """Run an async GitHub API call, retrying on transient errors.
+
+    Retries up to _GITHUB_RETRY_ATTEMPTS times with exponential backoff on
+    GithubException (covers 401 transient hiccups, 5xx, and connection errors).
+    Re-raises on the final attempt.
+    """
+    import collections.abc
+
+    for attempt in range(_GITHUB_RETRY_ATTEMPTS):
+        try:
+            result = coro_fn()
+            if isinstance(result, collections.abc.Coroutine):
+                return await result
+            return result
+        except GithubException as exc:
+            if attempt == _GITHUB_RETRY_ATTEMPTS - 1:
+                raise
+            sleep = _GITHUB_RETRY_BASE_SLEEP * (2**attempt)
+            logger.warning(
+                "GitHub API error during %s (attempt %d/%d): %s — retrying in %ds",
+                description,
+                attempt + 1,
+                _GITHUB_RETRY_ATTEMPTS,
+                exc,
+                sleep,
+            )
+            await asyncio.sleep(sleep)
+    msg = "unreachable"
+    raise RuntimeError(msg)
 
 
 async def _get_or_create_project(
@@ -350,10 +387,13 @@ async def _collect_github(
 
             try:
                 releases_started_at = time.monotonic()
-                release_count = await collector.collect_releases(
-                    project_name,
-                    project_id,
-                    session,
+                release_count = await _retry_github(
+                    lambda: collector.collect_releases(
+                        project_name,
+                        project_id,
+                        session,
+                    ),
+                    f"collect_releases({project_name})",
                 )
                 logger.info(
                     "  canonical/%s: releases collected (%d branches) in %s",
@@ -376,13 +416,16 @@ async def _collect_github(
                 # "all" mode: open issues first, then full-refresh below
                 try:
                     open_started_at = time.monotonic()
-                    open_collected = await collector.collect_issues(
-                        project_name,
-                        project_id,
-                        session,
-                        limit=limit,
-                        state="open",
-                        collection_run_id=collection_run_id,
+                    open_collected = await _retry_github(
+                        lambda: collector.collect_issues(
+                            project_name,
+                            project_id,
+                            session,
+                            limit=limit,
+                            state="open",
+                            collection_run_id=collection_run_id,
+                        ),
+                        f"collect_issues(open, {project_name})",
                     )
                     stats.issues_collected += open_collected
                     logger.info(
@@ -473,15 +516,18 @@ async def _collect_github(
 
             try:
                 issues_started_at = time.monotonic()
-                issues_collected = await collector.collect_issues(
-                    project_name,
-                    project_id,
-                    session,
-                    limit=limit,
-                    refresh_age_days=settings.refresh_age_days,
-                    since=watermark,
-                    collection_run_id=collection_run_id,
-                    state="all",
+                issues_collected = await _retry_github(
+                    lambda: collector.collect_issues(
+                        project_name,
+                        project_id,
+                        session,
+                        limit=limit,
+                        refresh_age_days=settings.refresh_age_days,
+                        since=watermark,
+                        collection_run_id=collection_run_id,
+                        state="all",
+                    ),
+                    f"collect_issues(all, {project_name})",
                 )
                 stats.issues_collected += issues_collected
                 logger.info(
@@ -523,14 +569,22 @@ async def _collect_github(
                         project_id, "github", str(exc), err_session
                     )
 
-            rate_limit = collector.check_rate_limit()
-            logger.info(
-                "GitHub API quota after %s: %d/%d remaining",
-                project_name,
-                rate_limit["remaining"],
-                rate_limit["limit"],
-            )
-            collector.wait_for_rate_limit()
+            try:
+                rate_limit = await _retry_github(
+                    collector.check_rate_limit,
+                    f"check_rate_limit after {project_name}",
+                )
+                logger.info(
+                    "GitHub API quota after %s: %d/%d remaining",
+                    project_name,
+                    rate_limit["remaining"],
+                    rate_limit["limit"],
+                )
+                collector.wait_for_rate_limit()
+            except GithubException as exc:
+                logger.warning(
+                    "Could not check GitHub rate limit after %s: %s", project_name, exc
+                )
 
             # Avoid GitHub secondary rate limits between repos
             await asyncio.sleep(1)
