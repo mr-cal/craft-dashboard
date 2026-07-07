@@ -112,14 +112,21 @@
 <section class="issue-detail-card">
   <h3>Related Issues</h3>
   {% if related_issues %}
-  <table>
+  <table role="grid">
+    <colgroup>
+      <col class="col-title">
+      <col style="width: 110px">
+      <col style="width: 60px">
+      <col class="col-summary">
+      <col style="width: 90px">
+    </colgroup>
     <thead>
       <tr>
         <th>Issue</th>
         <th>Project</th>
         <th>State</th>
-        <th>Similarity</th>
         <th>Summary</th>
+        <th>Similarity</th>
       </tr>
     </thead>
     <tbody>
@@ -132,8 +139,13 @@
         </td>
         <td>{{ rel.project_name }}</td>
         <td>{{ rel.state }}</td>
-        <td>{{ rel.similarity }}</td>
-        <td>{{ rel.summary or "—" }}</td>
+        <td class="summary-cell">{{ rel.summary or "—" }}</td>
+        <td>
+          <div class="similarity-bar">
+            <div class="similarity-fill" style="width: {{ (rel.similarity * 100) | round(0) | int }}%"></div>
+            <span class="similarity-label">{{ (rel.similarity * 100) | round(0) | int }}%</span>
+          </div>
+        </td>
       </tr>
       {% endfor %}
     </tbody>

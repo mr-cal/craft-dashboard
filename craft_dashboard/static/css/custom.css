@@ -374,6 +374,32 @@ table tbody tr:hover {
   color: #fff;
 }
 
+/* Similarity progress bar */
+.similarity-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.similarity-fill {
+  height: 6px;
+  background: #0066cc;
+  border-radius: 3px;
+  flex-shrink: 0;
+  max-width: 60px;
+}
+
+html.is-dark-theme .similarity-fill {
+  background: #4788f0;
+}
+
+.similarity-label {
+  font-size: 0.75rem;
+  color: var(--app-text-muted);
+  white-space: nowrap;
+}
+
 .action-badge {
   display: inline-block;
   padding: 0.15rem 0.5rem;

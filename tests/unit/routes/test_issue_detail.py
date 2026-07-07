@@ -201,7 +201,7 @@ class TestRelatedIssuesSection:
         assert response.status_code == 200
         assert "Related Issues" in response.text
         assert "Similar bug in core22 builds" in response.text
-        assert "0.91" in response.text
+        assert "91%" in response.text
 
     def test_related_issues_empty_no_embedding_shows_notice(
         self, test_client: TestClient
