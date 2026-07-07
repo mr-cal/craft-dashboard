@@ -36,6 +36,11 @@
   <section class="issue-detail-card">
     <h3>Current evaluation</h3>
     {% if current_evaluation %}
+    {% if is_outdated %}
+    <div class="evaluation-outdated-notice">
+      ⚠️ This summary may be outdated — the issue content or evaluation prompts have changed since this evaluation was made.
+    </div>
+    {% endif %}
     <p>{{ current_evaluation.summary or "No summary available." }}</p>
     <p><strong>Suggested action:</strong> {{ (current_evaluation.suggested_action or "—")|replace("_", " ") }}</p>
     {% if current_evaluation.suggested_action_reason %}

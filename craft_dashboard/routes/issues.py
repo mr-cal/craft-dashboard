@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException
 
 from craft_dashboard.dependencies import get_config, get_db_session
+from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION, _compute_content_hash
 from craft_dashboard.models.views import IssueFilters, IssueView
 from craft_dashboard.repositories.issue_repository import IssueRepository
 
@@ -295,6 +296,24 @@ async def issue_detail(
     current_evaluation = evaluation_history[0] if evaluation_history else None
 
     has_embedding = bool(current_evaluation and current_evaluation.get("has_embedding"))
+
+    is_outdated = False
+    if current_evaluation:
+        if current_evaluation.get("eval_version") != CURRENT_EVAL_VERSION:
+            is_outdated = True
+        else:
+            stored_hash = current_evaluation.get("issue_data_hash")
+            if stored_hash:
+                current_hash = _compute_content_hash(
+                    issue["title"],
+                    issue.get("body"),
+                    issue["state"],
+                    issue.get("labels") or [],
+                    issue.get("comments") or [],
+                )
+                if stored_hash != current_hash:
+                    is_outdated = True
+
     related_issues: list[dict[str, Any]] = []
     try:
         related_issues = await repo.find_similar_issues(
@@ -317,6 +336,7 @@ async def issue_detail(
             "original_issue_url": _build_original_issue_url(issue),
             "related_issues": related_issues,
             "has_embedding": has_embedding,
+            "is_outdated": is_outdated,
         },
     )
 

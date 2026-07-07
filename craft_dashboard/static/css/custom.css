@@ -717,3 +717,13 @@ table {
 .col-hidden {
   display: none !important;
 }
+
+.evaluation-outdated-notice {
+  background-color: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 0.375rem;
+  color: #92400e;
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.75rem;
+}
