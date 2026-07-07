@@ -892,6 +892,7 @@ class TestEvalResultIntegration:
             latest=True,
             evaluated_at=now,
             eval_locked_until=None,
+            eval_version=CURRENT_EVAL_VERSION,
         )
         expired_pending_eval = make_evaluation(
             id=3,

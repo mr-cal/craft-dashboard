@@ -435,9 +435,18 @@ async def eval_status(
                 )
             )
         else:
+            old_version = or_(
+                latest_evaluation.eval_version.is_(None),
+                latest_evaluation.eval_version != CURRENT_EVAL_VERSION,
+            )
+            old_version_unlocked = old_version & or_(
+                latest_evaluation.eval_locked_until.is_(None),
+                latest_evaluation.eval_locked_until <= now,
+            )
             pending_query = pending_query.where(
                 or_(
                     latest_evaluation.id.is_(None),
+                    old_version_unlocked,
                     (
                         (latest_evaluation.model_name == "pending")
                         & or_(
