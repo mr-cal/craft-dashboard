@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
@@ -26,6 +27,8 @@ from craft_dashboard.models.project import Project
 from craft_dashboard.repositories.issue_repository import (
     _build_excluded_issues_condition,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/eval")
 limiter = Limiter(key_func=get_remote_address)
@@ -175,6 +178,27 @@ async def _fetch_issue_and_latest_evaluation(
             and evaluation.issue_data_hash == current_hash
         ):
             continue
+        # Log a warning when re-evaluating an issue that was recently evaluated,
+        # to make unexpected re-evaluations visible in the server logs.
+        if (
+            evaluation is not None
+            and evaluation.evaluated_at is not None
+            and evaluation.model_name != "pending"
+        ):
+            age_minutes = (
+                datetime.now(tz=UTC) - evaluation.evaluated_at
+            ).total_seconds() / 60
+            if age_minutes < 120:  # noqa: PLR2004
+                logger.warning(
+                    "Re-evaluating %s/%s (evaluated %.0f min ago, "
+                    "stored_hash=%s, current_hash=%s, version=%s)",
+                    project_name,
+                    issue.external_id,
+                    age_minutes,
+                    evaluation.issue_data_hash,
+                    current_hash,
+                    evaluation.eval_version,
+                )
         return issue, project_name, evaluation
     return None
 

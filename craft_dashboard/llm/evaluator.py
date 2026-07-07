@@ -123,6 +123,13 @@ def _compute_content_hash(
 
     Includes comments so that new discussion triggers re-evaluation.
 
+    .. warning::
+        Any change to this function's output MUST be accompanied by a
+        ``CURRENT_EVAL_VERSION`` bump **in the same commit**. Changing the hash
+        without bumping the version causes all existing evaluations to appear
+        stale (hash mismatch at priority-5), triggering mass re-evaluation of
+        issues that haven't actually changed.
+
     Args:
         title: Issue title.
         body: Issue body text.
