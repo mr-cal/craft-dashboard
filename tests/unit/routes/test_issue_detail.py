@@ -203,7 +203,10 @@ class TestRelatedIssuesSection:
         assert "Similar bug in core22 builds" in response.text
         assert "0.91" in response.text
 
-    def test_related_issues_empty_shows_notice(self, test_client: TestClient) -> None:
+    def test_related_issues_empty_no_embedding_shows_notice(
+        self, test_client: TestClient
+    ) -> None:
+        """When the issue has no embedding, show the 'no embedding' notice."""
         with (
             patch.object(
                 IssueRepository,
@@ -220,4 +223,33 @@ class TestRelatedIssuesSection:
 
         assert response.status_code == 200
         assert "Related Issues" in response.text
-        assert "No related issues found" in response.text
+        assert "No embedding available" in response.text
+
+    def test_related_issues_empty_with_embedding_shows_threshold_notice(
+        self, test_client: TestClient
+    ) -> None:
+        """When the issue has an embedding but no similar results, show threshold notice."""
+        detail_with_embedding = {
+            **_DETAIL,
+            "evaluation_history": [
+                {**_DETAIL["evaluation_history"][0], "has_embedding": True},
+                *_DETAIL["evaluation_history"][1:],
+            ],
+        }
+        with (
+            patch.object(
+                IssueRepository,
+                "get_issue_detail",
+                AsyncMock(return_value=detail_with_embedding),
+            ),
+            patch.object(
+                IssueRepository,
+                "find_similar_issues",
+                AsyncMock(return_value=[]),
+            ),
+        ):
+            response = test_client.get("/issues/snapcraft/321")
+
+        assert response.status_code == 200
+        assert "Related Issues" in response.text
+        assert "No related issues found above the similarity threshold" in response.text

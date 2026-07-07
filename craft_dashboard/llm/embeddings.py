@@ -9,8 +9,6 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-_EMBEDDING_DIMENSION = 768  # nomic-embed-text-v1.5
-
 
 class EmbeddingClient:
     """Compute embeddings using an OpenAI-compatible /v1/embeddings endpoint."""

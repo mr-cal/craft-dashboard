@@ -257,15 +257,18 @@ async def run_evaluate_loop(
     stale_days: int,
     server_ca_cert: str,
     verbose: bool,
+    embed_model: str = "",
 ) -> None:
     """Poll the eval API, run LLM evaluation (summary + scores), and submit results.
 
     For each pending issue the loop runs two steps in sequence:
       1. Evaluate — calls evaluator.evaluate() to produce summary + scores in
          a single LLM call.  Closed/merged issues produce summary only.
-      2. Submit — POSTs the assembled payload to /api/eval/result with
-         summary_embedding=None.  Embeddings are computed separately by the
-         ``embed`` subcommand.
+      2. Embed (optional) — if *embed_model* is set, computes the summary
+         embedding immediately and includes it in the submission payload.
+         If *embed_model* is empty, summary_embedding=None is submitted and
+         embeddings can be computed later via the ``embed`` subcommand.
+      3. Submit — POSTs the assembled payload to /api/eval/result.
 
     The loop runs until *limit* issues are evaluated (limit=0 means run until
     the server returns 204 No Content), or until a shutdown signal is received.
@@ -295,6 +298,14 @@ async def run_evaluate_loop(
         client=llm_client,
         model=model,
     )
+    embed_client: EmbeddingClient | None = None
+    if embed_model:
+        embed_client = EmbeddingClient(
+            base_url=llm_base_url,
+            model=embed_model,
+            api_key=llm_api_key,
+            ca_cert=ca_cert,
+        )
     filter_parts = []
     if project:
         filter_parts.append(project)
@@ -498,6 +509,21 @@ async def run_evaluate_loop(
                         "summary_embedding": None,
                     }
 
+                    # Compute embedding inline if an embedding model is configured.
+                    # On failure, log a warning and continue — the eval is still
+                    # submitted without an embedding (backfillable via `embed`).
+                    t_embed: float = 0.0
+                    if embed_client is not None and result.get("summary"):
+                        progress.update(
+                            overall_id,
+                            description=f"[dim]{issue_ref}:[/dim] embed…",
+                        )
+                        embed_text = f"{issue_data['title']}. {result['summary']}"
+                        embedding, t_embed = await _timed(
+                            _embed_safe(embed_client, embed_text, issue_ref)
+                        )
+                        submission["summary_embedding"] = embedding
+
                     try:
                         submit_response = await http_client.post(
                             "/api/eval/result",
@@ -545,10 +571,13 @@ async def run_evaluate_loop(
                         overall_id, advance=1, description="Evaluating issues"
                     )
                     action = submission.get("suggested_action") or "summary_only"
+                    embed_info = (
+                        f"  embed {_format_elapsed(t_embed)}" if t_embed > 0 else ""
+                    )
                     progress.console.print(
                         f"[bold]{issue_ref}[/bold] — {action}"
                         f"  [dim]{prompt_tok} in / {completion_tok} out"
-                        f"  eval {_format_elapsed(t_eval)}[/dim]"
+                        f"  eval {_format_elapsed(t_eval)}{embed_info}[/dim]"
                     )
 
                     if limit > 0 and evaluated >= limit:
@@ -565,6 +594,8 @@ async def run_evaluate_loop(
                     )
     finally:
         await llm_client.close()
+        if embed_client is not None:
+            await embed_client.close()
 
 
 async def run_embed_loop(
@@ -869,13 +900,17 @@ def evaluate_cmd(
 ) -> None:
     r"""Pull issues from the server and evaluate them (summary + scores).
 
-    Embeddings are NOT computed here — run the ``embed`` subcommand afterwards.
+    If LOCAL_LLM_EMBEDDING_MODEL is set, the embedding is computed immediately
+    after each evaluation and submitted in the same pass. Otherwise,
+    summary_embedding=None is submitted and embeddings can be backfilled later
+    via the ``embed`` subcommand.
 
     LLM connection settings are read from environment variables (set in .env):
 
     \b
-      LOCAL_LLM_URL    — required, OpenAI-compatible endpoint
-      LOCAL_LLM_MODEL  — required, model name for evaluation
+      LOCAL_LLM_URL             — required, OpenAI-compatible endpoint
+      LOCAL_LLM_MODEL           — required, model name for evaluation
+      LOCAL_LLM_EMBEDDING_MODEL — optional, embedding model (enables inline embed)
       LOCAL_LLM_API_KEY           — optional, bearer token for the LLM endpoint
       LOCAL_LLM_CA_CERT           — optional, PEM CA cert for LLM TLS
       EVAL_CLIENT_SERVER_CA_CERT  — optional, PEM CA cert for server TLS
@@ -896,6 +931,7 @@ def evaluate_cmd(
     llm_api_key = os.environ.get("LOCAL_LLM_API_KEY", "")
     ca_cert = os.environ.get("LOCAL_LLM_CA_CERT", "")
     server_ca_cert = os.environ.get("EVAL_CLIENT_SERVER_CA_CERT", "")
+    embed_model = os.environ.get("LOCAL_LLM_EMBEDDING_MODEL", "")
     obj = ctx.obj
 
     asyncio.run(
@@ -915,6 +951,7 @@ def evaluate_cmd(
             stale_days=stale_days,
             server_ca_cert=server_ca_cert,
             verbose=obj["verbose"],
+            embed_model=embed_model,
         )
     )
 

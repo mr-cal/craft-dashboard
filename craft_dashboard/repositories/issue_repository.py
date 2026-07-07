@@ -87,6 +87,7 @@ def _serialize_evaluation(evaluation: LLMEvaluation) -> dict[str, Any]:
         "completion_tokens": evaluation.completion_tokens,
         "llm_backend": evaluation.llm_backend,
         "latest": evaluation.latest,
+        "has_embedding": evaluation.summary_embedding is not None,
     }
 
 

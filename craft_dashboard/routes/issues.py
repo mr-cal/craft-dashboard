@@ -1,6 +1,6 @@
 """Issue and PR triage routes."""
 
-import contextlib
+import logging
 from dataclasses import asdict
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, TypedDict, cast
@@ -17,6 +17,8 @@ from craft_dashboard.repositories.issue_repository import IssueRepository
 
 if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/issues")
 
@@ -292,12 +294,17 @@ async def issue_detail(
     evaluation_history = cast(list[dict[str, Any]], issue["evaluation_history"])
     current_evaluation = evaluation_history[0] if evaluation_history else None
 
+    has_embedding = bool(current_evaluation and current_evaluation.get("has_embedding"))
     related_issues: list[dict[str, Any]] = []
-    with contextlib.suppress(Exception):
+    try:
         related_issues = await repo.find_similar_issues(
             issue_id=issue["id"],
             top_n=settings.related_issues_top_n,
             similarity_threshold=settings.related_issues_similarity_threshold,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "find_similar_issues failed for issue %s", issue["id"], exc_info=True
         )
 
     return templates.TemplateResponse(
@@ -309,6 +316,7 @@ async def issue_detail(
             "evaluation_history": evaluation_history,
             "original_issue_url": _build_original_issue_url(issue),
             "related_issues": related_issues,
+            "has_embedding": has_embedding,
         },
     )
 
