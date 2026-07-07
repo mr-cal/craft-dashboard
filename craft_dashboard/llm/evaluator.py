@@ -14,7 +14,7 @@ from craft_dashboard.llm.prompts import (
 #: Evaluation version produced by the current prompt set.
 #: Increment this whenever a prompt change is expected to alter LLM output
 #: quality or structure (e.g. new body truncation rules, schema changes).
-CURRENT_EVAL_VERSION: int = 2
+CURRENT_EVAL_VERSION: int = 3
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +185,7 @@ class IssueEvaluator:
         comments: list[IssueComment] | None = None,
         pr_details: IssueDetails | None = None,
         existing_hash: str | None = None,
+        closing_references: list[IssueComment] | None = None,
     ) -> EvaluationResult | None:
         """Evaluate a single issue or PR in one LLM call.
 
@@ -206,6 +207,7 @@ class IssueEvaluator:
             comments: Recent comment dicts (optional).
             pr_details: PR review/CI/diff data (optional).
             existing_hash: Content hash from previous evaluation, if any.
+            closing_references: PRs or issues that closed this issue (optional).
 
         Returns:
             EvaluationResult dict, or None if skipped (content unchanged).
@@ -236,6 +238,7 @@ class IssueEvaluator:
                 is_maintainer=is_maintainer,
                 comment_count=comment_count,
                 comments=comments,
+                closing_references=closing_references,
             )
         else:
             messages = build_open_evaluate_prompt(

@@ -265,6 +265,7 @@ async def next_issue(
         "updated_at": issue.updated_at.isoformat() if issue.updated_at else None,
         "current_hash": _current_content_hash(issue),
         "maintainers": list(get_config(request).maintainers),
+        "closing_references": (issue.metadata_ or {}).get("closing_references", []),
     }
 
 

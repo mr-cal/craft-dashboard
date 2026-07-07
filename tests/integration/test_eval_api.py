@@ -118,6 +118,7 @@ class TestEvalNextIntegration:
             "updated_at": issue.updated_at.isoformat(),
             "current_hash": expected_hash,
             "maintainers": ["alice", "bob"],
+            "closing_references": [],
         }
 
         evaluations = asyncio.get_event_loop().run_until_complete(

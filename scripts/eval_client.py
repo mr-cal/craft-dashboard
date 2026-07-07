@@ -477,6 +477,7 @@ async def run_evaluate_loop(
                                 or issue_data.get("author_association") == "MAINTAINER",
                                 comment_count=len(issue_data.get("comments", [])),
                                 comments=issue_data.get("comments"),
+                                closing_references=issue_data.get("closing_references"),
                             )
                         )
                     except Exception:

@@ -71,6 +71,27 @@ def _format_pr_details(pr_details: dict) -> str:
     )
 
 
+def _format_closing_references(refs: list[dict]) -> str:
+    """Format closing references (PRs/issues that resolved an issue) for prompts.
+
+    Args:
+        refs: List of closing reference dicts with type/number/title/state fields.
+
+    Returns:
+        Formatted multi-line string, or empty string if refs is empty.
+
+    """
+    if not refs:
+        return ""
+    lines = ["\nClosed by:"]
+    for ref in refs:
+        type_label = "PR" if ref.get("type") == "pull_request" else "Issue"
+        lines.append(
+            f"- {type_label} #{ref['number']}: {ref.get('title', '')} ({ref.get('state', '')})"
+        )
+    return "\n".join(lines)
+
+
 def _build_summary_user_content(
     *,
     title: str,
@@ -84,12 +105,14 @@ def _build_summary_user_content(
     is_maintainer: bool,
     comments: list[dict] | None,
     state: str | None = None,
+    closing_references: list[dict] | None = None,
 ) -> str:
     """Build shared user content for summary prompts."""
     type_label = "Pull Request" if issue_type == "pull_request" else "Issue"
     label_str = ", ".join(labels) if labels else "none"
     comments_text = _format_comments(comments or [])
     state_line = f"State: {state}\n" if state else ""
+    closing_refs_text = _format_closing_references(closing_references or [])
 
     return (
         f"Type: {type_label}\n"
@@ -102,6 +125,7 @@ def _build_summary_user_content(
         f"Comment count: {comment_count}\n"
         f"Body:\n{_truncate_body(body)}"
         f"{comments_text}"
+        f"{closing_refs_text}"
     )
 
 
@@ -326,6 +350,7 @@ def build_closed_evaluate_prompt(
     author: str = "unknown",
     is_maintainer: bool = False,
     comments: list[dict] | None = None,
+    closing_references: list[dict] | None = None,
 ) -> list[dict[str, str]]:
     """Build a combined summary prompt for a closed issue or merged PR."""
     user_content = _build_summary_user_content(
@@ -340,6 +365,7 @@ def build_closed_evaluate_prompt(
         author=author,
         is_maintainer=is_maintainer,
         comments=comments,
+        closing_references=closing_references,
     )
     return [
         {"role": "system", "content": _CLOSED_EVAL_SYSTEM},

@@ -118,6 +118,39 @@ def _fetch_issue_comments(gh_issue: GHIssue) -> list[dict]:
     ]
 
 
+def _fetch_closing_references(gh_issue: GHIssue) -> list[dict]:
+    """Fetch PRs that closed this issue via GitHub timeline events.
+
+    Args:
+        gh_issue: A PyGithub Issue object (closed issues only).
+
+    Returns:
+        List of dicts describing each merged PR that closed the issue.
+
+    """
+    refs = []
+    for event in gh_issue.get_timeline():
+        if event.event == "cross-referenced" and event.source:
+            source = event.source
+            if (
+                source.type == "pull_request"
+                and source.issue is not None
+                and source.issue.pull_request is not None
+                and source.issue.pull_request.merged_at is not None
+            ):
+                refs.append(
+                    {
+                        "type": "pull_request",
+                        "number": source.issue.number,
+                        "title": source.issue.title,
+                        "url": source.issue.html_url,
+                        "state": "merged",
+                        "merged_at": source.issue.pull_request.merged_at.isoformat(),
+                    }
+                )
+    return refs
+
+
 def _fetch_pr_details(gh_pr: GHPullRequest) -> dict:
     """Fetch PR-specific data: reviews, CI checks, and diff stats.
 
@@ -519,7 +552,8 @@ class GitHubCollector:
                     exc_info=True,
                 )
 
-            # For all PRs, fetch reviews, CI status, and diff stats
+            # For all PRs, fetch reviews, CI status, and diff stats.
+            # For closed issues, fetch closing references (PRs that closed them).
             extra_metadata: dict = {}
             if issue_type == "pull_request":
                 logger.debug(
@@ -538,6 +572,16 @@ class GitHubCollector:
                         gh_issue.number,
                         exc_info=True,
                     )
+            elif issue_state == "closed":
+                logger.debug(
+                    "  Fetching closing references for %s/%s#%d",
+                    self.org,
+                    repo_name,
+                    gh_issue.number,
+                )
+                closing_refs = _fetch_closing_references(gh_issue)
+                if closing_refs:
+                    extra_metadata["closing_references"] = closing_refs
 
             stmt = insert(Issue).values(
                 **self._build_issue_values(
