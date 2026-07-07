@@ -375,6 +375,7 @@ async def run_evaluate_loop(
                         await asyncio.sleep(0.5)
                         continue
 
+                    t_wall_start = time.monotonic()
                     try:
                         response = await http_client.get(
                             "/api/eval/next",
@@ -563,7 +564,8 @@ async def run_evaluate_loop(
                         continue
 
                     evaluated += 1
-                    timing.add(PHASE_EVALUATE, t_eval)
+                    t_wall = time.monotonic() - t_wall_start
+                    timing.add(PHASE_EVALUATE, t_wall)
                     prompt_tok = submission["prompt_tokens"]
                     completion_tok = submission["completion_tokens"]
                     total_prompt_tokens += prompt_tok
