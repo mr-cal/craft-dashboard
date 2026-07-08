@@ -1074,6 +1074,76 @@ class TestEmbedNextIntegration:
             )
         assert second_response.status_code == 204
 
+    def test_embed_next_skips_empty_summary(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        """Evaluations with an empty summary must not appear in the embed queue."""
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(
+            id=1, project_id=1, title="Issue with empty summary", external_id="1"
+        )
+        evaluation = make_evaluation(id=1, issue_id=1, summary="", latest=True)
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue, evaluation)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/embed-next", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert response.status_code == 204
+
+    def test_embed_next_skips_non_latest_evaluation(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        """Only the latest evaluation for an issue should be considered."""
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(
+            id=1, project_id=1, title="Issue with old eval", external_id="1"
+        )
+        old_evaluation = make_evaluation(
+            id=1, issue_id=1, summary="Old summary.", latest=False
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue, old_evaluation)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/embed-next", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert response.status_code == 204
+
+    def test_embed_next_returns_lowest_issue_id_first(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        """embed-next must return issues ordered by issue_id ascending."""
+        project = make_project(id=1, name="snapcraft")
+        issue_a = make_issue(id=10, project_id=1, title="Later issue", external_id="10")
+        issue_b = make_issue(id=5, project_id=1, title="Earlier issue", external_id="5")
+        eval_a = make_evaluation(
+            id=1, issue_id=10, summary="Summary for A.", latest=True
+        )
+        eval_b = make_evaluation(
+            id=2, issue_id=5, summary="Summary for B.", latest=True
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue_a, issue_b, eval_a, eval_b)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/embed-next", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert response.status_code == 200
+        assert response.json()["issue_id"] == 5
+
 
 class TestEmbedResultIntegration:
     """Integration tests for POST /api/eval/embed-result."""
