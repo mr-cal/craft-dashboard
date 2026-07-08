@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
@@ -502,11 +501,8 @@ async def embed_next(
     """Return the next evaluated issue that needs an embedding, if any."""
     _require_eval_auth(request, authorization)
 
-    t0 = time.monotonic()
     excl = _build_excluded_issues_condition(get_config(request).filtered_issues)
     now = datetime.now(tz=UTC)
-    t1 = time.monotonic()
-    logger.info("embed_next: config/setup=%.3fs", t1 - t0)
     # Select only the columns we need. Selecting the full ORM object (including
     # the Vector summary_embedding column) causes the planner to ignore the
     # partial index and do a 67M-row cross-join. Ordering by
@@ -538,27 +534,18 @@ async def embed_next(
     )
     if excl is not None:
         embed_q = embed_q.where(excl)
-    t2 = time.monotonic()
     result = await session.execute(embed_q)
-    t3 = time.monotonic()
-    logger.info("embed_next: SELECT=%.3fs", t3 - t2)
     row = result.first()
     if row is None:
         return Response(status_code=204)
 
     issue_id, summary, title, external_id, project_name = row
-    t4 = time.monotonic()
     await session.execute(
         update(LLMEvaluation)
         .where(LLMEvaluation.issue_id == issue_id, LLMEvaluation.latest.is_(True))
         .values(eval_locked_until=now + _EMBED_LOCK_TTL)
     )
-    t5 = time.monotonic()
     await session.commit()
-    t6 = time.monotonic()
-    logger.info(
-        "embed_next: UPDATE=%.3fs commit=%.3fs total=%.3fs", t5 - t4, t6 - t5, t6 - t0
-    )
 
     embed_text = f"{title}. {summary}"
     return {
