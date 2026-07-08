@@ -12,7 +12,7 @@ from scripts.llm.validation import validate_evaluation_result
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import case, func, or_, select, update
-from sqlalchemy.orm import aliased, defer
+from sqlalchemy.orm import aliased
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -503,9 +503,19 @@ async def embed_next(
 
     excl = _build_excluded_issues_condition(get_config(request).filtered_issues)
     now = datetime.now(tz=UTC)
+    # Select only the columns we need. Selecting the full ORM object (including
+    # the Vector summary_embedding column) causes the planner to ignore the
+    # partial index and do a 67M-row cross-join. Ordering by
+    # LLMEvaluation.issue_id (not Issue.id) lets the planner drive from the
+    # ix_llm_evaluations_embed_queue index directly.
     embed_q = (
-        select(LLMEvaluation, Issue.title, Issue.external_id, Project.name)
-        .options(defer(LLMEvaluation.summary_embedding))
+        select(
+            LLMEvaluation.issue_id,
+            LLMEvaluation.summary,
+            Issue.title,
+            Issue.external_id,
+            Project.name,
+        )
         .join(Issue, LLMEvaluation.issue_id == Issue.id)
         .join(Project, Issue.project_id == Project.id)
         .where(
@@ -519,7 +529,7 @@ async def embed_next(
                 LLMEvaluation.eval_locked_until <= now,
             ),
         )
-        .order_by(Issue.id)
+        .order_by(LLMEvaluation.issue_id)
         .limit(1)
     )
     if excl is not None:
@@ -529,13 +539,17 @@ async def embed_next(
     if row is None:
         return Response(status_code=204)
 
-    evaluation, title, external_id, project_name = row
-    evaluation.eval_locked_until = now + _EMBED_LOCK_TTL
+    issue_id, summary, title, external_id, project_name = row
+    await session.execute(
+        update(LLMEvaluation)
+        .where(LLMEvaluation.issue_id == issue_id, LLMEvaluation.latest.is_(True))
+        .values(eval_locked_until=now + _EMBED_LOCK_TTL)
+    )
     await session.commit()
 
-    embed_text = f"{title}. {evaluation.summary}"
+    embed_text = f"{title}. {summary}"
     return {
-        "issue_id": evaluation.issue_id,
+        "issue_id": issue_id,
         "project_name": project_name,
         "external_id": external_id,
         "embed_text": embed_text,
