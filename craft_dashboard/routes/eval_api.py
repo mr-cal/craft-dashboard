@@ -12,7 +12,7 @@ from scripts.llm.validation import validate_evaluation_result
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import case, func, or_, select, update
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, defer
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -505,6 +505,7 @@ async def embed_next(
     now = datetime.now(tz=UTC)
     embed_q = (
         select(LLMEvaluation, Issue.title, Issue.external_id, Project.name)
+        .options(defer(LLMEvaluation.summary_embedding))
         .join(Issue, LLMEvaluation.issue_id == Issue.id)
         .join(Project, Issue.project_id == Project.id)
         .where(
