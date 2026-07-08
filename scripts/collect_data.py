@@ -107,7 +107,6 @@ async def _retry_github(coro_fn: object, description: str) -> object:
             result = coro_fn()
             if isinstance(result, collections.abc.Coroutine):
                 return await result
-            return result
         except GithubException as exc:
             if attempt == _GITHUB_RETRY_ATTEMPTS - 1:
                 raise
@@ -121,6 +120,8 @@ async def _retry_github(coro_fn: object, description: str) -> object:
                 sleep,
             )
             await asyncio.sleep(sleep)
+        else:
+            return result
     msg = "unreachable"
     raise RuntimeError(msg)
 
@@ -388,10 +389,12 @@ async def _collect_github(
             try:
                 releases_started_at = time.monotonic()
                 release_count = await _retry_github(
-                    lambda: collector.collect_releases(
-                        project_name,
-                        project_id,
-                        session,
+                    lambda _pn=project_name, _pid=project_id, _s=session: (
+                        collector.collect_releases(
+                            _pn,
+                            _pid,
+                            _s,
+                        )
                     ),
                     f"collect_releases({project_name})",
                 )
@@ -417,13 +420,15 @@ async def _collect_github(
                 try:
                     open_started_at = time.monotonic()
                     open_collected = await _retry_github(
-                        lambda: collector.collect_issues(
-                            project_name,
-                            project_id,
-                            session,
-                            limit=limit,
-                            state="open",
-                            collection_run_id=collection_run_id,
+                        lambda _pn=project_name, _pid=project_id, _s=session: (
+                            collector.collect_issues(
+                                _pn,
+                                _pid,
+                                _s,
+                                limit=limit,
+                                state="open",
+                                collection_run_id=collection_run_id,
+                            )
                         ),
                         f"collect_issues(open, {project_name})",
                     )
@@ -517,15 +522,17 @@ async def _collect_github(
             try:
                 issues_started_at = time.monotonic()
                 issues_collected = await _retry_github(
-                    lambda: collector.collect_issues(
-                        project_name,
-                        project_id,
-                        session,
-                        limit=limit,
-                        refresh_age_days=settings.refresh_age_days,
-                        since=watermark,
-                        collection_run_id=collection_run_id,
-                        state="all",
+                    lambda _pn=project_name, _pid=project_id, _s=session, _w=watermark: (
+                        collector.collect_issues(
+                            _pn,
+                            _pid,
+                            _s,
+                            limit=limit,
+                            refresh_age_days=settings.refresh_age_days,
+                            since=_w,
+                            collection_run_id=collection_run_id,
+                            state="all",
+                        )
                     ),
                     f"collect_issues(all, {project_name})",
                 )

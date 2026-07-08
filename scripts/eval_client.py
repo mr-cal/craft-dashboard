@@ -391,9 +391,21 @@ async def run_evaluate_loop(
                         logger.error("Cannot connect to %s%s", server_url, hint)  # noqa: TRY400
                         await _sleep_until_next_poll(poll_interval)
                         continue
+                    except httpx.HTTPStatusError as exc:
+                        logger.error(  # noqa: TRY400
+                            "HTTP error fetching work from %s: %s %s",
+                            server_url,
+                            exc.response.status_code,
+                            exc.response.text[:200],
+                        )
+                        await _sleep_until_next_poll(poll_interval)
+                        continue
                     except httpx.HTTPError as exc:
                         logger.error(  # noqa: TRY400
-                            "HTTP error fetching work from %s: %s", server_url, exc
+                            "HTTP error fetching work from %s: %s: %s",
+                            server_url,
+                            type(exc).__name__,
+                            exc,
                         )
                         await _sleep_until_next_poll(poll_interval)
                         continue
@@ -702,9 +714,21 @@ async def run_embed_loop(
                         logger.error("Cannot connect to %s%s", server_url, hint)  # noqa: TRY400
                         await _sleep_until_next_poll(poll_interval)
                         continue
+                    except httpx.HTTPStatusError as exc:
+                        logger.error(  # noqa: TRY400
+                            "HTTP error fetching work from %s: %s %s",
+                            server_url,
+                            exc.response.status_code,
+                            exc.response.text[:200],
+                        )
+                        await _sleep_until_next_poll(poll_interval)
+                        continue
                     except httpx.HTTPError as exc:
                         logger.error(  # noqa: TRY400
-                            "HTTP error fetching work from %s: %s", server_url, exc
+                            "HTTP error fetching work from %s: %s: %s",
+                            server_url,
+                            type(exc).__name__,
+                            exc,
                         )
                         await _sleep_until_next_poll(poll_interval)
                         continue
@@ -838,7 +862,7 @@ async def run_embed_loop(
 )
 @click.pass_context
 def cli(ctx: click.Context, server: str, token: str, verbose: bool) -> None:
-    r"""craft-dashboard local eval client.
+    """craft-dashboard local eval client.
 
     Two subcommands run the two phases independently:
 
@@ -901,7 +925,7 @@ def evaluate_cmd(
     incomplete: bool,
     stale_days: int,
 ) -> None:
-    r"""Pull issues from the server and evaluate them (summary + scores).
+    """Pull issues from the server and evaluate them (summary + scores).
 
     If LOCAL_LLM_EMBEDDING_MODEL is set, the embedding is computed immediately
     after each evaluation and submitted in the same pass. Otherwise,
@@ -980,7 +1004,7 @@ def embed_cmd(
     poll_interval: int,
     limit: int,
 ) -> None:
-    r"""Compute embeddings for evaluated issues that have none yet.
+    """Compute embeddings for evaluated issues that have none yet.
 
     Run after ``evaluate`` to add vector embeddings to completed evaluations.
 
