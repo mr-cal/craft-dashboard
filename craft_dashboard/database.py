@@ -30,13 +30,6 @@ def get_engine(
         max_overflow=max_overflow,
         pool_pre_ping=True,
         echo=False,
-        # Force custom plans so PostgreSQL always plans with actual parameter
-        # values. Without this, asyncpg's prepared statement cache causes
-        # PostgreSQL to switch to generic plans after 5+ executions, which
-        # cannot match partial index conditions like `model_name != 'pending'`
-        # against a bind parameter, causing catastrophic plan regressions (e.g.
-        # a full-table cross-join taking 15s instead of 0.3ms).
-        connect_args={"server_settings": {"plan_cache_mode": "force_custom_plan"}},
     )
 
 

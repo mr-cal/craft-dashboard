@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from scripts.llm.validation import validate_evaluation_result
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from sqlalchemy import case, func, or_, select, update
+from sqlalchemy import bindparam, case, func, or_, select, update
 from sqlalchemy.orm import aliased
 
 if TYPE_CHECKING:
@@ -508,6 +508,12 @@ async def embed_next(
     # partial index and do a 67M-row cross-join. Ordering by
     # LLMEvaluation.issue_id (not Issue.id) lets the planner drive from the
     # ix_llm_evaluations_embed_queue index directly.
+    # IMPORTANT: 'pending' and '' must be rendered as SQL literals (not bind
+    # parameters) so the planner's constraint implication checker can match
+    # them against the partial index predicate. Parameterized forms like
+    # `model_name != $1` prevent the planner from proving the partial index
+    # predicate is satisfied, causing a full Seq Scan (~13s) instead of the
+    # 0.3ms index path.
     embed_q = (
         select(
             LLMEvaluation.issue_id,
@@ -520,9 +526,10 @@ async def embed_next(
         .join(Project, Issue.project_id == Project.id)
         .where(
             LLMEvaluation.latest.is_(True),
-            LLMEvaluation.model_name != "pending",
+            LLMEvaluation.model_name
+            != bindparam("pending", value="pending", literal_execute=True),
             LLMEvaluation.summary.isnot(None),
-            LLMEvaluation.summary != "",
+            LLMEvaluation.summary != bindparam("empty", value="", literal_execute=True),
             LLMEvaluation.summary_embedding.is_(None),
             or_(
                 LLMEvaluation.eval_locked_until.is_(None),
