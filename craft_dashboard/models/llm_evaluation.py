@@ -40,6 +40,17 @@ class LLMEvaluation(Base):
             unique=True,
             postgresql_where=text("latest = true"),
         ),
+        Index(
+            "ix_llm_evaluations_embed_queue",
+            "issue_id",
+            postgresql_where=text(
+                "latest = true"
+                " AND model_name != 'pending'"
+                " AND summary IS NOT NULL"
+                " AND summary != ''"
+                " AND summary_embedding IS NULL"
+            ),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
