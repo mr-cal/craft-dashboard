@@ -51,6 +51,12 @@ class LLMEvaluation(Base):
                 " AND summary_embedding IS NULL"
             ),
         ),
+        Index(
+            "ix_llm_evaluations_eval_queue",
+            "eval_locked_until",
+            "issue_id",
+            postgresql_where=text("latest = true"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
