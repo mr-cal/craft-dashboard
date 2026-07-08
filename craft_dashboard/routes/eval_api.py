@@ -12,7 +12,7 @@ from scripts.llm.validation import validate_evaluation_result
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import bindparam, case, func, or_, select, update
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, defer
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -115,6 +115,10 @@ async def _fetch_issue_and_latest_evaluation(
             )
         )
         .order_by(priority, open_first, Issue.id)
+        # summary_embedding is a Vector(1024) column (~4KB/row). The eval
+        # queue query returns thousands of rows and never needs the embedding
+        # value, so defer it to avoid transferring ~10MB per request.
+        .options(defer(latest_evaluation.summary_embedding))
     )
 
     excl = _build_excluded_issues_condition(filtered_issues or {})
