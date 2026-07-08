@@ -687,6 +687,7 @@ async def run_embed_loop(
                         await asyncio.sleep(0.5)
                         continue
 
+                    t0 = time.monotonic()
                     try:
                         response = await http_client.get(
                             "/api/eval/embed-next",
@@ -751,7 +752,6 @@ async def run_embed_loop(
                         description=f"[dim]{issue_ref}:[/dim] embed…",
                     )
 
-                    t0 = time.monotonic()
                     embedding, t_embed = await _timed(
                         _embed_safe(embed_client, embed_text, issue_ref)
                     )
@@ -791,8 +791,8 @@ async def run_embed_loop(
                         continue
 
                     embedded += 1
-                    timing.add(PHASE_EMBED, t_embed)
                     duration = time.monotonic() - t0
+                    timing.add(PHASE_EMBED, duration)
                     progress.update(
                         overall_id, advance=1, description="Embedding issues"
                     )
