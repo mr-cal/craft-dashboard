@@ -766,7 +766,7 @@ async def stats_triage(
         .join(Issue, LLMEvaluation.issue_id == Issue.id)
         .join(Project, Issue.project_id == Project.id)
         .where(Issue.state == "open")
-        .where(LLMEvaluation.latest.is_(True))
+        .where(LLMEvaluation.latest)
     )
     if excl is not None:
         evaluated_q = evaluated_q.where(excl)
@@ -780,7 +780,7 @@ async def stats_triage(
         .join(Issue, LLMEvaluation.issue_id == Issue.id)
         .join(Project, Issue.project_id == Project.id)
         .where(Issue.state == "open")
-        .where(LLMEvaluation.latest.is_(True))
+        .where(LLMEvaluation.latest)
         .group_by(LLMEvaluation.suggested_action)
     )
     if excl is not None:

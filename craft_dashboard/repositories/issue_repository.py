@@ -142,8 +142,7 @@ class IssueRepository:
                 .join(Project, Issue.project_id == Project.id)
                 .outerjoin(
                     LLMEvaluation,
-                    (LLMEvaluation.issue_id == Issue.id)
-                    & LLMEvaluation.latest.is_(True),
+                    (LLMEvaluation.issue_id == Issue.id) & LLMEvaluation.latest,
                 )
                 .where(Project.name == project_name)
                 .where(Issue.external_id == external_id)
@@ -200,7 +199,7 @@ class IssueRepository:
             .join(Project, Issue.project_id == Project.id)
             .outerjoin(
                 LLMEvaluation,
-                (LLMEvaluation.issue_id == Issue.id) & LLMEvaluation.latest.is_(True),
+                (LLMEvaluation.issue_id == Issue.id) & LLMEvaluation.latest,
             )
         )
 
@@ -374,7 +373,7 @@ class IssueRepository:
         embedding_row = await self.session.execute(
             select(LLMEvaluation.summary_embedding)
             .where(LLMEvaluation.issue_id == issue_id)
-            .where(LLMEvaluation.latest.is_(True))
+            .where(LLMEvaluation.latest)
         )
         embedding = embedding_row.scalar_one_or_none()
         if embedding is None:

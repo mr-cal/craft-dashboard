@@ -106,8 +106,7 @@ async def _fetch_issue_and_latest_evaluation(
         .join(Project, Issue.project_id == Project.id)
         .outerjoin(
             latest_evaluation,
-            (latest_evaluation.issue_id == Issue.id)
-            & latest_evaluation.latest.is_(True),
+            (latest_evaluation.issue_id == Issue.id) & latest_evaluation.latest,
         )
         .where(
             or_(
@@ -311,7 +310,7 @@ async def submit_result(
         update(LLMEvaluation)
         .where(
             LLMEvaluation.issue_id == payload.issue_id,
-            LLMEvaluation.latest.is_(True),
+            LLMEvaluation.latest,
         )
         .values(latest=False, eval_locked_until=None)
     )
@@ -372,7 +371,7 @@ async def eval_status(
     )
     total_evaluated = await session.scalar(
         select(func.count(LLMEvaluation.id)).where(
-            LLMEvaluation.latest.is_(True),
+            LLMEvaluation.latest,
             LLMEvaluation.model_name != "pending",
         )
     )
@@ -399,8 +398,7 @@ async def eval_status(
             .join(Project, Issue.project_id == Project.id)
             .outerjoin(
                 latest_evaluation,
-                (latest_evaluation.issue_id == Issue.id)
-                & latest_evaluation.latest.is_(True),
+                (latest_evaluation.issue_id == Issue.id) & latest_evaluation.latest,
             )
         )
         if open_only:
@@ -466,7 +464,7 @@ async def eval_status(
         .join(Issue, LLMEvaluation.issue_id == Issue.id)
         .join(Project, Issue.project_id == Project.id)
         .where(
-            LLMEvaluation.latest.is_(True),
+            LLMEvaluation.latest,
             LLMEvaluation.model_name != "pending",
             LLMEvaluation.summary.isnot(None),
             LLMEvaluation.summary != "",
@@ -525,7 +523,7 @@ async def embed_next(
         .join(Issue, LLMEvaluation.issue_id == Issue.id)
         .join(Project, Issue.project_id == Project.id)
         .where(
-            LLMEvaluation.latest.is_(True),
+            LLMEvaluation.latest,
             LLMEvaluation.model_name
             != bindparam("pending", value="pending", literal_execute=True),
             LLMEvaluation.summary.isnot(None),
@@ -549,7 +547,7 @@ async def embed_next(
     issue_id, summary, title, external_id, project_name = row
     await session.execute(
         update(LLMEvaluation)
-        .where(LLMEvaluation.issue_id == issue_id, LLMEvaluation.latest.is_(True))
+        .where(LLMEvaluation.issue_id == issue_id, LLMEvaluation.latest)
         .values(eval_locked_until=now + _EMBED_LOCK_TTL)
     )
     await session.commit()
@@ -582,7 +580,7 @@ async def submit_embed_result(
     result = await session.execute(
         select(LLMEvaluation).where(
             LLMEvaluation.issue_id == payload.issue_id,
-            LLMEvaluation.latest.is_(True),
+            LLMEvaluation.latest,
         )
     )
     evaluation = result.scalar_one_or_none()
