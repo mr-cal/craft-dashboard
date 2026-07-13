@@ -376,6 +376,7 @@ async def run_evaluate_loop(
                         continue
 
                     t_wall_start = time.monotonic()
+                    progress.update(overall_id, description="Getting issue…")
                     try:
                         response = await http_client.get(
                             "/api/eval/next",
@@ -470,6 +471,18 @@ async def run_evaluate_loop(
                         description=f"[dim]{issue_ref}:[/dim] eval…",
                     )
 
+                    def _on_eval_attempt(
+                        attempt: int, total: int, *, _ref: str = issue_ref
+                    ) -> None:
+                        progress.update(
+                            overall_id,
+                            description=(
+                                f"[dim]{_ref}:[/dim] eval… ({attempt}/{total} attempts)"
+                            ),
+                        )
+
+                    llm_client.retry_callback = _on_eval_attempt
+
                     t0 = time.monotonic()
 
                     # Single evaluate call handles open, closed, and merged
@@ -538,6 +551,10 @@ async def run_evaluate_loop(
                         )
                         submission["summary_embedding"] = embedding
 
+                    progress.update(
+                        overall_id,
+                        description=f"[dim]{issue_ref}:[/dim] posting eval…",
+                    )
                     try:
                         submit_response = await http_client.post(
                             "/api/eval/result",
@@ -700,6 +717,7 @@ async def run_embed_loop(
                         continue
 
                     t0 = time.monotonic()
+                    progress.update(overall_id, description="Getting issue…")
                     try:
                         response = await http_client.get(
                             "/api/eval/embed-next",
@@ -784,6 +802,10 @@ async def run_embed_loop(
                         logger.warning("%s: embedding failed, skipping", issue_ref)
                         continue
 
+                    progress.update(
+                        overall_id,
+                        description=f"[dim]{issue_ref}:[/dim] posting embedding…",
+                    )
                     try:
                         submit_response = await http_client.post(
                             "/api/eval/embed-result",

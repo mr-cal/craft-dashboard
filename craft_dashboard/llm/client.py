@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import httpx
 from tenacity import (
+    RetryCallState,
     retry,
     retry_if_exception,
     stop_after_attempt,
@@ -18,6 +19,8 @@ from tenacity import (
 from craft_dashboard.llm.exceptions import LLMQuotaError, LLMUnavailableError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from craft_dashboard.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -25,6 +28,24 @@ logger = logging.getLogger(__name__)
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 HTTP_TOO_MANY_REQUESTS = 429
 HTTP_PAYMENT_REQUIRED = 402
+
+
+def _make_before_attempt(max_attempts: int) -> Callable[[RetryCallState], None]:
+    """Build a tenacity ``before`` hook that reports attempt progress.
+
+    Reads ``retry_callback`` off the instance the retried method is bound to
+    (``retry_state.args[0]`` is ``self``) so callers such as the eval CLI can
+    surface "(N/M attempts)" in a progress display without the client needing
+    to know anything about the UI.
+    """
+
+    def _before(retry_state: RetryCallState) -> None:
+        instance = retry_state.args[0] if retry_state.args else None
+        callback = getattr(instance, "retry_callback", None)
+        if callback is not None:
+            callback(retry_state.attempt_number, max_attempts)
+
+    return _before
 
 
 @dataclass
@@ -96,6 +117,9 @@ class OpenRouterClient:
         self.api_key = api_key
         self.base_url = base_url
         self._http: httpx.AsyncClient | None = None
+        # Optional hook invoked as (attempt_number, max_attempts) before each
+        # retry attempt of complete(); lets callers surface retry progress.
+        self.retry_callback: Callable[[int, int], None] | None = None
 
     @property
     def http(self) -> httpx.AsyncClient:
@@ -113,6 +137,7 @@ class OpenRouterClient:
         retry=retry_if_exception(_is_retriable),
         wait=wait_exponential(multiplier=1, min=4, max=60),
         stop=stop_after_attempt(3),
+        before=_make_before_attempt(3),
         reraise=True,
     )
     async def complete(
@@ -193,6 +218,9 @@ class LocalLLMClient:
         self.api_key = api_key
         self.ca_cert = str(pathlib.Path(ca_cert).expanduser()) if ca_cert else ca_cert
         self._http: httpx.AsyncClient | None = None
+        # Optional hook invoked as (attempt_number, max_attempts) before each
+        # retry attempt of complete(); lets callers surface retry progress.
+        self.retry_callback: Callable[[int, int], None] | None = None
 
     @property
     def http(self) -> httpx.AsyncClient:
@@ -215,6 +243,7 @@ class LocalLLMClient:
         ),
         wait=wait_exponential(multiplier=1, min=2, max=30),
         stop=stop_after_attempt(5),
+        before=_make_before_attempt(5),
         reraise=True,
     )
     async def complete(
