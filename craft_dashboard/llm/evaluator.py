@@ -64,12 +64,100 @@ def _needs_reevaluation(
     return existing_hash != current_hash
 
 
+def _fix_unescaped_quotes(text: str) -> str:
+    """Escape stray double-quotes inside JSON string values.
+
+    Some models emit literal quote characters inside a string value (e.g.
+    quoting a term for emphasis) without escaping them, which breaks JSON
+    parsing at that point. This walks the text tracking whether we're
+    inside a string and, when a ``"`` is found that isn't followed by a
+    JSON structural character (``,``, ``}``, ``]``, ``:``, or whitespace
+    leading to one of those), treats it as an unescaped quote within the
+    string and escapes it instead of treating it as the string terminator.
+
+    Args:
+        text: Candidate JSON text (already stripped of code fences/think blocks).
+
+    Returns:
+        Text with stray in-string quotes escaped.
+
+    """
+    structural_after_quote = set(",}]:")
+    result: list[str] = []
+    in_string = False
+    escape = False
+    length = len(text)
+    for i, ch in enumerate(text):
+        if escape:
+            result.append(ch)
+            escape = False
+            continue
+        if ch == "\\":
+            result.append(ch)
+            escape = True
+            continue
+        if ch != '"':
+            result.append(ch)
+            continue
+        if not in_string:
+            in_string = True
+            result.append(ch)
+            continue
+        # We're inside a string and hit a quote — check what follows it to
+        # decide whether this is really the end of the string.
+        j = i + 1
+        while j < length and text[j] in " \t\r\n":
+            j += 1
+        if j >= length or text[j] in structural_after_quote:
+            in_string = False
+            result.append(ch)
+        else:
+            result.append('\\"')
+    return "".join(result)
+
+
+def _extract_summary_fallback(content: str) -> ParsedEvaluation | None:
+    """Salvage a summary value from malformed or truncated JSON.
+
+    Some LLM responses are cut short mid-string (observed with grammar
+    -constrained decoding) despite otherwise looking complete, producing
+    JSON that no amount of quote-fixing can parse. As a last resort, pull
+    the raw text following ``"summary":`` directly out of the response so
+    a truncated evaluation still yields a usable (non-empty) summary
+    instead of being discarded entirely.
+
+    Args:
+        content: Cleaned LLM response content.
+
+    Returns:
+        A dict with just the ``summary`` key, or None if no summary text
+        could be found.
+
+    """
+    import re
+
+    match = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)', content, re.DOTALL)
+    if not match:
+        return None
+    raw = match.group(1)
+    # Unescape common JSON escape sequences that may appear in the salvaged text.
+    try:
+        summary = json.loads(f'"{raw}"')
+    except json.JSONDecodeError:
+        summary = raw
+    summary = summary.strip()
+    if not summary:
+        return None
+    return {"summary": summary}
+
+
 def _parse_evaluation_response(content: str) -> ParsedEvaluation | None:
     """Parse the LLM evaluation response as JSON.
 
     Handles responses that may be wrapped in markdown code fences, contain
-    surrounding text, or include <think>...</think> reasoning blocks from
-    thinking models (e.g. Qwen3).
+    surrounding text, include <think>...</think> reasoning blocks from
+    thinking models (e.g. Qwen3), contain unescaped quotes inside string
+    values, or are truncated mid-string.
 
     Args:
         content: Raw LLM response content.
@@ -86,27 +174,36 @@ def _parse_evaluation_response(content: str) -> ParsedEvaluation | None:
     # The actual response follows the closing tag.
     cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL).strip()
 
-    # Try direct parse first
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
+    candidates = [cleaned]
 
     # Strip markdown code fences (```json ... ``` or ``` ... ```)
     fence_match = re.search(r"```(?:json)?\s*\n(.*?)\n```", cleaned, re.DOTALL)
     if fence_match:
-        try:
-            return json.loads(fence_match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
+        candidates.append(fence_match.group(1).strip())
 
     # Extract first {...} block in case of surrounding text
     brace_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
     if brace_match:
+        candidates.append(brace_match.group(0))
+
+    for candidate in candidates:
         try:
-            return json.loads(brace_match.group(0))
+            return json.loads(candidate)
         except json.JSONDecodeError:
             pass
+        # Retry after escaping stray unescaped quotes inside string values.
+        try:
+            return json.loads(_fix_unescaped_quotes(candidate))
+        except json.JSONDecodeError:
+            pass
+
+    # Last resort: salvage a summary even from truncated/unparsable JSON.
+    fallback = _extract_summary_fallback(cleaned)
+    if fallback is not None:
+        logger.warning(
+            "Recovered summary from malformed LLM JSON response: %s", cleaned[:200]
+        )
+        return fallback
 
     logger.warning("Failed to parse LLM evaluation response as JSON: %s", cleaned[:200])
     return None

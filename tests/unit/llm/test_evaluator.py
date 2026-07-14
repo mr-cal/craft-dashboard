@@ -100,6 +100,41 @@ class TestParseEvaluationResponse:
         assert result is not None
         assert result["scores"]["staleness"] == 10
 
+    def test_unescaped_quotes_inside_summary_are_recovered(self) -> None:
+        """Stray unescaped quotes inside a string value don't break parsing."""
+        content = (
+            '{"summary": "Charmcraft 2.4.0 enforces strict naming for reactive '
+            'parts, requiring them to be named "charm" for proper config merging."}'
+        )
+
+        result = _parse_evaluation_response(content)
+
+        assert result is not None
+        assert result["summary"] == (
+            "Charmcraft 2.4.0 enforces strict naming for reactive parts, "
+            'requiring them to be named "charm" for proper config merging.'
+        )
+
+    def test_truncated_json_recovers_summary(self) -> None:
+        """A summary is salvaged even when the JSON is cut off mid-string."""
+        content = (
+            '{"summary": "Merged an external contribution to freeze the '
+            "types-requests dependency, resolving urllib3 compatibility "
+            "conflicts per typeshed guidelines. The change was integrated "
+            "directly without revi"
+        )
+
+        result = _parse_evaluation_response(content)
+
+        assert result is not None
+        assert result["summary"].startswith("Merged an external contribution")
+
+    def test_completely_unparseable_content_returns_none(self) -> None:
+        """Content with no recognisable summary field still returns None."""
+        result = _parse_evaluation_response("")
+
+        assert result is None
+
 
 class TestIssueEvaluator:
     """Tests for IssueEvaluator."""
