@@ -9,6 +9,7 @@ from craft_dashboard.collectors.github_graphql import (
     classify_pr_review_status,
     paginated_issues,
     paginated_pull_requests,
+    paginated_releases_and_branches,
 )
 
 
@@ -183,6 +184,16 @@ def _pr_node(number: int, updated_at: str = "2025-01-10T12:00:00Z") -> dict:
     }
 
 
+def _release_node(tag: str, created_at: str) -> dict:
+    return {
+        "tagName": tag,
+        "isPrerelease": False,
+        "isDraft": False,
+        "createdAt": created_at,
+        "publishedAt": created_at,
+    }
+
+
 class TestPaginatedPullRequests:
     def test_filters_client_side_by_since(self) -> None:
         requester = MagicMock()
@@ -214,6 +225,74 @@ class TestPaginatedPullRequests:
         )
 
         assert [node["number"] for node in results] == [2]
+
+
+class TestPaginatedReleasesAndBranches:
+    def test_returns_releases_and_hotfix_branch_names(self) -> None:
+        requester = MagicMock()
+        requester.graphql_query.return_value = (
+            {},
+            {
+                "data": {
+                    "rateLimit": {"cost": 2, "remaining": 4995, "resetAt": None},
+                    "repository": {
+                        "releases": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [
+                                _release_node("v2.0.0", "2025-01-10T00:00:00Z"),
+                                _release_node("v1.0.0", "2025-01-01T00:00:00Z"),
+                            ],
+                        },
+                        "refs": {
+                            "nodes": [{"name": "hotfix/1.0"}, {"name": "hotfix/2.0"}]
+                        },
+                    },
+                }
+            },
+        )
+
+        releases, branch_names = paginated_releases_and_branches(
+            requester, owner="canonical", name="repo", known_since=None
+        )
+
+        assert [r["tagName"] for r in releases] == ["v2.0.0", "v1.0.0"]
+        assert branch_names == ["hotfix/1.0", "hotfix/2.0"]
+
+    def test_stops_paginating_once_known_release_reached(self) -> None:
+        requester = MagicMock()
+        requester.graphql_query.side_effect = [
+            (
+                {},
+                {
+                    "data": {
+                        "rateLimit": {"cost": 2, "remaining": 4995, "resetAt": None},
+                        "repository": {
+                            "releases": {
+                                "pageInfo": {
+                                    "hasNextPage": True,
+                                    "endCursor": "CUR1",
+                                },
+                                "nodes": [
+                                    _release_node("v3.0.0", "2025-01-15T00:00:00Z"),
+                                    _release_node("v2.0.0", "2025-01-10T00:00:00Z"),
+                                ],
+                            },
+                            "refs": {"nodes": []},
+                        },
+                    }
+                },
+            )
+        ]
+
+        releases, _ = paginated_releases_and_branches(
+            requester,
+            owner="canonical",
+            name="repo",
+            known_since=datetime(2025, 1, 12, tzinfo=UTC),
+        )
+
+        assert [r["tagName"] for r in releases] == ["v3.0.0"]
+        assert requester.graphql_query.call_count == 1
 
 
 class TestClassifyPrReviewStatus:

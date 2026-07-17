@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 __all__ = [
     "paginated_issues",
     "paginated_pull_requests",
+    "paginated_releases_and_branches",
     "classify_pr_review_status",
     "classify_pr_ci_checks",
     "GraphQLCost",
@@ -91,6 +92,21 @@ query($owner: String!, $name: String!, $after: String) {
           }
         }
       }
+    }
+  }
+}
+"""
+
+_RELEASES_AND_BRANCHES_QUERY = """
+query($owner: String!, $name: String!, $after: String) {
+  rateLimit { cost remaining resetAt }
+  repository(owner: $owner, name: $name) {
+    releases(first: 20, after: $after, orderBy: {field: CREATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes { tagName isPrerelease isDraft createdAt publishedAt }
+    }
+    refs(refPrefix: "refs/heads/", query: "hotfix/", first: 100) {
+      nodes { name }
     }
   }
 }
@@ -220,6 +236,77 @@ def paginated_pull_requests(
         if not page_info["hasNextPage"]:
             return
         after = page_info["endCursor"]
+
+
+def paginated_releases_and_branches(
+    requester: "Requester",
+    owner: str,
+    name: str,
+    known_since: datetime | None = None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Fetch releases (newest-first) and hotfix branch names for one repo.
+
+    Pagination stops early once a release's ``createdAt`` falls at or before
+    ``known_since`` (the latest ``released_at`` already stored for this repo),
+    since releases are fetched newest-first and everything after that point
+    is already known. The ``refs`` (hotfix branches) query only runs on the
+    first page — branch listings don't need "since" filtering since
+    ``refs(first: 100)`` is cheap and branches are typically few.
+
+    Args:
+        requester: ``Github.requester``.
+        owner: Repository owner/org.
+        name: Repository name.
+        known_since: The latest ``Release.released_at`` already stored for
+            this repo, or ``None`` to fetch the full release history (e.g.
+            on first collection for a repo).
+
+    Returns:
+        A tuple of (release node dicts newer than ``known_since``, hotfix
+        branch name list).
+
+    """
+    after: str | None = None
+    releases: list[dict[str, Any]] = []
+    branch_names: list[str] = []
+    first_page = True
+
+    while True:
+        _, response = requester.graphql_query(
+            _RELEASES_AND_BRANCHES_QUERY,
+            {"owner": owner, "name": name, "after": after},
+        )
+        data = response["data"]
+        cost = GraphQLCost.from_response(data["rateLimit"])
+        logger.debug(
+            "GraphQL releases page for %s/%s: cost=%d remaining=%d reset_at=%s",
+            owner,
+            name,
+            cost.cost,
+            cost.remaining,
+            cost.reset_at,
+        )
+        repo = data["repository"]
+        if first_page:
+            branch_names = [ref["name"] for ref in repo["refs"]["nodes"]]
+            first_page = False
+
+        page = repo["releases"]
+        reached_known = False
+        for node in page["nodes"]:
+            created_at = _parse_graphql_datetime(node["createdAt"])
+            if (
+                known_since is not None
+                and created_at is not None
+                and created_at <= known_since
+            ):
+                reached_known = True
+                break
+            releases.append(node)
+
+        if reached_known or not page["pageInfo"]["hasNextPage"]:
+            return releases, branch_names
+        after = page["pageInfo"]["endCursor"]
 
 
 def classify_pr_review_status(reviews: list[dict[str, Any]]) -> tuple[str, int]:
