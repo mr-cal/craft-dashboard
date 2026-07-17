@@ -33,6 +33,24 @@ collection takes, and a GitHub API outage doesn't break the dashboard.
    GitHub (and optionally Launchpad). It upserts them into the database and
    generates a daily snapshot (aggregate counts + median ages) for each project.
 
+   Open issues/PRs and releases are fetched via GraphQL
+   (`craft_dashboard/collectors/github_graphql.py`) rather than the REST API,
+   which lets a single paginated query return nested fields (labels, review
+   status, CI checks) that would otherwise require many REST round-trips.
+   Closed-issue history still uses the REST API (`PyGithub`), since GraphQL
+   pagination isn't a net win for the full-history backfill path. The
+   collector tracks REST ("core") and GraphQL budgets separately
+   (`GitHubCollector.check_rate_limit`) since they're independent quotas.
+
+   Open-issue and release polling runs every 10 minutes in production (see
+   `cron.d/collect-data` in `mr-cal/vps-infra`), using the `since` timestamp
+   recorded in `collection_watermarks` to fetch only issues/PRs updated since
+   the last successful run. A `collection_runs` row (scoped by `source`) acts
+   as a concurrency guard so overlapping cron invocations for the same source
+   don't run at once. Each detected issue/PR change (created, updated, closed)
+   is recorded as an `issue_activities` row, driving the admin page's
+   "Recent Activity" feed.
+
 2. LLM evaluation can run in two ways:
 
    - `run_llm.py evaluate` performs optional server-side evaluation against
@@ -87,7 +105,12 @@ The main tables:
 
 - `collection_runs` -- one row per collection run. Stores start/finish times,
   status, issue counts, duration, and any per-project errors. Used by the admin
-  status endpoint to surface collection health.
+  status endpoint to surface collection health, and as a concurrency guard
+  (scoped by `source`) to prevent overlapping runs for the same source.
+
+- `issue_activities` -- one row per detected issue/PR change (created,
+  updated, closed), recorded during the collector's upsert loop. Drives the
+  admin page's "Recent Activity" feed.
 
 Migrations are managed with Alembic (`alembic/`). Run `make migrate` or
 `uv run alembic upgrade head` to apply them.

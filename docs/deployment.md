@@ -184,9 +184,11 @@ podman exec -i vps-infra_postgres_1 pg_dump -U craft_dashboard craft_dashboard |
 
 ## Scheduled tasks
 
-Data collection and LLM evaluation run as cron jobs on the host (see
+Data collection runs as cron jobs on the host (see
 [`cron.d/collect-data`](https://github.com/mr-cal/vps-infra/blob/main/cron.d/collect-data)
-in vps-infra for the live configuration).
+in vps-infra for the live configuration). LLM evaluation is not scheduled —
+it's opt-in via `scripts/eval_client.py` (pull-based) or manually invoking
+`scripts/run_llm.py evaluate` with `ENABLE_SERVER_EVAL=true`.
 
 In production (Podman), use `podman exec` instead of `docker compose exec`:
 
