@@ -267,6 +267,26 @@ class TestAdminRefreshWithAuth:
         assert response.status_code == 202
         assert "Admin: re-evaluation triggered with params:" in caplog.text
 
+    def test_re_evaluate_returns_disabled_when_server_eval_is_off(self) -> None:
+        """POST /admin/re-evaluate reports disabled when server eval is off."""
+        app = _create_admin_app()
+        app.state.settings.enable_server_eval = False
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/admin/re-evaluate",
+                headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
+            )
+
+        assert response.status_code == 409
+        assert response.json() == {
+            "status": "disabled",
+            "message": (
+                "Server-side evaluation is disabled (ENABLE_SERVER_EVAL=false). "
+                "Use the eval client script for pull-based evaluation."
+            ),
+        }
+
 
 class TestAdminDistribute:
     """Tests for refresh schedule distribution."""

@@ -17,6 +17,7 @@ class TestSettings:
 
         assert settings.database_url == "postgresql+asyncpg://localhost/test"
         assert settings.debug is False
+        assert settings.enable_server_eval is False
         assert settings.host == "127.0.0.1"
         assert settings.port == 8000
 

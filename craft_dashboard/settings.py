@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     eval_api_token: str = ""
 
     # Toggle server-side LLM evaluation (run_llm evaluate / admin re-evaluate)
-    enable_server_eval: bool = True
+    enable_server_eval: bool = False
 
     # OpenRouter model settings
     openrouter_model: str = "google/gemini-2.5-flash-lite"

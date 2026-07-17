@@ -1,5 +1,6 @@
 """Tests for scripts.llm.cli."""
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -39,6 +40,22 @@ class TestEvaluateCommand:
         assert "--strict-validation" in result.output
         assert "--no-resume" in result.output
         assert "--backend" not in result.output
+
+    def test_returns_cleanly_when_server_side_eval_is_disabled(
+        self, monkeypatch, caplog
+    ) -> None:
+        monkeypatch.setenv("ENABLE_SERVER_EVAL", "false")
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+        runner = CliRunner()
+
+        with caplog.at_level(logging.INFO, logger="scripts.llm.cli"):
+            result = runner.invoke(cli, ["evaluate"])
+
+        assert result.exit_code == 0
+        assert (
+            "Server-side evaluation is disabled (ENABLE_SERVER_EVAL=false). "
+            "Use the eval client script for pull-based evaluation instead."
+        ) in caplog.text
 
     @pytest.mark.asyncio
     async def test_clear_main_confirms_before_deleting(self, monkeypatch) -> None:
