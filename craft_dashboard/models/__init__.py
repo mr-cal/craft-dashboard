@@ -5,6 +5,7 @@ from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.models.collection_watermark import CollectionWatermark
 from craft_dashboard.models.dependency import Dependency
 from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.refresh_schedule import RefreshSchedule
@@ -18,6 +19,7 @@ __all__ = [
     "CollectionWatermark",
     "Dependency",
     "Issue",
+    "IssueActivity",
     "LLMEvaluation",
     "Project",
     "RefreshSchedule",
