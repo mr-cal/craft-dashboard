@@ -477,6 +477,22 @@ class TestCollectIssuesGraphQLOpenPath:
             },
         }
 
+    @staticmethod
+    def _make_session_with_no_existing_issue(fetch_count: int) -> AsyncMock:
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                result
+                for _ in range(fetch_count)
+                for result in (
+                    TestCollectIssuesGraphQLOpenPath._make_existing_result(),
+                    None,
+                )
+            ]
+        )
+        session.commit = AsyncMock()
+        return session
+
     async def test_collect_issues_uses_graphql_for_open_items(self, mocker) -> None:
         collector = GitHubCollector(
             token=_TEST_TOKEN,
@@ -508,16 +524,7 @@ class TestCollectIssuesGraphQLOpenPath:
             statements.append(stmt)
             return stmt
 
-        session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                self._make_existing_result(),
-                None,
-                self._make_existing_result(),
-                None,
-            ]
-        )
-        session.commit = AsyncMock()
+        session = self._make_session_with_no_existing_issue(fetch_count=2)
 
         mocker.patch(
             "sqlalchemy.dialects.postgresql.insert",
@@ -611,6 +618,93 @@ class TestCollectIssuesGraphQLOpenPath:
         insert.assert_not_called()
         collector.gh.get_repo.assert_not_called()
         session.commit.assert_awaited_once()
+
+    async def test_collect_issues_interleaves_graphql_items_before_limit(
+        self, mocker
+    ) -> None:
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        collector.gh = MagicMock()
+        collector.gh.requester = MagicMock()
+        collector.wait_for_rate_limit = MagicMock()
+
+        issue_nodes = [
+            self._make_issue_node() | {"number": 101 + offset} for offset in range(3)
+        ]
+        pr_nodes = [self._make_pr_node()]
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_issues",
+            return_value=iter(issue_nodes),
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_pull_requests",
+            return_value=iter(pr_nodes),
+        )
+
+        statements: list[
+            TestCollectIssuesGraphQLOpenPath._RecordingInsertStatement
+        ] = []
+
+        def fake_insert(_table):
+            stmt = TestCollectIssuesGraphQLOpenPath._RecordingInsertStatement()
+            statements.append(stmt)
+            return stmt
+
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=fake_insert,
+        )
+        session = self._make_session_with_no_existing_issue(fetch_count=2)
+
+        count = await collector.collect_issues(
+            "repo", 1, session, state="open", limit=2
+        )
+
+        assert count == 2
+        assert [stmt.values_kwargs["issue_type"] for stmt in statements] == [
+            "issue",
+            "pull_request",
+        ]
+        collector.gh.get_repo.assert_not_called()
+
+    async def test_collect_issues_handles_graphql_deleted_user_author(
+        self, mocker
+    ) -> None:
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        collector.gh = MagicMock()
+        collector.gh.requester = MagicMock()
+        collector.wait_for_rate_limit = MagicMock()
+
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_issues",
+            return_value=iter([self._make_issue_node() | {"author": None}]),
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_pull_requests",
+            return_value=iter([]),
+        )
+
+        statements: list[
+            TestCollectIssuesGraphQLOpenPath._RecordingInsertStatement
+        ] = []
+
+        def fake_insert(_table):
+            stmt = TestCollectIssuesGraphQLOpenPath._RecordingInsertStatement()
+            statements.append(stmt)
+            return stmt
+
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=fake_insert,
+        )
+        session = self._make_session_with_no_existing_issue(fetch_count=1)
+
+        count = await collector.collect_issues("repo", 1, session, state="open")
+
+        assert count == 1
+        assert statements[0].values_kwargs is not None
+        assert statements[0].values_kwargs["author"] is None
+        assert statements[0].values_kwargs["author_is_maintainer"] is False
+        assert statements[0].values_kwargs["author_is_bot"] is False
 
 
 class TestFetchPRDetails:

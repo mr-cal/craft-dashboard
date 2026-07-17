@@ -1,9 +1,10 @@
 """GitHub data collector for issues, PRs, releases, and dependencies."""
 
 import hashlib
-import itertools
 import logging
 import time
+from collections import deque
+from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
@@ -349,6 +350,26 @@ class _GraphQLPullRequestAdapter:
         }
 
 
+def _interleave_open_graphql_items(
+    issues: Iterable[dict[str, Any]],
+    pull_requests: Iterable[dict[str, Any]],
+) -> Iterator[_GraphQLIssueAdapter | _GraphQLPullRequestAdapter]:
+    """Yield open GraphQL issues and PRs in round-robin order."""
+    active = deque(
+        [
+            iter(_GraphQLIssueAdapter(node) for node in issues),
+            iter(_GraphQLPullRequestAdapter(node) for node in pull_requests),
+        ]
+    )
+    while active:
+        current = active.popleft()
+        try:
+            yield next(current)
+        except StopIteration:
+            continue
+        active.append(current)
+
+
 class GitHubCollector:
     """Collects issue, PR, release, and dependency data from GitHub."""
 
@@ -551,19 +572,9 @@ class GitHubCollector:
             # checks) would blow the REST rate limit at that cadence.
             self.wait_for_rate_limit(resource="graphql")
             requester = self.gh.requester
-            gh_issues = itertools.chain(
-                (
-                    _GraphQLIssueAdapter(node)
-                    for node in paginated_issues(
-                        requester, self.org, repo_name, since=None
-                    )
-                ),
-                (
-                    _GraphQLPullRequestAdapter(node)
-                    for node in paginated_pull_requests(
-                        requester, self.org, repo_name, since=None
-                    )
-                ),
+            gh_issues = _interleave_open_graphql_items(
+                paginated_issues(requester, self.org, repo_name, since=None),
+                paginated_pull_requests(requester, self.org, repo_name, since=None),
             )
             logger.info(
                 "  %s/%s: collecting open issues (via GraphQL)%s",
