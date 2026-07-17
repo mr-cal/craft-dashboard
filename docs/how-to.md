@@ -22,8 +22,8 @@ Generates daily snapshots after each project's collection.
 
 Two collection modes are used in production:
 
-**Open-issue refresh** (`--mode open`, default): runs every 4 hours, always
-refreshes all open GitHub issues for every project — no schedule gate.
+**Open-issue refresh** (`--mode open`, default): runs every 10 minutes, always
+refreshes all open GitHub issues (and releases) for every project — no schedule gate.
 
 **Full refresh** (`--mode full`): runs once daily, refreshes all issues
 (open + closed) per the per-project schedule (`refresh-interval-days` in
@@ -58,7 +58,7 @@ uv run scripts/collect_data.py --source github --project snapcraft -v
 In production, two cron jobs run:
 
 ```bash
-# Open-issue refresh — every 4 hours
+# Open-issue and release refresh — every 10 minutes
 podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source github --mode open
 
 # Full collection (open + closed issues, launchpad) — daily at 2 AM UTC
@@ -80,7 +80,7 @@ writes results directly to the database.
 preferred).
 
 ```
-# evaluate all open issues (daily cron mode)
+# evaluate all open issues (manual/opt-in; not run on a schedule by default)
 uv run scripts/run_llm.py evaluate --open-only
 
 # evaluate everything (open + closed)
@@ -93,7 +93,9 @@ uv run scripts/run_llm.py evaluate --project snapcraft
 uv run scripts/run_llm.py evaluate --open-only --limit 40
 ```
 
-In production, this runs as a daily cron job at 6 AM UTC:
+Server-side evaluation is disabled by default (`ENABLE_SERVER_EVAL=false`)
+and has no cron entry in production — there is no daily 6 AM eval job. Run
+it manually when `ENABLE_SERVER_EVAL=true`:
 
 ```bash
 # local
