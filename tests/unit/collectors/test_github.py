@@ -943,7 +943,7 @@ class TestCollectIssuesActivityRecording:
         assert count == 1
         assert len(activity_rows) == 1
         assert activity_rows[0].change_type == "created"
-        assert activity_rows[0].summary == "Issue 101"
+        assert activity_rows[0].title == "Issue 101"
         assert self._utc(activity_rows[0].occurred_at) == datetime(
             2025, 1, 2, tzinfo=UTC
         )
@@ -995,7 +995,7 @@ class TestCollectIssuesActivityRecording:
         assert count == 1
         assert len(activity_rows) == 1
         assert activity_rows[0].change_type == "updated"
-        assert activity_rows[0].summary == "Updated issue title"
+        assert activity_rows[0].title == "Updated issue title"
         assert self._utc(activity_rows[0].occurred_at) == datetime(
             2025, 1, 3, tzinfo=UTC
         )
@@ -1045,7 +1045,7 @@ class TestCollectIssuesActivityRecording:
         assert count == 1
         assert len(activity_rows) == 1
         assert activity_rows[0].change_type == "closed"
-        assert activity_rows[0].summary == "Issue 101"
+        assert activity_rows[0].title == "Issue 101"
         assert self._utc(activity_rows[0].occurred_at) == datetime(
             2025, 1, 4, tzinfo=UTC
         )

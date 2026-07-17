@@ -126,8 +126,8 @@ def _stub_admin_page_metrics(
     api_budget_exception: Exception | None = None,
     next_expected_fetch=None,
 ) -> None:
-    async def _fake_recent_activity(self, limit: int = 50):
-        assert limit == 50
+    async def _fake_recent_activity(self, limit: int = 20):
+        assert limit == 20
         return recent_activity if recent_activity is not None else []
 
     async def _fake_api_budget(self):
@@ -609,12 +609,14 @@ class TestAdminPage:
         _stub_admin_page_metrics(
             monkeypatch,
             recent_activity=[
-                SimpleNamespace(
-                    occurred_at=datetime(2025, 1, 10, 12, 34, tzinfo=UTC),
-                    issue_number=42,
-                    change_type="closed",
-                    summary="Closed after merge",
-                )
+                {
+                    "occurred_at": datetime(2025, 1, 10, 12, 34, tzinfo=UTC),
+                    "number": "42",
+                    "change_type": "closed",
+                    "project": "snapcraft",
+                    "title": "Closed after merge",
+                    "url": "https://github.com/canonical/snapcraft/issues/42",
+                }
             ],
             api_budget={
                 "core_remaining": 4999,
@@ -633,11 +635,13 @@ class TestAdminPage:
         assert response.status_code == 200
         assert "Recent Activity" in response.text
         assert "REST API Budget" in response.text
-        assert "4999 / 5000" in response.text
+        assert "4999 / 5000 remaining" in response.text
         assert "GraphQL API Budget" in response.text
-        assert "4998 / 5000" in response.text
+        assert "4998 / 5000 remaining" in response.text
         assert "Next Open-Issue Fetch" in response.text
         assert "2025-01-10 12:40 UTC" in response.text
+        assert "Closed after merge" in response.text
+        assert "#42" in response.text
         assert "#42" in response.text
         assert "closed" in response.text
         assert "Closed after merge" in response.text

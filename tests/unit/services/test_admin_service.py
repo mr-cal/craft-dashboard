@@ -289,21 +289,21 @@ class TestGetRecentIssueActivity:
                     project_id=project.id,
                     issue_number=11,
                     change_type="opened",
-                    summary="Oldest change",
+                    title="Oldest change",
                     occurred_at=datetime(2025, 1, 10, 9, 0, tzinfo=UTC),
                 ),
                 IssueActivity(
                     project_id=project.id,
                     issue_number=12,
                     change_type="updated",
-                    summary="Newest change",
+                    title="Newest change",
                     occurred_at=datetime(2025, 1, 10, 11, 0, tzinfo=UTC),
                 ),
                 IssueActivity(
                     project_id=project.id,
                     issue_number=13,
                     change_type="closed",
-                    summary="Middle change",
+                    title="Middle change",
                     occurred_at=datetime(2025, 1, 10, 10, 0, tzinfo=UTC),
                 ),
             ]
@@ -314,10 +314,154 @@ class TestGetRecentIssueActivity:
             limit=2
         )
 
-        assert [activity.summary for activity in activities] == [
+        assert [activity["title"] for activity in activities] == [
             "Newest change",
             "Middle change",
         ]
+        assert activities[0]["project"] == "snapcraft"
+        assert activities[0]["number"] == "12"
+        assert activities[0]["change_type"] == "updated"
+
+    async def test_joins_issue_for_live_url(self, test_db_session) -> None:
+        """The issue's live GitHub URL is joined in when the issue still exists."""
+        project = Project(
+            name="snapcraft",
+            category="application",
+            github_org="canonical",
+            display_order=1,
+        )
+        test_db_session.add(project)
+        await test_db_session.flush()
+
+        test_db_session.add(
+            Issue(
+                project_id=project.id,
+                source="github",
+                external_id="12",
+                issue_type="issue",
+                title="Live issue title",
+                state="open",
+                url="https://github.com/canonical/snapcraft/issues/12",
+                last_fetched_at=datetime(2025, 1, 10, 11, 0, tzinfo=UTC),
+            )
+        )
+        test_db_session.add(
+            IssueActivity(
+                project_id=project.id,
+                issue_number=12,
+                change_type="updated",
+                title="Recorded title",
+                occurred_at=datetime(2025, 1, 10, 11, 0, tzinfo=UTC),
+            )
+        )
+        await test_db_session.commit()
+
+        activities = await AdminService(test_db_session).get_recent_issue_activity()
+
+        assert (
+            activities[0]["url"] == "https://github.com/canonical/snapcraft/issues/12"
+        )
+
+
+class TestGetIssuesForRun:
+    async def test_change_type_joined_from_matching_activity(
+        self, test_db_session
+    ) -> None:
+        """An issue changed by this run shows its recorded change_type."""
+        project = Project(
+            name="snapcraft",
+            category="application",
+            github_org="canonical",
+            display_order=1,
+        )
+        test_db_session.add(project)
+        await test_db_session.flush()
+
+        run = CollectionRun(
+            source="github",
+            status="completed",
+            started_at=datetime(2025, 1, 10, 10, 0, tzinfo=UTC),
+        )
+        test_db_session.add(run)
+        await test_db_session.flush()
+
+        test_db_session.add(
+            Issue(
+                project_id=project.id,
+                source="github",
+                external_id="12",
+                issue_type="issue",
+                title="Newly opened issue",
+                state="open",
+                url="https://github.com/canonical/snapcraft/issues/12",
+                last_fetched_at=datetime(2025, 1, 10, 11, 0, tzinfo=UTC),
+                collection_run_id=run.id,
+            )
+        )
+        test_db_session.add(
+            IssueActivity(
+                project_id=project.id,
+                issue_number=12,
+                change_type="created",
+                title="Newly opened issue",
+                occurred_at=datetime(2025, 1, 10, 11, 0, tzinfo=UTC),
+                collection_run_id=run.id,
+            )
+        )
+        await test_db_session.commit()
+
+        issues, total = await AdminService(test_db_session).get_issues_for_run(run.id)
+
+        assert total == 1
+        assert issues[0]["change_type"] == "created"
+        assert issues[0]["project"] == "snapcraft"
+        assert issues[0]["number"] == "12"
+        assert issues[0]["url"] == "https://github.com/canonical/snapcraft/issues/12"
+
+    async def test_unchanged_issue_falls_back_to_unchanged(
+        self, test_db_session
+    ) -> None:
+        """An issue collected but not changed this run shows change_type 'unchanged'."""
+        project = Project(
+            name="snapcraft",
+            category="application",
+            github_org="canonical",
+            display_order=1,
+        )
+        test_db_session.add(project)
+        await test_db_session.flush()
+
+        run = CollectionRun(
+            source="github",
+            status="completed",
+            started_at=datetime(2025, 1, 10, 10, 0, tzinfo=UTC),
+        )
+        test_db_session.add(run)
+        await test_db_session.flush()
+
+        test_db_session.add(
+            Issue(
+                project_id=project.id,
+                source="github",
+                external_id="13",
+                issue_type="issue",
+                title="Untouched issue",
+                state="open",
+                url="https://github.com/canonical/snapcraft/issues/13",
+                last_fetched_at=datetime(2025, 1, 10, 11, 0, tzinfo=UTC),
+                collection_run_id=run.id,
+            )
+        )
+        await test_db_session.commit()
+
+        issues, total = await AdminService(test_db_session).get_issues_for_run(run.id)
+
+        assert total == 1
+        assert issues[0]["change_type"] == "unchanged"
+        occurred_at = issues[0]["occurred_at"]
+        if occurred_at.tzinfo is None:
+            occurred_at = occurred_at.replace(tzinfo=UTC)
+        assert occurred_at == datetime(2025, 1, 10, 11, 0, tzinfo=UTC)
 
 
 class TestGetApiBudget:

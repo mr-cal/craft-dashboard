@@ -13,8 +13,7 @@ class IssueActivity(Base):
 
     Populated during the per-issue upsert in ``GitHubCollector.collect_issues``
     whenever an issue/PR's stored state differs from its previous value,
-    driving the admin page's rolling "recent activity" feed. Population
-    logic is wired in a later task; this model only defines the schema.
+    driving the admin page's rolling "recent activity" feed.
     """
 
     __tablename__ = "issue_activities"
@@ -25,9 +24,19 @@ class IssueActivity(Base):
     )
     issue_number: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     change_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    summary: Mapped[str] = mapped_column(String(500), nullable=False)
+    # The issue/PR's title at the time of the change. Named `title` (not
+    # `summary`) because it's a verbatim copy of the issue title, not a
+    # generated description of what changed.
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
+    )
+    # The collection run that recorded this change, if known. Nullable and
+    # SET NULL on run deletion so activity history outlives run retention.
+    collection_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("collection_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
 
     def __repr__(self) -> str:

@@ -7,7 +7,7 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, TypedDict
 
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, select
 
 from craft_dashboard.collectors.github import GitHubCollector, RateLimitStatus
 from craft_dashboard.models.collection_run import CollectionRun
@@ -81,12 +81,19 @@ class SystemStatus(TypedDict):
     last_evaluation: datetime | None
 
 
-class IssueRef(TypedDict):
-    """Minimal issue reference shown in the collection run detail view."""
+class ActivityEntry(TypedDict):
+    """A single issue/PR event.
+
+    Shared by the recent-activity feed and the per-run detail view so both
+    render identical columns.
+    """
 
     project: str
+    number: str
     title: str
     url: str | None
+    change_type: str
+    occurred_at: datetime
 
 
 _EVALUATION_SOURCES = {"llm", "evaluation"}
@@ -250,7 +257,7 @@ class AdminService:
         return [row.name for row in project_result]
 
     async def get_recent_collection_runs(
-        self, limit: int = 10
+        self, limit: int = 20
     ) -> list[CollectionRunSummary]:
         """Get the most recent collection runs with health statistics."""
         result = await self.session.execute(
@@ -272,14 +279,36 @@ class AdminService:
             for run in runs
         ]
 
-    async def get_recent_issue_activity(self, limit: int = 50) -> list[IssueActivity]:
-        """Return the most recent issue/PR change events, newest first."""
-        result = await self.session.scalars(
-            select(IssueActivity)
+    async def get_recent_issue_activity(self, limit: int = 20) -> list[ActivityEntry]:
+        """Return the most recent issue/PR change events, newest first.
+
+        Joined against ``Issue`` for the live GitHub URL; falls back to the
+        title recorded at the time of the change if the issue row itself
+        was later removed (e.g. project deletion).
+        """
+        rows = await self.session.execute(
+            select(IssueActivity, Project.name.label("project_name"), Issue.url)
+            .join(Project, Project.id == IssueActivity.project_id)
+            .outerjoin(
+                Issue,
+                (Issue.project_id == IssueActivity.project_id)
+                & (Issue.source == "github")
+                & (Issue.external_id == cast(IssueActivity.issue_number, String)),
+            )
             .order_by(IssueActivity.occurred_at.desc())
             .limit(limit)
         )
-        return list(result)
+        return [
+            {
+                "project": row.project_name,
+                "number": str(row.IssueActivity.issue_number),
+                "title": row.IssueActivity.title,
+                "url": row.url,
+                "change_type": row.IssueActivity.change_type,
+                "occurred_at": row.IssueActivity.occurred_at,
+            }
+            for row in rows
+        ]
 
     async def get_api_budget(self) -> RateLimitStatus:
         """Return the current REST and GraphQL API budgets, for the admin page."""
@@ -313,7 +342,7 @@ class AdminService:
         self,
         run_id: int,
         limit: int = 100,
-    ) -> tuple[list[IssueRef], int]:
+    ) -> tuple[list[ActivityEntry], int]:
         """Return up to *limit* issues belonging to a collection run and the total count.
 
         Args:
@@ -322,7 +351,9 @@ class AdminService:
 
         Returns:
             A tuple of (issue list, total count).  The list is sorted by project
-            name then issue title and capped at *limit* entries.
+            name then issue title and capped at *limit* entries. Issues that
+            weren't actually changed by this run (unchanged since last fetch)
+            are included with change_type "unchanged".
 
         """
         total_result = await self.session.execute(
@@ -333,17 +364,31 @@ class AdminService:
         total = total_result.scalar_one()
 
         rows_result = await self.session.execute(
-            select(Issue, Project.name.label("project_name"))
+            select(
+                Issue,
+                Project.name.label("project_name"),
+                IssueActivity.change_type,
+                IssueActivity.occurred_at,
+            )
             .join(Project, Issue.project_id == Project.id)
+            .outerjoin(
+                IssueActivity,
+                (IssueActivity.collection_run_id == run_id)
+                & (IssueActivity.project_id == Issue.project_id)
+                & (cast(IssueActivity.issue_number, String) == Issue.external_id),
+            )
             .where(Issue.collection_run_id == run_id)
             .order_by(Project.name, Issue.title)
             .limit(limit)
         )
-        issues: list[IssueRef] = [
+        issues: list[ActivityEntry] = [
             {
                 "project": row.project_name,
+                "number": row.Issue.external_id,
                 "title": row.Issue.title,
                 "url": row.Issue.url,
+                "change_type": row.change_type or "unchanged",
+                "occurred_at": row.occurred_at or row.Issue.last_fetched_at,
             }
             for row in rows_result
         ]

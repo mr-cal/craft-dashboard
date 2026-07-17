@@ -156,7 +156,7 @@ async def admin_page(
     lifetime_stats = await admin_service.get_lifetime_token_stats()
     recent_stats = await admin_service.get_seven_day_token_stats()
     collection_runs = await admin_service.get_recent_collection_runs()
-    recent_activity = await admin_service.get_recent_issue_activity(limit=50)
+    recent_activity = await admin_service.get_recent_issue_activity()
     try:
         api_budget = await admin_service.get_api_budget()
     except (GithubException, requests.exceptions.RequestException) as exc:

@@ -34,11 +34,11 @@
       </div>
       <div class="status-card">
         <h4>REST API Budget</h4>
-        <p>{{ api_budget.core_remaining ~ " / " ~ api_budget.core_limit if api_budget else "Unknown" }}</p>
+        <p>{{ api_budget.core_remaining ~ " / " ~ api_budget.core_limit ~ " remaining" if api_budget else "Unknown" }}</p>
       </div>
       <div class="status-card">
         <h4>GraphQL API Budget</h4>
-        <p>{{ api_budget.graphql_remaining ~ " / " ~ api_budget.graphql_limit if api_budget else "Unknown" }}</p>
+        <p>{{ api_budget.graphql_remaining ~ " / " ~ api_budget.graphql_limit ~ " remaining" if api_budget else "Unknown" }}</p>
       </div>
     </div>
     {% if collection_runs %}
@@ -78,7 +78,13 @@
           </td>
           <td>{{ run.projects_processed }}</td>
           <td>{{ run.issues_collected }}</td>
-          <td>{{ run.duration_seconds | format_duration if run.duration_seconds is not none else "—" }}</td>
+          <td>
+            {% if run.status == "running" and run.started_at %}
+            <span class="run-elapsed" data-started-at="{{ run.started_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">running…</span>
+            {% else %}
+            {{ run.duration_seconds | format_duration if run.duration_seconds is not none else "—" }}
+            {% endif %}
+          </td>
           <td>
             {% if run.errors %}
             <ul style="margin: 0; padding-left: 1rem;">
@@ -97,6 +103,24 @@
         {% endfor %}
       </tbody>
     </table>
+    <script>
+      (function () {
+        function formatElapsed(startedAt) {
+          var seconds = Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 1000));
+          var m = Math.floor(seconds / 60);
+          var s = seconds % 60;
+          return m + "m " + s + "s";
+        }
+        function tickElapsed() {
+          document.querySelectorAll('.run-elapsed').forEach(function (el) {
+            var started = new Date(el.dataset.startedAt);
+            el.textContent = formatElapsed(started) + " (running)";
+          });
+        }
+        tickElapsed();
+        setInterval(tickElapsed, 1000);
+      })();
+    </script>
     <script>
       (function () {
         document.querySelectorAll('.run-row').forEach(function (row) {
@@ -129,9 +153,9 @@
       <thead>
         <tr>
           <th>When</th>
-          <th>Issue/PR #</th>
+          <th>Project</th>
+          <th>Issue/PR</th>
           <th>Change</th>
-          <th>Summary</th>
         </tr>
       </thead>
       <tbody>
@@ -140,9 +164,16 @@
           <td>
             <time class="local-time" datetime="{{ activity.occurred_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ activity.occurred_at.strftime('%Y-%m-%d %H:%M UTC') }}</time>
           </td>
-          <td>#{{ activity.issue_number }}</td>
+          <td>{{ activity.project }}</td>
+          <td>
+            {% if activity.url %}
+            <a href="{{ activity.url }}" target="_blank" rel="noopener noreferrer">#{{ activity.number }}</a>
+            {% else %}
+            #{{ activity.number }}
+            {% endif %}
+            <a href="/issues/{{ activity.project | urlencode_path }}/{{ activity.number }}">{{ activity.title|truncate(80) }}</a>
+          </td>
           <td>{{ activity.change_type }}</td>
-          <td>{{ activity.summary }}</td>
         </tr>
         {% else %}
         <tr>

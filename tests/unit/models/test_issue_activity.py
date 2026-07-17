@@ -27,8 +27,9 @@ class TestIssueActivityModel:
             "project_id",
             "issue_number",
             "change_type",
-            "summary",
+            "title",
             "occurred_at",
+            "collection_run_id",
         }
         assert expected.issubset(column_names)
 
@@ -39,6 +40,15 @@ class TestIssueActivityModel:
 
         assert foreign_key.target_fullname == "projects.id"
         assert foreign_key.ondelete == "CASCADE"
+
+    def test_collection_run_id_foreign_key(self) -> None:
+        """collection_run_id references collection_runs.id, nullable, SET NULL."""
+        col = IssueActivity.__table__.columns["collection_run_id"]
+        foreign_key = next(iter(col.foreign_keys))
+
+        assert foreign_key.target_fullname == "collection_runs.id"
+        assert foreign_key.ondelete == "SET NULL"
+        assert col.nullable is True
 
     @pytest.mark.asyncio
     async def test_create_and_read_issue_activity(self, test_db_session) -> None:
@@ -51,7 +61,7 @@ class TestIssueActivityModel:
             project_id=project.id,
             issue_number=42,
             change_type="updated",
-            summary="Label added: needs-review",
+            title="Label added: needs-review",
             occurred_at=datetime.now(UTC),
         )
         test_db_session.add(activity)

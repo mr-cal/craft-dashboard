@@ -794,8 +794,9 @@ class GitHubCollector:
                     project_id=project_id,
                     issue_number=gh_issue.number,
                     change_type=change_type,
-                    summary=(gh_issue.title or "")[:200],
+                    title=(gh_issue.title or "")[:200],
                     occurred_at=gh_issue.updated_at or datetime.now(UTC),
+                    collection_run_id=collection_run_id,
                 )
             )
 
