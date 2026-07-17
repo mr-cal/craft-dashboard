@@ -366,6 +366,253 @@ class TestCollectIssuesExceptionHandling:
             await collector.collect_issues("repo", 1, session, state="all")
 
 
+class TestCollectIssuesGraphQLOpenPath:
+    """Tests for GraphQL-backed open issue/PR collection."""
+
+    class _RecordingInsertStatement:
+        def __init__(self) -> None:
+            self.excluded = MagicMock()
+            self.values_kwargs: dict | None = None
+
+        def values(self, **kwargs):
+            self.values_kwargs = kwargs
+            return self
+
+        def on_conflict_do_update(self, **_kwargs):
+            return self
+
+    @staticmethod
+    def _make_existing_result(last_fetched: datetime | None = None) -> MagicMock:
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = last_fetched
+        return result
+
+    @staticmethod
+    def _make_issue_node() -> dict:
+        return {
+            "number": 101,
+            "title": "Issue 101",
+            "body": "Issue body",
+            "state": "OPEN",
+            "createdAt": "2025-01-01T00:00:00Z",
+            "updatedAt": "2025-01-02T00:00:00Z",
+            "closedAt": None,
+            "url": "https://github.com/canonical/repo/issues/101",
+            "author": {"login": "octocat"},
+            "labels": {"nodes": [{"name": "bug"}, {"name": "priority-high"}]},
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "reviewer"},
+                        "body": "x" * 1200,
+                        "createdAt": "2025-01-03T00:00:00Z",
+                    }
+                ]
+            },
+            "timelineItems": {"nodes": []},
+        }
+
+    @staticmethod
+    def _make_pr_node() -> dict:
+        return {
+            "number": 202,
+            "title": "PR 202",
+            "body": "PR body",
+            "state": "OPEN",
+            "createdAt": "2025-01-04T00:00:00Z",
+            "updatedAt": "2025-01-05T00:00:00Z",
+            "closedAt": None,
+            "mergedAt": None,
+            "url": "https://github.com/canonical/repo/pull/202",
+            "author": {"login": "maintainer"},
+            "labels": {"nodes": [{"name": "enhancement"}]},
+            "additions": 10,
+            "deletions": 3,
+            "changedFiles": 2,
+            "comments": {
+                "nodes": [
+                    {
+                        "author": {"login": "commenter"},
+                        "body": "looks good",
+                        "createdAt": "2025-01-06T00:00:00Z",
+                    }
+                ]
+            },
+            "reviews": {
+                "nodes": [{"author": {"login": "reviewer1"}, "state": "APPROVED"}]
+            },
+            "reviewThreads": {"nodes": [{"isResolved": False}, {"isResolved": True}]},
+            "commits": {
+                "nodes": [
+                    {
+                        "commit": {
+                            "checkSuites": {
+                                "nodes": [
+                                    {
+                                        "checkRuns": {
+                                            "nodes": [
+                                                {
+                                                    "name": "lint",
+                                                    "conclusion": "SUCCESS",
+                                                    "status": "COMPLETED",
+                                                },
+                                                {
+                                                    "name": "tests",
+                                                    "conclusion": "FAILURE",
+                                                    "status": "COMPLETED",
+                                                },
+                                                {
+                                                    "name": "publish",
+                                                    "conclusion": None,
+                                                    "status": "IN_PROGRESS",
+                                                },
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ]
+            },
+        }
+
+    async def test_collect_issues_uses_graphql_for_open_items(self, mocker) -> None:
+        collector = GitHubCollector(
+            token=_TEST_TOKEN,
+            org="canonical",
+            maintainers=["maintainer"],
+        )
+        requester = MagicMock()
+        collector.gh = MagicMock()
+        collector.gh.requester = requester
+        collector.wait_for_rate_limit = MagicMock()
+
+        issue_nodes = [self._make_issue_node()]
+        pr_nodes = [self._make_pr_node()]
+        paginated_issues = mocker.patch(
+            "craft_dashboard.collectors.github.paginated_issues",
+            return_value=iter(issue_nodes),
+        )
+        paginated_pull_requests = mocker.patch(
+            "craft_dashboard.collectors.github.paginated_pull_requests",
+            return_value=iter(pr_nodes),
+        )
+
+        statements: list[
+            TestCollectIssuesGraphQLOpenPath._RecordingInsertStatement
+        ] = []
+
+        def fake_insert(_table):
+            stmt = TestCollectIssuesGraphQLOpenPath._RecordingInsertStatement()
+            statements.append(stmt)
+            return stmt
+
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                self._make_existing_result(),
+                None,
+                self._make_existing_result(),
+                None,
+            ]
+        )
+        session.commit = AsyncMock()
+
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=fake_insert,
+        )
+
+        count = await collector.collect_issues("repo", 1, session, state="open")
+
+        assert count == 2
+        collector.wait_for_rate_limit.assert_called_once_with(resource="graphql")
+        collector.gh.get_repo.assert_not_called()
+        paginated_issues.assert_called_once_with(
+            requester, "canonical", "repo", since=None
+        )
+        paginated_pull_requests.assert_called_once_with(
+            requester, "canonical", "repo", since=None
+        )
+        session.commit.assert_awaited_once()
+
+        issue_values = statements[0].values_kwargs
+        assert issue_values is not None
+        assert issue_values["issue_type"] == "issue"
+        assert issue_values["state"] == "open"
+        assert issue_values["labels"] == ["bug", "priority-high"]
+        assert issue_values["author"] == "octocat"
+        assert issue_values["author_is_maintainer"] is False
+        assert issue_values["comments"] == [
+            {
+                "author": "reviewer",
+                "body": "x" * 1000,
+                "created_at": "2025-01-03T00:00:00Z",
+                "type": "comment",
+            }
+        ]
+        assert issue_values["metadata_"] == {}
+
+        pr_values = statements[1].values_kwargs
+        assert pr_values is not None
+        assert pr_values["issue_type"] == "pull_request"
+        assert pr_values["state"] == "open"
+        assert pr_values["labels"] == ["enhancement"]
+        assert pr_values["author"] == "maintainer"
+        assert pr_values["author_is_maintainer"] is True
+        assert pr_values["comments"] == [
+            {
+                "author": "commenter",
+                "body": "looks good",
+                "created_at": "2025-01-06T00:00:00Z",
+                "type": "comment",
+            }
+        ]
+        assert pr_values["metadata_"] == {
+            "review_status": "approved",
+            "review_count": 1,
+            "unresolved_review_comments": 1,
+            "ci_passing": ["lint"],
+            "ci_failing": ["tests"],
+            "ci_pending": ["publish"],
+            "diff_additions": 10,
+            "diff_deletions": 3,
+            "diff_files_changed": 2,
+        }
+
+    async def test_collect_issues_skips_unchanged_graphql_open_items(
+        self, mocker
+    ) -> None:
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        collector.gh = MagicMock()
+        collector.gh.requester = MagicMock()
+        collector.wait_for_rate_limit = MagicMock()
+
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_issues",
+            return_value=iter([self._make_issue_node()]),
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_pull_requests",
+            return_value=iter([]),
+        )
+
+        insert = mocker.patch("sqlalchemy.dialects.postgresql.insert")
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[self._make_existing_result(datetime(2025, 1, 3, tzinfo=UTC))]
+        )
+        session.commit = AsyncMock()
+
+        count = await collector.collect_issues("repo", 1, session, state="open")
+
+        assert count == 0
+        insert.assert_not_called()
+        collector.gh.get_repo.assert_not_called()
+        session.commit.assert_awaited_once()
+
+
 class TestFetchPRDetails:
     """Tests for _fetch_pr_details."""
 

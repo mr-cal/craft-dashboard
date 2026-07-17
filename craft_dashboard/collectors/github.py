@@ -1,10 +1,12 @@
 """GitHub data collector for issues, PRs, releases, and dependencies."""
 
 import hashlib
+import itertools
 import logging
 import time
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Literal, TypedDict, cast
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 import github
 import sqlalchemy as sa
@@ -15,6 +17,13 @@ from github.PullRequest import PullRequest as GHPullRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.collectors import ISSUE_UPSERT_FIELDS, RateLimitError
+from craft_dashboard.collectors.github_graphql import (
+    _parse_graphql_datetime,
+    classify_pr_ci_checks,
+    classify_pr_review_status,
+    paginated_issues,
+    paginated_pull_requests,
+)
 
 __all__ = ["GitHubCollector"]
 
@@ -227,6 +236,119 @@ def _fetch_pr_details(gh_pr: GHPullRequest) -> dict:
     }
 
 
+def _comments_from_graphql_node(node: dict[str, Any]) -> list[dict]:
+    """Convert a GraphQL node's embedded ``comments`` to the REST comment shape."""
+    return [
+        {
+            "author": (comment["author"] or {}).get("login", "unknown"),
+            "body": (comment["body"] or "")[:1000],
+            "created_at": comment["createdAt"],
+            "type": "comment",
+        }
+        for comment in node["comments"]["nodes"]
+    ]
+
+
+def _closing_refs_from_graphql_node(node: dict[str, Any]) -> list[dict]:
+    """Convert a GraphQL issue node's timeline items to the REST closing-ref shape."""
+    refs = []
+    for item in node["timelineItems"]["nodes"]:
+        source = item.get("source")
+        if source and source.get("mergedAt") is not None:
+            refs.append(
+                {
+                    "type": "pull_request",
+                    "number": source["number"],
+                    "title": source["title"],
+                    "url": source["url"],
+                    "state": "merged",
+                    "merged_at": source["mergedAt"],
+                }
+            )
+    return refs
+
+
+class _GraphQLIssueAdapter:
+    """GraphQL issue shim matching the PyGithub Issue read interface."""
+
+    def __init__(self, node: dict[str, Any]) -> None:
+        self._node = node
+        self.number = node["number"]
+        self.title = node["title"]
+        self.body = node["body"]
+        self.state = node["state"].lower()
+        author = node["author"]
+        self.user = SimpleNamespace(login=author["login"]) if author else None
+        self.labels = [
+            SimpleNamespace(name=label["name"]) for label in node["labels"]["nodes"]
+        ]
+        self.created_at = _parse_graphql_datetime(node["createdAt"])
+        self.updated_at = _parse_graphql_datetime(node["updatedAt"])
+        self.closed_at = _parse_graphql_datetime(node["closedAt"])
+        self.html_url = node["url"]
+        self.pull_request = None
+
+    def fetch_comments(self) -> list[dict]:
+        """Return the last-10 comments already embedded in the GraphQL node."""
+        return _comments_from_graphql_node(self._node)
+
+    def fetch_closing_references(self) -> list[dict]:
+        """Return closing PR references already embedded in the GraphQL node."""
+        return _closing_refs_from_graphql_node(self._node)
+
+
+class _GraphQLPullRequestAdapter:
+    """GraphQL pull-request shim matching the PyGithub Issue read interface."""
+
+    def __init__(self, node: dict[str, Any]) -> None:
+        self._node = node
+        self.number = node["number"]
+        self.title = node["title"]
+        self.body = node["body"]
+        self.state = node["state"].lower()
+        author = node["author"]
+        self.user = SimpleNamespace(login=author["login"]) if author else None
+        self.labels = [
+            SimpleNamespace(name=label["name"]) for label in node["labels"]["nodes"]
+        ]
+        self.created_at = _parse_graphql_datetime(node["createdAt"])
+        self.updated_at = _parse_graphql_datetime(node["updatedAt"])
+        self.closed_at = _parse_graphql_datetime(node["closedAt"])
+        self.html_url = node["url"]
+        self.pull_request = SimpleNamespace(
+            merged_at=_parse_graphql_datetime(node["mergedAt"])
+        )
+
+    def fetch_comments(self) -> list[dict]:
+        """Return the last-10 comments already embedded in the GraphQL node."""
+        return _comments_from_graphql_node(self._node)
+
+    def fetch_pr_details(self) -> dict:
+        """Return PR review/CI/diff details already embedded in the GraphQL node."""
+        review_status, review_count = classify_pr_review_status(
+            self._node["reviews"]["nodes"]
+        )
+        ci_passing, ci_failing, ci_pending = classify_pr_ci_checks(
+            self._node["commits"]["nodes"]
+        )
+        unresolved = sum(
+            1
+            for thread in self._node["reviewThreads"]["nodes"]
+            if not thread["isResolved"]
+        )
+        return {
+            "review_status": review_status,
+            "review_count": review_count,
+            "unresolved_review_comments": unresolved,
+            "ci_passing": ci_passing,
+            "ci_failing": ci_failing,
+            "ci_pending": ci_pending,
+            "diff_additions": self._node["additions"],
+            "diff_deletions": self._node["deletions"],
+            "diff_files_changed": self._node["changedFiles"],
+        }
+
+
 class GitHubCollector:
     """Collects issue, PR, release, and dependency data from GitHub."""
 
@@ -420,19 +542,37 @@ class GitHubCollector:
             Issue,
         )
 
-        repo = self.gh.get_repo(f"{self.org}/{repo_name}")
-
+        repo = None
         if state == "open":
             # Always fetch all currently-open issues; no schedule gate.
             # The per-issue updated_at skip below handles efficiency.
-            gh_issues = repo.get_issues(state="open", sort="updated", direction="desc")
+            # Use GraphQL (not REST) for the open pass: this runs every 10
+            # minutes, and REST's N+1 per-item calls (comments, reviews, CI
+            # checks) would blow the REST rate limit at that cadence.
+            self.wait_for_rate_limit(resource="graphql")
+            requester = self.gh.requester
+            gh_issues = itertools.chain(
+                (
+                    _GraphQLIssueAdapter(node)
+                    for node in paginated_issues(
+                        requester, self.org, repo_name, since=None
+                    )
+                ),
+                (
+                    _GraphQLPullRequestAdapter(node)
+                    for node in paginated_pull_requests(
+                        requester, self.org, repo_name, since=None
+                    )
+                ),
+            )
             logger.info(
-                "  %s/%s: collecting open issues%s",
+                "  %s/%s: collecting open issues (via GraphQL)%s",
                 self.org,
                 repo_name,
                 f", limit: {limit}" if limit else "",
             )
         else:
+            repo = self.gh.get_repo(f"{self.org}/{repo_name}")
             # Count how many existing issues are due for refresh
             cutoff = datetime.now(tz=UTC) - timedelta(days=refresh_age_days)
             stale_where = sa.and_(
@@ -518,7 +658,7 @@ class GitHubCollector:
                 )
                 break
 
-            issue_type, issue_state = _classify_issue(gh_issue)
+            issue_type, issue_state = _classify_issue(cast(GHIssue, gh_issue))
 
             # Skip if the issue hasn't changed since we last fetched it.
             # Use updated_at comparison rather than a fixed age window so that
@@ -564,15 +704,18 @@ class GitHubCollector:
 
             # Fetch comments for all items (open and closed)
             comments: list = []
-            try:
-                comments = _fetch_issue_comments(gh_issue)
-            except GithubException:
-                logger.warning(
-                    "Failed to fetch comments for %s#%d",
-                    repo_name,
-                    gh_issue.number,
-                    exc_info=True,
-                )
+            if isinstance(gh_issue, (_GraphQLIssueAdapter, _GraphQLPullRequestAdapter)):
+                comments = gh_issue.fetch_comments()
+            else:
+                try:
+                    comments = _fetch_issue_comments(gh_issue)
+                except GithubException:
+                    logger.warning(
+                        "Failed to fetch comments for %s#%d",
+                        repo_name,
+                        gh_issue.number,
+                        exc_info=True,
+                    )
 
             # For all PRs, fetch reviews, CI status, and diff stats.
             # For closed issues, fetch closing references (PRs that closed them).
@@ -584,16 +727,20 @@ class GitHubCollector:
                     repo_name,
                     gh_issue.number,
                 )
-                try:
-                    gh_pr = repo.get_pull(gh_issue.number)
-                    extra_metadata = _fetch_pr_details(gh_pr)
-                except GithubException:
-                    logger.warning(
-                        "Failed to fetch PR details for %s#%d",
-                        repo_name,
-                        gh_issue.number,
-                        exc_info=True,
-                    )
+                if isinstance(gh_issue, _GraphQLPullRequestAdapter):
+                    extra_metadata = gh_issue.fetch_pr_details()
+                else:
+                    rest_repo = cast("GHRepository", repo)
+                    try:
+                        gh_pr = rest_repo.get_pull(gh_issue.number)
+                        extra_metadata = _fetch_pr_details(gh_pr)
+                    except GithubException:
+                        logger.warning(
+                            "Failed to fetch PR details for %s#%d",
+                            repo_name,
+                            gh_issue.number,
+                            exc_info=True,
+                        )
             elif issue_state == "closed":
                 logger.debug(
                     "  Fetching closing references for %s/%s#%d",
@@ -601,13 +748,18 @@ class GitHubCollector:
                     repo_name,
                     gh_issue.number,
                 )
-                closing_refs = _fetch_closing_references(gh_issue)
+                if isinstance(gh_issue, _GraphQLIssueAdapter):
+                    closing_refs = gh_issue.fetch_closing_references()
+                elif isinstance(gh_issue, _GraphQLPullRequestAdapter):
+                    closing_refs = []
+                else:
+                    closing_refs = _fetch_closing_references(gh_issue)
                 if closing_refs:
                     extra_metadata["closing_references"] = closing_refs
 
             stmt = insert(Issue).values(
                 **self._build_issue_values(
-                    gh_issue,
+                    cast(GHIssue, gh_issue),
                     project_id,
                     issue_type,
                     issue_state,
