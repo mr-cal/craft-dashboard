@@ -565,6 +565,9 @@ class GitHubCollector:
         from craft_dashboard.models.issue import (
             Issue,
         )
+        from craft_dashboard.models.issue_activity import (
+            IssueActivity,
+        )
 
         repo = None
         if state == "open":
@@ -679,13 +682,16 @@ class GitHubCollector:
             # state transitions (e.g. open → closed) that happened after our
             # last fetch are never silently ignored.
             existing = await session.execute(
-                sa.select(Issue.last_fetched_at).where(
+                sa.select(Issue.last_fetched_at, Issue.closed_at).where(
                     Issue.project_id == project_id,
                     Issue.source == "github",
                     Issue.external_id == str(gh_issue.number),
                 )
             )
-            last_fetched = existing.scalar_one_or_none()
+            existing_row = existing.one_or_none()
+            last_fetched, previous_closed_at = (
+                existing_row if existing_row else (None, None)
+            )
             if last_fetched is not None and gh_issue.updated_at is not None:
                 fetched_tz = (
                     last_fetched.replace(tzinfo=UTC)
@@ -770,6 +776,28 @@ class GitHubCollector:
                     closing_refs = _fetch_closing_references(gh_issue)
                 if closing_refs:
                     extra_metadata["closing_references"] = closing_refs
+
+            # Note: if an issue closes, reopens, and closes again entirely
+            # between polls (the reopen never independently observed),
+            # previous_closed_at stays stale from the first closure and this
+            # reclose is classified as "updated" rather than "closed" — an
+            # accepted single-poll-granularity simplification, not a bug.
+            if last_fetched is None:
+                change_type = "created"
+            elif issue_state == "closed" and previous_closed_at is None:
+                change_type = "closed"
+            else:
+                change_type = "updated"
+
+            session.add(
+                IssueActivity(
+                    project_id=project_id,
+                    issue_number=gh_issue.number,
+                    change_type=change_type,
+                    summary=(gh_issue.title or "")[:200],
+                    occurred_at=gh_issue.updated_at or datetime.now(UTC),
+                )
+            )
 
             stmt = insert(Issue).values(
                 **self._build_issue_values(

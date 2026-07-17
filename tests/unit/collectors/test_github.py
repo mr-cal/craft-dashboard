@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
+import sqlalchemy as sa
 import urllib3
 from craft_dashboard.collectors.github import (
     GitHubCollector,
@@ -12,7 +13,16 @@ from craft_dashboard.collectors.github import (
     _fetch_issue_comments,
     _fetch_pr_details,
 )
+from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.issue_activity import IssueActivity
 from github import GithubException
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
+
+from tests.factories import make_issue, make_project
+
+if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
+    SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"
 
 _TEST_TOKEN = "ghp_test"
 
@@ -253,6 +263,7 @@ class TestCollectIssuesExceptionHandling:
 
         existing_result = MagicMock()
         existing_result.scalar_one_or_none.return_value = None
+        existing_result.one_or_none.return_value = None
 
         session = AsyncMock()
         session.execute = AsyncMock(
@@ -264,6 +275,7 @@ class TestCollectIssuesExceptionHandling:
                 None,
             ]
         )
+        session.add = MagicMock()
         session.commit = AsyncMock()
         return session
 
@@ -382,9 +394,17 @@ class TestCollectIssuesGraphQLOpenPath:
             return self
 
     @staticmethod
-    def _make_existing_result(last_fetched: datetime | None = None) -> MagicMock:
+    def _make_existing_result(
+        last_fetched: datetime | None = None,
+        closed_at: datetime | None = None,
+    ) -> MagicMock:
         result = MagicMock()
         result.scalar_one_or_none.return_value = last_fetched
+        result.one_or_none.return_value = (
+            (last_fetched, closed_at)
+            if last_fetched is not None or closed_at is not None
+            else None
+        )
         return result
 
     @staticmethod
@@ -490,6 +510,7 @@ class TestCollectIssuesGraphQLOpenPath:
                 )
             ]
         )
+        session.add = MagicMock()
         session.commit = AsyncMock()
         return session
 
@@ -615,6 +636,7 @@ class TestCollectIssuesGraphQLOpenPath:
         session.execute = AsyncMock(
             side_effect=[self._make_existing_result(datetime(2025, 1, 3, tzinfo=UTC))]
         )
+        session.add = MagicMock()
         session.commit = AsyncMock()
 
         count = await collector.collect_issues("repo", 1, session, state="open")
@@ -819,6 +841,264 @@ class TestFetchPRDetails:
         result = _fetch_pr_details(mock_pr)
 
         assert result["unresolved_review_comments"] == 1
+
+
+class TestCollectIssuesActivityRecording:
+    """DB-backed tests for IssueActivity rows created during issue collection."""
+
+    @staticmethod
+    def _make_graphql_issue_node(
+        *,
+        number: int = 101,
+        title: str = "Issue 101",
+        updated_at: str = "2025-01-02T00:00:00Z",
+        state: str = "OPEN",
+        closed_at: str | None = None,
+    ) -> dict:
+        return {
+            "number": number,
+            "title": title,
+            "body": "Issue body",
+            "state": state,
+            "createdAt": "2025-01-01T00:00:00Z",
+            "updatedAt": updated_at,
+            "closedAt": closed_at,
+            "url": f"https://github.com/canonical/repo/issues/{number}",
+            "author": {"login": "octocat"},
+            "labels": {"nodes": [{"name": "bug"}]},
+            "comments": {"nodes": []},
+            "timelineItems": {"nodes": []},
+        }
+
+    @staticmethod
+    def _make_rest_issue(
+        *,
+        number: int = 101,
+        title: str = "Issue 101",
+        updated_at: datetime = datetime(2025, 1, 4, tzinfo=UTC),
+        closed_at: datetime | None = None,
+    ) -> MagicMock:
+        gh_issue = MagicMock()
+        gh_issue.number = number
+        gh_issue.title = title
+        gh_issue.body = "Issue body"
+        gh_issue.state = "closed" if closed_at is not None else "open"
+        gh_issue.created_at = datetime(2025, 1, 1, tzinfo=UTC)
+        gh_issue.updated_at = updated_at
+        gh_issue.closed_at = closed_at
+        gh_issue.html_url = f"https://github.com/canonical/repo/issues/{number}"
+        gh_issue.user = MagicMock(login="octocat")
+        gh_issue.labels = []
+        gh_issue.pull_request = None
+        gh_issue.get_comments.return_value = []
+        return gh_issue
+
+    @staticmethod
+    async def _activity_rows(
+        session, project_id: int, issue_number: int
+    ) -> list[IssueActivity]:
+        result = await session.execute(
+            sa.select(IssueActivity)
+            .where(
+                IssueActivity.project_id == project_id,
+                IssueActivity.issue_number == issue_number,
+            )
+            .order_by(IssueActivity.id)
+        )
+        return list(result.scalars())
+
+    @staticmethod
+    def _utc(dt: datetime) -> datetime:
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+    @pytest.mark.asyncio
+    async def test_collect_issues_records_created_activity_for_new_issue(
+        self, mocker, test_db_session
+    ) -> None:
+        project = make_project()
+        test_db_session.add(project)
+        await test_db_session.flush()
+
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        collector.gh = MagicMock()
+        collector.gh.requester = MagicMock()
+        collector.wait_for_rate_limit = MagicMock()
+
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_issues",
+            return_value=iter([self._make_graphql_issue_node()]),
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_pull_requests",
+            return_value=iter([]),
+        )
+
+        with patch("sqlalchemy.dialects.postgresql.insert", side_effect=sqlite_insert):
+            count = await collector.collect_issues(
+                "repo", project.id, test_db_session, state="open"
+            )
+
+        activity_rows = await self._activity_rows(test_db_session, project.id, 101)
+
+        assert count == 1
+        assert len(activity_rows) == 1
+        assert activity_rows[0].change_type == "created"
+        assert activity_rows[0].summary == "Issue 101"
+        assert self._utc(activity_rows[0].occurred_at) == datetime(
+            2025, 1, 2, tzinfo=UTC
+        )
+
+    @pytest.mark.asyncio
+    async def test_collect_issues_records_updated_activity_for_changed_issue(
+        self, mocker, test_db_session
+    ) -> None:
+        project = make_project()
+        test_db_session.add(project)
+        await test_db_session.flush()
+        existing_issue = make_issue(
+            project_id=project.id,
+            external_id="101",
+            updated_at=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+        existing_issue.last_fetched_at = datetime(2025, 1, 1, tzinfo=UTC)
+        test_db_session.add(existing_issue)
+        await test_db_session.commit()
+
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        collector.gh = MagicMock()
+        collector.gh.requester = MagicMock()
+        collector.wait_for_rate_limit = MagicMock()
+
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_issues",
+            return_value=iter(
+                [
+                    self._make_graphql_issue_node(
+                        updated_at="2025-01-03T00:00:00Z",
+                        title="Updated issue title",
+                    )
+                ]
+            ),
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_pull_requests",
+            return_value=iter([]),
+        )
+
+        with patch("sqlalchemy.dialects.postgresql.insert", side_effect=sqlite_insert):
+            count = await collector.collect_issues(
+                "repo", project.id, test_db_session, state="open"
+            )
+
+        activity_rows = await self._activity_rows(test_db_session, project.id, 101)
+
+        assert count == 1
+        assert len(activity_rows) == 1
+        assert activity_rows[0].change_type == "updated"
+        assert activity_rows[0].summary == "Updated issue title"
+        assert self._utc(activity_rows[0].occurred_at) == datetime(
+            2025, 1, 3, tzinfo=UTC
+        )
+
+    @pytest.mark.asyncio
+    async def test_collect_issues_records_closed_activity_for_open_to_closed_issue(
+        self, mocker, test_db_session
+    ) -> None:
+        project = make_project()
+        test_db_session.add(project)
+        await test_db_session.flush()
+        existing_issue = make_issue(
+            project_id=project.id,
+            external_id="101",
+            state="open",
+            closed_at=None,
+            updated_at=datetime(2025, 1, 2, tzinfo=UTC),
+        )
+        existing_issue.last_fetched_at = datetime(2025, 1, 2, tzinfo=UTC)
+        test_db_session.add(existing_issue)
+        await test_db_session.commit()
+
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        repo = MagicMock()
+        repo.get_issues.return_value = [
+            self._make_rest_issue(closed_at=datetime(2025, 1, 4, tzinfo=UTC))
+        ]
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value = repo
+
+        mocker.patch(
+            "craft_dashboard.collectors.github._fetch_closing_references",
+            return_value=[],
+        )
+
+        with patch("sqlalchemy.dialects.postgresql.insert", side_effect=sqlite_insert):
+            count = await collector.collect_issues(
+                "repo",
+                project.id,
+                test_db_session,
+                state="all",
+                since=datetime(2025, 1, 1, tzinfo=UTC),
+            )
+
+        activity_rows = await self._activity_rows(test_db_session, project.id, 101)
+
+        assert count == 1
+        assert len(activity_rows) == 1
+        assert activity_rows[0].change_type == "closed"
+        assert activity_rows[0].summary == "Issue 101"
+        assert self._utc(activity_rows[0].occurred_at) == datetime(
+            2025, 1, 4, tzinfo=UTC
+        )
+
+    @pytest.mark.asyncio
+    async def test_collect_issues_skips_activity_for_unchanged_issue(
+        self, mocker, test_db_session
+    ) -> None:
+        project = make_project()
+        test_db_session.add(project)
+        await test_db_session.flush()
+        existing_issue = make_issue(
+            project_id=project.id,
+            external_id="101",
+            updated_at=datetime(2025, 1, 4, tzinfo=UTC),
+        )
+        existing_issue.last_fetched_at = datetime(2025, 1, 4, tzinfo=UTC)
+        test_db_session.add(existing_issue)
+        await test_db_session.commit()
+
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        collector.gh = MagicMock()
+        collector.gh.requester = MagicMock()
+        collector.wait_for_rate_limit = MagicMock()
+
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_issues",
+            return_value=iter(
+                [self._make_graphql_issue_node(updated_at="2025-01-03T00:00:00Z")]
+            ),
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_pull_requests",
+            return_value=iter([]),
+        )
+
+        count = await collector.collect_issues(
+            "repo", project.id, test_db_session, state="open"
+        )
+
+        activity_rows = await self._activity_rows(test_db_session, project.id, 101)
+        issue_result = await test_db_session.execute(
+            sa.select(Issue).where(
+                Issue.project_id == project.id,
+                Issue.external_id == "101",
+                Issue.source == "github",
+            )
+        )
+        stored_issue = issue_result.scalar_one()
+
+        assert count == 0
+        assert activity_rows == []
+        assert stored_issue.last_fetched_at == datetime(2025, 1, 4, tzinfo=UTC)
 
 
 class TestCollectReleasesGraphQLPath:
