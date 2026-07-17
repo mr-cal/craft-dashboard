@@ -340,6 +340,12 @@ class TestMainLogging:
         )
         monkeypatch.setattr(
             collect_data,
+            "_get_running_collection_run",
+            AsyncMock(return_value=None),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            collect_data,
             "_create_collection_run",
             AsyncMock(return_value=SimpleNamespace(id=1)),
         )

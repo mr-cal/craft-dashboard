@@ -20,7 +20,7 @@ import pathlib
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import click
@@ -201,6 +201,51 @@ async def _create_collection_run(source: str, session_factory: object) -> Collec
         await session.commit()
         await session.refresh(run)
         return run
+
+
+async def _get_running_collection_run(
+    session_factory: object,
+    source: str,
+    *,
+    stale_after: timedelta = timedelta(hours=6),
+) -> CollectionRun | None:
+    """Return an in-progress, non-stale collection run for this source, if any.
+
+    A ``status="running"`` row older than ``stale_after`` is treated as
+    abandoned (e.g. from a crashed prior invocation that never reached its
+    cleanup) rather than a genuine active conflict, so a single crash can't
+    permanently lock out future runs. The cutoff is intentionally generous
+    because GitHub ``wait_for_rate_limit`` backoff can keep a healthy run alive
+    for a long time.
+    """
+    async with session_factory() as session:
+        cutoff = datetime.now(UTC) - stale_after
+        result = await session.execute(
+            select(CollectionRun).where(
+                CollectionRun.source == source,
+                CollectionRun.status == "running",
+                CollectionRun.started_at >= cutoff,
+            )
+        )
+        running_run = result.scalars().first()
+        if running_run is not None:
+            return running_run
+
+        stale_result = await session.execute(
+            select(CollectionRun).where(
+                CollectionRun.source == source,
+                CollectionRun.status == "running",
+                CollectionRun.started_at < cutoff,
+            )
+        )
+        stale_run = stale_result.scalars().first()
+        if stale_run is not None:
+            logger.warning(
+                "Ignoring stale collection run %s from %s; treating it as abandoned",
+                stale_run.id,
+                stale_run.started_at,
+            )
+        return None
 
 
 async def _finish_collection_run(
@@ -724,38 +769,58 @@ async def _main(
         logger.info("Incremental collection mode enabled; using saved watermarks")
     logger.info("Collection mode: %s", mode)
 
-    run_started_at = time.monotonic()
-    stats = CollectionStats()
+    try:
+        sources_to_check: list[str] = []
+        if source in ("all", "github"):
+            sources_to_check.append("github")
+        if source in ("all", "launchpad"):
+            sources_to_check.append("launchpad")
 
-    async def _run_source(
-        source_name: str,
-        make_collector_call: object,
-    ) -> CollectionStats:
-        run = await _create_collection_run(source_name, session_factory)
-        try:
-            source_stats = await make_collector_call(run.id)
-        except Exception as exc:
+        for source_name in sources_to_check:
+            existing_running = await _get_running_collection_run(
+                session_factory,
+                source_name,
+            )
+            if existing_running is not None:
+                logger.warning(
+                    "Collection run %s already in progress for %s (started %s); skipping this invocation",
+                    existing_running.id,
+                    source_name,
+                    existing_running.started_at,
+                )
+                raise SystemExit(1)
+
+        run_started_at = time.monotonic()
+        stats = CollectionStats()
+
+        async def _run_source(
+            source_name: str,
+            make_collector_call: object,
+        ) -> CollectionStats:
+            run = await _create_collection_run(source_name, session_factory)
+            try:
+                source_stats = await make_collector_call(run.id)
+            except Exception as exc:
+                await _finish_collection_run(
+                    run,
+                    session_factory,
+                    status="failed",
+                    projects_processed=0,
+                    issues_collected=0,
+                    errors=[{"source": source_name, "error": str(exc)}],
+                )
+                raise
+
             await _finish_collection_run(
                 run,
                 session_factory,
-                status="failed",
-                projects_processed=0,
-                issues_collected=0,
-                errors=[{"source": source_name, "error": str(exc)}],
+                status="completed",
+                projects_processed=len(source_stats.projects_processed),
+                issues_collected=source_stats.issues_collected,
+                errors=source_stats.errors,
             )
-            raise
+            return source_stats
 
-        await _finish_collection_run(
-            run,
-            session_factory,
-            status="completed",
-            projects_processed=len(source_stats.projects_processed),
-            issues_collected=source_stats.issues_collected,
-            errors=source_stats.errors,
-        )
-        return source_stats
-
-    try:
         if source in ("all", "github"):
             stats.merge(
                 await _run_source(
