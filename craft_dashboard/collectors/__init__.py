@@ -6,7 +6,15 @@ class CollectorError(Exception):
 
 
 class RateLimitError(CollectorError):
-    """Raised when an API rate limit is hit."""
+    """Raised when a GitHub API rate limit is exhausted and cannot be waited out."""
+
+    def __init__(self, resource: str, remaining: int, limit: int) -> None:
+        self.resource = resource
+        self.remaining = remaining
+        self.limit = limit
+        super().__init__(
+            f"{resource} rate limit exhausted: {remaining}/{limit} remaining"
+        )
 
 
 class DataValidationError(CollectorError):

@@ -28,28 +28,70 @@ class TestGitHubRateLimit:
         collector = GitHubCollector(token=_TOKEN, org="canonical")
         collector.gh = MagicMock()
         collector.gh.get_rate_limit.return_value = SimpleNamespace(
-            rate=SimpleNamespace(
-                remaining=123,
-                limit=5000,
-                reset=datetime(2025, 1, 10, 12, 30, tzinfo=UTC),
+            resources=SimpleNamespace(
+                core=SimpleNamespace(
+                    remaining=123,
+                    limit=5000,
+                    reset=datetime(2025, 1, 10, 12, 30, tzinfo=UTC),
+                ),
+                graphql=SimpleNamespace(
+                    remaining=456,
+                    limit=5000,
+                    reset=datetime(2025, 1, 10, 12, 45, tzinfo=UTC),
+                ),
             )
         )
 
         result = collector.check_rate_limit()
 
         assert result == {
-            "remaining": 123,
-            "limit": 5000,
-            "reset_at": datetime(2025, 1, 10, 12, 30, tzinfo=UTC),
+            "core_remaining": 123,
+            "core_limit": 5000,
+            "core_reset": datetime(2025, 1, 10, 12, 30, tzinfo=UTC),
+            "graphql_remaining": 456,
+            "graphql_limit": 5000,
+            "graphql_reset": datetime(2025, 1, 10, 12, 45, tzinfo=UTC),
         }
+
+    def test_check_rate_limit_reads_graphql_from_resources(self) -> None:
+        collector = GitHubCollector(token=_TOKEN, org="canonical")
+        collector.gh = MagicMock()
+        collector.gh.get_rate_limit.return_value = SimpleNamespace(
+            resources=SimpleNamespace(
+                core=SimpleNamespace(
+                    remaining=123,
+                    limit=5000,
+                    reset=datetime(2025, 1, 10, 12, 30, tzinfo=UTC),
+                ),
+                graphql=SimpleNamespace(
+                    remaining=789,
+                    limit=5000,
+                    reset=datetime(2025, 1, 10, 12, 50, tzinfo=UTC),
+                ),
+            ),
+            graphql=SimpleNamespace(
+                remaining=1,
+                limit=1,
+                reset=datetime(2025, 1, 10, 12, 1, tzinfo=UTC),
+            ),
+        )
+
+        result = collector.check_rate_limit()
+
+        assert result["graphql_remaining"] == 789
+        assert result["graphql_limit"] == 5000
+        assert result["graphql_reset"] == datetime(2025, 1, 10, 12, 50, tzinfo=UTC)
 
     def test_wait_for_rate_limit_sleeps_until_reset_when_quota_is_low(self) -> None:
         collector = GitHubCollector(token=_TOKEN, org="canonical")
         collector.check_rate_limit = MagicMock(
             return_value={
-                "remaining": 25,
-                "limit": 5000,
-                "reset_at": datetime(2025, 1, 10, 12, 2, 30, tzinfo=UTC),
+                "core_remaining": 25,
+                "core_limit": 5000,
+                "core_reset": datetime(2025, 1, 10, 12, 2, 30, tzinfo=UTC),
+                "graphql_remaining": 250,
+                "graphql_limit": 5000,
+                "graphql_reset": datetime(2025, 1, 10, 13, 0, tzinfo=UTC),
             }
         )
 
@@ -57,7 +99,7 @@ class TestGitHubRateLimit:
             patch("craft_dashboard.collectors.github.datetime", FrozenDateTime),
             patch("craft_dashboard.collectors.github.time.sleep") as sleep,
         ):
-            collector.wait_for_rate_limit(min_remaining=100)
+            collector.wait_for_rate_limit(resource="core", threshold=100)
 
         sleep.assert_called_once_with(150)
 
@@ -65,11 +107,14 @@ class TestGitHubRateLimit:
         collector = GitHubCollector(token=_TOKEN, org="canonical")
         collector.check_rate_limit = MagicMock(
             return_value={
-                "remaining": 0,
-                "limit": 5000,
-                "reset_at": None,
+                "core_remaining": 0,
+                "core_limit": 5000,
+                "core_reset": None,
+                "graphql_remaining": 250,
+                "graphql_limit": 5000,
+                "graphql_reset": datetime(2025, 1, 10, 13, 0, tzinfo=UTC),
             }
         )
 
-        with pytest.raises(RateLimitError, match="reset time"):
-            collector.wait_for_rate_limit(min_remaining=100)
+        with pytest.raises(RateLimitError, match="rate limit exhausted"):
+            collector.wait_for_rate_limit(resource="core", threshold=100)

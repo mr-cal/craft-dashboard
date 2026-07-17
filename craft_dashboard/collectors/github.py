@@ -44,11 +44,14 @@ def _tag_on_main(repo: "GHRepository", best_tag: str) -> bool:
 
 
 class RateLimitStatus(TypedDict):
-    """Normalized GitHub core API rate limit details."""
+    """Snapshot of both REST (core) and GraphQL API rate-limit budgets."""
 
-    remaining: int
-    limit: int
-    reset_at: datetime | None
+    core_remaining: int
+    core_limit: int
+    core_reset: datetime | None
+    graphql_remaining: int
+    graphql_limit: int
+    graphql_reset: datetime | None
 
 
 def _classify_issue(gh_issue: GHIssue) -> tuple[str, str]:
@@ -318,27 +321,45 @@ class GitHubCollector:
         }
 
     def check_rate_limit(self) -> RateLimitStatus:
-        """Check GitHub API rate limit status."""
+        """Check GitHub REST (core) and GraphQL API rate limit status."""
         overview = self.gh.get_rate_limit()
-        # PyGithub returns RateLimitOverview; .rate gives the core Rate object
-        # with remaining/limit/reset attributes.
-        core = overview.rate
+        core = overview.resources.core
+        graphql = overview.resources.graphql
         return {
-            "remaining": int(core.remaining),
-            "limit": int(core.limit),
-            "reset_at": cast(datetime | None, core.reset),
+            "core_remaining": int(core.remaining),
+            "core_limit": int(core.limit),
+            "core_reset": cast(datetime | None, core.reset),
+            "graphql_remaining": int(graphql.remaining),
+            "graphql_limit": int(graphql.limit),
+            "graphql_reset": cast(datetime | None, graphql.reset),
         }
 
-    def wait_for_rate_limit(self, min_remaining: int = 100) -> None:
-        """Sleep until the core rate limit resets when quota is running low."""
+    def wait_for_rate_limit(
+        self, resource: Literal["core", "graphql"] = "core", threshold: int = 100
+    ) -> None:
+        """Sleep until the given resource's rate limit resets, if nearly exhausted.
+
+        Args:
+            resource: Which budget to check — "core" for REST calls (e.g.
+                repo.compare()), "graphql" for GraphQL queries.
+            threshold: Sleep if remaining requests fall at or below this value.
+
+        """
         quota = self.check_rate_limit()
-        remaining = quota["remaining"]
-        if remaining >= min_remaining:
+        if resource == "core":
+            remaining = quota["core_remaining"]
+            limit = quota["core_limit"]
+            reset_at = quota["core_reset"]
+        else:
+            remaining = quota["graphql_remaining"]
+            limit = quota["graphql_limit"]
+            reset_at = quota["graphql_reset"]
+
+        if remaining >= threshold:
             return
 
-        reset_at = quota["reset_at"]
         if reset_at is None:
-            raise RateLimitError("GitHub API rate limit reset time is unavailable")
+            raise RateLimitError(resource=resource, remaining=remaining, limit=limit)
 
         reset_time = (
             reset_at.replace(tzinfo=UTC) if reset_at.tzinfo is None else reset_at
@@ -348,9 +369,10 @@ class GitHubCollector:
             return
 
         logger.warning(
-            "GitHub rate limit low (%d/%d remaining); sleeping for %ds until %s",
+            "GitHub %s rate limit low (%d/%d remaining); sleeping for %ds until %s",
+            resource,
             remaining,
-            quota["limit"],
+            limit,
             sleep_seconds,
             reset_time.isoformat(),
         )

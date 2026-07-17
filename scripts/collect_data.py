@@ -325,12 +325,16 @@ async def _collect_github(
     rate_limit = collector.check_rate_limit()
     logger.info(
         "GitHub API quota: %d/%d remaining (reset at %s)",
-        rate_limit["remaining"],
-        rate_limit["limit"],
-        rate_limit["reset_at"],
+        rate_limit["core_remaining"],
+        rate_limit["core_limit"],
+        rate_limit["core_reset"],
     )
-    if int(rate_limit["remaining"]) <= 0:
-        raise RateLimitError("GitHub API rate limit exhausted before collection starts")
+    if int(rate_limit["core_remaining"]) <= 0:
+        raise RateLimitError(
+            resource="core",
+            remaining=int(rate_limit["core_remaining"]),
+            limit=int(rate_limit["core_limit"]),
+        )
     collector.wait_for_rate_limit()
 
     project_list = projects if projects else config.craft_projects
@@ -584,8 +588,8 @@ async def _collect_github(
                 logger.info(
                     "GitHub API quota after %s: %d/%d remaining",
                     project_name,
-                    rate_limit["remaining"],
-                    rate_limit["limit"],
+                    rate_limit["core_remaining"],
+                    rate_limit["core_limit"],
                 )
                 collector.wait_for_rate_limit()
             except GithubException as exc:
