@@ -776,6 +776,16 @@ async def _main(
         if source in ("all", "launchpad"):
             sources_to_check.append("launchpad")
 
+        # NOTE: this checks all requested sources up front and aborts the
+        # entire invocation (SystemExit) on the first conflict found, rather
+        # than skipping only the conflicting source and still running the
+        # others. With --source all, a stuck/long-running launchpad run would
+        # currently also block an otherwise-healthy github collection in the
+        # same invocation. This is a known, low-urgency gap: production cron
+        # always passes an explicit single --source (github or launchpad), so
+        # it isn't hit in practice today, but a future --source all cron
+        # invocation would need this loosened to per-source skipping instead
+        # of an all-or-nothing abort.
         for source_name in sources_to_check:
             existing_running = await _get_running_collection_run(
                 session_factory,

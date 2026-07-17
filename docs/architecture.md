@@ -47,9 +47,15 @@ collection takes, and a GitHub API outage doesn't break the dashboard.
    recorded in `collection_watermarks` to fetch only issues/PRs updated since
    the last successful run. A `collection_runs` row (scoped by `source`) acts
    as a concurrency guard so overlapping cron invocations for the same source
-   don't run at once. Each detected issue/PR change (created, updated, closed)
-   is recorded as an `issue_activities` row, driving the admin page's
-   "Recent Activity" feed.
+   don't run at once. Each detected issue/PR change is recorded as an
+   `issue_activities` row, driving the admin page's "Recent Activity" feed —
+   but note that the 10-minute pass only queries GraphQL's `states: [OPEN]`
+   issues/PRs, so it can record "created"/"updated" activity quickly but
+   cannot itself detect closures: an issue/PR that closes simply stops
+   appearing in that pass's results. Closures are only recorded during the
+   daily full-refresh pass (`--mode full`), which still uses the REST API for
+   closed-issue history. In practice this means "closed" activity can lag up
+   to a day behind the actual closure.
 
 2. LLM evaluation can run in two ways:
 

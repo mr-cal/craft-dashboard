@@ -874,6 +874,15 @@ class GitHubCollector:
 
         self.wait_for_rate_limit(resource="graphql")
         requester = self.gh.requester
+        # known_since is always None (no incremental fetch) even though every
+        # 10-minute run refetches full release/branch history: the
+        # "best tag per branch" selection below needs the complete tag list to
+        # correctly pick the highest-version tag per branch, not just tags
+        # newer than the last watermark. Passing a real known_since here would
+        # silently break that selection for branches with no new releases
+        # since the watermark. The paginated_releases_and_branches() early-stop
+        # optimization exists and is unit-tested but is intentionally unused
+        # in production for this reason.
         release_nodes, branch_names = paginated_releases_and_branches(
             requester, self.org, repo_name, known_since=None
         )
