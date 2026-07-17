@@ -1,16 +1,36 @@
 """Tests for the GitHub GraphQL query/pagination layer."""
 
 import logging
+import re
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 from craft_dashboard.collectors.github_graphql import (
+    _ISSUES_QUERY,
+    _PULL_REQUESTS_QUERY,
+    _RELEASES_AND_BRANCHES_QUERY,
     classify_pr_ci_checks,
     classify_pr_review_status,
     paginated_issues,
     paginated_pull_requests,
     paginated_releases_and_branches,
 )
+
+
+def _extract_pagination_arguments(query: str) -> list[tuple[str, str, int]]:
+    return [
+        (field_name, direction, int(value))
+        for field_name, direction, value in re.findall(
+            r"(\w+)\([^)]*\b(first|last):\s*(\d+)", query
+        )
+    ]
+
+
+def _extract_pagination_limits(query: str) -> dict[str, int]:
+    return {
+        field_name: value
+        for field_name, _, value in _extract_pagination_arguments(query)
+    }
 
 
 def _issue_node(number: int, updated_at: str = "2025-01-10T12:00:00Z") -> dict:
@@ -414,3 +434,107 @@ class TestClassifyPrCiChecks:
 
     def test_no_commits_returns_empty_lists(self) -> None:
         assert classify_pr_ci_checks([]) == ([], [], [])
+
+
+class TestNodeLimits:
+    def test_issues_query_stays_under_github_node_limit(self) -> None:
+        sizes = _extract_pagination_limits(_ISSUES_QUERY)
+
+        # issues(first: 50) with child connections:
+        # - labels(first: 20) -> 20
+        # - comments(last: 10) -> 10
+        # - timelineItems(last: 20) -> 20
+        # Per issue = 1 issue node + 20 + 10 + 20 = 51.
+        # Per page = 50 * 51 = 2,550 nodes.
+        max_nodes_per_page = sizes["issues"] * (
+            1 + sizes["labels"] + sizes["comments"] + sizes["timelineItems"]
+        )
+
+        assert max_nodes_per_page == 2_550
+        assert max_nodes_per_page < 500_000
+
+    def test_pull_requests_query_stays_under_github_node_limit(self) -> None:
+        sizes = _extract_pagination_limits(_PULL_REQUESTS_QUERY)
+
+        # pullRequests(first: 50) with child connections:
+        # - labels(first: 20) -> 20
+        # - comments(last: 10) -> 10
+        # - reviews(last: 20) -> 20
+        # - reviewThreads(first: 50) -> 50
+        # - commits(last: 1) -> checkSuites(first: 10) -> checkRuns(first: 20)
+        #   contributes 1 commit node + (1 * 10) checkSuites nodes
+        #   + (1 * 10 * 20) checkRuns nodes = 211 nodes.
+        # Per PR = 1 PR node + 20 + 10 + 20 + 50 + 211 = 312.
+        # Per page = 50 * 312 = 15,600 nodes.
+        max_nodes_per_page = sizes["pullRequests"] * (
+            1
+            + sizes["labels"]
+            + sizes["comments"]
+            + sizes["reviews"]
+            + sizes["reviewThreads"]
+            + sizes["commits"]
+            + sizes["commits"] * sizes["checkSuites"]
+            + sizes["commits"] * sizes["checkSuites"] * sizes["checkRuns"]
+        )
+
+        assert max_nodes_per_page == 15_600
+        assert max_nodes_per_page < 500_000
+
+    def test_releases_and_branches_query_stays_under_github_node_limit(self) -> None:
+        sizes = _extract_pagination_limits(_RELEASES_AND_BRANCHES_QUERY)
+
+        # This query has two top-level sibling connections under repository:
+        # - releases(first: 20) with no nested connections -> 20 * 1 = 20
+        # - refs(..., first: 100) with no nested connections -> 100 * 1 = 100
+        # Total worst case per query page = 20 + 100 = 120 nodes.
+        max_nodes_per_page = sizes["releases"] + sizes["refs"]
+
+        assert max_nodes_per_page == 120
+        assert max_nodes_per_page < 500_000
+
+    def test_queries_lock_in_all_page_size_arguments(self) -> None:
+        assert _extract_pagination_limits(_ISSUES_QUERY) == {
+            "issues": 50,
+            "labels": 20,
+            "comments": 10,
+            "timelineItems": 20,
+        }
+
+        assert _extract_pagination_arguments(_ISSUES_QUERY) == [
+            ("issues", "first", 50),
+            ("labels", "first", 20),
+            ("comments", "last", 10),
+            ("timelineItems", "last", 20),
+        ]
+
+        assert _extract_pagination_limits(_PULL_REQUESTS_QUERY) == {
+            "pullRequests": 50,
+            "labels": 20,
+            "comments": 10,
+            "reviews": 20,
+            "reviewThreads": 50,
+            "commits": 1,
+            "checkSuites": 10,
+            "checkRuns": 20,
+        }
+
+        assert _extract_pagination_arguments(_PULL_REQUESTS_QUERY) == [
+            ("pullRequests", "first", 50),
+            ("labels", "first", 20),
+            ("comments", "last", 10),
+            ("reviews", "last", 20),
+            ("reviewThreads", "first", 50),
+            ("commits", "last", 1),
+            ("checkSuites", "first", 10),
+            ("checkRuns", "first", 20),
+        ]
+
+        assert _extract_pagination_limits(_RELEASES_AND_BRANCHES_QUERY) == {
+            "releases": 20,
+            "refs": 100,
+        }
+
+        assert _extract_pagination_arguments(_RELEASES_AND_BRANCHES_QUERY) == [
+            ("releases", "first", 20),
+            ("refs", "first", 100),
+        ]
