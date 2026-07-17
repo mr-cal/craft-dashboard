@@ -24,6 +24,7 @@ from craft_dashboard.collectors.github_graphql import (
     classify_pr_review_status,
     paginated_issues,
     paginated_pull_requests,
+    paginated_releases_and_branches,
 )
 
 __all__ = ["GitHubCollector"]
@@ -31,7 +32,6 @@ __all__ = ["GitHubCollector"]
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from github.GitRelease import GitRelease as GHRelease
     from github.Repository import Repository as GHRepository
 
 _PROGRESS_LOG_INTERVAL_SECONDS = 30
@@ -841,13 +841,18 @@ class GitHubCollector:
 
         hotfix_re = re.compile(r"^hotfix/(\d+)\.(\d+)$")
 
+        self.wait_for_rate_limit(resource="graphql")
+        requester = self.gh.requester
+        release_nodes, branch_names = paginated_releases_and_branches(
+            requester, self.org, repo_name, known_since=None
+        )
         repo = self.gh.get_repo(f"{self.org}/{repo_name}")
 
         # Collect all non-prerelease, non-draft releases
-        all_releases: dict[str, "GHRelease"] = {}  # tag_name -> GH release object
-        for gh_rel in repo.get_releases():
-            if not gh_rel.prerelease and not gh_rel.draft:
-                all_releases[gh_rel.tag_name] = gh_rel
+        all_releases: dict[str, dict[str, Any]] = {}
+        for node in release_nodes:
+            if not node["isPrerelease"] and not node["isDraft"]:
+                all_releases[node["tagName"]] = node
 
         logger.info(
             "  %s/%s: found %d non-prerelease tags",
@@ -861,11 +866,7 @@ class GitHubCollector:
 
         # List ALL hotfix/* branches from GitHub — no version filter.
         # The DB stores every branch so the Hotfixes page can show a complete picture.
-        branches_to_track.extend(
-            branch.name
-            for branch in repo.get_branches()
-            if hotfix_re.match(branch.name)
-        )
+        branches_to_track.extend(name for name in branch_names if hotfix_re.match(name))
 
         logger.info(
             "  %s/%s: tracking branches: %s", self.org, repo_name, branches_to_track
@@ -918,8 +919,8 @@ class GitHubCollector:
                 )
                 continue
 
-            gh_rel = all_releases[best_tag]
-            pub = gh_rel.published_at
+            node = all_releases[best_tag]
+            pub = _parse_graphql_datetime(node["publishedAt"] or node["createdAt"])
             metadata: dict = {"prerelease": False, "draft": False}
 
             # Upsert: one row per project+branch
@@ -927,7 +928,7 @@ class GitHubCollector:
                 project_id=project_id,
                 version=best_tag,
                 branch=branch_name,
-                released_at=pub.replace(tzinfo=UTC) if pub else None,
+                released_at=pub if pub else None,
                 is_hotfix=(branch_name != "main"),
                 metadata_=metadata,
             )

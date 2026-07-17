@@ -814,3 +814,154 @@ class TestFetchPRDetails:
         result = _fetch_pr_details(mock_pr)
 
         assert result["unresolved_review_comments"] == 1
+
+
+class TestCollectReleasesGraphQLPath:
+    """Tests for GraphQL-backed release and hotfix branch enumeration."""
+
+    class _RecordingInsertStatement:
+        def __init__(self) -> None:
+            self.excluded = MagicMock()
+            self.values_kwargs: dict | None = None
+
+        def values(self, **kwargs):
+            self.values_kwargs = kwargs
+            return self
+
+        def on_conflict_do_update(self, **_kwargs):
+            return self
+
+    @staticmethod
+    def _make_metadata_result(metadata: dict | None = None) -> MagicMock:
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = metadata
+        return result
+
+    async def test_collect_releases_uses_graphql_for_release_and_branch_listing(
+        self, mocker
+    ) -> None:
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        requester = MagicMock()
+        mock_repo = MagicMock()
+        mock_repo.get_releases = MagicMock()
+        mock_repo.get_branches = MagicMock()
+
+        def compare_side_effect(base: str, head: str) -> MagicMock:
+            comparisons = {
+                ("4.4.1", "main"): MagicMock(ahead_by=0, behind_by=0),
+                ("4.3.2", "hotfix/4.3"): MagicMock(ahead_by=3, behind_by=0),
+                ("4.3.2", "main"): MagicMock(ahead_by=0, behind_by=0),
+            }
+            return comparisons[(base, head)]
+
+        mock_repo.compare.side_effect = compare_side_effect
+
+        collector.gh = MagicMock()
+        collector.gh.requester = requester
+        collector.gh.get_repo.return_value = mock_repo
+        collector.wait_for_rate_limit = MagicMock()
+
+        release_nodes = [
+            {
+                "tagName": "4.4.1",
+                "isPrerelease": False,
+                "isDraft": False,
+                "createdAt": "2025-04-01T00:00:00Z",
+                "publishedAt": "2025-04-02T00:00:00Z",
+            },
+            {
+                "tagName": "4.4.1-rc1",
+                "isPrerelease": True,
+                "isDraft": False,
+                "createdAt": "2025-03-20T00:00:00Z",
+                "publishedAt": "2025-03-20T00:00:00Z",
+            },
+            {
+                "tagName": "4.3.2",
+                "isPrerelease": False,
+                "isDraft": False,
+                "createdAt": "2025-03-01T00:00:00Z",
+                "publishedAt": None,
+            },
+            {
+                "tagName": "4.3.1",
+                "isPrerelease": False,
+                "isDraft": False,
+                "createdAt": "2025-02-01T00:00:00Z",
+                "publishedAt": "2025-02-02T00:00:00Z",
+            },
+            {
+                "tagName": "4.2.9",
+                "isPrerelease": False,
+                "isDraft": True,
+                "createdAt": "2025-01-01T00:00:00Z",
+                "publishedAt": "2025-01-02T00:00:00Z",
+            },
+        ]
+        branch_names = ["hotfix/4.3", "hotfix/foo-bar"]
+        paginated = mocker.patch(
+            "craft_dashboard.collectors.github.paginated_releases_and_branches",
+            return_value=(release_nodes, branch_names),
+        )
+
+        statements: list[TestCollectReleasesGraphQLPath._RecordingInsertStatement] = []
+
+        def fake_insert(_table):
+            stmt = TestCollectReleasesGraphQLPath._RecordingInsertStatement()
+            statements.append(stmt)
+            return stmt
+
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=fake_insert,
+        )
+
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                None,
+                self._make_metadata_result(),
+                None,
+                None,
+                self._make_metadata_result(),
+                None,
+            ]
+        )
+        session.commit = AsyncMock()
+
+        count = await collector.collect_releases("repo", 7, session)
+
+        assert count == 2
+        collector.wait_for_rate_limit.assert_called_once_with(resource="graphql")
+        paginated.assert_called_once_with(
+            requester, "canonical", "repo", known_since=None
+        )
+        collector.gh.get_repo.assert_called_once_with("canonical/repo")
+        mock_repo.get_releases.assert_not_called()
+        mock_repo.get_branches.assert_not_called()
+        assert mock_repo.compare.call_args_list == [
+            (("4.4.1", "main"),),
+            (("4.3.2", "hotfix/4.3"),),
+            (("4.3.2", "main"),),
+        ]
+        session.commit.assert_awaited_once()
+
+        assert len(statements) == 2
+
+        main_values = statements[0].values_kwargs
+        assert main_values is not None
+        assert main_values["project_id"] == 7
+        assert main_values["version"] == "4.4.1"
+        assert main_values["branch"] == "main"
+        assert main_values["released_at"] == datetime(2025, 4, 2, tzinfo=UTC)
+        assert main_values["is_hotfix"] is False
+        assert main_values["metadata_"] == {"prerelease": False, "draft": False}
+
+        hotfix_values = statements[1].values_kwargs
+        assert hotfix_values is not None
+        assert hotfix_values["project_id"] == 7
+        assert hotfix_values["version"] == "4.3.2"
+        assert hotfix_values["branch"] == "hotfix/4.3"
+        assert hotfix_values["released_at"] == datetime(2025, 3, 1, tzinfo=UTC)
+        assert hotfix_values["is_hotfix"] is True
+        assert hotfix_values["metadata_"] == {"prerelease": False, "draft": False}
