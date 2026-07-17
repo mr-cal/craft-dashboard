@@ -544,8 +544,11 @@ class GitHubCollector:
             refresh_age_days: Issues last fetched more than this many days ago
                 are considered stale and eligible for re-fetching. Only used
                 when state is not "open".
-            since: Fetch only issues updated on or after this timestamp. Only
-                used when state is not "open".
+            since: Fetch only issues updated on or after this timestamp. For
+                state="open", this filters the GraphQL fetch to recently
+                updated issues/PRs to reduce query cost during frequent open
+                polling. For non-open states, it continues to drive the
+                existing incremental REST refresh behavior.
             collection_run_id: ID of the collection run that fetched these issues.
             state: Which issues to fetch — "open" (always refreshed, no schedule
                 gate), "closed" (closed issues only), or "all" (open + closed).
@@ -573,8 +576,8 @@ class GitHubCollector:
             self.wait_for_rate_limit(resource="graphql")
             requester = self.gh.requester
             gh_issues = _interleave_open_graphql_items(
-                paginated_issues(requester, self.org, repo_name, since=None),
-                paginated_pull_requests(requester, self.org, repo_name, since=None),
+                paginated_issues(requester, self.org, repo_name, since=since),
+                paginated_pull_requests(requester, self.org, repo_name, since=since),
             )
             logger.info(
                 "  %s/%s: collecting open issues (via GraphQL)%s",

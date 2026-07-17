@@ -206,8 +206,8 @@ class TestPaginatedPullRequests:
                         "pullRequests": {
                             "pageInfo": {"hasNextPage": False, "endCursor": None},
                             "nodes": [
-                                _pr_node(1, updated_at="2025-01-05T00:00:00Z"),
                                 _pr_node(2, updated_at="2025-01-10T12:00:00Z"),
+                                _pr_node(1, updated_at="2025-01-05T00:00:00Z"),
                             ],
                         }
                     },
@@ -225,6 +225,56 @@ class TestPaginatedPullRequests:
         )
 
         assert [node["number"] for node in results] == [2]
+
+    def test_stops_paginating_after_first_pr_older_than_since(self) -> None:
+        requester = MagicMock()
+        requester.graphql_query.side_effect = [
+            (
+                {},
+                {
+                    "data": {
+                        "rateLimit": {"cost": 7, "remaining": 4990, "resetAt": None},
+                        "repository": {
+                            "pullRequests": {
+                                "pageInfo": {"hasNextPage": True, "endCursor": "CUR1"},
+                                "nodes": [
+                                    _pr_node(2, updated_at="2025-01-10T12:00:00Z"),
+                                    _pr_node(1, updated_at="2025-01-05T00:00:00Z"),
+                                ],
+                            }
+                        },
+                    }
+                },
+            ),
+            (
+                {},
+                {
+                    "data": {
+                        "rateLimit": {"cost": 7, "remaining": 4983, "resetAt": None},
+                        "repository": {
+                            "pullRequests": {
+                                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                "nodes": [
+                                    _pr_node(0, updated_at="2025-01-01T00:00:00Z")
+                                ],
+                            }
+                        },
+                    }
+                },
+            ),
+        ]
+
+        results = list(
+            paginated_pull_requests(
+                requester,
+                owner="canonical",
+                name="repo",
+                since=datetime(2025, 1, 9, tzinfo=UTC),
+            )
+        )
+
+        assert [node["number"] for node in results] == [2]
+        requester.graphql_query.assert_called_once()
 
 
 class TestPaginatedReleasesAndBranches:

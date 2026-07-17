@@ -229,7 +229,7 @@ def paginated_pull_requests(
         for node in prs["nodes"]:
             updated_at = _parse_graphql_datetime(node["updatedAt"])
             if since is not None and updated_at is not None and updated_at < since:
-                continue
+                return
             yield node
 
         page_info = prs["pageInfo"]

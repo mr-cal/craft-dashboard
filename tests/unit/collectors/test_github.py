@@ -493,7 +493,9 @@ class TestCollectIssuesGraphQLOpenPath:
         session.commit = AsyncMock()
         return session
 
-    async def test_collect_issues_uses_graphql_for_open_items(self, mocker) -> None:
+    async def test_collect_issues_passes_since_to_graphql_open_items(
+        self, mocker
+    ) -> None:
         collector = GitHubCollector(
             token=_TEST_TOKEN,
             org="canonical",
@@ -525,22 +527,25 @@ class TestCollectIssuesGraphQLOpenPath:
             return stmt
 
         session = self._make_session_with_no_existing_issue(fetch_count=2)
+        since = datetime(2025, 1, 9, tzinfo=UTC)
 
         mocker.patch(
             "sqlalchemy.dialects.postgresql.insert",
             side_effect=fake_insert,
         )
 
-        count = await collector.collect_issues("repo", 1, session, state="open")
+        count = await collector.collect_issues(
+            "repo", 1, session, state="open", since=since
+        )
 
         assert count == 2
         collector.wait_for_rate_limit.assert_called_once_with(resource="graphql")
         collector.gh.get_repo.assert_not_called()
         paginated_issues.assert_called_once_with(
-            requester, "canonical", "repo", since=None
+            requester, "canonical", "repo", since=since
         )
         paginated_pull_requests.assert_called_once_with(
-            requester, "canonical", "repo", since=None
+            requester, "canonical", "repo", since=since
         )
         session.commit.assert_awaited_once()
 

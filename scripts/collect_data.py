@@ -423,14 +423,19 @@ async def _collect_github(
                 # "all" mode: open issues first, then full-refresh below
                 try:
                     open_started_at = time.monotonic()
+                    open_collection_started_at = datetime.now(UTC)
+                    open_watermark = await _get_collection_watermark(
+                        session, project_id, "github_issues_open"
+                    )
                     open_collected = await _retry_github(
-                        lambda _pn=project_name, _pid=project_id, _s=session: (
+                        lambda _pn=project_name, _pid=project_id, _s=session, _w=open_watermark: (
                             collector.collect_issues(
                                 _pn,
                                 _pid,
                                 _s,
                                 limit=limit,
                                 state="open",
+                                since=_w,
                                 collection_run_id=collection_run_id,
                             )
                         ),
@@ -442,6 +447,12 @@ async def _collect_github(
                         project_name,
                         open_collected,
                         _format_duration(time.monotonic() - open_started_at),
+                    )
+                    await _upsert_collection_watermark(
+                        session,
+                        project_id,
+                        "github_issues_open",
+                        open_collection_started_at,
                     )
 
                     snapshot_started_at = time.monotonic()
