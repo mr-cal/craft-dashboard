@@ -75,7 +75,9 @@ dependencies and releases. To force a full refresh of all projects, see
 Server-side LLM evaluation using OpenRouter. Runs inside the app container and
 writes results directly to the database.
 
-**Prerequisites:** `OPENROUTER_API_KEY` in `.env` and `ENABLE_SERVER_EVAL=true`.
+**Prerequisites:** `OPENROUTER_API_KEY` in `.env` and `ENABLE_SERVER_EVAL=true`
+(disabled by default; the pull-based `scripts/eval_client.py` workflow is
+preferred).
 
 ```
 # evaluate all open issues (daily cron mode)

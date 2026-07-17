@@ -52,7 +52,7 @@ EVAL_API_TOKEN=<a random string for /api/eval/*>
 Evaluation settings:
 
 ```
-ENABLE_SERVER_EVAL=true
+ENABLE_SERVER_EVAL=false
 OPENROUTER_API_KEY=<your key>
 ```
 
@@ -193,19 +193,18 @@ In production (Podman), use `podman exec` instead of `docker compose exec`:
 ```bash
 # /etc/cron.d/craft-dashboard
 
-# Open-issue refresh — every 4 hours (keeps Issues dashboard current)
-0 */4 * * * root podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source github --mode open
+# Open-issue and release refresh — every 10 minutes (keeps Issues/Releases dashboards current)
+*/10 * * * * root podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source github --mode open
 
 # Full collection (open + closed issues, launchpad) — daily at 2 AM UTC
 # Refreshes closed issues per the per-project schedule (refresh-interval-days).
 0 2 * * * root podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source all --mode full
-
-# LLM evaluation — daily at 6 AM UTC (only if ENABLE_SERVER_EVAL=true)
-0 6 * * * root podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/run_llm.py evaluate --open-only
 
 # Database backup — daily at 3 AM UTC
 0 3 * * * root podman exec -i vps-infra_postgres_1 pg_dump -U craft_dashboard craft_dashboard | gzip > /opt/vps-infra/backups/craft-dashboard-$(date +\%Y\%m\%d).sql.gz
 ```
 
 If you use local LLM evaluation, run `scripts/eval_client.py` from a trusted
-machine that can reach the server over HTTPS.
+machine that can reach the server over HTTPS. Server-side evaluation
+(`scripts/run_llm.py`) is disabled by default (`ENABLE_SERVER_EVAL=false`)
+and has no cron entry in vps-infra; there is no daily 6 AM eval job.
