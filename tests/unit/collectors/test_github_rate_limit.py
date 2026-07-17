@@ -103,6 +103,50 @@ class TestGitHubRateLimit:
 
         sleep.assert_called_once_with(150)
 
+    def test_wait_for_rate_limit_sleeps_until_graphql_reset_when_quota_is_low(
+        self,
+    ) -> None:
+        collector = GitHubCollector(token=_TOKEN, org="canonical")
+        collector.check_rate_limit = MagicMock(
+            return_value={
+                "core_remaining": 250,
+                "core_limit": 5000,
+                "core_reset": datetime(2025, 1, 10, 13, 0, tzinfo=UTC),
+                "graphql_remaining": 25,
+                "graphql_limit": 5000,
+                "graphql_reset": datetime(2025, 1, 10, 12, 2, 30, tzinfo=UTC),
+            }
+        )
+
+        with (
+            patch("craft_dashboard.collectors.github.datetime", FrozenDateTime),
+            patch("craft_dashboard.collectors.github.time.sleep") as sleep,
+        ):
+            collector.wait_for_rate_limit(resource="graphql", threshold=100)
+
+        sleep.assert_called_once_with(150)
+
+    def test_wait_for_rate_limit_defaults_to_core_resource(self) -> None:
+        collector = GitHubCollector(token=_TOKEN, org="canonical")
+        collector.check_rate_limit = MagicMock(
+            return_value={
+                "core_remaining": 25,
+                "core_limit": 5000,
+                "core_reset": datetime(2025, 1, 10, 12, 2, 30, tzinfo=UTC),
+                "graphql_remaining": 250,
+                "graphql_limit": 5000,
+                "graphql_reset": datetime(2025, 1, 10, 13, 0, tzinfo=UTC),
+            }
+        )
+
+        with (
+            patch("craft_dashboard.collectors.github.datetime", FrozenDateTime),
+            patch("craft_dashboard.collectors.github.time.sleep") as sleep,
+        ):
+            collector.wait_for_rate_limit()
+
+        sleep.assert_called_once_with(150)
+
     def test_wait_for_rate_limit_raises_when_reset_time_is_missing(self) -> None:
         collector = GitHubCollector(token=_TOKEN, org="canonical")
         collector.check_rate_limit = MagicMock(
@@ -116,5 +160,9 @@ class TestGitHubRateLimit:
             }
         )
 
-        with pytest.raises(RateLimitError, match="rate limit exhausted"):
+        with pytest.raises(RateLimitError, match="rate limit exhausted") as exc_info:
             collector.wait_for_rate_limit(resource="core", threshold=100)
+
+        assert exc_info.value.resource == "core"
+        assert exc_info.value.remaining == 0
+        assert exc_info.value.limit == 5000
