@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, TypedDict
 
 from sqlalchemy import func, select
 
+from craft_dashboard.collectors.github import GitHubCollector, RateLimitStatus
 from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.refresh_schedule import RefreshSchedule
+from craft_dashboard.settings import Settings
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -86,6 +90,7 @@ class IssueRef(TypedDict):
 
 
 _EVALUATION_SOURCES = {"llm", "evaluation"}
+_OPEN_POLL_INTERVAL = timedelta(minutes=10)
 
 
 def _ensure_utc(value: datetime | None) -> datetime | None:
@@ -266,6 +271,43 @@ class AdminService:
             }
             for run in runs
         ]
+
+    async def get_recent_issue_activity(self, limit: int = 50) -> list[IssueActivity]:
+        """Return the most recent issue/PR change events, newest first."""
+        result = await self.session.scalars(
+            select(IssueActivity)
+            .order_by(IssueActivity.occurred_at.desc())
+            .limit(limit)
+        )
+        return list(result)
+
+    async def get_api_budget(self) -> RateLimitStatus:
+        """Return the current REST and GraphQL API budgets, for the admin page."""
+        settings = Settings()
+        collector = GitHubCollector(token=settings.github_token)
+        return await asyncio.to_thread(collector.check_rate_limit)
+
+    async def get_next_expected_fetch(self) -> datetime | None:
+        """Approximate when the next GitHub open-issue poll is expected."""
+        # CollectionRun currently records only source="github", not whether the
+        # run was the 10-minute open poll or the daily full refresh. This makes
+        # the admin indicator a best-effort approximation: immediately after a
+        # full-refresh run completes, the computed timestamp can be off by up to
+        # one open-poll interval until the next open-mode run completes.
+        last_run = await self.session.scalar(
+            select(CollectionRun)
+            .where(CollectionRun.source == "github")
+            .where(CollectionRun.status == "completed")
+            .order_by(CollectionRun.started_at.desc())
+            .limit(1)
+        )
+        if last_run is None:
+            return None
+        # Open-issue polling follows the GitHub collector cadence, not other sources.
+        started_at = _ensure_utc(last_run.started_at)
+        if started_at is None:
+            return None
+        return started_at + _OPEN_POLL_INTERVAL
 
     async def get_issues_for_run(
         self,

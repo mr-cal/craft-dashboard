@@ -1,9 +1,12 @@
 """Tests for the admin service."""
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.refresh_schedule import RefreshSchedule
@@ -265,3 +268,174 @@ class TestAdminService:
             datetime(2025, 1, 7, 9, 0),
             datetime(2025, 1, 9, 9, 0),
         ]
+
+
+class TestGetRecentIssueActivity:
+    async def test_returns_most_recent_issue_activity_first(
+        self, test_db_session
+    ) -> None:
+        project = Project(
+            name="snapcraft",
+            category="application",
+            github_org="canonical",
+            display_order=1,
+        )
+        test_db_session.add(project)
+        await test_db_session.flush()
+
+        test_db_session.add_all(
+            [
+                IssueActivity(
+                    project_id=project.id,
+                    issue_number=11,
+                    change_type="opened",
+                    summary="Oldest change",
+                    occurred_at=datetime(2025, 1, 10, 9, 0, tzinfo=UTC),
+                ),
+                IssueActivity(
+                    project_id=project.id,
+                    issue_number=12,
+                    change_type="updated",
+                    summary="Newest change",
+                    occurred_at=datetime(2025, 1, 10, 11, 0, tzinfo=UTC),
+                ),
+                IssueActivity(
+                    project_id=project.id,
+                    issue_number=13,
+                    change_type="closed",
+                    summary="Middle change",
+                    occurred_at=datetime(2025, 1, 10, 10, 0, tzinfo=UTC),
+                ),
+            ]
+        )
+        await test_db_session.commit()
+
+        activities = await AdminService(test_db_session).get_recent_issue_activity(
+            limit=2
+        )
+
+        assert [activity.summary for activity in activities] == [
+            "Newest change",
+            "Middle change",
+        ]
+
+
+class TestGetApiBudget:
+    async def test_checks_rate_limit_off_event_loop(self, test_db_session) -> None:
+        api_token = "unit-test-token"
+        expected_budget = {
+            "core_remaining": 4999,
+            "core_limit": 5000,
+            "core_reset": datetime(2025, 1, 10, 12, 30, tzinfo=UTC),
+            "graphql_remaining": 4998,
+            "graphql_limit": 5000,
+            "graphql_reset": datetime(2025, 1, 10, 12, 45, tzinfo=UTC),
+        }
+
+        with (
+            patch(
+                "craft_dashboard.services.admin_service.Settings",
+                return_value=SimpleNamespace(github_token=api_token),
+            ),
+            patch(
+                "craft_dashboard.services.admin_service.GitHubCollector"
+            ) as collector,
+            patch(
+                "craft_dashboard.services.admin_service.asyncio.to_thread"
+            ) as to_thread,
+        ):
+            to_thread.return_value = expected_budget
+
+            budget = await AdminService(test_db_session).get_api_budget()
+
+        assert collector.call_args.kwargs == {"token": api_token}
+        to_thread.assert_awaited_once_with(collector.return_value.check_rate_limit)
+        assert budget == expected_budget
+
+
+class TestGetNextExpectedFetch:
+    async def test_returns_ten_minutes_after_latest_completed_github_run(
+        self, test_db_session
+    ) -> None:
+        test_db_session.add_all(
+            [
+                CollectionRun(
+                    source="github",
+                    started_at=datetime(2025, 1, 10, 9, 40, tzinfo=UTC),
+                    finished_at=datetime(2025, 1, 10, 9, 42, tzinfo=UTC),
+                    status="completed",
+                    projects_processed=1,
+                    issues_collected=10,
+                    errors=[],
+                    duration_seconds=120.0,
+                ),
+                CollectionRun(
+                    source="github",
+                    started_at=datetime(2025, 1, 10, 10, 0, tzinfo=UTC),
+                    finished_at=None,
+                    status="running",
+                    projects_processed=1,
+                    issues_collected=3,
+                    errors=[],
+                    duration_seconds=None,
+                ),
+                CollectionRun(
+                    source="github",
+                    started_at=datetime(2025, 1, 10, 9, 55, tzinfo=UTC),
+                    finished_at=datetime(2025, 1, 10, 9, 57, tzinfo=UTC),
+                    status="failed",
+                    projects_processed=1,
+                    issues_collected=2,
+                    errors=[{"error": "boom"}],
+                    duration_seconds=120.0,
+                ),
+                CollectionRun(
+                    source="launchpad",
+                    started_at=datetime(2025, 1, 10, 10, 5, tzinfo=UTC),
+                    finished_at=datetime(2025, 1, 10, 10, 6, tzinfo=UTC),
+                    status="completed",
+                    projects_processed=1,
+                    issues_collected=4,
+                    errors=[],
+                    duration_seconds=60.0,
+                ),
+            ]
+        )
+        await test_db_session.commit()
+
+        next_fetch = await AdminService(test_db_session).get_next_expected_fetch()
+
+        assert next_fetch == datetime(2025, 1, 10, 9, 50, tzinfo=UTC)
+
+    async def test_returns_none_when_no_completed_github_runs_exist(
+        self, test_db_session
+    ) -> None:
+        test_db_session.add_all(
+            [
+                CollectionRun(
+                    source="github",
+                    started_at=datetime(2025, 1, 10, 10, 0, tzinfo=UTC),
+                    finished_at=None,
+                    status="running",
+                    projects_processed=1,
+                    issues_collected=0,
+                    errors=[],
+                    duration_seconds=None,
+                ),
+                CollectionRun(
+                    source="launchpad",
+                    started_at=datetime(2025, 1, 10, 10, 5, tzinfo=UTC),
+                    finished_at=datetime(2025, 1, 10, 10, 6, tzinfo=UTC),
+                    status="completed",
+                    projects_processed=1,
+                    issues_collected=4,
+                    errors=[],
+                    duration_seconds=60.0,
+                ),
+            ]
+        )
+        await test_db_session.commit()
+
+        next_fetch = await AdminService(test_db_session).get_next_expected_fetch()
+
+        assert next_fetch is None
