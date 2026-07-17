@@ -1,9 +1,15 @@
 """Tests for the GitHub GraphQL query/pagination layer."""
 
 import logging
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
-from craft_dashboard.collectors.github_graphql import paginated_issues
+from craft_dashboard.collectors.github_graphql import (
+    classify_pr_ci_checks,
+    classify_pr_review_status,
+    paginated_issues,
+    paginated_pull_requests,
+)
 
 
 def _issue_node(number: int, updated_at: str = "2025-01-10T12:00:00Z") -> dict:
@@ -130,3 +136,152 @@ class TestPaginatedIssues:
         assert requester.graphql_query.call_count == 2
         second_call_variables = requester.graphql_query.call_args_list[1].args[1]
         assert second_call_variables["after"] == "CURSOR1"
+
+
+def _pr_node(number: int, updated_at: str = "2025-01-10T12:00:00Z") -> dict:
+    return {
+        "number": number,
+        "title": f"PR {number}",
+        "body": "body text",
+        "state": "OPEN",
+        "createdAt": "2025-01-01T00:00:00Z",
+        "updatedAt": updated_at,
+        "closedAt": None,
+        "mergedAt": None,
+        "url": f"https://github.com/canonical/repo/pull/{number}",
+        "author": {"login": "octocat"},
+        "labels": {"nodes": []},
+        "additions": 10,
+        "deletions": 2,
+        "changedFiles": 3,
+        "comments": {"nodes": []},
+        "reviews": {"nodes": [{"author": {"login": "reviewer1"}, "state": "APPROVED"}]},
+        "reviewThreads": {"nodes": []},
+        "commits": {
+            "nodes": [
+                {
+                    "commit": {
+                        "checkSuites": {
+                            "nodes": [
+                                {
+                                    "checkRuns": {
+                                        "nodes": [
+                                            {
+                                                "name": "ci",
+                                                "conclusion": "SUCCESS",
+                                                "status": "COMPLETED",
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+    }
+
+
+class TestPaginatedPullRequests:
+    def test_filters_client_side_by_since(self) -> None:
+        requester = MagicMock()
+        requester.graphql_query.return_value = (
+            {},
+            {
+                "data": {
+                    "rateLimit": {"cost": 7, "remaining": 4990, "resetAt": None},
+                    "repository": {
+                        "pullRequests": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [
+                                _pr_node(1, updated_at="2025-01-05T00:00:00Z"),
+                                _pr_node(2, updated_at="2025-01-10T12:00:00Z"),
+                            ],
+                        }
+                    },
+                }
+            },
+        )
+
+        results = list(
+            paginated_pull_requests(
+                requester,
+                owner="canonical",
+                name="repo",
+                since=datetime(2025, 1, 9, tzinfo=UTC),
+            )
+        )
+
+        assert [node["number"] for node in results] == [2]
+
+
+class TestClassifyPrReviewStatus:
+    def test_changes_requested_wins_over_approval(self) -> None:
+        reviews = [
+            {"author": {"login": "alice"}, "state": "APPROVED"},
+            {"author": {"login": "bob"}, "state": "CHANGES_REQUESTED"},
+        ]
+
+        status, count = classify_pr_review_status(reviews)
+
+        assert status == "changes_requested"
+        assert count == 2
+
+    def test_all_approved(self) -> None:
+        reviews = [{"author": {"login": "alice"}, "state": "APPROVED"}]
+
+        status, count = classify_pr_review_status(reviews)
+
+        assert status == "approved"
+        assert count == 1
+
+    def test_no_reviews_is_pending(self) -> None:
+        status, count = classify_pr_review_status([])
+
+        assert status == "pending"
+        assert count == 0
+
+
+class TestClassifyPrCiChecks:
+    def test_classifies_passing_failing_pending(self) -> None:
+        commits = [
+            {
+                "commit": {
+                    "checkSuites": {
+                        "nodes": [
+                            {
+                                "checkRuns": {
+                                    "nodes": [
+                                        {
+                                            "name": "unit",
+                                            "conclusion": "SUCCESS",
+                                            "status": "COMPLETED",
+                                        },
+                                        {
+                                            "name": "lint",
+                                            "conclusion": "FAILURE",
+                                            "status": "COMPLETED",
+                                        },
+                                        {
+                                            "name": "deploy",
+                                            "conclusion": None,
+                                            "status": "IN_PROGRESS",
+                                        },
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        ]
+
+        passing, failing, pending = classify_pr_ci_checks(commits)
+
+        assert passing == ["unit"]
+        assert failing == ["lint"]
+        assert pending == ["deploy"]
+
+    def test_no_commits_returns_empty_lists(self) -> None:
+        assert classify_pr_ci_checks([]) == ([], [], [])

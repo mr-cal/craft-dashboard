@@ -14,7 +14,13 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from github.Requester import Requester
 
-__all__ = ["paginated_issues", "GraphQLCost"]
+__all__ = [
+    "paginated_issues",
+    "paginated_pull_requests",
+    "classify_pr_review_status",
+    "classify_pr_ci_checks",
+    "GraphQLCost",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +57,51 @@ query($owner: String!, $name: String!, $after: String, $since: DateTime) {
 }
 """
 
+_PULL_REQUESTS_QUERY = """
+query($owner: String!, $name: String!, $after: String) {
+  rateLimit { cost remaining resetAt }
+  repository(owner: $owner, name: $name) {
+    pullRequests(first: 50, after: $after, states: [OPEN], orderBy: {field: UPDATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number
+        title
+        body
+        state
+        createdAt
+        updatedAt
+        closedAt
+        mergedAt
+        url
+        author { login }
+        labels(first: 20) { nodes { name } }
+        additions
+        deletions
+        changedFiles
+        comments(last: 10) { nodes { author { login } body createdAt } }
+        reviews(last: 20) { nodes { author { login } state } }
+        reviewThreads(first: 50) { nodes { isResolved } }
+        commits(last: 1) {
+          nodes {
+            commit {
+              checkSuites(first: 10) {
+                nodes { checkRuns(first: 20) { nodes { name conclusion status } } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _parse_graphql_datetime(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
 
 class GraphQLCost:
     """Parsed ``rateLimit`` block from a GraphQL response, for budget logging."""
@@ -63,16 +114,10 @@ class GraphQLCost:
     @classmethod
     def from_response(cls, rate_limit: dict[str, Any]) -> "GraphQLCost":
         """Build a cost snapshot from a GraphQL ``rateLimit`` response block."""
-        reset_raw = rate_limit.get("resetAt")
-        reset_at = (
-            datetime.fromisoformat(reset_raw.replace("Z", "+00:00"))
-            if reset_raw
-            else None
-        )
         return cls(
             cost=int(rate_limit["cost"]),
             remaining=int(rate_limit["remaining"]),
-            reset_at=reset_at,
+            reset_at=_parse_graphql_datetime(rate_limit.get("resetAt")),
         )
 
 
@@ -124,3 +169,125 @@ def paginated_issues(
         if not page_info["hasNextPage"]:
             return
         after = page_info["endCursor"]
+
+
+def paginated_pull_requests(
+    requester: "Requester",
+    owner: str,
+    name: str,
+    since: datetime | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Yield normalized open-PR GraphQL nodes for one repo, following pagination.
+
+    ``pullRequests`` has no server-side ``since``/``filterBy`` argument (unlike
+    ``issues``), so filtering by ``since`` is done client-side against each
+    node's ``updatedAt``.
+
+    Args:
+        requester: ``Github.requester``.
+        owner: Repository owner/org.
+        name: Repository name.
+        since: Only yield PRs whose ``updatedAt`` is on or after this
+            timestamp. ``None`` yields all open PRs.
+
+    Yields:
+        Raw GraphQL PR node dicts, in updated-at-descending order.
+
+    """
+    after: str | None = None
+    while True:
+        _, response = requester.graphql_query(
+            _PULL_REQUESTS_QUERY, {"owner": owner, "name": name, "after": after}
+        )
+        data = response["data"]
+        cost = GraphQLCost.from_response(data["rateLimit"])
+        logger.debug(
+            "GraphQL PRs page for %s/%s: cost=%d remaining=%d reset_at=%s",
+            owner,
+            name,
+            cost.cost,
+            cost.remaining,
+            cost.reset_at,
+        )
+        prs = data["repository"]["pullRequests"]
+        for node in prs["nodes"]:
+            updated_at = _parse_graphql_datetime(node["updatedAt"])
+            if since is not None and updated_at is not None and updated_at < since:
+                continue
+            yield node
+
+        page_info = prs["pageInfo"]
+        if not page_info["hasNextPage"]:
+            return
+        after = page_info["endCursor"]
+
+
+def classify_pr_review_status(reviews: list[dict[str, Any]]) -> tuple[str, int]:
+    """Classify PR review status from GraphQL review nodes.
+
+    Later reviews override earlier ones for the same reviewer;
+    ``COMMENTED``/``DISMISSED`` don't count.
+
+    Args:
+        reviews: List of ``{"author": {"login": str} | None, "state": str}``
+            dicts, in chronological order (GraphQL's default).
+
+    Returns:
+        A tuple of (review_status, distinct_reviewer_count).
+
+    """
+    latest_per_reviewer: dict[str, str] = {}
+    for review in reviews:
+        author = review.get("author")
+        state = review["state"]
+        if author and state not in ("COMMENTED", "DISMISSED"):
+            latest_per_reviewer[author["login"]] = state
+
+    if any(s == "CHANGES_REQUESTED" for s in latest_per_reviewer.values()):
+        review_status = "changes_requested"
+    elif latest_per_reviewer and all(
+        s == "APPROVED" for s in latest_per_reviewer.values()
+    ):
+        review_status = "approved"
+    else:
+        review_status = "pending"
+
+    return review_status, len(latest_per_reviewer)
+
+
+def classify_pr_ci_checks(
+    commits: list[dict[str, Any]],
+) -> tuple[list[str], list[str], list[str]]:
+    """Classify CI check runs from the last commit's check suites.
+
+    Args:
+        commits: The ``commits(last: 1) { nodes { commit { checkSuites ... } } }``
+            list from a GraphQL PR node.
+
+    Returns:
+        A tuple of (ci_passing, ci_failing, ci_pending) name lists.
+
+    """
+    ci_passing: list[str] = []
+    ci_failing: list[str] = []
+    ci_pending: list[str] = []
+    if not commits:
+        return ci_passing, ci_failing, ci_pending
+
+    last_commit = commits[-1]["commit"]
+    for suite in last_commit["checkSuites"]["nodes"]:
+        for check in suite["checkRuns"]["nodes"]:
+            conclusion = (check.get("conclusion") or "").upper()
+            if conclusion in ("SUCCESS", "SKIPPED", "NEUTRAL"):
+                ci_passing.append(check["name"])
+            elif conclusion in (
+                "FAILURE",
+                "CANCELLED",
+                "TIMED_OUT",
+                "ACTION_REQUIRED",
+            ):
+                ci_failing.append(check["name"])
+            else:
+                ci_pending.append(check["name"])
+
+    return ci_passing, ci_failing, ci_pending
