@@ -14,6 +14,7 @@ from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.routes.admin import _verify_origin
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from github import GithubException
 from starlette.exceptions import HTTPException
 
 _ADMIN_TOKEN = "test-token-123"
@@ -122,6 +123,7 @@ def _stub_admin_page_metrics(
     *,
     recent_activity=None,
     api_budget=None,
+    api_budget_exception: Exception | None = None,
     next_expected_fetch=None,
 ) -> None:
     async def _fake_recent_activity(self, limit: int = 50):
@@ -129,6 +131,8 @@ def _stub_admin_page_metrics(
         return recent_activity if recent_activity is not None else []
 
     async def _fake_api_budget(self):
+        if api_budget_exception is not None:
+            raise api_budget_exception
         return api_budget or {
             "core_remaining": 5000,
             "core_limit": 5000,
@@ -661,3 +665,23 @@ class TestAdminPage:
         assert response.status_code == 200
         assert "Next Open-Issue Fetch" in response.text
         assert "Unknown" in response.text
+
+    def test_admin_page_handles_api_budget_lookup_failures(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """GET /admin keeps rendering when the API budget lookup fails."""
+        app = _create_admin_app()
+        _stub_admin_page_metrics(
+            monkeypatch,
+            api_budget_exception=GithubException(401, {"message": "Bad credentials"}),
+        )
+
+        with caplog.at_level(logging.WARNING, logger="craft_dashboard.routes.admin"):
+            with TestClient(app) as client:
+                response = client.get("/admin")
+
+        assert response.status_code == 200
+        assert "REST API Budget" in response.text
+        assert "GraphQL API Budget" in response.text
+        assert response.text.count("Unknown") >= 2
+        assert "Admin page: API budget lookup failed" in caplog.text

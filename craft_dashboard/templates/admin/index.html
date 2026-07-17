@@ -34,11 +34,11 @@
       </div>
       <div class="status-card">
         <h4>REST API Budget</h4>
-        <p>{{ api_budget.core_remaining }} / {{ api_budget.core_limit }}</p>
+        <p>{{ api_budget.core_remaining ~ " / " ~ api_budget.core_limit if api_budget else "Unknown" }}</p>
       </div>
       <div class="status-card">
         <h4>GraphQL API Budget</h4>
-        <p>{{ api_budget.graphql_remaining }} / {{ api_budget.graphql_limit }}</p>
+        <p>{{ api_budget.graphql_remaining ~ " / " ~ api_budget.graphql_limit if api_budget else "Unknown" }}</p>
       </div>
     </div>
     {% if collection_runs %}

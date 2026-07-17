@@ -10,9 +10,11 @@ import urllib.parse
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+import requests
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from github import GithubException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -155,7 +157,11 @@ async def admin_page(
     recent_stats = await admin_service.get_seven_day_token_stats()
     collection_runs = await admin_service.get_recent_collection_runs()
     recent_activity = await admin_service.get_recent_issue_activity(limit=50)
-    api_budget = await admin_service.get_api_budget()
+    try:
+        api_budget = await admin_service.get_api_budget()
+    except (GithubException, requests.exceptions.RequestException) as exc:
+        logger.warning("Admin page: API budget lookup failed: %s", exc)
+        api_budget = None
     next_expected_fetch = await admin_service.get_next_expected_fetch()
     next_refresh = await admin_service.get_next_scheduled_refresh()
     project_refresh_list = await admin_service.get_project_refresh_list()
