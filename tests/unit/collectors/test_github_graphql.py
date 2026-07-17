@@ -1,5 +1,6 @@
 """Tests for the GitHub GraphQL query/pagination layer."""
 
+import logging
 from unittest.mock import MagicMock
 
 from craft_dashboard.collectors.github_graphql import paginated_issues
@@ -23,6 +24,37 @@ def _issue_node(number: int, updated_at: str = "2025-01-10T12:00:00Z") -> dict:
 
 
 class TestPaginatedIssues:
+    def test_logs_full_rate_limit_block(self, caplog) -> None:
+        requester = MagicMock()
+        requester.graphql_query.return_value = (
+            {},
+            {
+                "data": {
+                    "rateLimit": {
+                        "cost": 1,
+                        "remaining": 4999,
+                        "resetAt": "2025-01-10T13:00:00Z",
+                    },
+                    "repository": {
+                        "issues": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [_issue_node(1)],
+                        }
+                    },
+                }
+            },
+        )
+
+        with caplog.at_level(
+            logging.DEBUG, logger="craft_dashboard.collectors.github_graphql"
+        ):
+            results = list(
+                paginated_issues(requester, owner="canonical", name="repo", since=None)
+            )
+
+        assert [node["number"] for node in results] == [1]
+        assert "reset_at=2025-01-10 13:00:00+00:00" in caplog.records[0].message
+
     def test_single_page_yields_all_nodes(self) -> None:
         requester = MagicMock()
         requester.graphql_query.return_value = (

@@ -110,11 +110,12 @@ def paginated_issues(
         data = response["data"]
         cost = GraphQLCost.from_response(data["rateLimit"])
         logger.debug(
-            "GraphQL issues page for %s/%s: cost=%d remaining=%d",
+            "GraphQL issues page for %s/%s: cost=%d remaining=%d reset_at=%s",
             owner,
             name,
             cost.cost,
             cost.remaining,
+            cost.reset_at,
         )
         issues = data["repository"]["issues"]
         yield from issues["nodes"]
