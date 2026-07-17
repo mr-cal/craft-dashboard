@@ -168,6 +168,44 @@ body.is-paper {
   background: #f99b11;
 }
 
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.status-card {
+  padding: 1rem;
+  border: 1px solid var(--app-border);
+  border-radius: 0.5rem;
+  background: var(--app-surface);
+  box-shadow: var(--app-shadow);
+}
+
+.status-card h4,
+.status-card p {
+  margin: 0;
+}
+
+.status-card p + p {
+  margin-top: 0.35rem;
+}
+
+.status-detail {
+  color: var(--app-text-muted);
+  font-size: 0.875rem;
+}
+
+.activity-feed {
+  margin-top: 1rem;
+}
+
+.activity-feed td,
+.activity-feed th {
+  vertical-align: top;
+}
+
 .issue-detail-layout {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

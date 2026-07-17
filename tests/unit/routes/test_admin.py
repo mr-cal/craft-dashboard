@@ -117,6 +117,44 @@ def _create_admin_app(session_override=_override_admin_db_session):
     return app
 
 
+def _stub_admin_page_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    recent_activity=None,
+    api_budget=None,
+    next_expected_fetch=None,
+) -> None:
+    async def _fake_recent_activity(self, limit: int = 50):
+        assert limit == 50
+        return recent_activity if recent_activity is not None else []
+
+    async def _fake_api_budget(self):
+        return api_budget or {
+            "core_remaining": 5000,
+            "core_limit": 5000,
+            "core_reset": datetime(2025, 1, 10, 13, 0, tzinfo=UTC),
+            "graphql_remaining": 5000,
+            "graphql_limit": 5000,
+            "graphql_reset": datetime(2025, 1, 10, 13, 0, tzinfo=UTC),
+        }
+
+    async def _fake_next_expected_fetch(self):
+        return next_expected_fetch
+
+    monkeypatch.setattr(
+        "craft_dashboard.routes.admin.AdminService.get_recent_issue_activity",
+        _fake_recent_activity,
+    )
+    monkeypatch.setattr(
+        "craft_dashboard.routes.admin.AdminService.get_api_budget",
+        _fake_api_budget,
+    )
+    monkeypatch.setattr(
+        "craft_dashboard.routes.admin.AdminService.get_next_expected_fetch",
+        _fake_next_expected_fetch,
+    )
+
+
 class TestAdminRoutes:
     """Tests for admin routes."""
 
@@ -530,9 +568,10 @@ class TestVerifyOrigin:
 class TestAdminPage:
     """Tests for the admin dashboard page."""
 
-    def test_admin_page_no_auth_required(self) -> None:
+    def test_admin_page_no_auth_required(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GET /admin renders without admin authentication."""
         app = _create_admin_app()
+        _stub_admin_page_metrics(monkeypatch)
 
         with TestClient(app) as client:
             response = client.get("/admin")
@@ -541,9 +580,12 @@ class TestAdminPage:
         assert "text/html" in response.headers["content-type"]
         assert "Admin" in response.text
 
-    def test_admin_page_includes_system_status_panel(self) -> None:
+    def test_admin_page_includes_system_status_panel(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """GET /admin shows the HTMX-powered system status panel."""
         app = _create_admin_app()
+        _stub_admin_page_metrics(monkeypatch)
 
         with TestClient(app) as client:
             response = client.get("/admin")
@@ -554,3 +596,68 @@ class TestAdminPage:
         assert 'hx-trigger="load, every 60s"' in response.text
         assert 'data-system-status-kind="collection"' in response.text
         assert 'data-system-status-kind="evaluation"' in response.text
+
+    def test_admin_page_renders_api_budget_recent_activity_and_next_fetch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GET /admin shows API budgets, next fetch, and recent issue activity."""
+        app = _create_admin_app()
+        _stub_admin_page_metrics(
+            monkeypatch,
+            recent_activity=[
+                SimpleNamespace(
+                    occurred_at=datetime(2025, 1, 10, 12, 34, tzinfo=UTC),
+                    issue_number=42,
+                    change_type="closed",
+                    summary="Closed after merge",
+                )
+            ],
+            api_budget={
+                "core_remaining": 4999,
+                "core_limit": 5000,
+                "core_reset": datetime(2025, 1, 10, 13, 0, tzinfo=UTC),
+                "graphql_remaining": 4998,
+                "graphql_limit": 5000,
+                "graphql_reset": datetime(2025, 1, 10, 13, 0, tzinfo=UTC),
+            },
+            next_expected_fetch=datetime(2025, 1, 10, 12, 40, tzinfo=UTC),
+        )
+
+        with TestClient(app) as client:
+            response = client.get("/admin")
+
+        assert response.status_code == 200
+        assert "Recent Activity" in response.text
+        assert "REST API Budget" in response.text
+        assert "4999 / 5000" in response.text
+        assert "GraphQL API Budget" in response.text
+        assert "4998 / 5000" in response.text
+        assert "Next Open-Issue Fetch" in response.text
+        assert "2025-01-10 12:40 UTC" in response.text
+        assert "#42" in response.text
+        assert "closed" in response.text
+        assert "Closed after merge" in response.text
+
+    def test_admin_page_shows_unknown_when_next_fetch_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GET /admin shows Unknown when no next open-issue fetch is available."""
+        app = _create_admin_app()
+        _stub_admin_page_metrics(
+            monkeypatch,
+            api_budget={
+                "core_remaining": 100,
+                "core_limit": 5000,
+                "core_reset": datetime(2025, 1, 10, 13, 0, tzinfo=UTC),
+                "graphql_remaining": 200,
+                "graphql_limit": 5000,
+                "graphql_reset": datetime(2025, 1, 10, 13, 0, tzinfo=UTC),
+            },
+        )
+
+        with TestClient(app) as client:
+            response = client.get("/admin")
+
+        assert response.status_code == 200
+        assert "Next Open-Issue Fetch" in response.text
+        assert "Unknown" in response.text

@@ -154,6 +154,9 @@ async def admin_page(
     lifetime_stats = await admin_service.get_lifetime_token_stats()
     recent_stats = await admin_service.get_seven_day_token_stats()
     collection_runs = await admin_service.get_recent_collection_runs()
+    recent_activity = await admin_service.get_recent_issue_activity(limit=50)
+    api_budget = await admin_service.get_api_budget()
+    next_expected_fetch = await admin_service.get_next_expected_fetch()
     next_refresh = await admin_service.get_next_scheduled_refresh()
     project_refresh_list = await admin_service.get_project_refresh_list()
 
@@ -174,6 +177,9 @@ async def admin_page(
             "recent_prompt_tokens": recent_stats["prompt_tokens"],
             "recent_completion_tokens": recent_stats["completion_tokens"],
             "collection_runs": collection_runs,
+            "recent_activity": recent_activity,
+            "api_budget": api_budget,
+            "next_expected_fetch": next_expected_fetch,
         },
     )
 

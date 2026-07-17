@@ -49,6 +49,24 @@ def client(app_with_db: tuple[FastAPI, str]) -> TestClient:
         yield test_client
 
 
+def _stub_admin_page_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake_api_budget(self):
+        return {
+            "core_remaining": 5000,
+            "core_limit": 5000,
+            "core_reset": datetime(2025, 1, 10, 13, 0, tzinfo=UTC),
+            "graphql_remaining": 5000,
+            "graphql_limit": 5000,
+            "graphql_reset": datetime(2025, 1, 10, 13, 0, tzinfo=UTC),
+        }
+
+    monkeypatch.setattr(
+        admin_routes.AdminService,
+        "get_api_budget",
+        _fake_api_budget,
+    )
+
+
 class TestAdminPageIntegration:
     """Integration tests for the admin dashboard page."""
 
@@ -56,8 +74,10 @@ class TestAdminPageIntegration:
         self,
         client: TestClient,
         test_db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The admin page renders HTML when real DB data exists."""
+        _stub_admin_page_metrics(monkeypatch)
 
         async def _seed() -> None:
             test_db_session.add(
@@ -75,8 +95,11 @@ class TestAdminPageIntegration:
         assert "text/html" in response.headers["content-type"]
         assert "<h2>Admin</h2>" in response.text
 
-    def test_admin_page_empty_db(self, client: TestClient) -> None:
+    def test_admin_page_empty_db(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The admin page still renders when the database is empty."""
+        _stub_admin_page_metrics(monkeypatch)
         response = client.get("/admin")
 
         assert response.status_code == 200

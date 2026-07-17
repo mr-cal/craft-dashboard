@@ -26,6 +26,21 @@
         </span>
       </div>
     </div>
+    <div class="status-grid">
+      <div class="status-card">
+        <h4>Next Open-Issue Fetch</h4>
+        <p>{{ next_expected_fetch.strftime("%Y-%m-%d %H:%M UTC") if next_expected_fetch else "Unknown" }}</p>
+        <p class="status-detail">Polling every 10 minutes</p>
+      </div>
+      <div class="status-card">
+        <h4>REST API Budget</h4>
+        <p>{{ api_budget.core_remaining }} / {{ api_budget.core_limit }}</p>
+      </div>
+      <div class="status-card">
+        <h4>GraphQL API Budget</h4>
+        <p>{{ api_budget.graphql_remaining }} / {{ api_budget.graphql_limit }}</p>
+      </div>
+    </div>
     {% if collection_runs %}
     <table style="margin-top: 1rem;">
       <thead>
@@ -103,6 +118,41 @@
             content.dataset.loaded = '1';
           });
         });
+      })();
+    </script>
+    {% else %}
+    <p style="color: var(--app-text-muted); margin-top: 1rem;">No recent collection runs.</p>
+    {% endif %}
+
+    <h3 style="margin-top: 1.5rem;">Recent Activity</h3>
+    <table class="activity-feed">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Issue/PR #</th>
+          <th>Change</th>
+          <th>Summary</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for activity in recent_activity %}
+        <tr>
+          <td>
+            <time class="local-time" datetime="{{ activity.occurred_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ activity.occurred_at.strftime('%Y-%m-%d %H:%M UTC') }}</time>
+          </td>
+          <td>#{{ activity.issue_number }}</td>
+          <td>{{ activity.change_type }}</td>
+          <td>{{ activity.summary }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="4">No recent activity.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <script>
+      (function () {
         document.querySelectorAll('time.local-time').forEach(function (el) {
           try {
             var d = new Date(el.getAttribute('datetime'));
@@ -114,9 +164,6 @@
         });
       })();
     </script>
-    {% else %}
-    <p style="color: var(--app-text-muted); margin-top: 1rem;">No recent collection runs.</p>
-    {% endif %}
   </div>
 </div>
 
