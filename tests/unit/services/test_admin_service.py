@@ -321,6 +321,7 @@ class TestGetRecentIssueActivity:
         assert activities[0]["project"] == "snapcraft"
         assert activities[0]["number"] == "12"
         assert activities[0]["change_type"] == "updated"
+        assert activities[0]["issue_type"] == "issue"
 
     async def test_joins_issue_for_live_url(self, test_db_session) -> None:
         """The issue's live GitHub URL is joined in when the issue still exists."""
@@ -361,6 +362,7 @@ class TestGetRecentIssueActivity:
         assert (
             activities[0]["url"] == "https://github.com/canonical/snapcraft/issues/12"
         )
+        assert activities[0]["issue_type"] == "issue"
 
 
 class TestGetIssuesForRun:
@@ -416,6 +418,7 @@ class TestGetIssuesForRun:
         assert issues[0]["change_type"] == "created"
         assert issues[0]["project"] == "snapcraft"
         assert issues[0]["number"] == "12"
+        assert issues[0]["issue_type"] == "issue"
         assert issues[0]["url"] == "https://github.com/canonical/snapcraft/issues/12"
 
     async def test_unchanged_issue_falls_back_to_unchanged(

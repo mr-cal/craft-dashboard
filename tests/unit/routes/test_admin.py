@@ -126,8 +126,8 @@ def _stub_admin_page_metrics(
     api_budget_exception: Exception | None = None,
     next_expected_fetch=None,
 ) -> None:
-    async def _fake_recent_activity(self, limit: int = 20):
-        assert limit == 20
+    async def _fake_recent_activity(self, limit: int = 50):
+        assert limit == 50
         return recent_activity if recent_activity is not None else []
 
     async def _fake_api_budget(self):
@@ -616,6 +616,7 @@ class TestAdminPage:
                     "project": "snapcraft",
                     "title": "Closed after merge",
                     "url": "https://github.com/canonical/snapcraft/issues/42",
+                    "issue_type": "pull_request",
                 }
             ],
             api_budget={

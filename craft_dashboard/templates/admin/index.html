@@ -153,8 +153,8 @@
       <thead>
         <tr>
           <th>When</th>
-          <th>Project</th>
-          <th>Issue/PR</th>
+          <th>Issue</th>
+          <th>Title</th>
           <th>Change</th>
         </tr>
       </thead>
@@ -164,13 +164,16 @@
           <td>
             <time class="local-time" datetime="{{ activity.occurred_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ activity.occurred_at.strftime('%Y-%m-%d %H:%M UTC') }}</time>
           </td>
-          <td>{{ activity.project }}</td>
-          <td>
+          <td style="white-space:nowrap;">
+            {{ activity.project }}<br>
+            {{ "pr" if activity.issue_type == "pull_request" else "issue" }}
             {% if activity.url %}
             <a href="{{ activity.url }}" target="_blank" rel="noopener noreferrer">#{{ activity.number }}</a>
             {% else %}
             #{{ activity.number }}
             {% endif %}
+          </td>
+          <td>
             <a href="/issues/{{ activity.project | urlencode_path }}/{{ activity.number }}">{{ activity.title|truncate(80) }}</a>
           </td>
           <td>{{ activity.change_type }}</td>

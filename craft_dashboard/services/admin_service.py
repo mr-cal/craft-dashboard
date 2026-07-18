@@ -92,6 +92,7 @@ class ActivityEntry(TypedDict):
     number: str
     title: str
     url: str | None
+    issue_type: str
     change_type: str
     occurred_at: datetime
 
@@ -279,7 +280,7 @@ class AdminService:
             for run in runs
         ]
 
-    async def get_recent_issue_activity(self, limit: int = 20) -> list[ActivityEntry]:
+    async def get_recent_issue_activity(self, limit: int = 50) -> list[ActivityEntry]:
         """Return the most recent issue/PR change events, newest first.
 
         Joined against ``Issue`` for the live GitHub URL; falls back to the
@@ -287,7 +288,12 @@ class AdminService:
         was later removed (e.g. project deletion).
         """
         rows = await self.session.execute(
-            select(IssueActivity, Project.name.label("project_name"), Issue.url)
+            select(
+                IssueActivity,
+                Project.name.label("project_name"),
+                Issue.url,
+                Issue.issue_type,
+            )
             .join(Project, Project.id == IssueActivity.project_id)
             .outerjoin(
                 Issue,
@@ -304,6 +310,7 @@ class AdminService:
                 "number": str(row.IssueActivity.issue_number),
                 "title": row.IssueActivity.title,
                 "url": row.url,
+                "issue_type": row.issue_type or "issue",
                 "change_type": row.IssueActivity.change_type,
                 "occurred_at": row.IssueActivity.occurred_at,
             }
@@ -387,6 +394,7 @@ class AdminService:
                 "number": row.Issue.external_id,
                 "title": row.Issue.title,
                 "url": row.Issue.url,
+                "issue_type": row.Issue.issue_type,
                 "change_type": row.change_type or "unchanged",
                 "occurred_at": row.occurred_at or row.Issue.last_fetched_at,
             }

@@ -3,8 +3,8 @@
   <thead>
     <tr>
       <th style="text-align: left; padding: 0.25rem 0.5rem;">When</th>
-      <th style="text-align: left; padding: 0.25rem 0.5rem;">Project</th>
-      <th style="text-align: left; padding: 0.25rem 0.5rem;">Issue/PR</th>
+      <th style="text-align: left; padding: 0.25rem 0.5rem;">Issue</th>
+      <th style="text-align: left; padding: 0.25rem 0.5rem;">Title</th>
       <th style="text-align: left; padding: 0.25rem 0.5rem;">Change</th>
     </tr>
   </thead>
@@ -14,13 +14,16 @@
       <td style="padding: 0.25rem 0.5rem; white-space: nowrap;">
         <time class="local-time" datetime="{{ issue.occurred_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ issue.occurred_at.strftime('%Y-%m-%d %H:%M UTC') }}</time>
       </td>
-      <td style="padding: 0.25rem 0.5rem; white-space: nowrap;">{{ issue.project }}</td>
-      <td style="padding: 0.25rem 0.5rem;">
+      <td style="padding: 0.25rem 0.5rem; white-space: nowrap;">
+        {{ issue.project }}<br>
+        {{ "pr" if issue.issue_type == "pull_request" else "issue" }}
         {% if issue.url %}
         <a href="{{ issue.url }}" target="_blank" rel="noopener noreferrer">#{{ issue.number }}</a>
         {% else %}
         #{{ issue.number }}
         {% endif %}
+      </td>
+      <td style="padding: 0.25rem 0.5rem;">
         <a href="/issues/{{ issue.project | urlencode_path }}/{{ issue.number }}">{{ issue.title|truncate(80) }}</a>
       </td>
       <td style="padding: 0.25rem 0.5rem;">{{ issue.change_type }}</td>
