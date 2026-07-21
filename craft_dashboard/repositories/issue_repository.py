@@ -10,6 +10,7 @@ from sqlalchemy import cast, func, or_, select
 from sqlalchemy import text as sa_text
 
 from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.views import IssueFilters, IssueQueryResult, IssueView
@@ -184,6 +185,39 @@ class IssueRepository:
                 _serialize_evaluation(evaluation) for evaluation in evaluations
             ],
         }
+
+    async def get_issue_activity_history(
+        self, project_name: str, issue_number: str
+    ) -> list[dict[str, Any]]:
+        """Return the change/refresh history for a single issue or PR.
+
+        Newest first. Returns an empty list if the project doesn't exist,
+        *issue_number* isn't a valid integer, or no activity has been
+        recorded yet (e.g. the issue hasn't changed since it was first
+        collected).
+        """
+        try:
+            number = int(issue_number)
+        except (TypeError, ValueError):
+            return []
+
+        rows = (
+            await self.session.execute(
+                select(IssueActivity)
+                .join(Project, Project.id == IssueActivity.project_id)
+                .where(Project.name == project_name)
+                .where(IssueActivity.issue_number == number)
+                .order_by(IssueActivity.occurred_at.desc())
+            )
+        ).scalars()
+        return [
+            {
+                "change_type": activity.change_type,
+                "title": activity.title,
+                "occurred_at": activity.occurred_at,
+            }
+            for activity in rows
+        ]
 
     async def search(self, filters: IssueFilters) -> IssueQueryResult:
         """Query issues with filters."""

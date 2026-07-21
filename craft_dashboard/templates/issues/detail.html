@@ -110,6 +110,30 @@
 </section>
 
 <section class="issue-detail-card">
+  <h3>Update history</h3>
+  {% if activity_history %}
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Change</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for activity in activity_history %}
+      <tr>
+        <td>{{ activity.occurred_at or "—" }}</td>
+        <td>{{ activity.change_type|replace("_", " ") }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No update history recorded yet.</p>
+  {% endif %}
+</section>
+
+<section class="issue-detail-card">
   <h3>Related Issues</h3>
   {% if related_issues %}
   <table role="grid">

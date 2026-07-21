@@ -16,7 +16,15 @@ from fastapi.testclient import TestClient
 
 class _IssueSession:
     async def execute(self, _query):
+        return _EmptyResult()
+
+
+class _EmptyResult:
+    def scalars(self):
         return []
+
+    def first(self):
+        return None
 
 
 @asynccontextmanager
@@ -133,6 +141,61 @@ class TestIssueDetailRoute:
 
         assert response.status_code == 200
         assert "https://bugs.launchpad.net/craft-parts/+bug/321" in response.text
+
+    def test_issue_detail_renders_activity_history(
+        self, test_client: TestClient
+    ) -> None:
+        history = [
+            {
+                "change_type": "review_approved",
+                "title": "Support core24 builds end to end",
+                "occurred_at": "2025-01-12T14:00:00+00:00",
+            },
+            {
+                "change_type": "opened",
+                "title": "Support core24 builds end to end",
+                "occurred_at": "2025-01-10T12:00:00+00:00",
+            },
+        ]
+        with (
+            patch.object(
+                IssueRepository,
+                "get_issue_detail",
+                AsyncMock(return_value=_DETAIL),
+            ),
+            patch.object(
+                IssueRepository,
+                "get_issue_activity_history",
+                AsyncMock(return_value=history),
+            ) as get_history,
+        ):
+            response = test_client.get("/issues/snapcraft/321")
+
+        assert response.status_code == 200
+        get_history.assert_awaited_once_with("snapcraft", "321")
+        assert "Update history" in response.text
+        assert "review approved" in response.text
+        assert "opened" in response.text
+
+    def test_issue_detail_shows_no_history_message_when_empty(
+        self, test_client: TestClient
+    ) -> None:
+        with (
+            patch.object(
+                IssueRepository,
+                "get_issue_detail",
+                AsyncMock(return_value=_DETAIL),
+            ),
+            patch.object(
+                IssueRepository,
+                "get_issue_activity_history",
+                AsyncMock(return_value=[]),
+            ),
+        ):
+            response = test_client.get("/issues/snapcraft/321")
+
+        assert response.status_code == 200
+        assert "No update history recorded yet" in response.text
 
     def test_issue_list_titles_link_to_issue_detail(
         self, test_client: TestClient

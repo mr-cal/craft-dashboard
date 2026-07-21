@@ -170,9 +170,7 @@ class TestEvaluateIssues:
         assert second_call["state"] == "open"
 
     @pytest.mark.asyncio
-    async def test_closed_issue_forwards_closing_references(
-        self, monkeypatch
-    ) -> None:
+    async def test_closed_issue_forwards_closing_references(self, monkeypatch) -> None:
         """Closing PRs recorded in metadata_ are forwarded for closed issues.
 
         Regression test: unlike the HTTP eval-client path (eval_api.py), the
@@ -210,9 +208,7 @@ class TestEvaluateIssues:
         )
 
         call_kwargs = evaluator.evaluate.await_args_list[0].kwargs
-        assert call_kwargs["closing_references"] == [
-            {"number": 99, "state": "merged"}
-        ]
+        assert call_kwargs["closing_references"] == [{"number": 99, "state": "merged"}]
         assert call_kwargs["pr_details"] is None
 
     @pytest.mark.asyncio

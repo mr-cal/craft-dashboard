@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.views import IssueFilters, IssueQueryResult, IssueView
 from craft_dashboard.repositories.issue_repository import (
@@ -473,6 +474,81 @@ class TestGetIssueDetail:
         detail = await IssueRepository(session).get_issue_detail("snapcraft", "999")
 
         assert detail is None
+
+
+class TestGetIssueActivityHistory:
+    async def test_returns_history_newest_first_for_the_given_issue(
+        self, test_db_session
+    ) -> None:
+        project = await _add_project(test_db_session, name="snapcraft")
+        other_project = await _add_project(test_db_session, name="charmcraft")
+        test_db_session.add_all(
+            [
+                IssueActivity(
+                    project_id=project.id,
+                    issue_number=321,
+                    change_type="opened",
+                    title="Oldest change",
+                    occurred_at=FIXED_NOW - timedelta(days=5),
+                ),
+                IssueActivity(
+                    project_id=project.id,
+                    issue_number=321,
+                    change_type="updated",
+                    title="Newest change",
+                    occurred_at=FIXED_NOW - timedelta(hours=1),
+                ),
+                # Different issue number in the same project: must be excluded.
+                IssueActivity(
+                    project_id=project.id,
+                    issue_number=999,
+                    change_type="updated",
+                    title="Unrelated issue",
+                    occurred_at=FIXED_NOW - timedelta(hours=2),
+                ),
+                # Same issue number in a different project: must be excluded.
+                IssueActivity(
+                    project_id=other_project.id,
+                    issue_number=321,
+                    change_type="updated",
+                    title="Same number, other project",
+                    occurred_at=FIXED_NOW - timedelta(hours=3),
+                ),
+            ]
+        )
+        await test_db_session.flush()
+
+        history = await IssueRepository(test_db_session).get_issue_activity_history(
+            "snapcraft", "321"
+        )
+
+        assert [entry["change_type"] for entry in history] == ["updated", "opened"]
+        assert [entry["title"] for entry in history] == [
+            "Newest change",
+            "Oldest change",
+        ]
+
+    async def test_returns_empty_list_when_no_history_exists(
+        self, test_db_session
+    ) -> None:
+        await _add_project(test_db_session, name="snapcraft")
+
+        history = await IssueRepository(test_db_session).get_issue_activity_history(
+            "snapcraft", "1"
+        )
+
+        assert history == []
+
+    async def test_returns_empty_list_for_non_numeric_issue_number(
+        self, test_db_session
+    ) -> None:
+        await _add_project(test_db_session, name="snapcraft")
+
+        history = await IssueRepository(test_db_session).get_issue_activity_history(
+            "snapcraft", "not-a-number"
+        )
+
+        assert history == []
 
 
 class TestQueryIssuesFilters:

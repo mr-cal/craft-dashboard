@@ -295,6 +295,8 @@ async def issue_detail(
     evaluation_history = cast(list[dict[str, Any]], issue["evaluation_history"])
     current_evaluation = evaluation_history[0] if evaluation_history else None
 
+    activity_history = await repo.get_issue_activity_history(project, number)
+
     has_embedding = bool(current_evaluation and current_evaluation.get("has_embedding"))
 
     is_outdated = False
@@ -333,6 +335,7 @@ async def issue_detail(
             "issue": issue,
             "current_evaluation": current_evaluation,
             "evaluation_history": evaluation_history,
+            "activity_history": activity_history,
             "original_issue_url": _build_original_issue_url(issue),
             "related_issues": related_issues,
             "has_embedding": has_embedding,

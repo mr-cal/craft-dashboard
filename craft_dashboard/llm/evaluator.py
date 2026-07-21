@@ -277,7 +277,6 @@ def _compute_content_hash(
     return hashlib.sha256(content.encode()).hexdigest()
 
 
-
 class IssueEvaluator:
     """Evaluates issues and PRs using an LLM."""
 
