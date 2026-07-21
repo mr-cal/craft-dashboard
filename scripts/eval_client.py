@@ -258,6 +258,7 @@ async def run_evaluate_loop(
     server_ca_cert: str,
     verbose: bool,
     embed_model: str = "",
+    issue: str = "",
 ) -> None:
     """Poll the eval API, run LLM evaluation (summary + scores), and submit results.
 
@@ -272,6 +273,9 @@ async def run_evaluate_loop(
 
     The loop runs until *limit* issues are evaluated (limit=0 means run until
     the server returns 204 No Content), or until a shutdown signal is received.
+
+    If *issue* is set (an external issue/PR number, requires *project*), only
+    that single issue is evaluated, bypassing the priority queue.
     """
     signal.signal(signal.SIGINT, _signal_handler)
     console = Console()
@@ -287,7 +291,10 @@ async def run_evaluate_loop(
         "force": force,
         "incomplete": incomplete,
         "stale_days": stale_days,
+        "external_id": issue,
     }
+    if issue:
+        limit = 1
 
     llm_client = LocalLLMClient(
         base_url=llm_base_url,
@@ -936,6 +943,12 @@ def cli(ctx: click.Context, server: str, token: str, verbose: bool) -> None:
     type=click.IntRange(min=0),
     help="Only evaluate stale evaluations older than N days",
 )
+@click.option(
+    "--issue",
+    default="",
+    help="Evaluate a single issue/PR number for --project (e.g. --issue 1068). "
+    "Implies --force and ignores --open-only/--incomplete/--stale-days.",
+)
 @click.pass_context
 def evaluate_cmd(
     ctx: click.Context,
@@ -946,6 +959,7 @@ def evaluate_cmd(
     force: bool,
     incomplete: bool,
     stale_days: int,
+    issue: str,
 ) -> None:
     """Pull issues from the server and evaluate them (summary + scores).
 
@@ -976,6 +990,8 @@ def evaluate_cmd(
             f"Missing required environment variable(s): {', '.join(missing)}. "
             "Set them in your .env file."
         )
+    if issue and not project:
+        raise click.UsageError("--issue requires --project")
 
     llm_api_key = os.environ.get("LOCAL_LLM_API_KEY", "")
     ca_cert = os.environ.get("LOCAL_LLM_CA_CERT", "")
@@ -1001,6 +1017,7 @@ def evaluate_cmd(
             server_ca_cert=server_ca_cert,
             verbose=obj["verbose"],
             embed_model=embed_model,
+            issue=issue,
         )
     )
 

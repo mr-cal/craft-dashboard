@@ -85,6 +85,7 @@ async def _fetch_issue_and_latest_evaluation(
     force: bool = False,
     incomplete: bool = False,
     stale_days: int = 0,
+    external_id: str = "",
     filtered_issues: dict[str, list[str]] | None = None,
 ) -> tuple[Issue, str, LLMEvaluation | None] | None:
     latest_evaluation = aliased(LLMEvaluation)
@@ -130,6 +131,9 @@ async def _fetch_issue_and_latest_evaluation(
 
     if project:
         query = query.where(Project.name == project)
+
+    if external_id:
+        query = query.where(Issue.external_id == external_id)
 
     if incomplete:
         query = query.where(
@@ -217,18 +221,29 @@ async def next_issue(
     force: bool = Query(default=False),
     incomplete: bool = Query(default=False),
     stale_days: int = Query(default=0),
+    external_id: str = Query(
+        default="", description="Evaluate only this issue/PR number (requires project)"
+    ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any] | Response:
     """Return the next issue that needs evaluation, if any."""
     _require_eval_auth(request, authorization)
 
+    if external_id and not project:
+        raise HTTPException(
+            status_code=422, detail="external_id requires project to be set"
+        )
+
     row = await _fetch_issue_and_latest_evaluation(
         session,
         project=project,
-        open_only=open_only,
-        force=force,
+        # A single targeted issue may be closed/merged or already evaluated;
+        # don't let the open/hash filters silently skip it.
+        open_only=open_only if not external_id else False,
+        force=force or bool(external_id),
         incomplete=incomplete,
         stale_days=stale_days,
+        external_id=external_id,
         filtered_issues=get_config(request).filtered_issues,
     )
     if row is None:
