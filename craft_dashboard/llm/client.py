@@ -91,12 +91,15 @@ class LLMClient(Protocol):
 def _is_retriable(exc: BaseException) -> bool:
     """Return True for transient errors that should trigger a retry.
 
-    Retries on 429 (rate limited) and network/timeout errors.
+    Retries on 429 (rate limited) and network/timeout/protocol errors.
+    ``httpx.TransportError`` covers ``TimeoutException``, ``NetworkError``,
+    and ``ProtocolError`` (e.g. ``RemoteProtocolError`` raised when the
+    server drops the connection without sending a response).
     Does NOT retry on 402 (quota exhausted) or other 4xx errors.
     """
     if isinstance(exc, httpx.HTTPStatusError):
         return exc.response.status_code == HTTP_TOO_MANY_REQUESTS
-    return isinstance(exc, (httpx.TimeoutException, httpx.NetworkError))
+    return isinstance(exc, httpx.TransportError)
 
 
 class OpenRouterClient:
@@ -237,9 +240,7 @@ class LocalLLMClient:
 
     @retry(
         retry=retry_if_exception(
-            lambda exc: isinstance(
-                exc, (httpx.TimeoutException, httpx.NetworkError, LLMUnavailableError)
-            )
+            lambda exc: isinstance(exc, (httpx.TransportError, LLMUnavailableError))
         ),
         wait=wait_exponential(multiplier=1, min=2, max=30),
         stop=stop_after_attempt(5),
