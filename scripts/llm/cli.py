@@ -13,7 +13,9 @@ from craft_dashboard.database import get_engine, get_session_factory
 from craft_dashboard.llm.client import create_llm_client
 from craft_dashboard.llm.evaluator import IssueEvaluator
 from craft_dashboard.settings import Settings
+from rich.console import Console
 
+from scripts.llm.console import setup_rich_logging
 from scripts.llm.orchestrator import _evaluate_issues
 from scripts.llm.storage import _clear_evaluations, count_evaluations
 
@@ -104,6 +106,7 @@ async def _main(
     strict_validation: bool,
     no_resume: bool,
     concurrency: int,
+    no_progress: bool,
 ) -> None:
     """Run LLM evaluation."""
     settings = Settings()
@@ -112,6 +115,15 @@ async def _main(
         if verbose
         else getattr(logging, settings.log_level.upper(), logging.INFO)
     )
+
+    # Only show a live Rich progress bar when attached to a real terminal
+    # (e.g. not when run as a detached subprocess by the admin re-evaluate
+    # endpoint, which redirects stdout and expects plain log lines).
+    show_progress = sys.stdout.isatty() and not no_progress
+    console: Console | None = None
+    if show_progress:
+        console = Console()
+        setup_rich_logging(verbose=verbose, console=console)
     logging.getLogger().setLevel(log_level)
 
     if not settings.enable_server_eval:
@@ -171,6 +183,7 @@ async def _main(
             strict_validation=strict_validation,
             resume=not no_resume,
             concurrency=concurrency,
+            console=console,
         )
         logger.info(
             "Evaluation complete: %d evaluated, %d skipped, %d errors, %d total tokens",
@@ -258,6 +271,15 @@ def cli(ctx: click.Context) -> None:
         "against a single self-hosted local LLM endpoint."
     ),
 )
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    default=False,
+    help=(
+        "Disable the live Rich progress bar (shown automatically in an "
+        "interactive terminal) and use plain text logs instead."
+    ),
+)
 def evaluate_cmd(
     project: str,
     limit: int,
@@ -271,6 +293,7 @@ def evaluate_cmd(
     strict_validation: bool,
     no_resume: bool,
     concurrency: int,
+    no_progress: bool,
 ) -> None:
     """Run LLM evaluation on issues and PRs."""
     asyncio.run(
@@ -287,6 +310,7 @@ def evaluate_cmd(
             strict_validation,
             no_resume,
             concurrency,
+            no_progress,
         )
     )
 

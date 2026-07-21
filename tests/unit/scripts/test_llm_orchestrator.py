@@ -1,6 +1,7 @@
 """Tests for scripts.llm.orchestrator."""
 
 import asyncio
+import io
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -15,6 +16,8 @@ from craft_dashboard.llm.exceptions import (
     LLMValidationError,
 )
 from craft_dashboard.models.issue import Issue
+from rich.console import Console
+from scripts.eval_timing import TimingHistory
 from scripts.llm.checkpoint import EvaluationCheckpoint
 from scripts.llm.orchestrator import _evaluate_issues
 from scripts.llm.queries import IssueEvaluationTarget
@@ -694,3 +697,101 @@ class TestEvaluateIssues:
 
         assert max_in_flight == 2
         assert stats["evaluated"] == 2
+
+    async def test_console_renders_progress_bar_for_each_outcome(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """Passing console= advances the progress bar for evaluated/skipped/errored."""
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.TimingHistory",
+            lambda: TimingHistory(tmp_path / "timing.json"),
+        )
+        targets = [
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=1),
+                project_name="snapcraft",
+                issue_data_hash=None,
+            ),
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=2),
+                project_name="snapcraft",
+                issue_data_hash=None,
+            ),
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=3),
+                project_name="snapcraft",
+                issue_data_hash=None,
+            ),
+        ]
+        # issue 1 evaluates successfully, issue 2 is skipped (unchanged
+        # content), issue 3 errors out.
+        results = iter(
+            [
+                _valid_result(issue_hash="hash"),
+                None,
+                RuntimeError("boom"),
+            ]
+        )
+
+        async def _evaluate(**_kwargs) -> dict | None:
+            outcome = next(results)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        evaluator = SimpleNamespace(
+            evaluate=AsyncMock(side_effect=_evaluate), model="m"
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
+            AsyncMock(return_value=targets),
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.store_evaluation_result", AsyncMock()
+        )
+
+        console = Console(file=io.StringIO())
+        stats = await _evaluate_issues(
+            session_factory=object(),
+            evaluator=evaluator,
+            maintainers=set(),
+            resume=False,
+            console=console,
+        )
+
+        assert stats["evaluated"] == 1
+        assert stats["skipped"] == 1
+        assert stats["errored"] == 1
+
+    async def test_console_none_skips_progress_bar_entirely(self, monkeypatch) -> None:
+        """The default (console=None) path behaves exactly as before."""
+        targets = [
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=1),
+                project_name="snapcraft",
+                issue_data_hash=None,
+            )
+        ]
+
+        async def _evaluate(**_kwargs) -> dict:
+            return _valid_result(issue_hash="hash")
+
+        evaluator = SimpleNamespace(
+            evaluate=AsyncMock(side_effect=_evaluate), model="m"
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
+            AsyncMock(return_value=targets),
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.store_evaluation_result", AsyncMock()
+        )
+
+        stats = await _evaluate_issues(
+            session_factory=object(),
+            evaluator=evaluator,
+            maintainers=set(),
+            resume=False,
+        )
+
+        assert stats["evaluated"] == 1

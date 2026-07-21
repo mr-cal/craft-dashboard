@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict
 
@@ -23,6 +25,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from scripts.eval_timing import PHASE_EVALUATE, TimingHistory
 from scripts.llm.checkpoint import (
     EvaluationCheckpoint,
     clear_checkpoint,
@@ -30,12 +33,14 @@ from scripts.llm.checkpoint import (
     load_checkpoint,
     save_checkpoint,
 )
+from scripts.llm.console import make_progress
 from scripts.llm.queries import IssueFilter, fetch_issue_evaluation_targets
 from scripts.llm.storage import store_evaluation_result
 from scripts.llm.validation import validate_evaluation_result
 
 if TYPE_CHECKING:
     from craft_dashboard.llm.evaluator import EvaluationResult, IssueEvaluator
+    from rich.console import Console
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from scripts.llm.queries import IssueEvaluationTarget
@@ -134,6 +139,7 @@ async def _evaluate_issues(
     strict_validation: bool = False,
     resume: bool = True,
     concurrency: int = 1,
+    console: Console | None = None,
 ) -> EvaluationStats | DryRunEvaluationStats:
     """Evaluate matched issues and persist any new results.
 
@@ -144,6 +150,10 @@ async def _evaluate_issues(
     its own retry/backoff) but should stay conservative against a single
     self-hosted local LLM endpoint, which usually can't serve many requests
     in parallel.
+
+    ``console`` enables a live Rich progress bar (with a persistent-history
+    ETA) alongside the existing text logs. When omitted, no progress bar is
+    rendered — text logs behave exactly as before.
     """
     stats = {"evaluated": 0, "skipped": 0, "errored": 0, "total_tokens": 0}
     filter_hash = compute_filter_hash(
@@ -219,8 +229,29 @@ async def _evaluate_issues(
     # even though they all share this one iterator object.
     remaining = iter(enumerate(targets, start=1))
 
+    progress = None
+    task_id = None
+    timing: TimingHistory | None = None
+    if console is not None:
+        timing = TimingHistory()
+        progress = make_progress(
+            console, total_to_eval, timing, PHASE_EVALUATE, worker_count
+        )
+        task_id = progress.add_task(
+            "Evaluating issues",
+            total=total_to_eval,
+            completed=stats["skipped"],
+        )
+
     async def _process_one(idx: int, target: IssueEvaluationTarget) -> None:
         nonlocal quota_exhausted, strict_failure
+        t0 = time.monotonic()
+
+        def _finish(outcome: str) -> None:
+            if progress is not None:
+                progress.update(task_id, advance=1)
+            if timing is not None and outcome == "evaluated":
+                timing.add(PHASE_EVALUATE, time.monotonic() - t0)
 
         issue = target.issue
         existing_hash = (
@@ -303,6 +334,7 @@ async def _evaluate_issues(
         except Exception:
             logger.exception("Error evaluating issue %s", issue.title)
             stats["errored"] += 1
+            _finish("errored")
             _log_progress(
                 stats,
                 processed=stats["evaluated"] + stats["skipped"] + stats["errored"],
@@ -315,6 +347,7 @@ async def _evaluate_issues(
                 "Skipped %s (content unchanged): %s", issue_ref, issue.title[:60]
             )
             stats["skipped"] += 1
+            _finish("skipped")
             _log_progress(
                 stats,
                 processed=stats["evaluated"] + stats["skipped"] + stats["errored"],
@@ -334,6 +367,7 @@ async def _evaluate_issues(
             if strict_validation:
                 strict_failure = exc
                 return
+            _finish("errored")
             _log_progress(
                 stats,
                 processed=stats["evaluated"] + stats["skipped"] + stats["errored"],
@@ -360,6 +394,7 @@ async def _evaluate_issues(
                     timestamp=datetime.now(tz=UTC).isoformat(),
                 )
             )
+        _finish("evaluated")
         logger.info(
             "[%d/%d] Evaluated %s (%s, %d tokens): %s",
             stats["evaluated"],
@@ -387,7 +422,9 @@ async def _evaluate_issues(
                 return
             await _process_one(idx, target)
 
-    await asyncio.gather(*(_worker() for _ in range(worker_count)))
+    progress_cm = progress if progress is not None else contextlib.nullcontext()
+    with progress_cm:
+        await asyncio.gather(*(_worker() for _ in range(worker_count)))
 
     if limit > 0 and stats["evaluated"] >= limit:
         logger.info("Reached evaluation limit of %d", limit)

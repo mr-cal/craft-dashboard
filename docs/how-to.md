@@ -97,6 +97,13 @@ uv run scripts/run_llm.py evaluate --open-only --limit 40
 uv run scripts/run_llm.py evaluate --force --concurrency 8
 ```
 
+When run interactively (a real terminal), `evaluate` shows a live Rich
+progress bar with an ETA, the same UX as `scripts/eval_client.py`. Pass
+`--no-progress` to disable it and fall back to plain text logs (this is
+automatic — and unaffected by this flag — when output isn't a terminal,
+e.g. when the admin dashboard's "Re-evaluate" button runs this as a
+subprocess).
+
 Server-side evaluation is disabled by default (`ENABLE_SERVER_EVAL=false`)
 and has no cron entry in production — there is no daily 6 AM eval job. Run
 it manually when `ENABLE_SERVER_EVAL=true`:

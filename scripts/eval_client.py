@@ -20,25 +20,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Awaitable
 
-    from rich.progress import Task as RichTask
-
 import click
 import httpx
 from dotenv import load_dotenv
 from rich.console import Console
-from rich.logging import RichHandler
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    ProgressColumn,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-    TimeElapsedColumn,
-    TimeRemainingColumn,
-)
-from rich.text import Text
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -47,6 +32,8 @@ from craft_dashboard.llm.client import LocalLLMClient
 from craft_dashboard.llm.embeddings import EmbeddingClient
 from craft_dashboard.llm.evaluator import IssueEvaluator, _compute_content_hash
 from eval_timing import PHASE_EMBED, PHASE_EVALUATE, TimingHistory
+
+from scripts.llm.console import format_elapsed, make_progress, setup_rich_logging
 
 logger = logging.getLogger(__name__)
 
@@ -59,32 +46,9 @@ paused_state = {"paused": False}
 
 _MAX_ERROR_BODY = 200
 
-
-def _setup_logging(*, verbose: bool, console: Console) -> None:
-    """Configure logging with a RichHandler backed by *console*."""
-    handler = RichHandler(
-        console=console,
-        show_path=False,
-        show_time=verbose,
-        markup=False,
-        rich_tracebacks=False,
-        log_time_format="%H:%M:%S",
-    )
-    # basicConfig is a no-op when handlers already exist (e.g. in tests).
-    logging.basicConfig(level=logging.INFO, handlers=[handler], format="%(message)s")
-    if not verbose:
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("httpcore").setLevel(logging.WARNING)
-        logging.getLogger("craft_dashboard.llm.client").setLevel(logging.WARNING)
-
-
-def _format_elapsed(seconds: float) -> str:
-    """Format elapsed time as a human-readable string."""
-    if seconds < 60:  # noqa: PLR2004
-        return f"{seconds:.0f}s"
-    minutes = int(seconds // 60)
-    remaining = int(seconds % 60)
-    return f"{minutes}m{remaining:02d}s"
+_setup_logging = setup_rich_logging
+_format_elapsed = format_elapsed
+_make_progress = make_progress
 
 
 async def _timed[T](coro: Awaitable[T]) -> tuple[T, float]:
@@ -116,54 +80,6 @@ def _format_error_body(response: httpx.Response) -> str:
         return f"(HTML response from {response.url} — is the server URL correct?)"
     text = response.text.strip()
     return (text[:_MAX_ERROR_BODY] + "…") if len(text) > _MAX_ERROR_BODY else text
-
-
-class TimingEtaColumn(ProgressColumn):
-    """ETA column backed by persistent TimingHistory.
-
-    Uses historical per-item durations to estimate completion time, so the ETA
-    is available immediately from the first item (not just after Rich has
-    accumulated enough in-run samples).
-    """
-
-    def __init__(self, history: TimingHistory, phase: str) -> None:
-        self._history = history
-        self._phase = phase
-        super().__init__()
-
-    def render(self, task: RichTask) -> Text:
-        """Render the ETA for the given Rich task."""
-        if task.finished:
-            return Text("—")
-        if task.total is None:
-            return Text("?")
-        remaining = max(0, int(task.total - task.completed))
-        return Text(self._history.eta(self._phase, remaining))
-
-
-def _make_progress(
-    console: Console,
-    total: int | None,  # noqa: ARG001
-    timing: TimingHistory | None = None,
-    phase: str | None = None,
-) -> Progress:
-    """Create a rich Progress bar for the eval loop."""
-    eta_col: ProgressColumn = (
-        TimingEtaColumn(timing, phase)
-        if timing is not None and phase is not None
-        else TimeRemainingColumn()
-    )
-    return Progress(
-        SpinnerColumn(),
-        TextColumn("[bold]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        MofNCompleteColumn(),
-        eta_col,
-        TimeElapsedColumn(),
-        console=console,
-        transient=False,
-    )
 
 
 async def _embed_safe(
