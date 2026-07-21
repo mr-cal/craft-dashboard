@@ -445,3 +445,102 @@ class TestComputeContentHash:
         )
 
         assert hash_a == hash_b
+
+    def test_review_status_change_triggers_reevaluation(self) -> None:
+        """A PR approval (review_status change) changes the content hash."""
+        hash_pending = _compute_content_hash(
+            "Fix flaky test in core24 harness",
+            "This PR fixes the flaky test by adding a retry.",
+            "open",
+            ["bug"],
+            comments=[],
+            pr_details={"review_status": "pending", "review_count": 0},
+        )
+        hash_approved = _compute_content_hash(
+            "Fix flaky test in core24 harness",
+            "This PR fixes the flaky test by adding a retry.",
+            "open",
+            ["bug"],
+            comments=[],
+            pr_details={"review_status": "approved", "review_count": 1},
+        )
+
+        assert hash_pending != hash_approved
+
+    def test_pr_details_default_none_stable(self) -> None:
+        """Hash is stable when pr_details is omitted vs explicitly None."""
+        h1 = _compute_content_hash(
+            "Add support for core24 base",
+            "Please add support for `base: core24`.",
+            "open",
+            ["enhancement"],
+        )
+        h2 = _compute_content_hash(
+            "Add support for core24 base",
+            "Please add support for `base: core24`.",
+            "open",
+            ["enhancement"],
+            pr_details=None,
+        )
+
+        assert h1 == h2
+
+    def test_pr_details_key_order_does_not_affect_hash(self) -> None:
+        """Same pr_details in different dict key order produce the same hash."""
+        hash_a = _compute_content_hash(
+            "Fix flaky test",
+            "Body",
+            "open",
+            [],
+            pr_details={
+                "review_status": "approved",
+                "review_count": 2,
+                "ci_passing": ["lint", "unit"],
+            },
+        )
+        hash_b = _compute_content_hash(
+            "Fix flaky test",
+            "Body",
+            "open",
+            [],
+            pr_details={
+                "ci_passing": ["lint", "unit"],
+                "review_count": 2,
+                "review_status": "approved",
+            },
+        )
+
+        assert hash_a == hash_b
+
+    def test_irrelevant_pr_details_do_not_affect_hash(self) -> None:
+        """Diff stats alone (no reviewer/CI signal change) don't move the hash.
+
+        Only fields that represent reviewer/CI intent (review_status,
+        review_count, unresolved_review_comments, ci_passing/ci_failing/
+        ci_pending) are hashed; diff line counts are excluded so routine
+        force-pushes with no new review activity don't force re-evaluation.
+        """
+        base_details = {
+            "review_status": "pending",
+            "review_count": 0,
+            "unresolved_review_comments": 0,
+            "ci_passing": [],
+            "ci_failing": [],
+            "ci_pending": [],
+        }
+        hash_a = _compute_content_hash(
+            "Fix flaky test",
+            "Body",
+            "open",
+            [],
+            pr_details={**base_details, "diff_additions": 10, "diff_deletions": 2},
+        )
+        hash_b = _compute_content_hash(
+            "Fix flaky test",
+            "Body",
+            "open",
+            [],
+            pr_details={**base_details, "diff_additions": 999, "diff_deletions": 500},
+        )
+
+        assert hash_a == hash_b

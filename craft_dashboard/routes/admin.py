@@ -22,7 +22,7 @@ from starlette import status
 from starlette.exceptions import HTTPException
 
 from craft_dashboard.auth import get_admin_bearer_token, verify_admin_token
-from craft_dashboard.dependencies import get_db_session
+from craft_dashboard.dependencies import get_config, get_db_session
 from craft_dashboard.services import AdminService
 
 if TYPE_CHECKING:
@@ -156,7 +156,9 @@ async def admin_page(
     lifetime_stats = await admin_service.get_lifetime_token_stats()
     recent_stats = await admin_service.get_seven_day_token_stats()
     collection_runs = await admin_service.get_recent_collection_runs()
-    recent_activity = await admin_service.get_recent_issue_activity()
+    recent_activity = await admin_service.get_recent_issue_activity(
+        filtered_issues=get_config(request).filtered_issues
+    )
     try:
         api_budget = await admin_service.get_api_budget()
     except (GithubException, requests.exceptions.RequestException) as exc:
@@ -199,7 +201,9 @@ async def collection_run_issues(
     """Return an HTML fragment listing the issues collected in a given run."""
     templates: Jinja2Templates = request.app.state.templates
     admin_service = AdminService(session)
-    issues, total = await admin_service.get_issues_for_run(run_id)
+    issues, total = await admin_service.get_issues_for_run(
+        run_id, filtered_issues=get_config(request).filtered_issues
+    )
     return templates.TemplateResponse(
         request,
         "admin/collection_run_issues.html",

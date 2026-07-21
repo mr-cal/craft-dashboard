@@ -14,7 +14,7 @@ from craft_dashboard.llm.prompts import (
 #: Evaluation version produced by the current prompt set.
 #: Increment this whenever a prompt change is expected to alter LLM output
 #: quality or structure (e.g. new body truncation rules, schema changes).
-CURRENT_EVAL_VERSION: int = 3
+CURRENT_EVAL_VERSION: int = 4
 
 logger = logging.getLogger(__name__)
 
@@ -209,16 +209,33 @@ def _parse_evaluation_response(content: str) -> ParsedEvaluation | None:
     return None
 
 
+#: pr_details keys that represent reviewer/CI intent a human or the LLM would
+#: act on. Diff stats and other cosmetic fields are deliberately excluded so
+#: routine force-pushes without new review activity don't force re-evaluation.
+_HASHED_PR_DETAIL_KEYS = (
+    "review_status",
+    "review_count",
+    "unresolved_review_comments",
+    "ci_passing",
+    "ci_failing",
+    "ci_pending",
+)
+
+
 def _compute_content_hash(
     title: str,
     body: str | None,
     state: str,
     labels: list[str],
     comments: list[IssueComment] | None = None,
+    pr_details: dict[str, Any] | None = None,
 ) -> str:
     """Compute a SHA-256 hash of issue content for change detection.
 
-    Includes comments so that new discussion triggers re-evaluation.
+    Includes comments so that new discussion triggers re-evaluation, and a
+    subset of PR review/CI metadata (see ``_HASHED_PR_DETAIL_KEYS``) so that a
+    review approval, changes-requested, or CI status flip triggers
+    re-evaluation even when the title/body/labels/comments are unchanged.
 
     .. warning::
         Any change to this function's output MUST be accompanied by a
@@ -233,6 +250,8 @@ def _compute_content_hash(
         state: Issue state.
         labels: List of label names.
         comments: Recent comments list (optional).
+        pr_details: PR review/CI/diff metadata dict (optional). Only the keys
+            listed in ``_HASHED_PR_DETAIL_KEYS`` affect the hash.
 
     Returns:
         A 64-character hex string.
@@ -244,8 +263,19 @@ def _compute_content_hash(
             f"{c.get('author', '')}:{c.get('body', '')[:100]}"
             for c in sorted(comments, key=lambda c: c.get("created_at") or "")
         )
-    content = f"{title}|{body or ''}|{state}|{','.join(sorted(labels))}{comments_repr}"
+    pr_details_repr = ""
+    if pr_details:
+        pr_details_repr = "|" + ";".join(
+            f"{key}={pr_details[key]!r}"
+            for key in _HASHED_PR_DETAIL_KEYS
+            if key in pr_details
+        )
+    content = (
+        f"{title}|{body or ''}|{state}|{','.join(sorted(labels))}"
+        f"{comments_repr}{pr_details_repr}"
+    )
     return hashlib.sha256(content.encode()).hexdigest()
+
 
 
 class IssueEvaluator:
@@ -313,7 +343,12 @@ class IssueEvaluator:
         label_names = labels if isinstance(labels, list) else []
         normalized_state = state.lower()
         current_hash = _compute_content_hash(
-            title, body, normalized_state, label_names, comments=comments
+            title,
+            body,
+            normalized_state,
+            label_names,
+            comments=comments,
+            pr_details=pr_details,
         )
 
         if not _needs_reevaluation(existing_hash, current_hash):
@@ -336,6 +371,7 @@ class IssueEvaluator:
                 comment_count=comment_count,
                 comments=comments,
                 closing_references=closing_references,
+                pr_details=pr_details,
             )
         else:
             messages = build_open_evaluate_prompt(

@@ -74,6 +74,7 @@ def _current_content_hash(issue: Issue) -> str:
         issue.state,
         issue.labels or [],
         issue.comments or [],
+        pr_details=issue.metadata_ or None,
     )
 
 
@@ -284,6 +285,12 @@ async def next_issue(
         "current_hash": _current_content_hash(issue),
         "maintainers": list(get_config(request).maintainers),
         "closing_references": (issue.metadata_ or {}).get("closing_references", []),
+        # PR review/CI/diff metadata (review_status, ci_passing/ci_failing/
+        # ci_pending, diff stats, etc.), populated by the collector for pull
+        # requests. Empty for plain issues. Forwarded so the eval client can
+        # give the LLM review/CI context and keep its local hash check
+        # (which also hashes a subset of these fields) in sync with the server.
+        "pr_details": issue.metadata_ or {},
     }
 
 

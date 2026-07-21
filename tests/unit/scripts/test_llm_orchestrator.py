@@ -19,8 +19,16 @@ from scripts.llm.orchestrator import _evaluate_issues
 from scripts.llm.queries import IssueEvaluationTarget
 
 
-def _make_issue(*, issue_id: int, issue_type: str = "issue") -> Issue:
+def _make_issue(
+    *, issue_id: int, issue_type: str = "issue", state: str = "open"
+) -> Issue:
     now = datetime.now(tz=UTC)
+    if issue_type == "pull_request":
+        metadata = {"merged": True}
+    elif state == "closed":
+        metadata = {"closing_references": [{"number": 99, "state": "merged"}]}
+    else:
+        metadata = {}
     return Issue(
         id=issue_id,
         project_id=1,
@@ -29,11 +37,11 @@ def _make_issue(*, issue_id: int, issue_type: str = "issue") -> Issue:
         issue_type=issue_type,
         title=f"Issue {issue_id}",
         body="Body",
-        state="open",
+        state=state,
         author="alice",
         labels=["bug"],
         comments=[{"author": "bob", "body": "Looks good"}],
-        metadata_={"merged": True} if issue_type == "pull_request" else {},
+        metadata_=metadata,
         created_at=now,
         updated_at=now,
         last_fetched_at=now,
@@ -160,6 +168,52 @@ class TestEvaluateIssues:
         assert second_call["pr_details"] == {"merged": True}
         assert first_call["state"] == "open"
         assert second_call["state"] == "open"
+
+    @pytest.mark.asyncio
+    async def test_closed_issue_forwards_closing_references(
+        self, monkeypatch
+    ) -> None:
+        """Closing PRs recorded in metadata_ are forwarded for closed issues.
+
+        Regression test: unlike the HTTP eval-client path (eval_api.py), the
+        direct-DB orchestrator previously never extracted closing_references
+        from Issue.metadata_ at all, so closed issues never got their closing
+        PR context in the summary prompt.
+        """
+        closed_issue = _make_issue(issue_id=1, state="closed")
+        targets = [
+            IssueEvaluationTarget(
+                issue=closed_issue,
+                project_name="charmcraft",
+                issue_data_hash=None,
+                eval_version=CURRENT_EVAL_VERSION,
+            ),
+        ]
+        evaluator = SimpleNamespace(
+            evaluate=AsyncMock(side_effect=[_valid_result(issue_hash="new-hash")]),
+            model="eval-model",
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
+            AsyncMock(return_value=targets),
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.store_evaluation_result", AsyncMock()
+        )
+
+        await _evaluate_issues(
+            session_factory=object(),
+            evaluator=evaluator,
+            maintainers={"alice"},
+            llm_backend="local",
+            resume=False,
+        )
+
+        call_kwargs = evaluator.evaluate.await_args_list[0].kwargs
+        assert call_kwargs["closing_references"] == [
+            {"number": 99, "state": "merged"}
+        ]
+        assert call_kwargs["pr_details"] is None
 
     @pytest.mark.asyncio
     async def test_accepts_closed_issue_summary_only_results(self, monkeypatch) -> None:

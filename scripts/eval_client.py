@@ -456,6 +456,7 @@ async def run_evaluate_loop(
                         issue_data["state"],
                         issue_data.get("labels", []),
                         issue_data.get("comments"),
+                        pr_details=issue_data.get("pr_details"),
                     )
                     current_hash = issue_data.get("current_hash", "")
                     if current_hash and local_hash != current_hash:
@@ -511,6 +512,7 @@ async def run_evaluate_loop(
                                 comment_count=len(issue_data.get("comments", [])),
                                 comments=issue_data.get("comments"),
                                 closing_references=issue_data.get("closing_references"),
+                                pr_details=issue_data.get("pr_details"),
                             )
                         )
                     except Exception:

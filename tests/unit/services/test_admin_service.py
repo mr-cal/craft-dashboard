@@ -364,6 +364,43 @@ class TestGetRecentIssueActivity:
         )
         assert activities[0]["issue_type"] == "issue"
 
+    async def test_excludes_filtered_issues(self, test_db_session) -> None:
+        """Dependency-dashboard issues listed in filtered_issues are excluded."""
+        project = Project(
+            name="snapcraft",
+            category="application",
+            github_org="canonical",
+            display_order=1,
+        )
+        test_db_session.add(project)
+        await test_db_session.flush()
+
+        test_db_session.add_all(
+            [
+                IssueActivity(
+                    project_id=project.id,
+                    issue_number=4472,
+                    change_type="updated",
+                    title="Dependency Dashboard",
+                    occurred_at=datetime(2025, 1, 10, 12, 0, tzinfo=UTC),
+                ),
+                IssueActivity(
+                    project_id=project.id,
+                    issue_number=12,
+                    change_type="updated",
+                    title="A real issue",
+                    occurred_at=datetime(2025, 1, 10, 11, 0, tzinfo=UTC),
+                ),
+            ]
+        )
+        await test_db_session.commit()
+
+        activities = await AdminService(test_db_session).get_recent_issue_activity(
+            filtered_issues={"snapcraft": ["4472"]}
+        )
+
+        assert [activity["number"] for activity in activities] == ["12"]
+
 
 class TestGetIssuesForRun:
     async def test_change_type_joined_from_matching_activity(
@@ -465,6 +502,60 @@ class TestGetIssuesForRun:
         if occurred_at.tzinfo is None:
             occurred_at = occurred_at.replace(tzinfo=UTC)
         assert occurred_at == datetime(2025, 1, 10, 11, 0, tzinfo=UTC)
+
+    async def test_excludes_filtered_issues(self, test_db_session) -> None:
+        """Dependency-dashboard issues listed in filtered_issues are excluded."""
+        project = Project(
+            name="snapcraft",
+            category="application",
+            github_org="canonical",
+            display_order=1,
+        )
+        test_db_session.add(project)
+        await test_db_session.flush()
+
+        run = CollectionRun(
+            source="github",
+            status="completed",
+            started_at=datetime(2025, 1, 10, 10, 0, tzinfo=UTC),
+        )
+        test_db_session.add(run)
+        await test_db_session.flush()
+
+        test_db_session.add_all(
+            [
+                Issue(
+                    project_id=project.id,
+                    source="github",
+                    external_id="4472",
+                    issue_type="issue",
+                    title="Dependency Dashboard",
+                    state="open",
+                    url="https://github.com/canonical/snapcraft/issues/4472",
+                    last_fetched_at=datetime(2025, 1, 10, 11, 0, tzinfo=UTC),
+                    collection_run_id=run.id,
+                ),
+                Issue(
+                    project_id=project.id,
+                    source="github",
+                    external_id="12",
+                    issue_type="issue",
+                    title="A real issue",
+                    state="open",
+                    url="https://github.com/canonical/snapcraft/issues/12",
+                    last_fetched_at=datetime(2025, 1, 10, 11, 0, tzinfo=UTC),
+                    collection_run_id=run.id,
+                ),
+            ]
+        )
+        await test_db_session.commit()
+
+        issues, total = await AdminService(test_db_session).get_issues_for_run(
+            run.id, filtered_issues={"snapcraft": ["4472"]}
+        )
+
+        assert total == 1
+        assert [issue["number"] for issue in issues] == ["12"]
 
 
 class TestGetApiBudget:

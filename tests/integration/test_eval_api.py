@@ -119,6 +119,7 @@ class TestEvalNextIntegration:
             "current_hash": expected_hash,
             "maintainers": ["alice", "bob"],
             "closing_references": [],
+            "pr_details": {},
         }
 
         evaluations = asyncio.get_event_loop().run_until_complete(
@@ -246,6 +247,107 @@ class TestEvalNextIntegration:
         assert skipped.status_code == 204
         assert forced.status_code == 200
         assert forced.json()["issue_id"] == 1
+
+    def test_next_returns_pr_after_new_review_approval(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        """A PR approval changes the hash even with no new comment, so it's re-queued.
+
+        Regression test for issues/PRs whose review status changed (e.g. a new
+        approval) not being picked up by the eval client because the content
+        hash didn't account for PR review/CI metadata.
+        """
+        project = make_project(id=1, name="craft-application")
+        issue = make_issue(
+            id=1,
+            project_id=1,
+            external_id="1140",
+            issue_type="pull_request",
+            title="Fix flaky test",
+            state="open",
+        )
+        # Evaluation was stored before the PR was approved: hash computed
+        # without any pr_details (as it would have been prior to this fix, or
+        # simply before the approval happened).
+        stale_hash = _compute_content_hash(
+            issue.title,
+            issue.body,
+            issue.state,
+            issue.labels,
+            issue.comments,
+        )
+        existing_eval = make_evaluation(
+            id=1,
+            issue_id=1,
+            latest=True,
+            summary="This summary is intentionally long enough.",
+            suggested_action="keep_open",
+            suggested_action_reason="Waiting on review.",
+            scores={
+                "staleness": 0,
+                "complexity": 0,
+                "support_request": 0,
+                "readiness": 0,
+            },
+            eval_version=CURRENT_EVAL_VERSION,
+            issue_data_hash=stale_hash,
+        )
+        # The PR has since been approved.
+        issue.metadata_ = {"review_status": "approved", "review_count": 1}
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue, existing_eval)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/next?open_only=false",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["issue_id"] == 1
+        assert response.json()["pr_details"] == {
+            "review_status": "approved",
+            "review_count": 1,
+        }
+
+    def test_next_response_includes_pr_details(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        """The /api/eval/next payload surfaces PR review/CI metadata."""
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(
+            id=1,
+            project_id=1,
+            external_id="7",
+            issue_type="pull_request",
+            title="Add feature",
+        )
+        issue.metadata_ = {
+            "review_status": "changes_requested",
+            "review_count": 2,
+            "ci_passing": ["lint"],
+            "ci_failing": ["unit"],
+            "ci_pending": [],
+            "unresolved_review_comments": 1,
+            "diff_additions": 20,
+            "diff_deletions": 4,
+            "diff_files_changed": 2,
+        }
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/next",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["pr_details"] == issue.metadata_
 
 
 class TestEvalNextPriorityOrdering:

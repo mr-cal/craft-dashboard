@@ -159,6 +159,17 @@ REAL_ISSUE_PR = {
     "updated_at": "2026-06-01T12:00:00+00:00",
     "current_hash": "a127efca396f446d",
     "maintainers": ["alice-canonical"],
+    "pr_details": {
+        "review_status": "approved",
+        "review_count": 1,
+        "ci_passing": ["lint", "unit"],
+        "ci_failing": [],
+        "ci_pending": [],
+        "unresolved_review_comments": 0,
+        "diff_additions": 42,
+        "diff_deletions": 3,
+        "diff_files_changed": 5,
+    },
 }
 
 SAMPLE_EVALUATE_RESULT: dict[str, Any] = {
@@ -406,6 +417,29 @@ class TestEvalClientHappyPath:
         call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
         assert call_kwargs["issue_type"] == "pull_request"
         assert call_kwargs["labels"] == ["enhancement", "ready-for-review"]
+
+    @pytest.mark.asyncio
+    async def test_pr_details_forwarded_to_evaluator(
+        self, monkeypatch, patched_runtime
+    ) -> None:
+        """PR review/CI metadata from the server response reaches evaluator.evaluate().
+
+        Regression test: pr_details was previously never forwarded from the
+        /api/eval/next response to evaluator.evaluate(), silently dropping
+        review/CI context (e.g. a new approval) from the LLM prompt.
+        """
+        _patch_http(
+            monkeypatch,
+            get_responses=_with_status(
+                httpx.Response(status_code=200, json=REAL_ISSUE_PR)
+            ),
+            post_responses=[httpx.Response(status_code=200)],
+        )
+
+        await eval_client.run_evaluate_loop(**DEFAULT_KWARGS)
+
+        call_kwargs = patched_runtime["evaluator"].evaluate.call_args.kwargs
+        assert call_kwargs["pr_details"] == REAL_ISSUE_PR["pr_details"]
 
     @pytest.mark.asyncio
     async def test_maintainer_author_is_maintainer_flag(

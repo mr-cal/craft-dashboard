@@ -269,3 +269,63 @@ class TestBuildClosedEvaluatePrompt:
         )
         assert "closed" in msgs[1]["content"].lower()
         assert "Old bug" in msgs[1]["content"]
+
+    def test_includes_pr_details_for_merged_pr(self) -> None:
+        """A merged PR's final review/CI state is included in the summary prompt."""
+        msgs = build_closed_evaluate_prompt(
+            title="Add feature",
+            body="Description",
+            issue_type="pull_request",
+            state="merged",
+            labels=[],
+            age_days=5,
+            last_activity_days=1,
+            author="dev",
+            is_maintainer=False,
+            comment_count=0,
+            pr_details={
+                "review_status": "approved",
+                "review_count": 2,
+                "ci_passing": ["lint"],
+                "ci_failing": [],
+                "ci_pending": [],
+                "unresolved_review_comments": 0,
+                "diff_additions": 10,
+                "diff_deletions": 5,
+                "diff_files_changed": 3,
+            },
+        )
+        assert "approved" in msgs[1]["content"]
+
+    def test_no_pr_details_for_closed_issue(self) -> None:
+        """pr_details is ignored for non-PR issue_type, even if passed."""
+        msgs = build_closed_evaluate_prompt(
+            title="Bug",
+            body=None,
+            issue_type="issue",
+            state="closed",
+            labels=[],
+            age_days=0,
+            last_activity_days=0,
+            author="x",
+            is_maintainer=False,
+            comment_count=0,
+            pr_details={"review_status": "should_not_appear"},
+        )
+        assert "should_not_appear" not in msgs[1]["content"]
+
+    def test_pr_details_omitted_when_none(self) -> None:
+        """No error and no stray formatting when pr_details is not supplied."""
+        msgs = build_closed_evaluate_prompt(
+            title="Add feature",
+            body="Description",
+            issue_type="pull_request",
+            state="merged",
+            labels=[],
+            age_days=5,
+            last_activity_days=1,
+            author="dev",
+            is_maintainer=False,
+            comment_count=0,
+        )
+        assert "Review status" not in msgs[1]["content"]

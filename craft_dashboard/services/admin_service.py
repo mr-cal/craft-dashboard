@@ -7,7 +7,7 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, TypedDict
 
-from sqlalchemy import String, cast, func, select
+from sqlalchemy import String, cast, func, or_, select
 
 from craft_dashboard.collectors.github import GitHubCollector, RateLimitStatus
 from craft_dashboard.models.collection_run import CollectionRun
@@ -16,10 +16,14 @@ from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.refresh_schedule import RefreshSchedule
+from craft_dashboard.repositories.issue_repository import (
+    _build_excluded_issues_condition,
+)
 from craft_dashboard.settings import Settings
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql.elements import ColumnElement
 
 
 class TokenStats(TypedDict):
@@ -106,6 +110,30 @@ def _ensure_utc(value: datetime | None) -> datetime | None:
     if value is None or value.tzinfo is not None:
         return value
     return value.replace(tzinfo=UTC)
+
+
+def _build_excluded_activity_condition(
+    filtered_issues: dict[str, list[str]],
+) -> ColumnElement[bool] | None:
+    """Return a NOT(...) clause excluding configured issue numbers from IssueActivity.
+
+    Mirrors ``issue_repository._build_excluded_issues_condition`` but matches on
+    ``IssueActivity.issue_number`` (an integer column) instead of
+    ``Issue.external_id``, since the activity feed query only outer-joins
+    ``Issue`` (the issue row may no longer exist) and must not depend on that
+    join to apply the exclusion. Requires ``Project`` to already be joined in
+    the calling query. Returns None when filtered_issues is empty.
+    """
+    conditions = [
+        (Project.name == project_name)
+        & cast(IssueActivity.issue_number, String).in_(ids)
+        for project_name, ids in filtered_issues.items()
+        if ids
+    ]
+    if not conditions:
+        return None
+    combined = or_(*conditions) if len(conditions) > 1 else conditions[0]
+    return ~combined
 
 
 class AdminService:
@@ -280,14 +308,21 @@ class AdminService:
             for run in runs
         ]
 
-    async def get_recent_issue_activity(self, limit: int = 50) -> list[ActivityEntry]:
+    async def get_recent_issue_activity(
+        self,
+        limit: int = 50,
+        filtered_issues: dict[str, list[str]] | None = None,
+    ) -> list[ActivityEntry]:
         """Return the most recent issue/PR change events, newest first.
 
         Joined against ``Issue`` for the live GitHub URL; falls back to the
         title recorded at the time of the change if the issue row itself
-        was later removed (e.g. project deletion).
+        was later removed (e.g. project deletion). Issues listed in
+        *filtered_issues* (e.g. Renovate/Dependabot "Dependency Dashboard"
+        meta-issues) are excluded so they don't dominate the admin feed with
+        noise.
         """
-        rows = await self.session.execute(
+        query = (
             select(
                 IssueActivity,
                 Project.name.label("project_name"),
@@ -301,8 +336,12 @@ class AdminService:
                 & (Issue.source == "github")
                 & (Issue.external_id == cast(IssueActivity.issue_number, String)),
             )
-            .order_by(IssueActivity.occurred_at.desc())
-            .limit(limit)
+        )
+        excl = _build_excluded_activity_condition(filtered_issues or {})
+        if excl is not None:
+            query = query.where(excl)
+        rows = await self.session.execute(
+            query.order_by(IssueActivity.occurred_at.desc()).limit(limit)
         )
         return [
             {
@@ -349,12 +388,16 @@ class AdminService:
         self,
         run_id: int,
         limit: int = 100,
+        filtered_issues: dict[str, list[str]] | None = None,
     ) -> tuple[list[ActivityEntry], int]:
         """Return up to *limit* issues belonging to a collection run and the total count.
 
         Args:
             run_id: Primary key of the collection run.
             limit: Maximum number of issues to return.
+            filtered_issues: Issue numbers per project to exclude (e.g.
+                Renovate/Dependabot "Dependency Dashboard" meta-issues), matching
+                ``craft-dashboard.toml``'s ``[issues.filter]`` config.
 
         Returns:
             A tuple of (issue list, total count).  The list is sorted by project
@@ -363,14 +406,20 @@ class AdminService:
             are included with change_type "unchanged".
 
         """
-        total_result = await self.session.execute(
+        excl = _build_excluded_issues_condition(filtered_issues or {})
+
+        total_query = (
             select(func.count())
             .select_from(Issue)
+            .join(Project, Issue.project_id == Project.id)
             .where(Issue.collection_run_id == run_id)
         )
+        if excl is not None:
+            total_query = total_query.where(excl)
+        total_result = await self.session.execute(total_query)
         total = total_result.scalar_one()
 
-        rows_result = await self.session.execute(
+        rows_query = (
             select(
                 Issue,
                 Project.name.label("project_name"),
@@ -385,8 +434,11 @@ class AdminService:
                 & (cast(IssueActivity.issue_number, String) == Issue.external_id),
             )
             .where(Issue.collection_run_id == run_id)
-            .order_by(Project.name, Issue.title)
-            .limit(limit)
+        )
+        if excl is not None:
+            rows_query = rows_query.where(excl)
+        rows_result = await self.session.execute(
+            rows_query.order_by(Project.name, Issue.title).limit(limit)
         )
         issues: list[ActivityEntry] = [
             {

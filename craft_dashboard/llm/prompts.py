@@ -106,6 +106,7 @@ def _build_summary_user_content(
     comments: list[dict] | None,
     state: str | None = None,
     closing_references: list[dict] | None = None,
+    pr_details: dict | None = None,
 ) -> str:
     """Build shared user content for summary prompts."""
     type_label = "Pull Request" if issue_type == "pull_request" else "Issue"
@@ -113,6 +114,9 @@ def _build_summary_user_content(
     comments_text = _format_comments(comments or [])
     state_line = f"State: {state}\n" if state else ""
     closing_refs_text = _format_closing_references(closing_references or [])
+    pr_details_text = (
+        _format_pr_details(pr_details or {}) if issue_type == "pull_request" else ""
+    )
 
     return (
         f"Type: {type_label}\n"
@@ -124,6 +128,7 @@ def _build_summary_user_content(
         f"Last activity: {last_activity_days} days ago\n"
         f"Comment count: {comment_count}\n"
         f"Body:\n{_truncate_body(body)}"
+        f"{pr_details_text}"
         f"{comments_text}"
         f"{closing_refs_text}"
     )
@@ -351,6 +356,7 @@ def build_closed_evaluate_prompt(
     is_maintainer: bool = False,
     comments: list[dict] | None = None,
     closing_references: list[dict] | None = None,
+    pr_details: dict | None = None,
 ) -> list[dict[str, str]]:
     """Build a combined summary prompt for a closed issue or merged PR."""
     user_content = _build_summary_user_content(
@@ -366,6 +372,7 @@ def build_closed_evaluate_prompt(
         is_maintainer=is_maintainer,
         comments=comments,
         closing_references=closing_references,
+        pr_details=pr_details,
     )
     return [
         {"role": "system", "content": _CLOSED_EVAL_SYSTEM},

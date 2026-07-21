@@ -224,6 +224,14 @@ async def _evaluate_issues(
             if issue.issue_type == "pull_request" and issue.metadata_
             else None
         )
+        # Closed (non-PR) issues may have closing PRs recorded by the collector
+        # in metadata_; surface them so build_closed_evaluate_prompt() can
+        # reference what actually resolved the issue.
+        closing_references = (
+            (issue.metadata_ or {}).get("closing_references")
+            if issue.issue_type != "pull_request"
+            else None
+        )
 
         issue_ref = f"{target.project_name}#{issue.external_id}"
         pct = (idx / total_to_eval * 100) if total_to_eval > 0 else 0
@@ -249,6 +257,7 @@ async def _evaluate_issues(
             "comment_count": len(issue_comments),
             "comments": issue_comments,
             "pr_details": pr_details,
+            "closing_references": closing_references,
             "existing_hash": existing_hash,
         }
 

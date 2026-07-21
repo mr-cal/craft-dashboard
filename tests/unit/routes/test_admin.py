@@ -126,7 +126,9 @@ def _stub_admin_page_metrics(
     api_budget_exception: Exception | None = None,
     next_expected_fetch=None,
 ) -> None:
-    async def _fake_recent_activity(self, limit: int = 50):
+    async def _fake_recent_activity(
+        self, limit: int = 50, filtered_issues: dict | None = None
+    ):
         assert limit == 50
         return recent_activity if recent_activity is not None else []
 
