@@ -77,7 +77,9 @@ writes results directly to the database.
 
 **Prerequisites:** `OPENROUTER_API_KEY` in `.env` and `ENABLE_SERVER_EVAL=true`
 (disabled by default; the pull-based `scripts/eval_client.py` workflow is
-preferred).
+preferred). In production, `.env` lives at `/opt/vps-infra/.env` on the VPS
+(see "Reloading .env in production" in [`docs/deployment.md`](deployment.md)
+for how to edit it and apply changes).
 
 ```
 # evaluate all open issues (manual/opt-in; not run on a schedule by default)
