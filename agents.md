@@ -15,7 +15,7 @@ Existing failures should be noted and communicated to the user.
 Any changes to the Dockerfile or Alembic migrations should also verify that
 `make build` succeeds.
 
-Finally, your changes should be commited and pushed.
+Finally, your changes should be committed and pushed.
 
 ## Before completing UI/UX tasks
 
@@ -37,8 +37,10 @@ Instead, just push to a custom url with the token.
 
 - `craft-dashboard.toml` - project list, maintainers, bots, hotfix thresholds.
 - `.env` - runtime secrets and feature flags. Not committed.
-- `.env.llm` - information for connecting to the server for debugging and pushing
-  changes to git repos.
+  - You can ALWAYS connect to the local llm server and to the production web server
+    using the info in this file. Don't assume you can't access them.
+- `.env.llm` - information for connecting to the server for debugging, pushing changes
+  to git repos, and triggering deployments.
 - `alembic/versions/` - database migrations. Always generate with
   `uv run alembic revision --autogenerate -m "<description>"`.
 
