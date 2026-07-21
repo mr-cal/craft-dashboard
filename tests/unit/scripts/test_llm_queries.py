@@ -7,7 +7,13 @@ from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
-from scripts.llm.queries import _build_issue_query, fetch_issue_evaluation_targets
+from scripts.llm.queries import (
+    _build_issue_query,
+    count_issue_evaluation_targets,
+    fetch_issue_evaluation_breakdown,
+    fetch_issue_evaluation_targets,
+    stream_issue_evaluation_targets,
+)
 from sqlalchemy.dialects import postgresql as pg_dialect
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -176,3 +182,136 @@ class TestFetchIssueEvaluationTargets:
             CURRENT_EVAL_VERSION,
             CURRENT_EVAL_VERSION,
         ]
+
+
+async def _seed_two_projects_with_issues(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Seed two projects with a handful of open/closed issues, no evals."""
+    async with session_factory() as session:
+        snapcraft = Project(name="snapcraft", category="application")
+        charmcraft = Project(name="charmcraft", category="application")
+        session.add_all([snapcraft, charmcraft])
+        await session.flush()
+
+        issues = [
+            _issue(issue_id=1, state="open"),
+            _issue(issue_id=2, state="open"),
+            _issue(issue_id=3, state="closed"),
+            _issue(issue_id=4, state="open"),
+            _issue(issue_id=5, state="closed"),
+        ]
+        for issue, project in zip(
+            issues, [snapcraft, snapcraft, snapcraft, charmcraft, charmcraft]
+        ):
+            issue.project_id = project.id
+            session.add(issue)
+        await session.commit()
+
+
+class TestCountIssueEvaluationTargets:
+    @pytest.mark.asyncio
+    async def test_count_matches_fetch_length(
+        self, test_db_engine: AsyncEngine
+    ) -> None:
+        session_factory = async_sessionmaker(
+            test_db_engine, class_=AsyncSession, expire_on_commit=False
+        )
+        await _seed_two_projects_with_issues(session_factory)
+
+        count = await count_issue_evaluation_targets(session_factory)
+        targets = await fetch_issue_evaluation_targets(session_factory)
+
+        assert count == len(targets) == 5
+
+    @pytest.mark.asyncio
+    async def test_count_respects_filters(self, test_db_engine: AsyncEngine) -> None:
+        session_factory = async_sessionmaker(
+            test_db_engine, class_=AsyncSession, expire_on_commit=False
+        )
+        await _seed_two_projects_with_issues(session_factory)
+
+        count = await count_issue_evaluation_targets(session_factory, open_only=True)
+
+        assert count == 3
+
+
+class TestStreamIssueEvaluationTargets:
+    @pytest.mark.asyncio
+    async def test_streams_all_matching_targets(
+        self, test_db_engine: AsyncEngine
+    ) -> None:
+        session_factory = async_sessionmaker(
+            test_db_engine, class_=AsyncSession, expire_on_commit=False
+        )
+        await _seed_two_projects_with_issues(session_factory)
+
+        streamed = [
+            target.issue.id
+            async for target in stream_issue_evaluation_targets(session_factory)
+        ]
+        fetched = [
+            target.issue.id
+            for target in await fetch_issue_evaluation_targets(session_factory)
+        ]
+
+        assert streamed == fetched
+
+    @pytest.mark.asyncio
+    async def test_streams_across_multiple_pages(
+        self, test_db_engine: AsyncEngine
+    ) -> None:
+        session_factory = async_sessionmaker(
+            test_db_engine, class_=AsyncSession, expire_on_commit=False
+        )
+        await _seed_two_projects_with_issues(session_factory)
+
+        # A page size smaller than the total row count forces at least two
+        # offset/limit round-trips, exercising the pagination loop itself.
+        streamed = [
+            target.issue.id
+            async for target in stream_issue_evaluation_targets(
+                session_factory, page_size=2
+            )
+        ]
+
+        assert len(streamed) == 5
+        assert len(set(streamed)) == 5
+
+
+class TestFetchIssueEvaluationBreakdown:
+    @pytest.mark.asyncio
+    async def test_groups_by_project_and_state(
+        self, test_db_engine: AsyncEngine
+    ) -> None:
+        session_factory = async_sessionmaker(
+            test_db_engine, class_=AsyncSession, expire_on_commit=False
+        )
+        await _seed_two_projects_with_issues(session_factory)
+
+        breakdown = await fetch_issue_evaluation_breakdown(session_factory)
+
+        assert breakdown == {
+            ("snapcraft", "open"): 2,
+            ("snapcraft", "closed"): 1,
+            ("charmcraft", "open"): 1,
+            ("charmcraft", "closed"): 1,
+        }
+
+    @pytest.mark.asyncio
+    async def test_breakdown_respects_project_filter(
+        self, test_db_engine: AsyncEngine
+    ) -> None:
+        session_factory = async_sessionmaker(
+            test_db_engine, class_=AsyncSession, expire_on_commit=False
+        )
+        await _seed_two_projects_with_issues(session_factory)
+
+        breakdown = await fetch_issue_evaluation_breakdown(
+            session_factory, project_filter="snapcraft"
+        )
+
+        assert breakdown == {
+            ("snapcraft", "open"): 2,
+            ("snapcraft", "closed"): 1,
+        }

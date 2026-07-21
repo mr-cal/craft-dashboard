@@ -1,11 +1,18 @@
 """Tests for scripts.llm.cli."""
 
+import json
 import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from click.testing import CliRunner
-from scripts.llm.cli import _clear_main, _main, _parse_issue_filter, cli
+from scripts.llm.cli import (
+    EvaluateOptions,
+    _clear_main,
+    _main,
+    _parse_issue_filter,
+    cli,
+)
 
 
 class TestParseIssueFilter:
@@ -85,6 +92,8 @@ class TestEvaluateCommand:
                 "skipped": 0,
                 "errored": 0,
                 "total_tokens": 0,
+                "estimated_cost_usd": 0.0,
+                "unpriced_evaluations": 0,
             }
         )
         monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
@@ -95,6 +104,257 @@ class TestEvaluateCommand:
         assert result.exit_code == 0
         evaluate_issues.assert_awaited_once()
         assert evaluate_issues.await_args.kwargs["concurrency"] == 4
+
+    def test_json_summary_flag_prints_json_stats(self, monkeypatch) -> None:
+        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+
+        engine = MagicMock()
+        engine.dispose = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.load_config",
+            MagicMock(return_value=MagicMock(maintainers=[])),
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
+        )
+        evaluate_issues = AsyncMock(
+            return_value={
+                "evaluated": 3,
+                "skipped": 1,
+                "errored": 0,
+                "total_tokens": 500,
+                "estimated_cost_usd": 0.05,
+                "unpriced_evaluations": 0,
+            }
+        )
+        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["evaluate", "--json-summary"])
+
+        assert result.exit_code == 0
+        json_line = result.output.strip().splitlines()[-1]
+        assert json.loads(json_line) == {
+            "evaluated": 3,
+            "skipped": 1,
+            "errored": 0,
+            "total_tokens": 500,
+            "estimated_cost_usd": 0.05,
+            "unpriced_evaluations": 0,
+        }
+
+    def test_without_json_summary_flag_prints_no_json(self, monkeypatch) -> None:
+        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+
+        engine = MagicMock()
+        engine.dispose = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.load_config",
+            MagicMock(return_value=MagicMock(maintainers=[])),
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
+        )
+        evaluate_issues = AsyncMock(
+            return_value={
+                "evaluated": 3,
+                "skipped": 1,
+                "errored": 0,
+                "total_tokens": 500,
+                "estimated_cost_usd": 0.05,
+                "unpriced_evaluations": 0,
+            }
+        )
+        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["evaluate"])
+
+        assert result.exit_code == 0
+        assert result.output.strip() == ""
+
+    def test_exits_nonzero_when_errors_occurred(self, monkeypatch) -> None:
+        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+
+        engine = MagicMock()
+        engine.dispose = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.load_config",
+            MagicMock(return_value=MagicMock(maintainers=[])),
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
+        )
+        evaluate_issues = AsyncMock(
+            return_value={
+                "evaluated": 2,
+                "skipped": 0,
+                "errored": 3,
+                "total_tokens": 100,
+                "estimated_cost_usd": 0.0,
+                "unpriced_evaluations": 0,
+            }
+        )
+        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["evaluate"])
+
+        assert result.exit_code == 1
+
+    def test_exits_zero_when_no_errors_occurred(self, monkeypatch) -> None:
+        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+
+        engine = MagicMock()
+        engine.dispose = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.load_config",
+            MagicMock(return_value=MagicMock(maintainers=[])),
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
+        )
+        evaluate_issues = AsyncMock(
+            return_value={
+                "evaluated": 2,
+                "skipped": 0,
+                "errored": 0,
+                "total_tokens": 100,
+                "estimated_cost_usd": 0.0,
+                "unpriced_evaluations": 0,
+            }
+        )
+        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["evaluate"])
+
+        assert result.exit_code == 0
+
+    def test_exits_zero_when_server_side_eval_disabled_even_conceptually(
+        self, monkeypatch
+    ) -> None:
+        """Disabled-eval early-return (stats=None) must not be mistaken for errors."""
+        monkeypatch.setenv("ENABLE_SERVER_EVAL", "false")
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["evaluate"])
+
+        assert result.exit_code == 0
+
+    def test_logs_estimated_cost_when_present(self, monkeypatch, caplog) -> None:
+        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+
+        engine = MagicMock()
+        engine.dispose = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.load_config",
+            MagicMock(return_value=MagicMock(maintainers=[])),
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
+        )
+        evaluate_issues = AsyncMock(
+            return_value={
+                "evaluated": 3,
+                "skipped": 0,
+                "errored": 0,
+                "total_tokens": 900,
+                "estimated_cost_usd": 0.0123,
+                "unpriced_evaluations": 0,
+            }
+        )
+        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
+
+        runner = CliRunner()
+        with caplog.at_level(logging.INFO, logger="scripts.llm.cli"):
+            result = runner.invoke(cli, ["evaluate"])
+
+        assert result.exit_code == 0
+        assert "$0.0123 estimated cost" in caplog.text
+
+    def test_notes_unpriced_evaluations_in_cost_summary(
+        self, monkeypatch, caplog
+    ) -> None:
+        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+
+        engine = MagicMock()
+        engine.dispose = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.load_config",
+            MagicMock(return_value=MagicMock(maintainers=[])),
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
+        )
+        evaluate_issues = AsyncMock(
+            return_value={
+                "evaluated": 2,
+                "skipped": 0,
+                "errored": 0,
+                "total_tokens": 200,
+                "estimated_cost_usd": 0.0,
+                "unpriced_evaluations": 2,
+            }
+        )
+        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
+
+        runner = CliRunner()
+        with caplog.at_level(logging.INFO, logger="scripts.llm.cli"):
+            result = runner.invoke(cli, ["evaluate"])
+
+        assert result.exit_code == 0
+        assert "2 evaluations excluded" in caplog.text
+        assert "no pricing data" in caplog.text
 
     def test_no_console_passed_when_stdout_is_not_a_tty(self, monkeypatch) -> None:
         """CliRunner's captured stdout isn't a real TTY, so no progress bar."""
@@ -123,6 +383,8 @@ class TestEvaluateCommand:
                 "skipped": 0,
                 "errored": 0,
                 "total_tokens": 0,
+                "estimated_cost_usd": 0.0,
+                "unpriced_evaluations": 0,
             }
         )
         monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
@@ -162,24 +424,28 @@ class TestEvaluateCommand:
                 "skipped": 0,
                 "errored": 0,
                 "total_tokens": 0,
+                "estimated_cost_usd": 0.0,
+                "unpriced_evaluations": 0,
             }
         )
         monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
 
         await _main(
-            project="",
-            limit=0,
-            open_only=False,
-            verbose=False,
-            force=False,
-            issue="",
-            incomplete=False,
-            stale_days=0,
-            dry_run=False,
-            strict_validation=False,
-            no_resume=False,
-            concurrency=1,
-            no_progress=False,
+            EvaluateOptions(
+                project="",
+                limit=0,
+                open_only=False,
+                verbose=False,
+                force=False,
+                issue="",
+                incomplete=False,
+                stale_days=0,
+                dry_run=False,
+                strict_validation=False,
+                no_resume=False,
+                concurrency=1,
+                no_progress=False,
+            )
         )
 
         assert evaluate_issues.await_args.kwargs["console"] is not None
@@ -216,24 +482,28 @@ class TestEvaluateCommand:
                 "skipped": 0,
                 "errored": 0,
                 "total_tokens": 0,
+                "estimated_cost_usd": 0.0,
+                "unpriced_evaluations": 0,
             }
         )
         monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
 
         await _main(
-            project="",
-            limit=0,
-            open_only=False,
-            verbose=False,
-            force=False,
-            issue="",
-            incomplete=False,
-            stale_days=0,
-            dry_run=False,
-            strict_validation=False,
-            no_resume=False,
-            concurrency=1,
-            no_progress=True,
+            EvaluateOptions(
+                project="",
+                limit=0,
+                open_only=False,
+                verbose=False,
+                force=False,
+                issue="",
+                incomplete=False,
+                stale_days=0,
+                dry_run=False,
+                strict_validation=False,
+                no_resume=False,
+                concurrency=1,
+                no_progress=True,
+            )
         )
 
         assert evaluate_issues.await_args.kwargs["console"] is None

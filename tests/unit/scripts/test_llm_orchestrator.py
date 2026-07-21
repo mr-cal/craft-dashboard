@@ -70,6 +70,63 @@ def _valid_result(*, issue_hash: str) -> dict:
     }
 
 
+def _stub_target_queries(
+    monkeypatch: pytest.MonkeyPatch,
+    targets: list[IssueEvaluationTarget],
+) -> None:
+    """Replace the query-layer functions the orchestrator calls with fakes.
+
+    Mirrors ``scripts.llm.queries``'s ``count_issue_evaluation_targets``,
+    ``stream_issue_evaluation_targets``, and ``fetch_issue_evaluation_breakdown``
+    against the given in-memory ``targets`` list, honoring only
+    ``include_issue_ids``/``exclude_issue_ids`` (the orchestrator's own
+    checkpoint-resume logic) and ignoring the SQL-level filter kwargs
+    (project_filter, open_only, etc.), which is queries.py's own
+    responsibility and is covered by test_llm_queries.py instead.
+    """
+
+    def _matching_ids(**kwargs: object) -> set[int]:
+        ids = {target.issue.id for target in targets}
+        include_issue_ids = kwargs.get("include_issue_ids")
+        if include_issue_ids is not None:
+            ids &= set(include_issue_ids)
+        exclude_issue_ids = kwargs.get("exclude_issue_ids")
+        if exclude_issue_ids:
+            ids -= set(exclude_issue_ids)
+        return ids
+
+    async def fake_count(*_args: object, **kwargs: object) -> int:
+        return len(_matching_ids(**kwargs))
+
+    async def fake_stream(*_args: object, **kwargs: object):
+        matching_ids = _matching_ids(**kwargs)
+        for target in targets:
+            if target.issue.id in matching_ids:
+                yield target
+
+    async def fake_breakdown(
+        *_args: object, **kwargs: object
+    ) -> dict[tuple[str, str], int]:
+        matching_ids = _matching_ids(**kwargs)
+        breakdown: dict[tuple[str, str], int] = {}
+        for target in targets:
+            if target.issue.id not in matching_ids:
+                continue
+            key = (target.project_name, target.issue.state)
+            breakdown[key] = breakdown.get(key, 0) + 1
+        return breakdown
+
+    monkeypatch.setattr(
+        "scripts.llm.orchestrator.count_issue_evaluation_targets", fake_count
+    )
+    monkeypatch.setattr(
+        "scripts.llm.orchestrator.stream_issue_evaluation_targets", fake_stream
+    )
+    monkeypatch.setattr(
+        "scripts.llm.orchestrator.fetch_issue_evaluation_breakdown", fake_breakdown
+    )
+
+
 class TestEvaluateIssues:
     @pytest.mark.asyncio
     async def test_dry_run_returns_count_without_calling_evaluator(
@@ -88,10 +145,7 @@ class TestEvaluateIssues:
             ),
         ]
         evaluator = SimpleNamespace(evaluate=AsyncMock(), model="eval-model")
-        fetch_targets = AsyncMock(return_value=targets)
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets", fetch_targets
-        )
+        _stub_target_queries(monkeypatch, targets)
 
         stats = await _evaluate_issues(
             session_factory=object(),
@@ -106,6 +160,8 @@ class TestEvaluateIssues:
             "skipped": 0,
             "errored": 0,
             "total_tokens": 0,
+            "estimated_cost_usd": 0.0,
+            "unpriced_evaluations": 0,
             "would_evaluate": 2,
         }
         evaluator.evaluate.assert_not_awaited()
@@ -138,10 +194,7 @@ class TestEvaluateIssues:
             model="eval-model",
         )
         persist_result = AsyncMock()
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
-            AsyncMock(return_value=targets),
-        )
+        _stub_target_queries(monkeypatch, targets)
         monkeypatch.setattr(
             "scripts.llm.orchestrator.store_evaluation_result", persist_result
         )
@@ -154,7 +207,14 @@ class TestEvaluateIssues:
             resume=False,
         )
 
-        assert stats == {"evaluated": 1, "skipped": 1, "errored": 0, "total_tokens": 77}
+        assert stats == {
+            "evaluated": 1,
+            "skipped": 1,
+            "errored": 0,
+            "total_tokens": 77,
+            "estimated_cost_usd": 0.0,
+            "unpriced_evaluations": 1,
+        }
         persist_result.assert_awaited_once()
         persisted_kwargs = persist_result.await_args.kwargs
         assert persisted_kwargs["issue_id"] == 1
@@ -195,10 +255,7 @@ class TestEvaluateIssues:
             evaluate=AsyncMock(side_effect=[_valid_result(issue_hash="new-hash")]),
             model="eval-model",
         )
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
-            AsyncMock(return_value=targets),
-        )
+        _stub_target_queries(monkeypatch, targets)
         monkeypatch.setattr(
             "scripts.llm.orchestrator.store_evaluation_result", AsyncMock()
         )
@@ -238,10 +295,7 @@ class TestEvaluateIssues:
             ),
             model="eval-model",
         )
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
-            AsyncMock(return_value=[target]),
-        )
+        _stub_target_queries(monkeypatch, [target])
         store_result = AsyncMock()
         monkeypatch.setattr(
             "scripts.llm.orchestrator.store_evaluation_result", store_result
@@ -254,7 +308,14 @@ class TestEvaluateIssues:
             resume=False,
         )
 
-        assert stats == {"evaluated": 1, "skipped": 0, "errored": 0, "total_tokens": 10}
+        assert stats == {
+            "evaluated": 1,
+            "skipped": 0,
+            "errored": 0,
+            "total_tokens": 10,
+            "estimated_cost_usd": 0.0,
+            "unpriced_evaluations": 1,
+        }
         assert evaluator.evaluate.await_args.kwargs["state"] == "closed"
         store_result.assert_awaited_once()
 
@@ -287,10 +348,7 @@ class TestEvaluateIssues:
             ),
             model="eval-model",
         )
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
-            AsyncMock(return_value=[target]),
-        )
+        _stub_target_queries(monkeypatch, [target])
         store_result = AsyncMock()
         monkeypatch.setattr(
             "scripts.llm.orchestrator.store_evaluation_result", store_result
@@ -304,7 +362,14 @@ class TestEvaluateIssues:
             resume=False,
         )
 
-        assert stats == {"evaluated": 0, "skipped": 0, "errored": 1, "total_tokens": 0}
+        assert stats == {
+            "evaluated": 0,
+            "skipped": 0,
+            "errored": 1,
+            "total_tokens": 0,
+            "estimated_cost_usd": 0.0,
+            "unpriced_evaluations": 0,
+        }
         store_result.assert_not_awaited()
         assert "Validation failed for issue" in caplog.text
 
@@ -334,10 +399,7 @@ class TestEvaluateIssues:
             ),
             model="eval-model",
         )
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
-            AsyncMock(return_value=targets),
-        )
+        _stub_target_queries(monkeypatch, targets)
 
         with pytest.raises(LLMValidationError):
             await _evaluate_issues(
@@ -372,10 +434,7 @@ class TestEvaluateIssues:
             ),
             model="eval-model",
         )
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
-            AsyncMock(return_value=[target]),
-        )
+        _stub_target_queries(monkeypatch, [target])
         store_result = AsyncMock()
         monkeypatch.setattr(
             "scripts.llm.orchestrator.store_evaluation_result", store_result
@@ -389,7 +448,14 @@ class TestEvaluateIssues:
             resume=False,
         )
 
-        assert stats == {"evaluated": 1, "skipped": 0, "errored": 0, "total_tokens": 77}
+        assert stats == {
+            "evaluated": 1,
+            "skipped": 0,
+            "errored": 0,
+            "total_tokens": 77,
+            "estimated_cost_usd": 0.0,
+            "unpriced_evaluations": 1,
+        }
         assert "Retrying charmcraft#1 after attempt 1/3 in 2.0s" in caplog.text
         assert evaluator.evaluate.await_count == 2
         store_result.assert_awaited_once()
@@ -433,10 +499,7 @@ class TestEvaluateIssues:
             ),
             model="eval-model",
         )
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
-            AsyncMock(return_value=targets),
-        )
+        _stub_target_queries(monkeypatch, targets)
         store_result = AsyncMock()
         monkeypatch.setattr(
             "scripts.llm.orchestrator.store_evaluation_result", store_result
@@ -449,7 +512,14 @@ class TestEvaluateIssues:
             resume=False,
         )
 
-        assert stats == {"evaluated": 1, "skipped": 0, "errored": 1, "total_tokens": 77}
+        assert stats == {
+            "evaluated": 1,
+            "skipped": 0,
+            "errored": 1,
+            "total_tokens": 77,
+            "estimated_cost_usd": 0.0,
+            "unpriced_evaluations": 1,
+        }
         assert evaluator.evaluate.await_count == 4
         store_result.assert_awaited_once()
         assert store_result.await_args.kwargs["issue_id"] == 2
@@ -474,10 +544,7 @@ class TestEvaluateIssues:
             evaluate=AsyncMock(return_value=_valid_result(issue_hash="hash-2")),
             model="eval-model",
         )
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
-            AsyncMock(return_value=targets),
-        )
+        _stub_target_queries(monkeypatch, targets)
         monkeypatch.setattr(
             "scripts.llm.orchestrator.compute_filter_hash",
             lambda **_: "filter-hash",
@@ -512,7 +579,14 @@ class TestEvaluateIssues:
             stale_days=7,
         )
 
-        assert stats == {"evaluated": 1, "skipped": 1, "errored": 0, "total_tokens": 77}
+        assert stats == {
+            "evaluated": 1,
+            "skipped": 1,
+            "errored": 0,
+            "total_tokens": 77,
+            "estimated_cost_usd": 0.0,
+            "unpriced_evaluations": 1,
+        }
         assert evaluator.evaluate.await_count == 1
         assert evaluator.evaluate.await_args.kwargs["title"] == "Issue 2"
         save_checkpoint.assert_called_once()
@@ -532,10 +606,7 @@ class TestEvaluateIssues:
             evaluate=AsyncMock(return_value=_valid_result(issue_hash="hash-1")),
             model="eval-model",
         )
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
-            AsyncMock(return_value=[target]),
-        )
+        _stub_target_queries(monkeypatch, [target])
         load_checkpoint = MagicMock()
         monkeypatch.setattr("scripts.llm.orchestrator.load_checkpoint", load_checkpoint)
         monkeypatch.setattr(
@@ -555,7 +626,14 @@ class TestEvaluateIssues:
             resume=False,
         )
 
-        assert stats == {"evaluated": 1, "skipped": 0, "errored": 0, "total_tokens": 77}
+        assert stats == {
+            "evaluated": 1,
+            "skipped": 0,
+            "errored": 0,
+            "total_tokens": 77,
+            "estimated_cost_usd": 0.0,
+            "unpriced_evaluations": 1,
+        }
         load_checkpoint.assert_not_called()
 
     @pytest.mark.asyncio
@@ -576,10 +654,7 @@ class TestEvaluateIssues:
             evaluate=AsyncMock(side_effect=[LLMQuotaError("quota"), None]),
             model="eval-model",
         )
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
-            AsyncMock(return_value=targets),
-        )
+        _stub_target_queries(monkeypatch, targets)
         store_result = AsyncMock()
         monkeypatch.setattr(
             "scripts.llm.orchestrator.store_evaluation_result", store_result
@@ -592,9 +667,76 @@ class TestEvaluateIssues:
             resume=False,
         )
 
-        assert stats == {"evaluated": 0, "skipped": 0, "errored": 0, "total_tokens": 0}
+        assert stats == {
+            "evaluated": 0,
+            "skipped": 0,
+            "errored": 0,
+            "total_tokens": 0,
+            "estimated_cost_usd": 0.0,
+            "unpriced_evaluations": 0,
+        }
         assert evaluator.evaluate.await_count == 1
         store_result.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_quota_errors_stop_cleanly_without_double_counting(
+        self, monkeypatch
+    ) -> None:
+        """Several workers hitting LLMQuotaError near-simultaneously must not
+        corrupt stats, double-count, or let evaluation continue past the
+        exhaustion point -- `quota_exhausted` is a plain bool flagged from
+        multiple concurrent tasks, which is safe under asyncio's
+        single-threaded cooperative scheduling but worth pinning down with
+        an explicit regression test.
+        """
+        targets = [
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=issue_id),
+                project_name="snapcraft",
+                issue_data_hash=None,
+            )
+            for issue_id in range(1, 11)
+        ]
+        call_count = 0
+
+        async def _evaluate(**_kwargs) -> dict:
+            nonlocal call_count
+            call_count += 1
+            # Yielding control here lets several concurrent workers all reach
+            # "about to raise LLMQuotaError" before any of them has had a
+            # chance to observe `quota_exhausted` becoming True.
+            await asyncio.sleep(0)
+            raise LLMQuotaError("quota exhausted")
+
+        evaluator = SimpleNamespace(
+            evaluate=AsyncMock(side_effect=_evaluate), model="m"
+        )
+        _stub_target_queries(monkeypatch, targets)
+        store_result = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.store_evaluation_result", store_result
+        )
+
+        stats = await _evaluate_issues(
+            session_factory=object(),
+            evaluator=evaluator,
+            maintainers=set(),
+            resume=False,
+            concurrency=5,
+        )
+
+        assert stats == {
+            "evaluated": 0,
+            "skipped": 0,
+            "errored": 0,
+            "total_tokens": 0,
+            "estimated_cost_usd": 0.0,
+            "unpriced_evaluations": 0,
+        }
+        store_result.assert_not_awaited()
+        # Multiple workers race into the quota-exhausted branch concurrently,
+        # but the run must still stop well short of evaluating every target.
+        assert 0 < call_count < len(targets)
 
     @pytest.mark.asyncio
     async def test_concurrency_evaluates_all_targets_with_multiple_workers(
@@ -616,10 +758,7 @@ class TestEvaluateIssues:
         evaluator = SimpleNamespace(
             evaluate=AsyncMock(side_effect=_evaluate), model="m"
         )
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
-            AsyncMock(return_value=targets),
-        )
+        _stub_target_queries(monkeypatch, targets)
         store_result = AsyncMock()
         monkeypatch.setattr(
             "scripts.llm.orchestrator.store_evaluation_result", store_result
@@ -638,6 +777,8 @@ class TestEvaluateIssues:
             "skipped": 0,
             "errored": 0,
             "total_tokens": 5 * 77,
+            "estimated_cost_usd": 0.0,
+            "unpriced_evaluations": 5,
         }
         assert evaluator.evaluate.await_count == 5
         assert store_result.await_count == 5
@@ -671,10 +812,7 @@ class TestEvaluateIssues:
         evaluator = SimpleNamespace(
             evaluate=AsyncMock(side_effect=_evaluate), model="m"
         )
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
-            AsyncMock(return_value=targets),
-        )
+        _stub_target_queries(monkeypatch, targets)
         monkeypatch.setattr(
             "scripts.llm.orchestrator.store_evaluation_result", AsyncMock()
         )
@@ -742,10 +880,7 @@ class TestEvaluateIssues:
         evaluator = SimpleNamespace(
             evaluate=AsyncMock(side_effect=_evaluate), model="m"
         )
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
-            AsyncMock(return_value=targets),
-        )
+        _stub_target_queries(monkeypatch, targets)
         monkeypatch.setattr(
             "scripts.llm.orchestrator.store_evaluation_result", AsyncMock()
         )
@@ -779,10 +914,7 @@ class TestEvaluateIssues:
         evaluator = SimpleNamespace(
             evaluate=AsyncMock(side_effect=_evaluate), model="m"
         )
-        monkeypatch.setattr(
-            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
-            AsyncMock(return_value=targets),
-        )
+        _stub_target_queries(monkeypatch, targets)
         monkeypatch.setattr(
             "scripts.llm.orchestrator.store_evaluation_result", AsyncMock()
         )

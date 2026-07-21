@@ -28,6 +28,7 @@ from rich.text import Text
 if TYPE_CHECKING:
     from rich.console import Console
     from rich.progress import Task as RichTask
+    from rich.progress import TaskID
 
     from scripts.eval_timing import TimingHistory
 
@@ -145,3 +146,56 @@ def make_progress(
         console=console,
         transient=False,
     )
+
+
+class ProgressTracker:
+    """Advances a live progress bar (and records ETA timing) after each item.
+
+    Wraps an optional Rich ``Progress``/``TimingHistory`` pair so callers can
+    unconditionally call :meth:`finish` after every processed item without
+    checking for ``None`` themselves. When no progress bar is active (e.g.
+    ``console`` was never passed to the caller), every method is a no-op,
+    which keeps the non-interactive code path exactly as cheap as before
+    this class existed.
+    """
+
+    def __init__(
+        self,
+        *,
+        progress: Progress | None,
+        task_id: TaskID | None,
+        timing: TimingHistory | None,
+        phase: str,
+    ) -> None:
+        """Initialize the tracker.
+
+        Args:
+            progress: The live Rich Progress instance to advance, or None to
+                disable progress reporting entirely.
+            task_id: The task within *progress* to advance (ignored when
+                *progress* is None).
+            timing: Optional persistent timing history to record durations
+                into, for ETA estimation on the current and future runs.
+            phase: Phase key to use with *timing*.
+
+        """
+        self._progress = progress
+        self._task_id = task_id
+        self._timing = timing
+        self._phase = phase
+
+    def finish(self, outcome: str | None, elapsed: float) -> None:
+        """Advance the bar by one item and record its duration for ETA.
+
+        Args:
+            outcome: One of "evaluated", "skipped", or "errored". Only
+                "evaluated" durations are recorded into the timing history,
+                since skipped/errored items don't reflect a full LLM call's
+                typical duration and would skew the ETA.
+            elapsed: Wall-clock seconds spent processing the item.
+
+        """
+        if self._progress is not None:
+            self._progress.update(self._task_id, advance=1)
+        if self._timing is not None and outcome == "evaluated":
+            self._timing.add(self._phase, elapsed)

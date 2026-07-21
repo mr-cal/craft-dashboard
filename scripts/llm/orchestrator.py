@@ -33,8 +33,15 @@ from scripts.llm.checkpoint import (
     load_checkpoint,
     save_checkpoint,
 )
-from scripts.llm.console import make_progress
-from scripts.llm.queries import IssueFilter, fetch_issue_evaluation_targets
+from scripts.llm.console import ProgressTracker, make_progress
+from scripts.llm.pricing import estimate_cost_usd, format_usd
+from scripts.llm.queries import (
+    IssueFilter,
+    count_issue_evaluation_targets,
+    fetch_issue_evaluation_breakdown,
+    stream_issue_evaluation_targets,
+)
+from scripts.llm.ratelimit import SharedRateLimiter, parse_retry_after
 from scripts.llm.storage import store_evaluation_result
 from scripts.llm.validation import validate_evaluation_result
 
@@ -53,6 +60,8 @@ class EvaluationStats(TypedDict):
     skipped: int
     errored: int
     total_tokens: int
+    estimated_cost_usd: float
+    unpriced_evaluations: int
 
 
 class DryRunEvaluationStats(EvaluationStats):
@@ -63,6 +72,7 @@ class DryRunEvaluationStats(EvaluationStats):
 
 logger = logging.getLogger(__name__)
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503})
+_HTTP_TOO_MANY_REQUESTS = 429
 _retry_sleep = asyncio.sleep
 
 
@@ -72,7 +82,12 @@ def _is_retryable_evaluation_error(exc: BaseException) -> bool:
     return isinstance(exc, (httpx.TimeoutException, LLMTimeoutError, LLMRateLimitError))
 
 
-def _log_retry_attempt(retry_state: RetryCallState, *, issue_ref: str) -> None:
+async def _log_retry_attempt(
+    retry_state: RetryCallState,
+    *,
+    issue_ref: str,
+    rate_limiter: SharedRateLimiter,
+) -> None:
     exception = retry_state.outcome.exception() if retry_state.outcome else None
     if exception is None:
         return
@@ -84,25 +99,41 @@ def _log_retry_attempt(retry_state: RetryCallState, *, issue_ref: str) -> None:
         retry_state.next_action.sleep,
         exception,
     )
+    if (
+        isinstance(exception, httpx.HTTPStatusError)
+        and exception.response.status_code == _HTTP_TOO_MANY_REQUESTS
+    ):
+        # Coordinate across all concurrent workers, not just this one: a 429
+        # here means the whole run should back off, not just this request's
+        # own retry loop.
+        retry_after = parse_retry_after(exception.response.headers.get("Retry-After"))
+        await rate_limiter.report_rate_limited(retry_after=retry_after)
 
 
 async def _evaluate_issue_with_retries(
     evaluator: IssueEvaluator,
     issue_kwargs: dict[str, object],
     issue_ref: str,
+    rate_limiter: SharedRateLimiter,
 ) -> EvaluationResult | None:
+    async def _before_sleep(retry_state: RetryCallState) -> None:
+        await _log_retry_attempt(
+            retry_state, issue_ref=issue_ref, rate_limiter=rate_limiter
+        )
+
     async for attempt in AsyncRetrying(
         retry=retry_if_exception(_is_retryable_evaluation_error),
         wait=wait_exponential(multiplier=2, min=2, max=8),
         stop=stop_after_attempt(3),
-        before_sleep=lambda retry_state: _log_retry_attempt(
-            retry_state, issue_ref=issue_ref
-        ),
+        before_sleep=_before_sleep,
         sleep=_retry_sleep,
         reraise=True,
     ):
         with attempt:
-            return await evaluator.evaluate(**issue_kwargs)
+            await rate_limiter.wait_if_throttled()
+            result = await evaluator.evaluate(**issue_kwargs)
+            await rate_limiter.report_success()
+            return result
     msg = f"Retry loop exited unexpectedly for {issue_ref}"
     raise RuntimeError(msg)
 
@@ -112,15 +143,80 @@ def _log_progress(
 ) -> None:
     if processed % 10 == 0:
         pct = (processed / total_to_eval * 100) if total_to_eval > 0 else 0
+        cost_suffix = (
+            f", ~{format_usd(stats['estimated_cost_usd'])} spent"
+            if stats["estimated_cost_usd"] > 0
+            else ""
+        )
         logger.info(
-            "Progress [%d/%d] (%.0f%%): %d evaluated, %d skipped, %d errors",
+            "Progress [%d/%d] (%.0f%%): %d evaluated, %d skipped, %d errors%s",
             processed,
             total_to_eval,
             pct,
             stats["evaluated"],
             stats["skipped"],
             stats["errored"],
+            cost_suffix,
         )
+
+
+def _build_issue_kwargs(
+    target: IssueEvaluationTarget, maintainers: set[str], *, force: bool
+) -> dict[str, object]:
+    """Build the evaluator prompt kwargs for one issue evaluation target."""
+    issue = target.issue
+    existing_hash = (
+        None
+        if force
+        else (
+            target.issue_data_hash
+            if target.eval_version == CURRENT_EVAL_VERSION
+            else None
+        )
+    )
+    labels = issue.labels if isinstance(issue.labels, list) else []
+
+    now = datetime.now(tz=UTC)
+    created = issue.created_at or now
+    updated = issue.updated_at or now
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=UTC)
+
+    age_days = (now - created).days
+    last_activity_days = (now - updated).days
+    issue_comments = issue.comments if issue.comments else []
+    pr_details = (
+        issue.metadata_
+        if issue.issue_type == "pull_request" and issue.metadata_
+        else None
+    )
+    # Closed (non-PR) issues may have closing PRs recorded by the collector
+    # in metadata_; surface them so build_closed_evaluate_prompt() can
+    # reference what actually resolved the issue.
+    closing_references = (
+        (issue.metadata_ or {}).get("closing_references")
+        if issue.issue_type != "pull_request"
+        else None
+    )
+
+    return {
+        "title": issue.title,
+        "body": issue.body,
+        "issue_type": issue.issue_type,
+        "state": issue.state,
+        "labels": labels,
+        "age_days": age_days,
+        "last_activity_days": last_activity_days,
+        "author": issue.author or "unknown",
+        "is_maintainer": issue.author in maintainers if issue.author else False,
+        "comment_count": len(issue_comments),
+        "comments": issue_comments,
+        "pr_details": pr_details,
+        "closing_references": closing_references,
+        "existing_hash": existing_hash,
+    }
 
 
 async def _evaluate_issues(
@@ -155,7 +251,14 @@ async def _evaluate_issues(
     ETA) alongside the existing text logs. When omitted, no progress bar is
     rendered — text logs behave exactly as before.
     """
-    stats = {"evaluated": 0, "skipped": 0, "errored": 0, "total_tokens": 0}
+    stats = {
+        "evaluated": 0,
+        "skipped": 0,
+        "errored": 0,
+        "total_tokens": 0,
+        "estimated_cost_usd": 0.0,
+        "unpriced_evaluations": 0,
+    }
     filter_hash = compute_filter_hash(
         project_filter=project_filter,
         limit=limit,
@@ -165,47 +268,63 @@ async def _evaluate_issues(
         incomplete=incomplete,
         stale_days=stale_days,
     )
-    targets = await fetch_issue_evaluation_targets(
-        session_factory,
-        project_filter=project_filter,
-        open_only=open_only,
-        issue_filters=issue_filters,
-        incomplete=incomplete,
-        stale_days=stale_days,
-    )
+    query_kwargs = {
+        "project_filter": project_filter,
+        "open_only": open_only,
+        "issue_filters": issue_filters,
+        "incomplete": incomplete,
+        "stale_days": stale_days,
+    }
 
     completed_issue_ids: set[int] = set()
     checkpoint = load_checkpoint(filter_hash) if resume else None
-    if checkpoint is not None:
-        target_ids = {target.issue.id for target in targets}
-        completed_issue_ids = {
-            issue_id
-            for issue_id in checkpoint.completed_issue_ids
-            if issue_id in target_ids
-        }
-        if completed_issue_ids:
+    if checkpoint is not None and checkpoint.completed_issue_ids:
+        # Only count checkpoint IDs that still match the current filters
+        # (data may have changed since the checkpoint was written), rather
+        # than trusting checkpoint.completed_issue_ids's length outright.
+        already_done = await count_issue_evaluation_targets(
+            session_factory,
+            include_issue_ids=set(checkpoint.completed_issue_ids),
+            **query_kwargs,
+        )
+        if already_done:
+            completed_issue_ids = set(checkpoint.completed_issue_ids)
+            stats["skipped"] = already_done
             logger.info(
                 "Resuming evaluation with %d completed issues from checkpoint",
-                len(completed_issue_ids),
+                already_done,
             )
-            stats["skipped"] = len(completed_issue_ids)
-            targets = [
-                target
-                for target in targets
-                if target.issue.id not in completed_issue_ids
-            ]
 
+    # Streaming + a COUNT query (rather than materializing every matching
+    # issue into a Python list) keeps memory flat regardless of how many of
+    # the ~19k+ issues match -- only `page_size` rows are held at a time.
+    remaining_count = await count_issue_evaluation_targets(
+        session_factory,
+        exclude_issue_ids=completed_issue_ids or None,
+        **query_kwargs,
+    )
     if limit > 0:
-        remaining_limit = max(limit - len(completed_issue_ids), 0)
-        targets = targets[:remaining_limit]
+        remaining_count = min(remaining_count, max(limit - stats["skipped"], 0))
 
-    total_to_eval = stats["skipped"] + len(targets)
+    total_to_eval = stats["skipped"] + remaining_count
 
     if dry_run:
-        logger.info("DRY RUN: %d issues would be evaluated", len(targets))
+        breakdown = await fetch_issue_evaluation_breakdown(
+            session_factory,
+            exclude_issue_ids=completed_issue_ids or None,
+            **query_kwargs,
+        )
+        if breakdown:
+            logger.info(
+                "Breakdown of issues that would be evaluated "
+                "(by project and state, limit not applied):"
+            )
+            for (project_name, state), count in sorted(breakdown.items()):
+                logger.info("  %s (%s): %d", project_name, state, count)
+        logger.info("DRY RUN: %d issues would be evaluated", remaining_count)
         return {
             **stats,
-            "would_evaluate": len(targets),
+            "would_evaluate": remaining_count,
         }
 
     if total_to_eval == 0:
@@ -217,17 +336,36 @@ async def _evaluate_issues(
     worker_count = max(1, concurrency)
     logger.info(
         "Starting evaluation of %d issues (concurrency=%d)",
-        len(targets),
+        remaining_count,
         worker_count,
     )
 
     quota_exhausted = False
     strict_failure: BaseException | None = None
-    # A shared, non-reentrant iterator: asyncio workers pull the next
-    # (idx, target) pair cooperatively. Calling next() is synchronous with no
-    # `await` inside it, so concurrent workers can never race on the same item
-    # even though they all share this one iterator object.
-    remaining = iter(enumerate(targets, start=1))
+    rate_limiter = SharedRateLimiter()
+    targets_stream = stream_issue_evaluation_targets(
+        session_factory,
+        exclude_issue_ids=completed_issue_ids or None,
+        **query_kwargs,
+    )
+    # Async generators are not safely re-entrant: concurrent workers calling
+    # anext() on the same generator directly would race. A lock around the
+    # (fast, no-LLM-call-inside) "pull next item" step keeps this safe while
+    # still letting workers evaluate concurrently once they have an item.
+    stream_lock = asyncio.Lock()
+    next_idx = 0
+
+    async def _next_target() -> tuple[int, IssueEvaluationTarget] | None:
+        nonlocal next_idx
+        async with stream_lock:
+            if limit > 0 and stats["evaluated"] >= limit:
+                return None
+            try:
+                target = await anext(targets_stream)
+            except StopAsyncIteration:
+                return None
+            next_idx += 1
+            return next_idx, target
 
     progress = None
     task_id = None
@@ -242,54 +380,14 @@ async def _evaluate_issues(
             total=total_to_eval,
             completed=stats["skipped"],
         )
+    tracker = ProgressTracker(
+        progress=progress, task_id=task_id, timing=timing, phase=PHASE_EVALUATE
+    )
 
     async def _process_one(idx: int, target: IssueEvaluationTarget) -> None:
         nonlocal quota_exhausted, strict_failure
         t0 = time.monotonic()
-
-        def _finish(outcome: str) -> None:
-            if progress is not None:
-                progress.update(task_id, advance=1)
-            if timing is not None and outcome == "evaluated":
-                timing.add(PHASE_EVALUATE, time.monotonic() - t0)
-
         issue = target.issue
-        existing_hash = (
-            None
-            if force
-            else (
-                target.issue_data_hash
-                if target.eval_version == CURRENT_EVAL_VERSION
-                else None
-            )
-        )
-        labels = issue.labels if isinstance(issue.labels, list) else []
-
-        now = datetime.now(tz=UTC)
-        created = issue.created_at or now
-        updated = issue.updated_at or now
-        if created.tzinfo is None:
-            created = created.replace(tzinfo=UTC)
-        if updated.tzinfo is None:
-            updated = updated.replace(tzinfo=UTC)
-
-        age_days = (now - created).days
-        last_activity_days = (now - updated).days
-        issue_comments = issue.comments if issue.comments else []
-        pr_details = (
-            issue.metadata_
-            if issue.issue_type == "pull_request" and issue.metadata_
-            else None
-        )
-        # Closed (non-PR) issues may have closing PRs recorded by the collector
-        # in metadata_; surface them so build_closed_evaluate_prompt() can
-        # reference what actually resolved the issue.
-        closing_references = (
-            (issue.metadata_ or {}).get("closing_references")
-            if issue.issue_type != "pull_request"
-            else None
-        )
-
         issue_ref = f"{target.project_name}#{issue.external_id}"
         pct = (idx / total_to_eval * 100) if total_to_eval > 0 else 0
         logger.info(
@@ -300,29 +398,19 @@ async def _evaluate_issues(
             issue_ref,
             issue.title[:60],
         )
+        issue_kwargs = _build_issue_kwargs(target, maintainers, force=force)
 
-        issue_kwargs = {
-            "title": issue.title,
-            "body": issue.body,
-            "issue_type": issue.issue_type,
-            "state": issue.state,
-            "labels": labels,
-            "age_days": age_days,
-            "last_activity_days": last_activity_days,
-            "author": issue.author or "unknown",
-            "is_maintainer": issue.author in maintainers if issue.author else False,
-            "comment_count": len(issue_comments),
-            "comments": issue_comments,
-            "pr_details": pr_details,
-            "closing_references": closing_references,
-            "existing_hash": existing_hash,
-        }
-
+        # `outcome` stays None only on the two early-abort paths below
+        # (quota exhaustion, strict-validation failure) where the item
+        # didn't actually complete and shouldn't advance the progress bar
+        # or trigger the trailing _log_progress() call.
+        outcome: str | None = None
         try:
             result = await _evaluate_issue_with_retries(
                 evaluator,
                 issue_kwargs,
                 issue_ref,
+                rate_limiter,
             )
         except LLMQuotaError:
             logger.warning(
@@ -334,76 +422,70 @@ async def _evaluate_issues(
         except Exception:
             logger.exception("Error evaluating issue %s", issue.title)
             stats["errored"] += 1
-            _finish("errored")
-            _log_progress(
-                stats,
-                processed=stats["evaluated"] + stats["skipped"] + stats["errored"],
-                total_to_eval=total_to_eval,
-            )
-            return
-
-        if result is None:
-            logger.info(
-                "Skipped %s (content unchanged): %s", issue_ref, issue.title[:60]
-            )
-            stats["skipped"] += 1
-            _finish("skipped")
-            _log_progress(
-                stats,
-                processed=stats["evaluated"] + stats["skipped"] + stats["errored"],
-                total_to_eval=total_to_eval,
-            )
-            return
-
-        try:
-            validate_evaluation_result(
-                result,
-                issue_type=issue.issue_type,
-                state=issue.state,
-            )
-        except LLMValidationError as exc:
-            logger.warning("Validation failed for issue %s", issue_ref, exc_info=True)
-            stats["errored"] += 1
-            if strict_validation:
-                strict_failure = exc
-                return
-            _finish("errored")
-            _log_progress(
-                stats,
-                processed=stats["evaluated"] + stats["skipped"] + stats["errored"],
-                total_to_eval=total_to_eval,
-            )
-            return
-
-        await store_evaluation_result(
-            session_factory,
-            issue_id=issue.id,
-            result=result,
-            model=evaluator.model,
-            llm_backend=llm_backend,
-        )
-
-        stats["evaluated"] += 1
-        stats["total_tokens"] += result["tokens_used"]
-        completed_issue_ids.add(issue.id)
-        if resume:
-            save_checkpoint(
-                EvaluationCheckpoint(
-                    filter_hash=filter_hash,
-                    completed_issue_ids=sorted(completed_issue_ids),
-                    timestamp=datetime.now(tz=UTC).isoformat(),
+            outcome = "errored"
+        else:
+            if result is None:
+                logger.info(
+                    "Skipped %s (content unchanged): %s", issue_ref, issue.title[:60]
                 )
-            )
-        _finish("evaluated")
-        logger.info(
-            "[%d/%d] Evaluated %s (%s, %d tokens): %s",
-            stats["evaluated"],
-            total_to_eval,
-            issue_ref,
-            result["suggested_action"],
-            result["tokens_used"],
-            issue.title[:60],
-        )
+                stats["skipped"] += 1
+                outcome = "skipped"
+            else:
+                try:
+                    validate_evaluation_result(
+                        result,
+                        issue_type=issue.issue_type,
+                        state=issue.state,
+                    )
+                except LLMValidationError as exc:
+                    logger.warning(
+                        "Validation failed for issue %s", issue_ref, exc_info=True
+                    )
+                    stats["errored"] += 1
+                    if strict_validation:
+                        strict_failure = exc
+                        return
+                    outcome = "errored"
+                else:
+                    await store_evaluation_result(
+                        session_factory,
+                        issue_id=issue.id,
+                        result=result,
+                        model=evaluator.model,
+                        llm_backend=llm_backend,
+                    )
+                    stats["evaluated"] += 1
+                    stats["total_tokens"] += result["tokens_used"]
+                    cost = estimate_cost_usd(
+                        evaluator.model,
+                        prompt_tokens=result["prompt_tokens"],
+                        completion_tokens=result["completion_tokens"],
+                    )
+                    if cost is None:
+                        stats["unpriced_evaluations"] += 1
+                    else:
+                        stats["estimated_cost_usd"] += cost
+                    completed_issue_ids.add(issue.id)
+                    if resume:
+                        save_checkpoint(
+                            EvaluationCheckpoint(
+                                filter_hash=filter_hash,
+                                completed_issue_ids=sorted(completed_issue_ids),
+                                timestamp=datetime.now(tz=UTC).isoformat(),
+                            )
+                        )
+                    outcome = "evaluated"
+                    logger.info(
+                        "[%d/%d] Evaluated %s (%s, %d tokens): %s",
+                        stats["evaluated"],
+                        total_to_eval,
+                        issue_ref,
+                        result["suggested_action"],
+                        result["tokens_used"],
+                        issue.title[:60],
+                    )
+
+        tracker.finish(outcome, time.monotonic() - t0)
         _log_progress(
             stats,
             processed=stats["evaluated"] + stats["skipped"] + stats["errored"],
@@ -414,17 +496,18 @@ async def _evaluate_issues(
         while True:
             if quota_exhausted or strict_failure is not None:
                 return
-            if limit > 0 and stats["evaluated"] >= limit:
+            next_item = await _next_target()
+            if next_item is None:
                 return
-            try:
-                idx, target = next(remaining)
-            except StopIteration:
-                return
+            idx, target = next_item
             await _process_one(idx, target)
 
     progress_cm = progress if progress is not None else contextlib.nullcontext()
-    with progress_cm:
-        await asyncio.gather(*(_worker() for _ in range(worker_count)))
+    try:
+        with progress_cm:
+            await asyncio.gather(*(_worker() for _ in range(worker_count)))
+    finally:
+        await targets_stream.aclose()
 
     if limit > 0 and stats["evaluated"] >= limit:
         logger.info("Reached evaluation limit of %d", limit)

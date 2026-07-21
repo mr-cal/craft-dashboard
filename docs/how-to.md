@@ -95,6 +95,12 @@ uv run scripts/run_llm.py evaluate --open-only --limit 40
 # evaluate concurrently (e.g. 8 requests in flight) for a large backlog;
 # safe against remote backends like OpenRouter, keep at 1 for local LLM endpoints
 uv run scripts/run_llm.py evaluate --force --concurrency 8
+
+# preview what would be evaluated, broken down by project and issue state
+uv run scripts/run_llm.py evaluate --dry-run
+
+# print a machine-readable JSON summary of the stats at the end
+uv run scripts/run_llm.py evaluate --open-only --json-summary
 ```
 
 When run interactively (a real terminal), `evaluate` shows a live Rich
@@ -103,6 +109,20 @@ progress bar with an ETA, the same UX as `scripts/eval_client.py`. Pass
 automatic — and unaffected by this flag — when output isn't a terminal,
 e.g. when the admin dashboard's "Re-evaluate" button runs this as a
 subprocess).
+
+The completion log line reports an estimated USD cost alongside token counts
+(based on known per-model OpenRouter pricing; evaluations using an unpriced
+model are called out separately rather than silently counted as free).
+`--dry-run` additionally prints a per-project, per-issue-state breakdown of
+what would be evaluated before the final count. The command exits non-zero
+if any issues errored during the run, so it can be used as a CI/cron
+success check; pass `--json-summary` to also get the final stats as a single
+JSON line on stdout for scripting.
+
+At `--concurrency` above 1, all workers share a single rate-limit backoff:
+if OpenRouter returns a 429, every worker pauses (honoring the response's
+`Retry-After` header, or an exponential backoff otherwise) rather than each
+worker independently retrying back into the same limit.
 
 Server-side evaluation is disabled by default (`ENABLE_SERVER_EVAL=false`)
 and has no cron entry in production — there is no daily 6 AM eval job. Run
