@@ -39,6 +39,7 @@ class TestEvaluateCommand:
         assert result.exit_code == 0
         assert "--strict-validation" in result.output
         assert "--no-resume" in result.output
+        assert "--concurrency" in result.output
         assert "--backend" not in result.output
 
     def test_returns_cleanly_when_server_side_eval_is_disabled(
@@ -56,6 +57,43 @@ class TestEvaluateCommand:
             "Server-side evaluation is disabled (ENABLE_SERVER_EVAL=false). "
             "Use the eval client script for pull-based evaluation instead."
         ) in caplog.text
+
+    def test_forwards_concurrency_option_to_orchestrator(self, monkeypatch) -> None:
+        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+
+        engine = MagicMock()
+        engine.dispose = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.load_config",
+            MagicMock(return_value=MagicMock(maintainers=[])),
+        )
+        monkeypatch.setattr(
+            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
+        )
+        evaluate_issues = AsyncMock(
+            return_value={
+                "evaluated": 0,
+                "skipped": 0,
+                "errored": 0,
+                "total_tokens": 0,
+            }
+        )
+        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["evaluate", "--concurrency", "4"])
+
+        assert result.exit_code == 0
+        evaluate_issues.assert_awaited_once()
+        assert evaluate_issues.await_args.kwargs["concurrency"] == 4
 
     @pytest.mark.asyncio
     async def test_clear_main_confirms_before_deleting(self, monkeypatch) -> None:

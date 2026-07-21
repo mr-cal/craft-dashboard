@@ -38,6 +38,8 @@ if TYPE_CHECKING:
     from craft_dashboard.llm.evaluator import EvaluationResult, IssueEvaluator
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from scripts.llm.queries import IssueEvaluationTarget
+
 
 class EvaluationStats(TypedDict):
     """Progress counters returned by the LLM orchestration loop."""
@@ -131,8 +133,18 @@ async def _evaluate_issues(
     llm_backend: str = "openrouter",
     strict_validation: bool = False,
     resume: bool = True,
+    concurrency: int = 1,
 ) -> EvaluationStats | DryRunEvaluationStats:
-    """Evaluate matched issues and persist any new results."""
+    """Evaluate matched issues and persist any new results.
+
+    ``concurrency`` controls how many issues are evaluated at once (workers
+    pull from a shared queue of targets). A value of 1 preserves the original
+    strictly-sequential behavior; higher values issue concurrent LLM requests,
+    which is safe against remote backends like OpenRouter (each worker uses
+    its own retry/backoff) but should stay conservative against a single
+    self-hosted local LLM endpoint, which usually can't serve many requests
+    in parallel.
+    """
     stats = {"evaluated": 0, "skipped": 0, "errored": 0, "total_tokens": 0}
     filter_hash = compute_filter_hash(
         project_filter=project_filter,
@@ -192,10 +204,24 @@ async def _evaluate_issues(
             clear_checkpoint()
         return stats
 
-    logger.info("Starting evaluation of %d issues", len(targets))
+    worker_count = max(1, concurrency)
+    logger.info(
+        "Starting evaluation of %d issues (concurrency=%d)",
+        len(targets),
+        worker_count,
+    )
 
     quota_exhausted = False
-    for idx, target in enumerate(targets, start=1):
+    strict_failure: BaseException | None = None
+    # A shared, non-reentrant iterator: asyncio workers pull the next
+    # (idx, target) pair cooperatively. Calling next() is synchronous with no
+    # `await` inside it, so concurrent workers can never race on the same item
+    # even though they all share this one iterator object.
+    remaining = iter(enumerate(targets, start=1))
+
+    async def _process_one(idx: int, target: IssueEvaluationTarget) -> None:
+        nonlocal quota_exhausted, strict_failure
+
         issue = target.issue
         existing_hash = (
             None
@@ -273,7 +299,7 @@ async def _evaluate_issues(
                 stats["evaluated"],
             )
             quota_exhausted = True
-            break
+            return
         except Exception:
             logger.exception("Error evaluating issue %s", issue.title)
             stats["errored"] += 1
@@ -282,7 +308,7 @@ async def _evaluate_issues(
                 processed=stats["evaluated"] + stats["skipped"] + stats["errored"],
                 total_to_eval=total_to_eval,
             )
-            continue
+            return
 
         if result is None:
             logger.info(
@@ -294,7 +320,7 @@ async def _evaluate_issues(
                 processed=stats["evaluated"] + stats["skipped"] + stats["errored"],
                 total_to_eval=total_to_eval,
             )
-            continue
+            return
 
         try:
             validate_evaluation_result(
@@ -302,17 +328,18 @@ async def _evaluate_issues(
                 issue_type=issue.issue_type,
                 state=issue.state,
             )
-        except LLMValidationError:
+        except LLMValidationError as exc:
             logger.warning("Validation failed for issue %s", issue_ref, exc_info=True)
             stats["errored"] += 1
             if strict_validation:
-                raise
+                strict_failure = exc
+                return
             _log_progress(
                 stats,
                 processed=stats["evaluated"] + stats["skipped"] + stats["errored"],
                 total_to_eval=total_to_eval,
             )
-            continue
+            return
 
         await store_evaluation_result(
             session_factory,
@@ -348,9 +375,25 @@ async def _evaluate_issues(
             total_to_eval=total_to_eval,
         )
 
-        if limit > 0 and stats["evaluated"] >= limit:
-            logger.info("Reached evaluation limit of %d", limit)
-            break
+    async def _worker() -> None:
+        while True:
+            if quota_exhausted or strict_failure is not None:
+                return
+            if limit > 0 and stats["evaluated"] >= limit:
+                return
+            try:
+                idx, target = next(remaining)
+            except StopIteration:
+                return
+            await _process_one(idx, target)
+
+    await asyncio.gather(*(_worker() for _ in range(worker_count)))
+
+    if limit > 0 and stats["evaluated"] >= limit:
+        logger.info("Reached evaluation limit of %d", limit)
+
+    if strict_failure is not None:
+        raise strict_failure
 
     if resume and not quota_exhausted and stats["errored"] == 0:
         clear_checkpoint()

@@ -103,6 +103,7 @@ async def _main(
     dry_run: bool,
     strict_validation: bool,
     no_resume: bool,
+    concurrency: int,
 ) -> None:
     """Run LLM evaluation."""
     settings = Settings()
@@ -146,10 +147,11 @@ async def _main(
         force = True
 
     logger.info(
-        "Using openrouter backend (model=%s, open_only=%s, force=%s)",
+        "Using openrouter backend (model=%s, open_only=%s, force=%s, concurrency=%d)",
         settings.model,
         open_only,
         force,
+        concurrency,
     )
 
     try:
@@ -168,6 +170,7 @@ async def _main(
             llm_backend="openrouter",
             strict_validation=strict_validation,
             resume=not no_resume,
+            concurrency=concurrency,
         )
         logger.info(
             "Evaluation complete: %d evaluated, %d skipped, %d errors, %d total tokens",
@@ -245,6 +248,16 @@ def cli(ctx: click.Context) -> None:
     default=False,
     help="Ignore any saved checkpoint and start a fresh evaluation run.",
 )
+@click.option(
+    "--concurrency",
+    default=1,
+    type=int,
+    help=(
+        "Number of issues to evaluate concurrently (default: 1, sequential). "
+        "Safe to raise against remote backends like OpenRouter; keep low "
+        "against a single self-hosted local LLM endpoint."
+    ),
+)
 def evaluate_cmd(
     project: str,
     limit: int,
@@ -257,6 +270,7 @@ def evaluate_cmd(
     dry_run: bool,
     strict_validation: bool,
     no_resume: bool,
+    concurrency: int,
 ) -> None:
     """Run LLM evaluation on issues and PRs."""
     asyncio.run(
@@ -272,6 +286,7 @@ def evaluate_cmd(
             dry_run,
             strict_validation,
             no_resume,
+            concurrency,
         )
     )
 

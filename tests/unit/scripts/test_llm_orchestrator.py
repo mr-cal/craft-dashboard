@@ -1,5 +1,6 @@
 """Tests for scripts.llm.orchestrator."""
 
+import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -591,3 +592,105 @@ class TestEvaluateIssues:
         assert stats == {"evaluated": 0, "skipped": 0, "errored": 0, "total_tokens": 0}
         assert evaluator.evaluate.await_count == 1
         store_result.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_concurrency_evaluates_all_targets_with_multiple_workers(
+        self, monkeypatch
+    ) -> None:
+        targets = [
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=issue_id),
+                project_name="snapcraft",
+                issue_data_hash=None,
+            )
+            for issue_id in range(1, 6)
+        ]
+
+        async def _evaluate(**_kwargs) -> dict:
+            await asyncio.sleep(0)
+            return _valid_result(issue_hash="hash")
+
+        evaluator = SimpleNamespace(
+            evaluate=AsyncMock(side_effect=_evaluate), model="m"
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
+            AsyncMock(return_value=targets),
+        )
+        store_result = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.store_evaluation_result", store_result
+        )
+
+        stats = await _evaluate_issues(
+            session_factory=object(),
+            evaluator=evaluator,
+            maintainers=set(),
+            resume=False,
+            concurrency=3,
+        )
+
+        assert stats == {
+            "evaluated": 5,
+            "skipped": 0,
+            "errored": 0,
+            "total_tokens": 5 * 77,
+        }
+        assert evaluator.evaluate.await_count == 5
+        assert store_result.await_count == 5
+        persisted_issue_ids = {
+            call.kwargs["issue_id"] for call in store_result.await_args_list
+        }
+        assert persisted_issue_ids == {1, 2, 3, 4, 5}
+
+    @pytest.mark.asyncio
+    async def test_concurrency_runs_evaluations_in_parallel(self, monkeypatch) -> None:
+        targets = [
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=issue_id),
+                project_name="snapcraft",
+                issue_data_hash=None,
+            )
+            for issue_id in range(1, 3)
+        ]
+        in_flight = 0
+        max_in_flight = 0
+        release = asyncio.Event()
+
+        async def _evaluate(**_kwargs) -> dict:
+            nonlocal in_flight, max_in_flight
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+            await release.wait()
+            in_flight -= 1
+            return _valid_result(issue_hash="hash")
+
+        evaluator = SimpleNamespace(
+            evaluate=AsyncMock(side_effect=_evaluate), model="m"
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.fetch_issue_evaluation_targets",
+            AsyncMock(return_value=targets),
+        )
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.store_evaluation_result", AsyncMock()
+        )
+
+        async def _unblock_once_both_started() -> None:
+            while in_flight < 2:  # noqa: ASYNC110
+                await asyncio.sleep(0)
+            release.set()
+
+        stats, _ = await asyncio.gather(
+            _evaluate_issues(
+                session_factory=object(),
+                evaluator=evaluator,
+                maintainers=set(),
+                resume=False,
+                concurrency=2,
+            ),
+            _unblock_once_both_started(),
+        )
+
+        assert max_in_flight == 2
+        assert stats["evaluated"] == 2

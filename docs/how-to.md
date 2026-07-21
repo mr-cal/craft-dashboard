@@ -91,6 +91,10 @@ uv run scripts/run_llm.py evaluate --project snapcraft
 
 # limit number of issues (good for testing API costs)
 uv run scripts/run_llm.py evaluate --open-only --limit 40
+
+# evaluate concurrently (e.g. 8 requests in flight) for a large backlog;
+# safe against remote backends like OpenRouter, keep at 1 for local LLM endpoints
+uv run scripts/run_llm.py evaluate --force --concurrency 8
 ```
 
 Server-side evaluation is disabled by default (`ENABLE_SERVER_EVAL=false`)
