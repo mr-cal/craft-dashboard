@@ -1,9 +1,9 @@
 """Shared Rich console/progress-bar helpers for LLM evaluation CLIs.
 
-Used by both ``scripts/eval_client.py`` (pull-based local evaluation) and
-``scripts/llm/cli.py`` (server-side batch evaluation via OpenRouter) so both
-tools present a consistent interactive UX: colored logs, a live progress bar,
-and a persistent-history-backed ETA.
+Used by both ``scripts/llm/eval_worker.py`` (continuous HTTP evaluation)
+and ``scripts/run_llm.py`` entrypoints so the evaluation worker keeps a
+consistent interactive UX: colored logs, a live progress bar, and a
+persistent-history-backed ETA.
 """
 
 from __future__ import annotations

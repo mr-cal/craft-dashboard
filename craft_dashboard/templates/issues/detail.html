@@ -178,7 +178,7 @@
   {% if has_embedding %}
   <p>No related issues found above the similarity threshold.</p>
   {% else %}
-  <p>No embedding available for this issue. Run the eval client with <code>LOCAL_LLM_EMBEDDING_MODEL</code> set to enable similarity search.</p>
+  <p>No embedding available for this issue yet. Run <code>scripts/run_llm.py evaluate</code> to enable similarity search.</p>
   {% endif %}
   {% endif %}
 </section>

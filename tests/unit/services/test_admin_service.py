@@ -677,3 +677,125 @@ class TestGetNextExpectedFetch:
         next_fetch = await AdminService(test_db_session).get_next_expected_fetch()
 
         assert next_fetch is None
+
+
+class TestLLMServiceStatus:
+    """Tests for AdminService.get_llm_service_status."""
+
+    async def test_status_is_unknown_when_never_polled(self, test_db_session) -> None:
+        """No recorded activity yet (e.g. right after a fresh deploy)."""
+        with patch(
+            "craft_dashboard.services.admin_service.get_eval_activity",
+            return_value=(None, None),
+        ):
+            status = await AdminService(test_db_session).get_llm_service_status()
+
+        assert status == {
+            "status": "unknown",
+            "last_poll_at": None,
+            "last_result_at": None,
+        }
+
+    async def test_status_is_running_when_recently_polled(
+        self, test_db_session
+    ) -> None:
+        """A poll within the stale window counts as running."""
+        now = datetime(2025, 1, 10, 12, 0, tzinfo=UTC)
+        last_poll = now - timedelta(seconds=10)
+        last_result = now - timedelta(seconds=40)
+        with (
+            patch(
+                "craft_dashboard.services.admin_service.get_eval_activity",
+                return_value=(last_poll, last_result),
+            ),
+            patch(
+                "craft_dashboard.services.admin_service.datetime", FrozenStatsDateTime
+            ),
+        ):
+            FrozenStatsDateTime.frozen_now = now
+            status = await AdminService(test_db_session).get_llm_service_status()
+
+        assert status == {
+            "status": "running",
+            "last_poll_at": last_poll,
+            "last_result_at": last_result,
+        }
+
+    async def test_status_is_stalled_when_poll_is_too_old(
+        self, test_db_session
+    ) -> None:
+        """A poll older than the stale window counts as stalled."""
+        now = datetime(2025, 1, 10, 12, 0, tzinfo=UTC)
+        last_poll = now - timedelta(minutes=10)
+        with (
+            patch(
+                "craft_dashboard.services.admin_service.get_eval_activity",
+                return_value=(last_poll, None),
+            ),
+            patch(
+                "craft_dashboard.services.admin_service.datetime", FrozenStatsDateTime
+            ),
+        ):
+            FrozenStatsDateTime.frozen_now = now
+            status = await AdminService(test_db_session).get_llm_service_status()
+
+        assert status["status"] == "stalled"
+
+
+class TestRecentEvaluations:
+    """Tests for AdminService.get_recent_evaluations."""
+
+    async def test_returns_evaluations_newest_first(self, test_db_session) -> None:
+        await _seed_admin_data(test_db_session)
+
+        recent = await AdminService(test_db_session).get_recent_evaluations(limit=20)
+
+        assert [entry["suggested_action"] for entry in recent] == [
+            "keep_open",
+            "needs_review",
+        ]
+        assert recent[0]["project"] == "snapcraft"
+        assert recent[0]["model_name"] == "gpt-4.1"
+        assert "tokens_used" not in recent[0]
+
+    async def test_respects_limit(self, test_db_session) -> None:
+        await _seed_admin_data(test_db_session)
+
+        recent = await AdminService(test_db_session).get_recent_evaluations(limit=1)
+
+        assert len(recent) == 1
+        assert recent[0]["suggested_action"] == "keep_open"
+
+
+class TestDailyEvaluationStats:
+    """Tests for AdminService.get_daily_evaluation_stats."""
+
+    async def test_counts_evaluations_per_day_within_window(
+        self, test_db_session
+    ) -> None:
+        await _seed_admin_data(test_db_session)
+
+        with patch(
+            "craft_dashboard.services.admin_service.datetime", FrozenStatsDateTime
+        ):
+            FrozenStatsDateTime.frozen_now = datetime(2025, 1, 10, 12, 0, tzinfo=UTC)
+            stats = await AdminService(test_db_session).get_daily_evaluation_stats(
+                days=7
+            )
+
+        # Only the evaluation from 2 days ago falls within the 7-day window;
+        # the one from 10 days ago is excluded.
+        assert stats == [{"date": "2025-01-08", "count": 1}]
+
+    async def test_excludes_evaluations_outside_window(self, test_db_session) -> None:
+        await _seed_admin_data(test_db_session)
+
+        with patch(
+            "craft_dashboard.services.admin_service.datetime", FrozenStatsDateTime
+        ):
+            FrozenStatsDateTime.frozen_now = datetime(2025, 1, 10, 12, 0, tzinfo=UTC)
+            stats = await AdminService(test_db_session).get_daily_evaluation_stats(
+                days=14
+            )
+
+        assert len(stats) == 2

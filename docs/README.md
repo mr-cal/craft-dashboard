@@ -4,4 +4,4 @@
 - [deployment.md](deployment.md) -- LXD VM and VPS setup with Ansible
 - [development.md](development.md) -- local setup, tests, linting, project layout
 - [how-to.md](how-to.md) -- scripts, common operations, SQL snippets
-- [eval-client.md](eval-client.md) -- pull-based issue evaluation worker
+- [evaluate.md](evaluate.md) -- continuous HTTP issue evaluation worker

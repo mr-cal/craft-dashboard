@@ -28,4 +28,4 @@ docker compose up --build   # run locally with Docker
 | [Deployment](docs/deployment.md) | Docker-based deployment and configuration |
 | [Architecture](docs/architecture.md) | How the app works, data flow, schema |
 | [How-to guide](docs/how-to.md) | Scripts, common operations, recipes |
-| [Eval client](docs/eval-client.md) | Pull-based local LLM evaluation client |
+| [Evaluate worker](docs/evaluate.md) | Continuous HTTP-only LLM evaluation worker |

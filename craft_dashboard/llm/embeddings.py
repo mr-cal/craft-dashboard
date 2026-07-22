@@ -39,21 +39,27 @@ class EmbeddingClient:
         if self._http is not None and not self._http.is_closed:
             await self._http.aclose()
 
-    async def embed(self, text: str) -> list[float]:
+    async def embed(self, text: str, *, dimensions: int | None = None) -> list[float]:
         """Compute an embedding for a single text string."""
-        results = await self.embed_batch([text])
+        results = await self.embed_batch([text], dimensions=dimensions)
         return results[0]
 
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+    async def embed_batch(
+        self, texts: list[str], *, dimensions: int | None = None
+    ) -> list[list[float]]:
         """Compute embeddings for multiple texts in one API call."""
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
+        payload: dict[str, object] = {"model": self.model, "input": texts}
+        if dimensions is not None:
+            payload["dimensions"] = dimensions
+
         response = await self._client.post(
             f"{self.base_url}/embeddings",
             headers=headers,
-            json={"model": self.model, "input": texts},
+            json=payload,
         )
         response.raise_for_status()
         data = response.json()

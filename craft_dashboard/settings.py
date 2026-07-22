@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     # OpenRouter model settings
     openrouter_model: str = "google/gemini-2.5-flash-lite"
 
-    # Embedding model for similarity search (used by eval_client.py).
-    # Leave blank to skip embedding generation.
+    # Legacy local embedding model setting. The continuous `evaluate`
+    # worker now always uses OpenRouter embeddings instead.
     local_llm_embedding_model: str = ""
 
     # Related issues — shown on the issue detail page.

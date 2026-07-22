@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Backfill summary_embedding for existing LLM evaluations that lack one.
+"""Backfill OpenRouter summary embeddings for existing LLM evaluations.
 
-Run this after enabling LOCAL_LLM_EMBEDDING_MODEL if you already have
-evaluations without embeddings. It reads directly from the database
-(requires DB access) and updates rows in batches.
+Recomputes embeddings for every evaluation row with a summary so the entire
+history lives in the same vector space as the continuous ``evaluate`` worker.
+This script talks directly to the database and is safe to re-run.
 
 Usage:
     uv run scripts/backfill_embeddings.py
@@ -25,84 +25,130 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
+from craft_dashboard.llm.client import OPENROUTER_BASE_URL
 from craft_dashboard.llm.embeddings import EmbeddingClient
+from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 
 logger = logging.getLogger(__name__)
 
 
+def _build_embedding_text(title: str, summary: str) -> str:
+    """Return the exact text shape used by the continuous evaluation worker."""
+    return f"{title}. {summary}"
+
+
+async def _update_batch(
+    *,
+    async_session: sessionmaker,
+    embedding_client: EmbeddingClient,
+    rows: list[tuple[int, str, str]],
+) -> int:
+    """Embed and persist one ordered batch of evaluation rows."""
+    texts = [_build_embedding_text(title, summary) for _, title, summary in rows]
+    embeddings = await embedding_client.embed_batch(texts, dimensions=1024)
+
+    async with async_session() as session, session.begin():
+        for (evaluation_id, _title, _summary), embedding in zip(
+            rows, embeddings, strict=True
+        ):
+            await session.execute(
+                update(LLMEvaluation)
+                .where(LLMEvaluation.id == evaluation_id)
+                .values(summary_embedding=embedding)
+            )
+    return len(rows)
+
+
 async def run_backfill(
     *,
     database_url: str,
-    llm_url: str,
+    openrouter_api_key: str,
     embedding_model: str,
-    llm_api_key: str,
-    ca_cert: str,
     batch_size: int,
     limit: int,
     dry_run: bool,
 ) -> None:
-    """Backfill embeddings for evaluations that are missing one."""
+    """Backfill embeddings for all evaluations with a stored summary."""
     engine = create_async_engine(database_url, echo=False)
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
     embedding_client = EmbeddingClient(
-        base_url=llm_url.rstrip("/"),
+        base_url=OPENROUTER_BASE_URL,
         model=embedding_model,
-        api_key=llm_api_key,
-        ca_cert=ca_cert,
+        api_key=openrouter_api_key,
+        ca_cert="",
     )
 
     try:
-        async with async_session() as session:
-            stmt = (
-                select(LLMEvaluation.id, LLMEvaluation.summary)
-                .where(
-                    LLMEvaluation.latest.is_(True),
-                    LLMEvaluation.summary.isnot(None),
-                    LLMEvaluation.summary_embedding.is_(None),
-                )
-                .order_by(LLMEvaluation.id)
-            )
-            if limit > 0:
-                stmt = stmt.limit(limit)
-
-            result = await session.execute(stmt)
-            rows = result.all()
-
-        total = len(rows)
-        logger.info("Found %d evaluations needing embeddings", total)
-        if dry_run:
-            logger.info("Dry run — no changes will be made")
-            return
-
+        processed = 0
         updated = 0
-        for i in range(0, total, batch_size):
-            batch = rows[i : i + batch_size]
-            logger.info(
-                "Processing batch %d-%d of %d...",
-                i + 1,
-                min(i + batch_size, total),
-                total,
-            )
-            for eval_id, summary in batch:
-                try:
-                    embedding = await embedding_client.embed(summary)
-                except Exception:
-                    logger.warning("Failed to embed evaluation %d, skipping", eval_id)
-                    continue
+        last_id = 0
+        while True:
+            remaining = max(0, limit - processed) if limit > 0 else batch_size
+            current_batch_size = min(batch_size, remaining) if limit > 0 else batch_size
+            if current_batch_size == 0:
+                break
 
-                async with async_session() as session, session.begin():
-                    await session.execute(
-                        update(LLMEvaluation)
-                        .where(LLMEvaluation.id == eval_id)
-                        .values(summary_embedding=embedding)
+            async with async_session() as session:
+                stmt = (
+                    select(LLMEvaluation.id, Issue.title, LLMEvaluation.summary)
+                    .join(Issue, LLMEvaluation.issue_id == Issue.id)
+                    .where(
+                        LLMEvaluation.id > last_id,
+                        LLMEvaluation.summary.is_not(None),
+                        LLMEvaluation.summary != "",
                     )
-                updated += 1
+                    .order_by(LLMEvaluation.id)
+                    .limit(current_batch_size)
+                )
+                result = await session.execute(stmt)
+                rows = [(row[0], row[1], row[2]) for row in result.all()]
 
-            logger.info("Progress: %d/%d updated", updated, total)
+            if not rows:
+                break
 
-        logger.info("Done: updated %d evaluations", updated)
+            processed += len(rows)
+            start_id = rows[0][0]
+            last_id = rows[-1][0]
+            logger.info(
+                "Processing evaluations %d-%d (%d rows total so far)",
+                start_id,
+                last_id,
+                processed,
+            )
+
+            if not dry_run:
+                try:
+                    updated += await _update_batch(
+                        async_session=async_session,
+                        embedding_client=embedding_client,
+                        rows=rows,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Batch %d-%d failed (%s); falling back to per-row updates",
+                        start_id,
+                        last_id,
+                        exc,
+                    )
+                    for evaluation_id, title, summary in rows:
+                        embedding = await embedding_client.embed(
+                            _build_embedding_text(title, summary), dimensions=1024
+                        )
+                        async with async_session() as session, session.begin():
+                            await session.execute(
+                                update(LLMEvaluation)
+                                .where(LLMEvaluation.id == evaluation_id)
+                                .values(summary_embedding=embedding)
+                            )
+                        updated += 1
+
+            logger.info("Progress: processed=%d updated=%d", processed, updated)
+
+        if dry_run:
+            logger.info("Dry run: %d evaluations would be refreshed", processed)
+        else:
+            logger.info("Done: refreshed %d evaluation embeddings", updated)
     finally:
         await embedding_client.close()
         await engine.dispose()
@@ -116,36 +162,23 @@ async def run_backfill(
     help="Async SQLAlchemy database URL [env: DATABASE_URL]",
 )
 @click.option(
-    "--llm-url",
-    default="http://localhost:11434/v1",
-    show_default=True,
-    envvar="LOCAL_LLM_URL",
-    help="OpenAI-compatible LLM endpoint [env: LOCAL_LLM_URL]",
+    "--openrouter-api-key",
+    required=True,
+    envvar="OPENROUTER_API_KEY",
+    help="OpenRouter API key [env: OPENROUTER_API_KEY]",
 )
 @click.option(
     "--embedding-model",
-    required=True,
-    envvar="LOCAL_LLM_EMBEDDING_MODEL",
-    help="Embedding model name [env: LOCAL_LLM_EMBEDDING_MODEL]",
-)
-@click.option(
-    "--llm-api-key",
-    default="",
-    envvar="LOCAL_LLM_API_KEY",
-    help="API key for the LLM endpoint [env: LOCAL_LLM_API_KEY]",
-)
-@click.option(
-    "--ca-cert",
-    default="",
-    envvar="LOCAL_LLM_CA_CERT",
-    help="PEM CA cert path for LLM server TLS verification [env: LOCAL_LLM_CA_CERT]",
+    default="openai/text-embedding-3-small",
+    show_default=True,
+    help="OpenRouter embedding model to use for the backfill",
 )
 @click.option(
     "--batch-size",
     default=100,
     show_default=True,
     type=click.IntRange(min=1),
-    help="Rows to process per DB transaction",
+    help="Rows to process per embedding batch",
 )
 @click.option(
     "--limit",
@@ -162,23 +195,19 @@ async def run_backfill(
 )
 def main(
     database_url: str,
-    llm_url: str,
+    openrouter_api_key: str,
     embedding_model: str,
-    llm_api_key: str,
-    ca_cert: str,
     batch_size: int,
     limit: int,
     dry_run: bool,
 ) -> None:
-    """Backfill summary_embedding for evaluations that are missing one."""
+    """Recompute summary embeddings for all stored LLM evaluations."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     asyncio.run(
         run_backfill(
             database_url=database_url,
-            llm_url=llm_url,
+            openrouter_api_key=openrouter_api_key,
             embedding_model=embedding_model,
-            llm_api_key=llm_api_key,
-            ca_cert=ca_cert,
             batch_size=batch_size,
             limit=limit,
             dry_run=dry_run,

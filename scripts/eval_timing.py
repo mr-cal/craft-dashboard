@@ -1,8 +1,8 @@
-"""Persistent timing history for eval client ETA estimation.
+"""Persistent timing history for evaluate-worker ETA estimation.
 
 Stores rolling windows of evaluation durations per phase in a JSON file at
-``~/.craft-dashboard/eval-timing.json``.  The file is created on first use.
-All I/O errors are silently ignored so the client degrades gracefully.
+``~/.craft-dashboard/eval-timing.json``. The file is created on first use.
+All I/O errors are silently ignored so the worker degrades gracefully.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ DEFAULT_PATH: pathlib.Path = (
 )
 MAX_WINDOW: int = 100
 
-# Phase keys used throughout the eval client
+# Phase keys used throughout the evaluate worker
 PHASE_EVALUATE = "evaluate"
 PHASE_EMBED = "embed"
 

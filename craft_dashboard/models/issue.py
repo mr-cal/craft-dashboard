@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -28,7 +29,10 @@ class Issue(Base):
     """An issue or pull request from GitHub or Launchpad."""
 
     __tablename__ = "issues"
-    __table_args__ = (UniqueConstraint("project_id", "source", "external_id"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "source", "external_id"),
+        Index("ix_issues_content_hash", "content_hash"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(
@@ -60,6 +64,13 @@ class Issue(Base):
     comments: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, nullable=True, default=list
     )
+    # SHA-256 hash of title/body/state/labels/comments/PR-review-details, kept
+    # up to date by the collectors on every create/update (see
+    # craft_dashboard.llm.content_hash.compute_content_hash). Comparing this
+    # against LLMEvaluation.issue_data_hash is how "does this issue need
+    # re-evaluation" is detected without recomputing a hash for every issue
+    # on every poll.
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -330,6 +330,84 @@
 
 <div class="row--25-75">
   <div class="col">
+    <h3>LLM evaluation service</h3>
+    <p>Status of the continuous <code>evaluate</code> worker, and its recent output.</p>
+    <div class="status-grid">
+      <div class="status-card">
+        <h4>Status</h4>
+        <p>
+          <span class="system-status-indicator" data-llm-service-status="{{ llm_service_status.status }}">
+            <span class="system-status-dot"></span>
+            <span>{{ llm_service_status.status | capitalize }}</span>
+          </span>
+        </p>
+      </div>
+      <div class="status-card">
+        <h4>Last poll</h4>
+        <p>{{ llm_service_status.last_poll_at | local_datetime("Never") }}</p>
+      </div>
+      <div class="status-card">
+        <h4>Last result</h4>
+        <p>{{ llm_service_status.last_result_at | local_datetime("Never") }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <h4>Daily evaluations (last 14 days)</h4>
+    {% if llm_daily_stats %}
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Evaluations</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for day in llm_daily_stats %}
+        <tr>
+          <td>{{ day.date }}</td>
+          <td>{{ "{:,}".format(day.count) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>No evaluations recorded yet.</p>
+    {% endif %}
+    <h4 style="margin-top: 1rem;">Recent evaluations</h4>
+    {% if llm_recent_evaluations %}
+    <table>
+      <thead>
+        <tr>
+          <th>Project</th>
+          <th>Issue</th>
+          <th>Model</th>
+          <th>Verdict</th>
+          <th>Evaluated</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in llm_recent_evaluations %}
+        <tr>
+          <td>{{ entry.project }}</td>
+          <td><a href="/issues/{{ entry.project | urlencode_path }}/{{ entry.external_id }}">{{ entry.title }}</a></td>
+          <td>{{ entry.model_name }}</td>
+          <td>{{ entry.suggested_action or "Unknown" }}</td>
+          <td>{{ entry.evaluated_at | local_datetime("Unknown") }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>No evaluations recorded yet.</p>
+    {% endif %}
+  </div>
+</div>
+
+<hr class="p-rule" />
+
+<div class="row--25-75">
+  <div class="col">
     <h3>Admin actions</h3>
     <div style="margin-bottom: 1rem; display: flex; flex-direction: column; gap: 0.5rem;">
       <label for="admin-token" id="admin-token-label">Admin Token:</label>
@@ -352,49 +430,6 @@
           </div>
           <p style="font-size:0.875rem;color:var(--app-text-muted);margin-top:0.5rem;"><strong>Refresh Open Issues</strong> fetches all open issues now (same as the 4-hour cron). <strong>Run Full Refresh</strong> fetches open + closed for projects due on the schedule.</p>
           <div id="refresh-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
-        </div>
-      </div>
-
-      <div style="flex: 1; min-width: 200px;">
-        <h4>Re-evaluate issues</h4>
-        <div class="admin-form">
-          <div class="admin-form__row">
-            <label for="eval-project">Project:</label>
-            <select id="eval-project">
-              <option value="">All projects</option>
-              {% for proj in project_names %}
-              <option value="{{ proj }}">{{ proj }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="admin-form__row">
-            <label for="eval-limit">Limit:</label>
-            <input type="number" id="eval-limit" value="0" min="0" placeholder="0 = unlimited" />
-          </div>
-          <div class="admin-form__row">
-            <label for="eval-stale-days">Stale days:</label>
-            <input type="number" id="eval-stale-days" value="0" min="0" placeholder="0 = disabled" />
-          </div>
-          <div class="admin-form__row">
-            <label>
-              <input type="checkbox" id="eval-force" /> Force (ignore content hash)
-            </label>
-          </div>
-          <div class="admin-form__row">
-            <label>
-              <input type="checkbox" id="eval-incomplete" /> Incomplete only (missing summary/scores)
-            </label>
-          </div>
-          <div class="admin-form__row">
-            <label>
-              <input type="checkbox" id="eval-open-only" checked /> Open issues only
-            </label>
-          </div>
-          <div style="display:flex;gap:0.5rem;">
-            <button class="p-button--positive" id="evaluate-btn" onclick="triggerEvaluate()">Run Evaluation</button>
-            <button class="p-button--neutral" id="dry-run-btn" onclick="triggerDryRun()">Dry Run</button>
-          </div>
-          <div id="evaluate-status" style="margin-top:0.5rem;font-size:0.875rem;"></div>
         </div>
       </div>
 
@@ -528,87 +563,6 @@ function triggerRefreshOpen() {
 function triggerRefreshFull() {
   if (!confirm('Run full refresh now? Only projects due per schedule will get open+closed issues refreshed.')) return;
   callEndpoint('/admin/refresh', 'refresh-full-btn', 'refresh-status', 'Full refresh queued', { mode: 'full' });
-}
-
-function gatherEvalParams() {
-  return {
-    project: document.getElementById('eval-project').value,
-    limit: parseInt(document.getElementById('eval-limit').value) || 0,
-    stale_days: parseInt(document.getElementById('eval-stale-days').value) || 0,
-    force: document.getElementById('eval-force').checked,
-    incomplete: document.getElementById('eval-incomplete').checked,
-    open_only: document.getElementById('eval-open-only').checked,
-    dry_run: false,
-  };
-}
-
-async function triggerEvaluate() {
-  const params = gatherEvalParams();
-  const desc = [];
-  if (params.project) desc.push(`project: ${params.project}`);
-  if (params.limit > 0) desc.push(`limit: ${params.limit}`);
-  if (params.force) desc.push('force');
-  const confirmMsg = desc.length ? `Re-evaluate issues (${desc.join(', ')})?` : 'Re-evaluate all open issues?';
-  if (!confirm(confirmMsg + ' This will consume API credits.')) return;
-  
-  const btn = document.getElementById('evaluate-btn');
-  const statusDiv = document.getElementById('evaluate-status');
-  btn.disabled = true;
-  statusDiv.innerHTML = '<span style="color:gray;">Running...</span>';
-  
-  try {
-    const response = await fetch('/admin/re-evaluate', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(params),
-    });
-    const data = await response.json();
-    window.dispatchHxTriggers(response);
-    if (response.ok) {
-      statusDiv.innerHTML = `<span style="color:green;">✓ ${data.message}</span>`;
-    } else {
-      if (response.status === 401) {
-        setAuthenticated(false);
-        setTokenStatus('✗ Authentication required', 'red');
-      }
-      statusDiv.innerHTML = `<span style="color:red;">✗ ${data.detail || 'Error'}</span>`;
-    }
-  } catch (error) {
-    showToast(error.message, 'error');
-    statusDiv.innerHTML = `<span style="color:red;">✗ ${error.message}</span>`;
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-async function triggerDryRun() {
-  const params = gatherEvalParams();
-  params.dry_run = true;
-  
-  const btn = document.getElementById('dry-run-btn');
-  const statusDiv = document.getElementById('evaluate-status');
-  btn.disabled = true;
-  statusDiv.innerHTML = '<span style="color:gray;">Checking...</span>';
-  
-  try {
-    const response = await fetch('/admin/re-evaluate', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(params),
-    });
-    const data = await response.json();
-    window.dispatchHxTriggers(response);
-    if (response.ok) {
-      statusDiv.innerHTML = `<span style="color:blue;">ℹ ${data.message}</span>`;
-    } else {
-      statusDiv.innerHTML = `<span style="color:red;">✗ ${data.detail || 'Error'}</span>`;
-    }
-  } catch (error) {
-    showToast(error.message, 'error');
-    statusDiv.innerHTML = `<span style="color:red;">✗ ${error.message}</span>`;
-  } finally {
-    btn.disabled = false;
-  }
 }
 
 function triggerDistribute() {

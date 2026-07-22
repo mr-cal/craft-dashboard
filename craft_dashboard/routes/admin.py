@@ -1,4 +1,4 @@
-"""Admin routes for triggering refreshes and re-evaluations."""
+"""Admin routes for dashboard operations and refreshes."""
 
 import asyncio
 import html
@@ -48,18 +48,6 @@ class AdminAuthRequest(BaseModel):
     """Request model for admin cookie authentication."""
 
     token: str
-
-
-class ReEvaluateRequest(BaseModel):
-    """Request model for re-evaluation parameters."""
-
-    project: str = ""
-    limit: int = 0
-    stale_days: int = 0
-    force: bool = False
-    incomplete: bool = False
-    open_only: bool = True
-    dry_run: bool = False
 
 
 def _get_admin_token(request: Request) -> str:
@@ -151,8 +139,6 @@ async def admin_page(
     templates: Jinja2Templates = request.app.state.templates
 
     admin_service = AdminService(session)
-    project_names = await admin_service.get_project_names()
-    schedule_days = await admin_service.get_schedule_day_counts()
     lifetime_stats = await admin_service.get_lifetime_token_stats()
     recent_stats = await admin_service.get_seven_day_token_stats()
     collection_runs = await admin_service.get_recent_collection_runs(
@@ -169,13 +155,14 @@ async def admin_page(
     next_expected_fetch = await admin_service.get_next_expected_fetch()
     next_refresh = await admin_service.get_next_scheduled_refresh()
     project_refresh_list = await admin_service.get_project_refresh_list()
+    llm_service_status = await admin_service.get_llm_service_status()
+    llm_recent_evaluations = await admin_service.get_recent_evaluations()
+    llm_daily_stats = await admin_service.get_daily_evaluation_stats()
 
     return templates.TemplateResponse(
         request,
         "admin/index.html",
         {
-            "project_names": project_names,
-            "schedule_days": schedule_days,
             "next_refresh": next_refresh,
             "project_refresh_list": project_refresh_list,
             "total_evaluations": lifetime_stats["evaluations"],
@@ -190,6 +177,9 @@ async def admin_page(
             "recent_activity": recent_activity,
             "api_budget": api_budget,
             "next_expected_fetch": next_expected_fetch,
+            "llm_service_status": llm_service_status,
+            "llm_recent_evaluations": llm_recent_evaluations,
+            "llm_daily_stats": llm_daily_stats,
         },
     )
 
@@ -286,119 +276,6 @@ async def trigger_refresh(
         {"status": "refresh_queued", "message": msg},
         status_code=202,
         headers=_build_toast_headers(msg, "success"),
-    )
-
-
-@router.post("/re-evaluate")
-async def trigger_re_evaluation(
-    request: Request,
-    body: ReEvaluateRequest | None = None,
-    authorization: str = Header(default=""),
-    _session: AsyncSession = Depends(get_db_session),
-) -> JSONResponse:
-    """Trigger LLM re-evaluation of issues with optional parameters.
-
-    Requires admin authentication via Bearer token.
-    """
-    _require_admin_auth(request, authorization)
-    _verify_origin(request)
-
-    params = body or ReEvaluateRequest()
-
-    # Build command for run_llm.py
-    cmd = [
-        sys.executable,
-        str(
-            pathlib.Path(__file__).resolve().parent.parent.parent  # noqa: ASYNC240
-            / "scripts"
-            / "run_llm.py"
-        ),
-        "evaluate",
-    ]
-    if params.project:
-        cmd.extend(["--project", params.project])
-    if params.limit > 0:
-        cmd.extend(["--limit", str(params.limit)])
-    if params.stale_days > 0:
-        cmd.extend(["--stale-days", str(params.stale_days)])
-    if params.force:
-        cmd.append("--force")
-    if params.incomplete:
-        cmd.append("--incomplete")
-    if params.open_only:
-        cmd.append("--open-only")
-    if params.dry_run:
-        cmd.append("--dry-run")
-
-    logger.info("Admin: re-evaluation triggered with params: %s", params.model_dump())
-
-    if params.dry_run:
-        # Run synchronously to capture the count
-        import re
-
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-        output = stdout.decode() if stdout else ""
-        # Parse the "DRY RUN: N issues would be evaluated" line from output
-        match = re.search(r"DRY RUN:\s*(\d+)\s*issues would be evaluated", output)
-        count = int(match.group(1)) if match else None
-
-        if count is not None:
-            message = f"Dry run: {count} issues would be evaluated"
-            return JSONResponse(
-                {
-                    "status": "dry_run_complete",
-                    "message": message,
-                    "count": count,
-                },
-                headers=_build_toast_headers(message, "info"),
-            )
-        # Fallback: show raw output
-        return JSONResponse(
-            {
-                "status": "dry_run_complete",
-                "message": "Dry run completed. Check logs for details.",
-            },
-            headers=_build_toast_headers(
-                "Dry run completed. Check logs for details.", "info"
-            ),
-        )
-    # Run in background
-    asyncio.create_task(
-        asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-    )
-
-    desc_parts = []
-    if params.project:
-        desc_parts.append(f"project={params.project}")
-    if params.limit > 0:
-        desc_parts.append(f"limit={params.limit}")
-    if params.stale_days > 0:
-        desc_parts.append(f"stale_days={params.stale_days}")
-    if params.force:
-        desc_parts.append("force")
-    if params.incomplete:
-        desc_parts.append("incomplete")
-    desc = ", ".join(desc_parts) or "all open issues"
-
-    message = f"LLM re-evaluation queued: {desc}"
-    return JSONResponse(
-        {
-            "status": "evaluation_queued",
-            "message": message,
-        },
-        status_code=202,
-        headers=_build_toast_headers(
-            f"LLM re-evaluation has been queued for {desc}.", "success"
-        ),
     )
 
 

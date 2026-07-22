@@ -11,15 +11,17 @@ from pydantic import BaseModel
 from scripts.llm.validation import validate_evaluation_result
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from sqlalchemy import bindparam, case, func, or_, select, update
-from sqlalchemy.orm import aliased, defer
+from sqlalchemy import func, or_, select, update
+from sqlalchemy.orm import aliased
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.auth import verify_eval_token
 from craft_dashboard.dependencies import get_config, get_db_session
-from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION, _compute_content_hash
+from craft_dashboard.llm.content_hash import compute_content_hash
+from craft_dashboard.llm.evaluation_queue import build_pending_evaluation_query
+from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION
 from craft_dashboard.llm.exceptions import LLMValidationError
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
@@ -34,6 +36,48 @@ router = APIRouter(prefix="/api/eval")
 limiter = Limiter(key_func=get_remote_address)
 
 _LOCK_TTL = timedelta(minutes=10)
+
+#: Addresses treated as "local" for rate-limit purposes — a worker running
+#: on the same host as the app (the common case for the continuous
+#: `evaluate` service) needs a much higher `/next` polling budget than a
+#: single external contributor.
+_LOOPBACK_ADDRESSES = frozenset({"127.0.0.1", "::1"})
+
+#: How recently `/next`/`/result` must have been called for the service to
+#: be considered "running" rather than "stalled". A bit more than 2x the
+#: default 30s poll interval, to tolerate a slow evaluation or a missed tick
+#: without flapping.
+_ACTIVITY_STALE_AFTER = timedelta(seconds=90)
+
+# In-memory activity tracking for `AdminService.get_llm_service_status()`.
+# The app runs as a single gunicorn worker process (see Dockerfile), so a
+# module-level timestamp is sufficient — no heartbeat table/DB writes needed.
+# This works identically whether the worker calling these endpoints runs on
+# the same host or remotely, since it's activity on the endpoints themselves,
+# not a separate signal from a specific caller.
+_last_next_call_at: datetime | None = None
+_last_result_submitted_at: datetime | None = None
+
+
+def _eval_next_rate_limit(key: str) -> str:
+    """Return a higher `/next` rate limit for loopback callers.
+
+    ``slowapi`` calls this with the resolved rate-limit key (the result of
+    ``key_func``, i.e. the caller's IP) when the decorated limit value is a
+    callable declaring a ``key`` parameter, letting the limit vary per caller
+    without needing to inspect the request directly.
+    """
+    return "1000/minute" if key in _LOOPBACK_ADDRESSES else "30/minute"
+
+
+def get_eval_activity() -> tuple[datetime | None, datetime | None]:
+    """Return (last `/next` call time, last `/result` submission time).
+
+    Used by ``AdminService.get_llm_service_status`` to derive whether the
+    continuous evaluation worker looks like it's actually running, without
+    reaching into this module's internals directly.
+    """
+    return _last_next_call_at, _last_result_submitted_at
 
 
 class EvalResultSubmission(BaseModel):
@@ -50,13 +94,8 @@ class EvalResultSubmission(BaseModel):
     completion_tokens: int = 0
     model_used: str = ""
     llm_backend: str = "local"
-    summary_embedding: list[float] | None = None
-
-
-class EmbedResultSubmission(BaseModel):
-    """Request body for a submitted embedding result."""
-
-    issue_id: int
+    # Every evaluation includes an embedding — there is no more deferred
+    # embedding step, so this is required, not optional.
     summary_embedding: list[float]
 
 
@@ -67,8 +106,17 @@ def _require_eval_auth(request: Request, authorization: str = "") -> None:
 
 
 def _current_content_hash(issue: Issue) -> str:
-    """Compute the current content hash for an issue."""
-    return _compute_content_hash(
+    """Return the issue's current content hash.
+
+    Prefers the denormalized ``Issue.content_hash`` (kept up to date by the
+    collectors on every create/update), so this is an O(1) column read
+    instead of recomputing a hash from title/body/comments/pr_details on
+    every call. Falls back to computing it on the fly if somehow unset (e.g.
+    a race with the one-time backfill script for pre-existing issues).
+    """
+    if issue.content_hash:
+        return issue.content_hash
+    return compute_content_hash(
         issue.title,
         issue.body,
         issue.state,
@@ -89,130 +137,48 @@ async def _fetch_issue_and_latest_evaluation(
     external_id: str = "",
     filtered_issues: dict[str, list[str]] | None = None,
 ) -> tuple[Issue, str, LLMEvaluation | None] | None:
-    latest_evaluation = aliased(LLMEvaluation)
-    now = datetime.now(tz=UTC)
-    old_version = or_(
-        latest_evaluation.eval_version.is_(None),
-        latest_evaluation.eval_version != CURRENT_EVAL_VERSION,
-    )
-    priority = case(
-        (latest_evaluation.id.is_(None) & (Issue.state == "open"), 1),
-        (latest_evaluation.id.is_(None) & (Issue.state != "open"), 2),
-        (old_version & (Issue.state == "open"), 3),
-        (old_version & (Issue.state != "open"), 4),
-        else_=5,
-    )
-    open_first = case((Issue.state == "open", 0), else_=1)
-    query = (
-        select(Issue, Project.name, latest_evaluation)
-        .join(Project, Issue.project_id == Project.id)
-        .outerjoin(
-            latest_evaluation,
-            (latest_evaluation.issue_id == Issue.id) & latest_evaluation.latest,
-        )
-        .where(
-            or_(
-                latest_evaluation.eval_locked_until.is_(None),
-                latest_evaluation.eval_locked_until <= now,
-            )
-        )
-        .order_by(priority, open_first, Issue.id)
-        # summary_embedding is a Vector(1024) column (~4KB/row). The eval
-        # queue query returns thousands of rows and never needs the embedding
-        # value, so defer it to avoid transferring ~10MB per request.
-        .options(defer(latest_evaluation.summary_embedding))
-    )
-
-    excl = _build_excluded_issues_condition(filtered_issues or {})
-    if excl is not None:
-        query = query.where(excl)
-
-    if open_only:
-        query = query.where(Issue.state == "open")
-
-    if project:
-        query = query.where(Project.name == project)
-
-    if external_id:
-        query = query.where(Issue.external_id == external_id)
-
-    if incomplete:
-        query = query.where(
-            or_(
-                latest_evaluation.id.is_(None),
-                latest_evaluation.summary.is_(None),
-                latest_evaluation.summary == "",
-                (
-                    (Issue.state == "open")
-                    & or_(
-                        latest_evaluation.scores.is_(None),
-                        latest_evaluation.suggested_action.is_(None),
-                        latest_evaluation.suggested_action == "",
-                    )
-                ),
-            )
-        )
-
-    if stale_days > 0:
-        cutoff = now - timedelta(days=stale_days)
-        query = query.where(
-            or_(
-                latest_evaluation.id.is_(None),
-                latest_evaluation.evaluated_at < cutoff,
-            )
-        )
+    query = build_pending_evaluation_query(
+        project=project,
+        open_only=open_only,
+        force=force,
+        incomplete=incomplete,
+        stale_days=stale_days,
+        external_id=external_id,
+        filtered_issues=filtered_issues,
+    ).limit(1)
 
     result = await session.execute(query)
-    for row in result.all():
-        issue, project_name, evaluation = row[0], row[1], row[2]
-        current_hash = _current_content_hash(issue)
-        has_complete_evaluation = (
-            evaluation is not None
-            and evaluation.summary not in (None, "")
-            and (
-                issue.state != "open"
-                or (
-                    evaluation.scores is not None
-                    and evaluation.suggested_action not in (None, "")
-                )
+    row = result.first()
+    if row is None:
+        return None
+
+    issue, project_name, evaluation = row[0], row[1], row[2]
+    # Log a warning when re-evaluating an issue that was recently evaluated,
+    # to make unexpected re-evaluations visible in the server logs.
+    if (
+        evaluation is not None
+        and evaluation.evaluated_at is not None
+        and evaluation.model_name != "pending"
+    ):
+        age_minutes = (
+            datetime.now(tz=UTC) - evaluation.evaluated_at
+        ).total_seconds() / 60
+        if age_minutes < 120:  # noqa: PLR2004
+            logger.warning(
+                "Re-evaluating %s/%s (evaluated %.0f min ago, "
+                "stored_hash=%s, current_hash=%s, version=%s)",
+                project_name,
+                issue.external_id,
+                age_minutes,
+                evaluation.issue_data_hash,
+                _current_content_hash(issue),
+                evaluation.eval_version,
             )
-        )
-        if (
-            not force
-            and stale_days <= 0
-            and not incomplete
-            and has_complete_evaluation
-            and evaluation.eval_version == CURRENT_EVAL_VERSION
-            and evaluation.issue_data_hash == current_hash
-        ):
-            continue
-        # Log a warning when re-evaluating an issue that was recently evaluated,
-        # to make unexpected re-evaluations visible in the server logs.
-        if (
-            evaluation is not None
-            and evaluation.evaluated_at is not None
-            and evaluation.model_name != "pending"
-        ):
-            age_minutes = (
-                datetime.now(tz=UTC) - evaluation.evaluated_at
-            ).total_seconds() / 60
-            if age_minutes < 120:  # noqa: PLR2004
-                logger.warning(
-                    "Re-evaluating %s/%s (evaluated %.0f min ago, "
-                    "stored_hash=%s, current_hash=%s, version=%s)",
-                    project_name,
-                    issue.external_id,
-                    age_minutes,
-                    evaluation.issue_data_hash,
-                    current_hash,
-                    evaluation.eval_version,
-                )
-        return issue, project_name, evaluation
-    return None
+    return issue, project_name, evaluation
 
 
 @router.get("/next", response_model=None)
-@limiter.limit("30/minute")
+@limiter.limit(_eval_next_rate_limit)
 async def next_issue(
     request: Request,
     *,
@@ -228,7 +194,9 @@ async def next_issue(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any] | Response:
     """Return the next issue that needs evaluation, if any."""
+    global _last_next_call_at  # noqa: PLW0603
     _require_eval_auth(request, authorization)
+    _last_next_call_at = datetime.now(tz=UTC)
 
     if external_id and not project:
         raise HTTPException(
@@ -303,6 +271,7 @@ async def submit_result(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Store an evaluation result for an issue."""
+    global _last_result_submitted_at  # noqa: PLW0603
     _require_eval_auth(request, authorization)
 
     issue = await session.get(Issue, payload.issue_id)
@@ -362,6 +331,7 @@ async def submit_result(
     )
 
     await session.commit()
+    _last_result_submitted_at = datetime.now(tz=UTC)
     return {"status": "stored", "issue_id": payload.issue_id}
 
 
@@ -485,137 +455,10 @@ async def eval_status(
             select(func.count()).select_from(pending_query.subquery())
         )
 
-    pending_embeddings_q = (
-        select(func.count(LLMEvaluation.id))
-        .join(Issue, LLMEvaluation.issue_id == Issue.id)
-        .join(Project, Issue.project_id == Project.id)
-        .where(
-            LLMEvaluation.latest,
-            LLMEvaluation.model_name != "pending",
-            LLMEvaluation.summary.isnot(None),
-            LLMEvaluation.summary != "",
-            LLMEvaluation.summary_embedding.is_(None),
-        )
-    )
-    if excl is not None:
-        pending_embeddings_q = pending_embeddings_q.where(excl)
-    pending_embeddings = await session.scalar(pending_embeddings_q)
-
     return {
         "pending": pending or 0,
         "locked": locked or 0,
         "evaluated_today": evaluated_today or 0,
         "total_evaluated": total_evaluated or 0,
         "total_open": total_open or 0,
-        "pending_embeddings": pending_embeddings or 0,
     }
-
-
-_EMBED_LOCK_TTL = timedelta(minutes=5)
-
-
-@router.get("/embed-next", response_model=None)
-@limiter.limit("300/minute")
-async def embed_next(
-    request: Request,
-    *,
-    authorization: str = Header(default=""),
-    session: AsyncSession = Depends(get_db_session),
-) -> dict[str, Any] | Response:
-    """Return the next evaluated issue that needs an embedding, if any."""
-    _require_eval_auth(request, authorization)
-
-    excl = _build_excluded_issues_condition(get_config(request).filtered_issues)
-    now = datetime.now(tz=UTC)
-    # Select only the columns we need. Selecting the full ORM object (including
-    # the Vector summary_embedding column) causes the planner to ignore the
-    # partial index and do a 67M-row cross-join. Ordering by
-    # LLMEvaluation.issue_id (not Issue.id) lets the planner drive from the
-    # ix_llm_evaluations_embed_queue index directly.
-    # IMPORTANT: 'pending' and '' must be rendered as SQL literals (not bind
-    # parameters) so the planner's constraint implication checker can match
-    # them against the partial index predicate. Parameterized forms like
-    # `model_name != $1` prevent the planner from proving the partial index
-    # predicate is satisfied, causing a full Seq Scan (~13s) instead of the
-    # 0.3ms index path.
-    embed_q = (
-        select(
-            LLMEvaluation.issue_id,
-            LLMEvaluation.summary,
-            Issue.title,
-            Issue.external_id,
-            Project.name,
-        )
-        .join(Issue, LLMEvaluation.issue_id == Issue.id)
-        .join(Project, Issue.project_id == Project.id)
-        .where(
-            LLMEvaluation.latest,
-            LLMEvaluation.model_name
-            != bindparam("pending", value="pending", literal_execute=True),
-            LLMEvaluation.summary.isnot(None),
-            LLMEvaluation.summary != bindparam("empty", value="", literal_execute=True),
-            LLMEvaluation.summary_embedding.is_(None),
-            or_(
-                LLMEvaluation.eval_locked_until.is_(None),
-                LLMEvaluation.eval_locked_until <= now,
-            ),
-        )
-        .order_by(LLMEvaluation.issue_id)
-        .limit(1)
-    )
-    if excl is not None:
-        embed_q = embed_q.where(excl)
-    result = await session.execute(embed_q)
-    row = result.first()
-    if row is None:
-        return Response(status_code=204)
-
-    issue_id, summary, title, external_id, project_name = row
-    await session.execute(
-        update(LLMEvaluation)
-        .where(LLMEvaluation.issue_id == issue_id, LLMEvaluation.latest)
-        .values(eval_locked_until=now + _EMBED_LOCK_TTL)
-    )
-    await session.commit()
-
-    embed_text = f"{title}. {summary}"
-    return {
-        "issue_id": issue_id,
-        "project_name": project_name,
-        "external_id": external_id,
-        "embed_text": embed_text,
-    }
-
-
-@router.post("/embed-result")
-async def submit_embed_result(
-    request: Request,
-    payload: EmbedResultSubmission,
-    *,
-    authorization: str = Header(default=""),
-    session: AsyncSession = Depends(get_db_session),
-) -> dict[str, Any]:
-    """Store an embedding for a previously evaluated issue."""
-    _require_eval_auth(request, authorization)
-
-    if not payload.summary_embedding:
-        raise HTTPException(
-            status_code=422, detail="summary_embedding must not be empty"
-        )
-
-    result = await session.execute(
-        select(LLMEvaluation).where(
-            LLMEvaluation.issue_id == payload.issue_id,
-            LLMEvaluation.latest,
-        )
-    )
-    evaluation = result.scalar_one_or_none()
-    if evaluation is None:
-        raise HTTPException(
-            status_code=404, detail="No evaluation found for this issue"
-        )
-
-    evaluation.summary_embedding = payload.summary_embedding
-    evaluation.eval_locked_until = None
-    await session.commit()
-    return {"status": "stored", "issue_id": payload.issue_id}

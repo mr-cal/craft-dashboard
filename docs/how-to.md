@@ -72,8 +72,8 @@ dependencies and releases. To force a full refresh of all projects, see
 
 ### run_llm.py
 
-Server-side LLM evaluation using OpenRouter. Runs inside the app container and
-writes results directly to the database.
+Server-side LLM evaluation using OpenRouter. The `evaluate` entrypoint now runs
+as a continuous HTTP-polling service rather than a direct-DB batch job.
 
 **Prerequisites:** `OPENROUTER_API_KEY` in `.env`. In production, `.env` lives
 at `/opt/vps-infra/.env` on the VPS (see "Reloading .env in production" in
@@ -93,70 +93,26 @@ The model is set via the `OPENROUTER_MODEL` env var (default
 `google/gemini-2.5-flash-lite`) — there is no `--model` CLI flag. Pick any
 model slug from [openrouter.ai/models](https://openrouter.ai/models) (the
 site lists per-token pricing and context length for each); if you change it
-to something not already priced in `scripts/llm/pricing.py`, the cost
-estimate in the completion summary will report it as unpriced rather than
-silently showing $0.
+to something without pricing metadata, the cost estimate may be unavailable
+rather than silently showing $0.
 
 ```
-# evaluate all open issues (manual/opt-in; not run on a schedule by default)
-uv run scripts/run_llm.py evaluate --open-only
-
-# evaluate everything (open + closed)
+# start the continuous evaluation service locally
 uv run scripts/run_llm.py evaluate
 
-# limit to a project
-uv run scripts/run_llm.py evaluate --project snapcraft
-
-# limit number of issues (good for testing API costs)
-uv run scripts/run_llm.py evaluate --open-only --limit 40
-
-# evaluate concurrently (e.g. 8 requests in flight) for a large backlog;
-# safe against remote backends like OpenRouter, keep at 1 for local LLM endpoints
-uv run scripts/run_llm.py evaluate --force --concurrency 8
-
-# preview what would be evaluated, broken down by project and issue state
-uv run scripts/run_llm.py evaluate --dry-run
-
-# print a machine-readable JSON summary of the stats at the end
-uv run scripts/run_llm.py evaluate --open-only --json-summary
+# start the same service inside the app container
+podman compose exec -T app python scripts/run_llm.py evaluate
 ```
 
-When run interactively (a real terminal), `evaluate` shows a live Rich
-progress bar with an ETA, the same UX as `scripts/eval_client.py`. Pass
-`--no-progress` to disable it and fall back to plain text logs (this is
-automatic — and unaffected by this flag — when output isn't a terminal,
-e.g. when the admin dashboard's "Re-evaluate" button runs this as a
-subprocess).
+The service polls over HTTP for work, evaluates issues with OpenRouter, and
+posts results back to the server. It replaces the old manual/admin-triggered
+one-shot batch flow.
 
-The completion log line reports an estimated USD cost alongside token counts
-(based on known per-model OpenRouter pricing; evaluations using an unpriced
-model are called out separately rather than silently counted as free).
-`--dry-run` additionally prints a per-project, per-issue-state breakdown of
-what would be evaluated before the final count. The command exits non-zero
-if any issues errored during the run, so it can be used as a CI/cron
-success check; pass `--json-summary` to also get the final stats as a single
-JSON line on stdout for scripting.
-
-At `--concurrency` above 1, all workers share a single rate-limit backoff:
-if OpenRouter returns a 429, every worker pauses (honoring the response's
-`Retry-After` header, or an exponential backoff otherwise) rather than each
-worker independently retrying back into the same limit.
-
-This is not scheduled by cron; there is no daily eval job. Run it manually
-whenever you like:
-
-```bash
-# local
-podman compose exec -T app python scripts/run_llm.py evaluate --open-only
-# production
-podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/run_llm.py evaluate --open-only
-```
-
-The evaluator hashes issue content and skips unchanged issues, so daily runs
-only process newly changed issues.
+The evaluator hashes issue content and skips unchanged issues, so the
+continuous service only processes newly changed issues.
 
 For **local LLM evaluation** (pull-based, runs on your machine), use the eval
-client instead. See [`docs/eval-client.md`](eval-client.md).
+HTTP evaluate worker instead. See [`docs/evaluate.md`](evaluate.md).
 
 ### backfill_snapshots.py
 
@@ -320,8 +276,8 @@ cd /opt/vps-infra && podman-compose -f docker-compose.craft-dashboard.yml up -d
 
 The server now uses OpenRouter for server-side evaluation.
 
-For local LLM evaluation, use the pull-based eval client instead. See
-[`docs/eval-client.md`](eval-client.md) for setup and usage.
+For local LLM evaluation, use `scripts/run_llm.py evaluate --llm-backend local`.
+See [`docs/evaluate.md`](evaluate.md) for setup and usage.
 
 ### Delete all existing evaluations
 

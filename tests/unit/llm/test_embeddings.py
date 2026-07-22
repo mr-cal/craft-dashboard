@@ -83,3 +83,18 @@ async def test_embed_raises_on_http_error():
                 await client.embed("test")
         finally:
             await client.close()
+
+
+@pytest.mark.asyncio
+async def test_embed_batch_sends_dimensions_when_requested():
+    response = _make_response([[0.1, 0.2, 0.3]])
+    with patch(
+        "httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response
+    ) as mock_post:
+        client = EmbeddingClient(base_url="http://localhost:11434/v1")
+        try:
+            await client.embed_batch(["test text"], dimensions=1024)
+        finally:
+            await client.close()
+    _args, kwargs = mock_post.call_args
+    assert kwargs["json"]["dimensions"] == 1024

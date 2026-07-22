@@ -11,6 +11,7 @@ from craft_dashboard.config import DashboardConfig
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.routes import admin as admin_routes
 from craft_dashboard.settings import Settings
@@ -104,6 +105,69 @@ class TestAdminPageIntegration:
 
         assert response.status_code == 200
         assert "Project full-refresh schedule" in response.text
+
+    def test_admin_page_shows_llm_evaluation_service_section(
+        self,
+        client: TestClient,
+        test_db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The read-only LLM service section shows status and recent evals."""
+        _stub_admin_page_metrics(monkeypatch)
+
+        async def _seed() -> None:
+            project = Project(
+                name="snapcraft", category="application", github_org="canonical"
+            )
+            test_db_session.add(project)
+            await test_db_session.flush()
+            issue = Issue(
+                project_id=project.id,
+                source="github",
+                external_id="42",
+                issue_type="issue",
+                title="Build fails on arm64",
+                body="Body",
+                state="open",
+                author="dev",
+                author_is_maintainer=False,
+                author_is_bot=False,
+                labels=[],
+                created_at=datetime(2025, 1, 1, tzinfo=UTC),
+                updated_at=datetime(2025, 1, 1, tzinfo=UTC),
+                url="https://example.com/snapcraft/issues/42",
+                metadata_={},
+                comments=[],
+                last_fetched_at=datetime(2025, 1, 1, tzinfo=UTC),
+            )
+            test_db_session.add(issue)
+            await test_db_session.flush()
+            test_db_session.add(
+                LLMEvaluation(
+                    issue_id=issue.id,
+                    model_name="gpt-4.1",
+                    summary="Summary",
+                    suggested_action="keep_open",
+                    suggested_action_reason="Reason",
+                    scores={},
+                    evaluated_at=datetime(2025, 1, 5, tzinfo=UTC),
+                    issue_data_hash="hash",
+                    latest=True,
+                )
+            )
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = client.get("/admin")
+
+        assert response.status_code == 200
+        assert "LLM evaluation service" in response.text
+        assert "gpt-4.1" in response.text
+        assert "keep_open" in response.text
+        assert "Build fails on arm64" in response.text
+        # Cost figures are deliberately not surfaced here.
+        assert "openrouter cost" not in response.text.lower()
 
 
 class TestAdminHealthIntegration:
@@ -209,7 +273,7 @@ class TestAdminAuthIntegration:
 
 
 class TestAdminRefreshIntegration:
-    """Integration tests for refresh and re-evaluate endpoints."""
+    """Integration tests for refresh endpoints."""
 
     @pytest.mark.parametrize(
         ("origin", "host", "expected_status"),
@@ -241,20 +305,19 @@ class TestAdminRefreshIntegration:
 
         assert response.status_code == expected_status
 
-    def test_re_evaluate_with_valid_token(
+    def test_re_evaluate_route_is_removed(
         self,
         client: TestClient,
         app_with_db: tuple[FastAPI, str],
     ) -> None:
-        """Re-evaluate accepts a valid bearer token and queues work."""
-        app, token = app_with_db
+        """Re-evaluate is no longer available."""
+        _app, token = app_with_db
 
         response = client.post(
-            "/admin/re-evaluate", headers={"Authorization": f"Bearer {token}"}
+            "/admin/re-evaluate", headers={"Authorization": "******"}
         )
 
-        assert response.status_code == 202
-        assert response.json()["status"] == "evaluation_queued"
+        assert response.status_code == 404
 
 
 class TestAdminLogsIntegration:

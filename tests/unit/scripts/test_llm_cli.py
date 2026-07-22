@@ -1,29 +1,10 @@
 """Tests for scripts.llm.cli."""
 
-import json
-import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from click.testing import CliRunner
-from scripts.llm.cli import (
-    EvaluateOptions,
-    _clear_main,
-    _main,
-    _parse_issue_filter,
-    cli,
-)
-
-
-class TestParseIssueFilter:
-    def test_parses_single_ids_and_ranges(self) -> None:
-        assert _parse_issue_filter("charmcraft#2687,snapcraft#100-200") == [
-            ("charmcraft", 2687, 2687),
-            ("snapcraft", 100, 200),
-        ]
-
-    def test_skips_invalid_items(self) -> None:
-        assert _parse_issue_filter("bad,craft-parts#abc") == []
+from scripts.llm.cli import _clear_main, cli
 
 
 class TestClearEvaluationsCommand:
@@ -36,473 +17,50 @@ class TestClearEvaluationsCommand:
         assert "--project" in result.output
         assert "--yes" in result.output
 
-
-class TestEvaluateCommand:
-    def test_help_lists_validation_and_resume_flags(self) -> None:
-        runner = CliRunner()
-
-        result = runner.invoke(cli, ["evaluate", "--help"])
-
-        assert result.exit_code == 0
-        assert "--strict-validation" in result.output
-        assert "--no-resume" in result.output
-        assert "--concurrency" in result.output
-        assert "--no-progress" in result.output
-        assert "--backend" not in result.output
-
-    def test_forwards_concurrency_option_to_orchestrator(self, monkeypatch) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-
-        engine = MagicMock()
-        engine.dispose = AsyncMock()
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.load_config",
-            MagicMock(return_value=MagicMock(maintainers=[])),
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
-        )
-        evaluate_issues = AsyncMock(
-            return_value={
-                "evaluated": 0,
-                "skipped": 0,
-                "errored": 0,
-                "total_tokens": 0,
-                "total_prompt_tokens": 0,
-                "total_completion_tokens": 0,
-                "estimated_cost_usd": 0.0,
-                "unpriced_evaluations": 0,
-            }
-        )
-        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["evaluate", "--concurrency", "4"])
-
-        assert result.exit_code == 0
-        evaluate_issues.assert_awaited_once()
-        assert evaluate_issues.await_args.kwargs["concurrency"] == 4
-
-    def test_json_summary_flag_prints_json_stats(self, monkeypatch) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-
-        engine = MagicMock()
-        engine.dispose = AsyncMock()
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.load_config",
-            MagicMock(return_value=MagicMock(maintainers=[])),
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
-        )
-        evaluate_issues = AsyncMock(
-            return_value={
-                "evaluated": 3,
-                "skipped": 1,
-                "errored": 0,
-                "total_tokens": 500,
-                "total_prompt_tokens": 166,
-                "total_completion_tokens": 334,
-                "estimated_cost_usd": 0.05,
-                "unpriced_evaluations": 0,
-            }
-        )
-        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["evaluate", "--json-summary"])
-
-        assert result.exit_code == 0
-        json_line = result.output.strip().splitlines()[-1]
-        assert json.loads(json_line) == {
-            "evaluated": 3,
-            "skipped": 1,
-            "errored": 0,
-            "total_tokens": 500,
-            "total_prompt_tokens": 166,
-            "total_completion_tokens": 334,
-            "estimated_cost_usd": 0.05,
-            "unpriced_evaluations": 0,
-        }
-
-    def test_without_json_summary_flag_prints_no_json(self, monkeypatch) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-
-        engine = MagicMock()
-        engine.dispose = AsyncMock()
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.load_config",
-            MagicMock(return_value=MagicMock(maintainers=[])),
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
-        )
-        evaluate_issues = AsyncMock(
-            return_value={
-                "evaluated": 3,
-                "skipped": 1,
-                "errored": 0,
-                "total_tokens": 500,
-                "total_prompt_tokens": 166,
-                "total_completion_tokens": 334,
-                "estimated_cost_usd": 0.05,
-                "unpriced_evaluations": 0,
-            }
-        )
-        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["evaluate"])
-
-        assert result.exit_code == 0
-        assert result.output.strip() == ""
-
-    def test_exits_nonzero_when_errors_occurred(self, monkeypatch) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-
-        engine = MagicMock()
-        engine.dispose = AsyncMock()
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.load_config",
-            MagicMock(return_value=MagicMock(maintainers=[])),
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
-        )
-        evaluate_issues = AsyncMock(
-            return_value={
-                "evaluated": 2,
-                "skipped": 0,
-                "errored": 3,
-                "total_tokens": 100,
-                "total_prompt_tokens": 33,
-                "total_completion_tokens": 67,
-                "estimated_cost_usd": 0.0,
-                "unpriced_evaluations": 0,
-            }
-        )
-        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["evaluate"])
-
-        assert result.exit_code == 1
-
-    def test_exits_zero_when_no_errors_occurred(self, monkeypatch) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-
-        engine = MagicMock()
-        engine.dispose = AsyncMock()
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.load_config",
-            MagicMock(return_value=MagicMock(maintainers=[])),
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
-        )
-        evaluate_issues = AsyncMock(
-            return_value={
-                "evaluated": 2,
-                "skipped": 0,
-                "errored": 0,
-                "total_tokens": 100,
-                "total_prompt_tokens": 33,
-                "total_completion_tokens": 67,
-                "estimated_cost_usd": 0.0,
-                "unpriced_evaluations": 0,
-            }
-        )
-        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["evaluate"])
-
-        assert result.exit_code == 0
-
-    def test_logs_estimated_cost_when_present(self, monkeypatch, caplog) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-
-        engine = MagicMock()
-        engine.dispose = AsyncMock()
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.load_config",
-            MagicMock(return_value=MagicMock(maintainers=[])),
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
-        )
-        evaluate_issues = AsyncMock(
-            return_value={
-                "evaluated": 3,
-                "skipped": 0,
-                "errored": 0,
-                "total_tokens": 900,
-                "total_prompt_tokens": 300,
-                "total_completion_tokens": 600,
-                "estimated_cost_usd": 0.0123,
-                "unpriced_evaluations": 0,
-            }
-        )
-        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
-
-        runner = CliRunner()
-        with caplog.at_level(logging.INFO, logger="scripts.llm.cli"):
-            result = runner.invoke(cli, ["evaluate"])
-
-        assert result.exit_code == 0
-        assert "$0.0123 estimated cost" in caplog.text
-
-    def test_notes_unpriced_evaluations_in_cost_summary(
-        self, monkeypatch, caplog
-    ) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-
-        engine = MagicMock()
-        engine.dispose = AsyncMock()
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.load_config",
-            MagicMock(return_value=MagicMock(maintainers=[])),
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
-        )
-        evaluate_issues = AsyncMock(
-            return_value={
-                "evaluated": 2,
-                "skipped": 0,
-                "errored": 0,
-                "total_tokens": 200,
-                "total_prompt_tokens": 66,
-                "total_completion_tokens": 134,
-                "estimated_cost_usd": 0.0,
-                "unpriced_evaluations": 2,
-            }
-        )
-        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
-
-        runner = CliRunner()
-        with caplog.at_level(logging.INFO, logger="scripts.llm.cli"):
-            result = runner.invoke(cli, ["evaluate"])
-
-        assert result.exit_code == 0
-        assert "2 evaluations excluded" in caplog.text
-        assert "no pricing data" in caplog.text
-
-    def test_no_console_passed_when_stdout_is_not_a_tty(self, monkeypatch) -> None:
-        """CliRunner's captured stdout isn't a real TTY, so no progress bar."""
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-
-        engine = MagicMock()
-        engine.dispose = AsyncMock()
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.load_config",
-            MagicMock(return_value=MagicMock(maintainers=[])),
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
-        )
-        evaluate_issues = AsyncMock(
-            return_value={
-                "evaluated": 0,
-                "skipped": 0,
-                "errored": 0,
-                "total_tokens": 0,
-                "total_prompt_tokens": 0,
-                "total_completion_tokens": 0,
-                "estimated_cost_usd": 0.0,
-                "unpriced_evaluations": 0,
-            }
-        )
-        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["evaluate"])
-
-        assert result.exit_code == 0
-        assert evaluate_issues.await_args.kwargs["console"] is None
-
-    async def test_console_passed_when_stdout_is_a_tty(self, monkeypatch) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-        monkeypatch.setattr("scripts.llm.cli.sys.stdout.isatty", lambda: True)
-
-        engine = MagicMock()
-        engine.dispose = AsyncMock()
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.load_config",
-            MagicMock(return_value=MagicMock(maintainers=[])),
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
-        )
-        setup_rich_logging = MagicMock()
-        monkeypatch.setattr("scripts.llm.cli.setup_rich_logging", setup_rich_logging)
-        evaluate_issues = AsyncMock(
-            return_value={
-                "evaluated": 0,
-                "skipped": 0,
-                "errored": 0,
-                "total_tokens": 0,
-                "total_prompt_tokens": 0,
-                "total_completion_tokens": 0,
-                "estimated_cost_usd": 0.0,
-                "unpriced_evaluations": 0,
-            }
-        )
-        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
-
-        await _main(
-            EvaluateOptions(
-                project="",
-                limit=0,
-                open_only=False,
-                verbose=False,
-                force=False,
-                issue="",
-                incomplete=False,
-                stale_days=0,
-                dry_run=False,
-                strict_validation=False,
-                no_resume=False,
-                concurrency=1,
-                no_progress=False,
-            )
-        )
-
-        assert evaluate_issues.await_args.kwargs["console"] is not None
-        setup_rich_logging.assert_called_once()
-
-    async def test_no_progress_flag_disables_console_even_on_a_tty(
+    @pytest.mark.asyncio
+    async def test_clear_main_deletes_rows_without_storage_helpers(
         self, monkeypatch
     ) -> None:
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-        monkeypatch.setattr("scripts.llm.cli.sys.stdout.isatty", lambda: True)
+        class _FakeResult:
+            rowcount = 3
 
-        engine = MagicMock()
-        engine.dispose = AsyncMock()
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_session_factory", MagicMock(return_value=MagicMock())
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.load_config",
-            MagicMock(return_value=MagicMock(maintainers=[])),
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.create_llm_client", MagicMock(return_value=MagicMock())
-        )
-        setup_rich_logging = MagicMock()
-        monkeypatch.setattr("scripts.llm.cli.setup_rich_logging", setup_rich_logging)
-        evaluate_issues = AsyncMock(
-            return_value={
-                "evaluated": 0,
-                "skipped": 0,
-                "errored": 0,
-                "total_tokens": 0,
-                "total_prompt_tokens": 0,
-                "total_completion_tokens": 0,
-                "estimated_cost_usd": 0.0,
-                "unpriced_evaluations": 0,
-            }
-        )
-        monkeypatch.setattr("scripts.llm.cli._evaluate_issues", evaluate_issues)
+        class _FakeSession:
+            def __init__(self) -> None:
+                self.scalar_calls = []
+                self.execute_calls = []
+                self.committed = False
 
-        await _main(
-            EvaluateOptions(
-                project="",
-                limit=0,
-                open_only=False,
-                verbose=False,
-                force=False,
-                issue="",
-                incomplete=False,
-                stale_days=0,
-                dry_run=False,
-                strict_validation=False,
-                no_resume=False,
-                concurrency=1,
-                no_progress=True,
-            )
-        )
+            async def __aenter__(self):
+                return self
 
-        assert evaluate_issues.await_args.kwargs["console"] is None
-        setup_rich_logging.assert_not_called()
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
 
-    @pytest.mark.asyncio
-    async def test_clear_main_confirms_before_deleting(self, monkeypatch) -> None:
-        count_evaluations = AsyncMock(return_value=3)
-        clear_evaluations = AsyncMock(return_value=3)
+            async def scalar(self, query):
+                self.scalar_calls.append(query)
+                return 3
+
+            async def execute(self, query):
+                self.execute_calls.append(query)
+                return _FakeResult()
+
+            async def commit(self) -> None:
+                self.committed = True
+
+        class _FakeSessionFactory:
+            def __init__(self, session) -> None:
+                self._session = session
+
+            def __call__(self):
+                return self._session
+
+        fake_session = _FakeSession()
+        session_factory = _FakeSessionFactory(fake_session)
         confirm = MagicMock()
         engine = MagicMock()
         engine.dispose = AsyncMock()
-        session_factory = MagicMock()
-        monkeypatch.setattr("scripts.llm.cli.count_evaluations", count_evaluations)
-        monkeypatch.setattr("scripts.llm.cli._clear_evaluations", clear_evaluations)
+        monkeypatch.delattr("scripts.llm.cli.count_evaluations", raising=False)
+        monkeypatch.delattr("scripts.llm.cli._clear_evaluations", raising=False)
         monkeypatch.setattr("scripts.llm.cli.click.confirm", confirm)
         monkeypatch.setattr(
             "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
@@ -514,15 +72,60 @@ class TestEvaluateCommand:
 
         await _clear_main(project="snapcraft", yes=False)
 
-        count_evaluations.assert_awaited_once_with(
-            "snapcraft",
-            session_factory=session_factory,
-            engine=engine,
-        )
+        assert len(fake_session.scalar_calls) == 1
+        assert len(fake_session.execute_calls) == 1
         confirm.assert_called_once()
-        clear_evaluations.assert_awaited_once_with(
-            "snapcraft",
-            session_factory=session_factory,
-            engine=engine,
+        assert fake_session.committed is True
+        engine.dispose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_clear_main_skips_delete_when_no_evaluations(
+        self, monkeypatch
+    ) -> None:
+        class _FakeSession:
+            def __init__(self) -> None:
+                self.execute_calls = []
+                self.committed = False
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def scalar(self, query):
+                return 0
+
+            async def execute(self, query):
+                self.execute_calls.append(query)
+                raise AssertionError("delete should not run")
+
+            async def commit(self) -> None:
+                self.committed = True
+
+        class _FakeSessionFactory:
+            def __init__(self, session) -> None:
+                self._session = session
+
+            def __call__(self):
+                return self._session
+
+        fake_session = _FakeSession()
+        engine = MagicMock()
+        engine.dispose = AsyncMock()
+        confirm = MagicMock()
+        monkeypatch.setattr("scripts.llm.cli.click.confirm", confirm)
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
         )
+        monkeypatch.setattr(
+            "scripts.llm.cli.get_session_factory",
+            MagicMock(return_value=_FakeSessionFactory(fake_session)),
+        )
+
+        await _clear_main(project="", yes=False)
+
+        confirm.assert_not_called()
+        assert fake_session.execute_calls == []
+        assert fake_session.committed is False
         engine.dispose.assert_awaited_once()

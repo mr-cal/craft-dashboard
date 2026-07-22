@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.collectors import ISSUE_UPSERT_FIELDS
+from craft_dashboard.llm.content_hash import compute_content_hash
 
 __all__ = ["LaunchpadCollector"]
 
@@ -153,6 +154,7 @@ class LaunchpadCollector:
                 str(task.owner_link).rsplit("/", 1)[-1] if task.owner_link else None
             )
             author_is_maintainer = author in self._maintainers if author else False
+            labels = list(bug.tags)
 
             stmt = insert(Issue).values(
                 project_id=project_id,
@@ -165,7 +167,7 @@ class LaunchpadCollector:
                 author=author,
                 author_is_maintainer=author_is_maintainer,
                 author_is_bot=False,
-                labels=list(bug.tags),
+                labels=labels,
                 created_at=bug.date_created.replace(tzinfo=UTC)
                 if bug.date_created
                 else None,
@@ -177,6 +179,9 @@ class LaunchpadCollector:
                 else None,
                 url=bug.web_link,
                 metadata_={"importance": task.importance, "status": task.status},
+                content_hash=compute_content_hash(
+                    bug.title, bug.description, state, labels
+                ),
                 last_fetched_at=datetime.now(tz=UTC),
                 collection_run_id=collection_run_id,
             )

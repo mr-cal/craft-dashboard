@@ -1,11 +1,11 @@
 """Issue and PR evaluator using LLM."""
 
-import hashlib
 import json
 import logging
 from typing import Any, TypedDict
 
 from craft_dashboard.llm.client import LLMClient
+from craft_dashboard.llm.content_hash import compute_content_hash
 from craft_dashboard.llm.prompts import (
     build_closed_evaluate_prompt,
     build_open_evaluate_prompt,
@@ -214,72 +214,11 @@ def _parse_evaluation_response(content: str) -> ParsedEvaluation | None:
     return None
 
 
-#: pr_details keys that represent reviewer/CI intent a human or the LLM would
-#: act on. Diff stats and other cosmetic fields are deliberately excluded so
-#: routine force-pushes without new review activity don't force re-evaluation.
-_HASHED_PR_DETAIL_KEYS = (
-    "review_status",
-    "review_count",
-    "unresolved_review_comments",
-    "ci_passing",
-    "ci_failing",
-    "ci_pending",
-)
-
-
-def _compute_content_hash(
-    title: str,
-    body: str | None,
-    state: str,
-    labels: list[str],
-    comments: list[IssueComment] | None = None,
-    pr_details: dict[str, Any] | None = None,
-) -> str:
-    """Compute a SHA-256 hash of issue content for change detection.
-
-    Includes comments so that new discussion triggers re-evaluation, and a
-    subset of PR review/CI metadata (see ``_HASHED_PR_DETAIL_KEYS``) so that a
-    review approval, changes-requested, or CI status flip triggers
-    re-evaluation even when the title/body/labels/comments are unchanged.
-
-    .. warning::
-        Any change to this function's output MUST be accompanied by a
-        ``CURRENT_EVAL_VERSION`` bump **in the same commit**. Changing the hash
-        without bumping the version causes all existing evaluations to appear
-        stale (hash mismatch at priority-5), triggering mass re-evaluation of
-        issues that haven't actually changed.
-
-    Args:
-        title: Issue title.
-        body: Issue body text.
-        state: Issue state.
-        labels: List of label names.
-        comments: Recent comments list (optional).
-        pr_details: PR review/CI/diff metadata dict (optional). Only the keys
-            listed in ``_HASHED_PR_DETAIL_KEYS`` affect the hash.
-
-    Returns:
-        A 64-character hex string.
-
-    """
-    comments_repr = ""
-    if comments:
-        comments_repr = "|" + ";".join(
-            f"{c.get('author', '')}:{c.get('body', '')[:100]}"
-            for c in sorted(comments, key=lambda c: c.get("created_at") or "")
-        )
-    pr_details_repr = ""
-    if pr_details:
-        pr_details_repr = "|" + ";".join(
-            f"{key}={pr_details[key]!r}"
-            for key in _HASHED_PR_DETAIL_KEYS
-            if key in pr_details
-        )
-    content = (
-        f"{title}|{body or ''}|{state}|{','.join(sorted(labels))}"
-        f"{comments_repr}{pr_details_repr}"
-    )
-    return hashlib.sha256(content.encode()).hexdigest()
+#: Re-exported for backward compatibility — the implementation now lives in
+#: ``craft_dashboard.llm.content_hash`` so it can be shared with the
+#: collectors (which set ``Issue.content_hash``) without importing the whole
+#: evaluator module.
+_compute_content_hash = compute_content_hash
 
 
 class IssueEvaluator:

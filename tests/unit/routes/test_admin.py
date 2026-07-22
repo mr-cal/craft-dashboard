@@ -214,7 +214,7 @@ class TestAdminRoutes:
 
 
 class TestAdminRefreshWithAuth:
-    """Authenticated tests for refresh and re-evaluate routes."""
+    """Authenticated tests for admin routes."""
 
     def test_refresh_with_valid_token(self) -> None:
         """POST /admin/refresh accepts the configured admin token."""
@@ -271,44 +271,29 @@ class TestAdminRefreshWithAuth:
         assert "collect_data.py" in seen.get("args", ("",))[1]
         assert seen["args"][0] == sys.executable
 
-    def test_re_evaluate_requires_auth(self) -> None:
-        """POST /admin/re-evaluate returns 401 without token."""
+    def test_re_evaluate_route_is_removed(self) -> None:
+        """POST /admin/re-evaluate is no longer exposed."""
         app = _create_admin_app()
 
         with TestClient(app) as client:
             response = client.post("/admin/re-evaluate")
 
-        assert response.status_code == 401
+        assert response.status_code == 404
 
-    def test_re_evaluate_with_valid_token(self) -> None:
-        """POST /admin/re-evaluate accepts the configured admin token."""
+    def test_admin_page_omits_re_evaluate_controls(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GET /admin no longer renders the re-evaluate UI."""
         app = _create_admin_app()
+        _stub_admin_page_metrics(monkeypatch)
 
         with TestClient(app) as client:
-            response = client.post(
-                "/admin/re-evaluate",
-                headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
-            )
+            response = client.get("/admin")
 
-        assert response.status_code == 202
-        assert response.json()["status"] == "evaluation_queued"
-        assert response.headers["HX-Trigger"] == (
-            '{"toast":{"message":"LLM re-evaluation has been queued for all open issues.","type":"success"}}'
-        )
-
-    def test_re_evaluate_logs_when_queued(self, caplog) -> None:
-        """POST /admin/re-evaluate emits an audit log when work is queued."""
-        app = _create_admin_app()
-
-        with caplog.at_level(logging.INFO, logger="craft_dashboard.routes.admin"):
-            with TestClient(app) as client:
-                response = client.post(
-                    "/admin/re-evaluate",
-                    headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
-                )
-
-        assert response.status_code == 202
-        assert "Admin: re-evaluation triggered with params:" in caplog.text
+        assert response.status_code == 200
+        assert "Re-evaluate issues" not in response.text
+        assert "triggerEvaluate" not in response.text
+        assert "triggerDryRun" not in response.text
 
 
 class TestAdminDistribute:

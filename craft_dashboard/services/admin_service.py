@@ -6,6 +6,7 @@ import asyncio
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, TypedDict
+from typing import cast as typing_cast
 
 from sqlalchemy import String, cast, func, or_, select
 
@@ -19,6 +20,7 @@ from craft_dashboard.models.refresh_schedule import RefreshSchedule
 from craft_dashboard.repositories.issue_repository import (
     _build_excluded_issues_condition,
 )
+from craft_dashboard.routes.eval_api import _ACTIVITY_STALE_AFTER, get_eval_activity
 from craft_dashboard.settings import Settings
 
 if TYPE_CHECKING:
@@ -83,6 +85,42 @@ class SystemStatus(TypedDict):
     evaluation_running: bool
     last_collection: datetime | None
     last_evaluation: datetime | None
+
+
+class LLMServiceStatus(TypedDict):
+    """Status of the continuous `evaluate` worker, derived from HTTP activity.
+
+    No direct process/heartbeat signal exists from the worker itself (it's a
+    remote HTTP client, possibly not even on this host) — status is inferred
+    from how recently it has called `/api/eval/next` or `/api/eval/result`.
+    """
+
+    status: str  # "running" | "stalled" | "unknown"
+    last_poll_at: datetime | None
+    last_result_at: datetime | None
+
+
+class RecentEvaluationEntry(TypedDict):
+    """A single recently-submitted evaluation shown on the admin dashboard.
+
+    Deliberately excludes token/cost fields — the admin page doesn't surface
+    OpenRouter spend.
+    """
+
+    issue_id: int
+    project: str
+    external_id: str
+    title: str
+    model_name: str
+    suggested_action: str | None
+    evaluated_at: datetime
+
+
+class DailyEvaluationCount(TypedDict):
+    """Count of evaluations submitted on a given calendar day."""
+
+    date: str
+    count: int
 
 
 class ActivityEntry(TypedDict):
@@ -517,6 +555,87 @@ class AdminService:
             "last_collection": _ensure_utc(last_collection),
             "last_evaluation": _ensure_utc(last_evaluation),
         }
+
+    async def get_llm_service_status(self) -> LLMServiceStatus:
+        """Derive the continuous `evaluate` worker's status from HTTP activity.
+
+        "running" requires a `/next` poll within the stale window (the worker
+        polls even when there's nothing to do, so this alone proves it's
+        alive); "stalled" means it *has* called in before but not recently
+        enough; "unknown" means it has never been observed at all (e.g. right
+        after a fresh deploy, before the worker's first poll).
+        """
+        last_poll_at, last_result_at = get_eval_activity()
+        if last_poll_at is None:
+            status = "unknown"
+        elif datetime.now(UTC) - last_poll_at <= _ACTIVITY_STALE_AFTER:
+            status = "running"
+        else:
+            status = "stalled"
+        return {
+            "status": status,
+            "last_poll_at": last_poll_at,
+            "last_result_at": last_result_at,
+        }
+
+    async def get_recent_evaluations(
+        self, limit: int = 20
+    ) -> list[RecentEvaluationEntry]:
+        """Return the most recently submitted evaluations, newest first.
+
+        Deliberately omits token/cost fields — the admin page doesn't surface
+        OpenRouter spend.
+        """
+        query = (
+            select(
+                LLMEvaluation.issue_id,
+                Project.name.label("project_name"),
+                Issue.external_id,
+                Issue.title,
+                LLMEvaluation.model_name,
+                LLMEvaluation.suggested_action,
+                LLMEvaluation.evaluated_at,
+            )
+            .join(Issue, LLMEvaluation.issue_id == Issue.id)
+            .join(Project, Issue.project_id == Project.id)
+            .where(LLMEvaluation.latest.is_(True))
+            .order_by(LLMEvaluation.evaluated_at.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return [
+            {
+                "issue_id": row.issue_id,
+                "project": row.project_name,
+                "external_id": row.external_id,
+                "title": row.title,
+                "model_name": row.model_name,
+                "suggested_action": row.suggested_action,
+                "evaluated_at": typing_cast("datetime", _ensure_utc(row.evaluated_at)),
+            }
+            for row in result
+        ]
+
+    async def get_daily_evaluation_stats(
+        self, days: int = 14
+    ) -> list[DailyEvaluationCount]:
+        """Return evaluation counts per day for the last `days` days.
+
+        Counts every submitted evaluation (not just `latest=True` rows), so
+        re-evaluations of the same issue each count toward the day they were
+        submitted. No cost fields — the admin page doesn't surface OpenRouter
+        spend.
+        """
+        since = datetime.now(UTC) - timedelta(days=days)
+        day = func.date(LLMEvaluation.evaluated_at)
+        query = (
+            select(day.label("day"), func.count(LLMEvaluation.id).label("total"))
+            .where(LLMEvaluation.evaluated_at >= since)
+            .group_by(day)
+            .order_by(day)
+        )
+        result = await self.session.execute(query)
+        return [{"date": str(row.day), "count": row.total} for row in result]
 
     async def update_schedule(self, project: str, days: list[int]) -> None:
         """Update the refresh schedule for a project."""

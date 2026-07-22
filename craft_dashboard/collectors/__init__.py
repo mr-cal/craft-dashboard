@@ -32,6 +32,7 @@ ISSUE_UPSERT_FIELDS = [
     "labels",
     "updated_at",
     "closed_at",
+    "content_hash",
     "last_fetched_at",
     "collection_run_id",
 ]

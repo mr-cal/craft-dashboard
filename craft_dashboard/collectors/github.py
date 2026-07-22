@@ -26,6 +26,7 @@ from craft_dashboard.collectors.github_graphql import (
     paginated_pull_requests,
     paginated_releases_and_branches,
 )
+from craft_dashboard.llm.content_hash import compute_content_hash
 
 __all__ = ["GitHubCollector"]
 
@@ -436,6 +437,7 @@ class GitHubCollector:
 
         """
         author = gh_issue.user.login if gh_issue.user else None
+        labels = [label.name for label in gh_issue.labels]
         return {
             "project_id": project_id,
             "source": "github",
@@ -447,7 +449,7 @@ class GitHubCollector:
             "author": author,
             "author_is_maintainer": self.is_maintainer(author) if author else False,
             "author_is_bot": author.endswith("[bot]") if author else False,
-            "labels": [label.name for label in gh_issue.labels],
+            "labels": labels,
             "created_at": gh_issue.created_at.replace(tzinfo=UTC)
             if gh_issue.created_at
             else None,
@@ -460,6 +462,14 @@ class GitHubCollector:
             "url": gh_issue.html_url,
             "metadata_": extra_metadata,
             "comments": comments,
+            "content_hash": compute_content_hash(
+                gh_issue.title,
+                gh_issue.body,
+                state,
+                labels,
+                comments,
+                pr_details=extra_metadata or None,
+            ),
             "last_fetched_at": datetime.now(tz=UTC),
         }
 

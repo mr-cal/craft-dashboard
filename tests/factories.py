@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from craft_dashboard.llm.content_hash import compute_content_hash
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
@@ -42,10 +43,26 @@ def make_issue(
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
     url: str = "",
+    comments: list[dict[str, Any]] | None = None,
+    metadata_: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> Issue:
     """Build an Issue model with defaults shared across tests."""
     now = datetime.now(tz=UTC)
+    resolved_labels = [] if labels is None else labels
+    resolved_comments = [] if comments is None else comments
+    resolved_metadata = {} if metadata_ is None else metadata_
+    kwargs.setdefault(
+        "content_hash",
+        compute_content_hash(
+            title,
+            body,
+            state,
+            resolved_labels,
+            resolved_comments,
+            pr_details=resolved_metadata or None,
+        ),
+    )
     return Issue(
         project_id=project_id,
         source=source,
@@ -57,12 +74,12 @@ def make_issue(
         author=author,
         author_is_maintainer=author_is_maintainer,
         author_is_bot=author_is_bot,
-        labels=[] if labels is None else labels,
+        labels=resolved_labels,
         created_at=created_at or now - timedelta(days=10),
         updated_at=updated_at or now,
         url=url or f"https://github.com/canonical/test/issues/{external_id}",
-        metadata_={},
-        comments=[],
+        metadata_=resolved_metadata,
+        comments=resolved_comments,
         last_fetched_at=now,
         **kwargs,
     )

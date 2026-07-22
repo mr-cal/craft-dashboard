@@ -56,10 +56,9 @@ OPENROUTER_API_KEY=<your key>
 ```
 
 - `EVAL_API_TOKEN` is required for the pull-based eval API (`/api/eval/*`).
-- `OPENROUTER_API_KEY` is required for server-side OpenRouter evaluation
-  (`run_llm.py evaluate` and admin-triggered re-evaluation).
-- Local LLM evaluation is handled by the eval client (`docs/eval-client.md`),
-  not by the server.
+- `OPENROUTER_API_KEY` is required for the continuous server-side
+  `run_llm.py evaluate` service.
+- Continuous and local-backend HTTP evaluation is documented in `docs/evaluate.md`.
 
 See `.env.example` for all available settings.
 
@@ -185,9 +184,8 @@ podman exec -i vps-infra_postgres_1 pg_dump -U craft_dashboard craft_dashboard |
 
 Data collection runs as cron jobs on the host (see
 [`cron.d/collect-data`](https://github.com/mr-cal/vps-infra/blob/main/cron.d/collect-data)
-in vps-infra for the live configuration). LLM evaluation is not scheduled —
-it's opt-in via `scripts/eval_client.py` (pull-based) or manually invoking
-`scripts/run_llm.py evaluate`.
+in vps-infra for the live configuration). LLM evaluation now runs via the
+continuous `scripts/run_llm.py evaluate` HTTP-polling service.
 
 In production (Podman), use `podman exec` instead of `docker compose exec`:
 
@@ -205,7 +203,7 @@ In production (Podman), use `podman exec` instead of `docker compose exec`:
 0 3 * * * root podman exec -i vps-infra_postgres_1 pg_dump -U craft_dashboard craft_dashboard | gzip > /opt/vps-infra/backups/craft-dashboard-$(date +\%Y\%m\%d).sql.gz
 ```
 
-If you use local LLM evaluation, run `scripts/eval_client.py` from a trusted
-machine that can reach the server over HTTPS. Server-side evaluation
-(`scripts/run_llm.py`) has no cron entry in vps-infra; there is no daily
-scheduled eval job — run it manually whenever you like.
+If you use a local LLM backend, run `scripts/run_llm.py evaluate --llm-backend local`
+from a trusted machine that can reach the server over HTTPS. Server-side
+evaluation now runs as the continuous `scripts/run_llm.py evaluate` polling
+service rather than a manual one-shot batch job.

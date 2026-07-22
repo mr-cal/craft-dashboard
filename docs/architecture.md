@@ -5,8 +5,8 @@
 craft-dashboard is a read-only web application backed by a PostgreSQL database.
 The web app never calls external APIs during request handling. GitHub and
 Launchpad data is fetched by offline scripts that run on systemd timers. LLM
-results can be produced either by optional server-side jobs or by a pull-based
-local eval client that fetches work from the server and submits results back.
+results are produced by a continuous pull-based evaluation worker that
+fetches work from the server and submits results back over HTTP.
 
 ```
                           ┌──────────────────────────────────┐
@@ -59,14 +59,15 @@ collection takes, and a GitHub API outage doesn't break the dashboard.
 
 2. LLM evaluation can run in two ways:
 
-   - `run_llm.py evaluate` performs optional server-side evaluation against
-     OpenRouter and writes the evaluation (summary, suggested action, scores)
-     back to PostgreSQL.
-   - `scripts/eval_client.py` performs pull-based local evaluation. It requests
-     the next issue from `/api/eval/next`, evaluates it against an
-     OpenAI-compatible LLM, and submits the result to `/api/eval/result`.
+   - `run_llm.py evaluate` now runs as a continuous HTTP-polling service. It
+     performs server-side evaluation against OpenRouter and writes the
+     evaluation (summary, suggested action, scores) back to PostgreSQL.
+   - `scripts/run_llm.py evaluate` can also target a local OpenAI-compatible
+     backend while still polling `/api/eval/next` and submitting results to
+     `/api/eval/result`. OpenRouter embeddings are computed inline for every
+     submission.
 
-   Both flows use content hashing to skip unchanged issues.
+   The HTTP worker uses content hashing to skip unchanged issues.
 
 3. The FastAPI app reads everything from the database and renders HTML pages
    with Jinja2 templates. The issues page uses HTMX for filtering and
@@ -138,10 +139,9 @@ All routes are in `craft_dashboard/routes/`:
 - `admin.py` -- `GET /admin` renders the admin page. `POST /admin/auth` and
   `POST /admin/logout` handle session login. `GET /admin/status` returns
   collection run status as JSON. `POST /admin/refresh` triggers a data refresh,
-  `POST /admin/re-evaluate` triggers LLM re-evaluation, and
-  `POST /admin/distribute` spreads refresh schedules evenly. `GET /admin/health`
-  returns a health check. `GET /admin/logs` streams recent application logs.
-  Protected by bearer token.
+  and `POST /admin/distribute` spreads refresh schedules evenly.
+  `GET /admin/health` returns a health check. `GET /admin/logs` streams recent
+  application logs. Protected by bearer token.
 - `eval_api.py` -- pull-based evaluation API. `GET /api/eval/next` leases the
   next issue, `POST /api/eval/result` stores the evaluation, and
   `GET /api/eval/status` returns queue counts. Protected by the eval API token.
@@ -154,7 +154,7 @@ a developer workstation or home-lab LLM.
 ```
 ┌──────────────────────────────┐   ← HTTPS (`next` / `result`) ←   ┌────────────────────────────────┐
 │ Docker container on VPS      │                                    │ Local machine                  │
-│ FastAPI + /api/eval/*        │                                    │ scripts/eval_client.py         │
+│ FastAPI + /api/eval/*        │                                    │ scripts/run_llm.py evaluate    │
 │ PostgreSQL                   │                                    │ OpenAI-compatible local LLM    │
 └──────────────────────────────┘                                    └────────────────────────────────┘
 ```
@@ -162,8 +162,8 @@ a developer workstation or home-lab LLM.
 Flow:
 
 1. The server exposes `GET /api/eval/next` to hand out the next eligible issue.
-2. The eval client pulls that issue over HTTPS and evaluates it locally.
-3. The client pushes the finished result to `POST /api/eval/result`.
+2. The evaluate worker pulls that issue over HTTPS and evaluates it.
+3. The worker pushes the finished result to `POST /api/eval/result`.
 4. Operators can query `GET /api/eval/status` to see queue counts.
 
 Security properties:
@@ -204,11 +204,11 @@ The LLM subsystem lives in `craft_dashboard/llm/`.
 - Server-side evaluation uses OpenRouter, with
   `anthropic/claude-haiku-4.5` for evaluation and
   `google/gemini-2.5-flash-lite` for summaries by default.
-- Local LLM evaluation uses the pull-based eval client; the local client class
+- Local LLM evaluation uses the HTTP evaluate worker; the local client class
   remains available for that workflow.
 
 The evaluator hashes issue content and skips re-evaluation when the hash
-matches the previous run. This keeps API costs low for daily cron runs.
+matches the previous run. This keeps API costs low for the continuous evaluation service.
 
 ## Refresh scheduling
 

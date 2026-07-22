@@ -72,6 +72,7 @@ class TestSettings:
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         monkeypatch.delenv("ADMIN_TOKEN", raising=False)
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.delenv("EVAL_API_TOKEN", raising=False)
 
         settings = Settings(_env_file=None)
 
@@ -121,7 +122,8 @@ class TestValidateRequiredSecrets:
 class TestEmbeddingSettings:
     """Tests for embedding and related-issues settings."""
 
-    def test_embedding_settings_have_defaults(self) -> None:
+    def test_embedding_settings_have_defaults(self, monkeypatch) -> None:
+        monkeypatch.delenv("LOCAL_LLM_EMBEDDING_MODEL", raising=False)
         s = Settings(_env_file=None)
         assert s.local_llm_embedding_model == ""
         assert s.related_issues_top_n == 10
