@@ -50,24 +50,7 @@ class TestEvaluateCommand:
         assert "--no-progress" in result.output
         assert "--backend" not in result.output
 
-    def test_returns_cleanly_when_server_side_eval_is_disabled(
-        self, monkeypatch, caplog
-    ) -> None:
-        monkeypatch.setenv("ENABLE_SERVER_EVAL", "false")
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-        runner = CliRunner()
-
-        with caplog.at_level(logging.INFO, logger="scripts.llm.cli"):
-            result = runner.invoke(cli, ["evaluate"])
-
-        assert result.exit_code == 0
-        assert (
-            "Server-side evaluation is disabled (ENABLE_SERVER_EVAL=false). "
-            "Use the eval client script for pull-based evaluation instead."
-        ) in caplog.text
-
     def test_forwards_concurrency_option_to_orchestrator(self, monkeypatch) -> None:
-        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
         monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
 
@@ -106,7 +89,6 @@ class TestEvaluateCommand:
         assert evaluate_issues.await_args.kwargs["concurrency"] == 4
 
     def test_json_summary_flag_prints_json_stats(self, monkeypatch) -> None:
-        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
         monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
 
@@ -152,7 +134,6 @@ class TestEvaluateCommand:
         }
 
     def test_without_json_summary_flag_prints_no_json(self, monkeypatch) -> None:
-        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
         monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
 
@@ -190,7 +171,6 @@ class TestEvaluateCommand:
         assert result.output.strip() == ""
 
     def test_exits_nonzero_when_errors_occurred(self, monkeypatch) -> None:
-        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
         monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
 
@@ -227,7 +207,6 @@ class TestEvaluateCommand:
         assert result.exit_code == 1
 
     def test_exits_zero_when_no_errors_occurred(self, monkeypatch) -> None:
-        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
         monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
 
@@ -263,20 +242,7 @@ class TestEvaluateCommand:
 
         assert result.exit_code == 0
 
-    def test_exits_zero_when_server_side_eval_disabled_even_conceptually(
-        self, monkeypatch
-    ) -> None:
-        """Disabled-eval early-return (stats=None) must not be mistaken for errors."""
-        monkeypatch.setenv("ENABLE_SERVER_EVAL", "false")
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-
-        runner = CliRunner()
-        result = runner.invoke(cli, ["evaluate"])
-
-        assert result.exit_code == 0
-
     def test_logs_estimated_cost_when_present(self, monkeypatch, caplog) -> None:
-        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
         monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
 
@@ -317,7 +283,6 @@ class TestEvaluateCommand:
     def test_notes_unpriced_evaluations_in_cost_summary(
         self, monkeypatch, caplog
     ) -> None:
-        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
         monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
 
@@ -358,7 +323,6 @@ class TestEvaluateCommand:
 
     def test_no_console_passed_when_stdout_is_not_a_tty(self, monkeypatch) -> None:
         """CliRunner's captured stdout isn't a real TTY, so no progress bar."""
-        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
         monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
 
@@ -396,7 +360,6 @@ class TestEvaluateCommand:
         assert evaluate_issues.await_args.kwargs["console"] is None
 
     async def test_console_passed_when_stdout_is_a_tty(self, monkeypatch) -> None:
-        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
         monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         monkeypatch.setattr("scripts.llm.cli.sys.stdout.isatty", lambda: True)
@@ -454,7 +417,6 @@ class TestEvaluateCommand:
     async def test_no_progress_flag_disables_console_even_on_a_tty(
         self, monkeypatch
     ) -> None:
-        monkeypatch.setenv("ENABLE_SERVER_EVAL", "true")
         monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         monkeypatch.setattr("scripts.llm.cli.sys.stdout.isatty", lambda: True)

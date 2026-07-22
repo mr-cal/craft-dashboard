@@ -248,7 +248,6 @@ class TestAdminRefreshIntegration:
     ) -> None:
         """Re-evaluate accepts a valid bearer token and queues work."""
         app, token = app_with_db
-        app.state.settings.enable_server_eval = True
 
         response = client.post(
             "/admin/re-evaluate", headers={"Authorization": f"Bearer {token}"}

@@ -52,13 +52,12 @@ EVAL_API_TOKEN=<a random string for /api/eval/*>
 Evaluation settings:
 
 ```
-ENABLE_SERVER_EVAL=false
 OPENROUTER_API_KEY=<your key>
 ```
 
 - `EVAL_API_TOKEN` is required for the pull-based eval API (`/api/eval/*`).
-- `ENABLE_SERVER_EVAL` toggles server-side OpenRouter evaluation for
-  `run_llm.py evaluate` and admin-triggered re-evaluation.
+- `OPENROUTER_API_KEY` is required for server-side OpenRouter evaluation
+  (`run_llm.py evaluate` and admin-triggered re-evaluation).
 - Local LLM evaluation is handled by the eval client (`docs/eval-client.md`),
   not by the server.
 
@@ -188,7 +187,7 @@ Data collection runs as cron jobs on the host (see
 [`cron.d/collect-data`](https://github.com/mr-cal/vps-infra/blob/main/cron.d/collect-data)
 in vps-infra for the live configuration). LLM evaluation is not scheduled —
 it's opt-in via `scripts/eval_client.py` (pull-based) or manually invoking
-`scripts/run_llm.py evaluate` with `ENABLE_SERVER_EVAL=true`.
+`scripts/run_llm.py evaluate`.
 
 In production (Podman), use `podman exec` instead of `docker compose exec`:
 
@@ -208,5 +207,5 @@ In production (Podman), use `podman exec` instead of `docker compose exec`:
 
 If you use local LLM evaluation, run `scripts/eval_client.py` from a trusted
 machine that can reach the server over HTTPS. Server-side evaluation
-(`scripts/run_llm.py`) is disabled by default (`ENABLE_SERVER_EVAL=false`)
-and has no cron entry in vps-infra; there is no daily 6 AM eval job.
+(`scripts/run_llm.py`) has no cron entry in vps-infra; there is no daily
+scheduled eval job — run it manually whenever you like.

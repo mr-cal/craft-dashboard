@@ -301,18 +301,6 @@ async def trigger_re_evaluation(
     _require_admin_auth(request, authorization)
     _verify_origin(request)
 
-    settings = request.app.state.settings
-    if not settings.enable_server_eval:
-        message = (
-            "Server-side evaluation is disabled (ENABLE_SERVER_EVAL=false). "
-            "Use the eval client script for pull-based evaluation."
-        )
-        return JSONResponse(
-            {"status": "disabled", "message": message},
-            status_code=status.HTTP_409_CONFLICT,
-            headers=_build_toast_headers(message, "warning"),
-        )
-
     params = body or ReEvaluateRequest()
 
     # Build command for run_llm.py

@@ -122,12 +122,11 @@ async def _clear_main(project: str, yes: bool) -> None:
         await engine.dispose()
 
 
-async def _main(options: EvaluateOptions) -> dict | None:
+async def _main(options: EvaluateOptions) -> dict:
     """Run LLM evaluation.
 
-    Returns the evaluation stats dict (or ``None`` if evaluation didn't run
-    at all, e.g. server-side eval is disabled) so ``evaluate_cmd`` can derive
-    its process exit code from ``stats["errored"]``.
+    Returns the evaluation stats dict so ``evaluate_cmd`` can derive its
+    process exit code from ``stats["errored"]``.
     """
     settings = Settings()
     log_level = (
@@ -145,13 +144,6 @@ async def _main(options: EvaluateOptions) -> dict | None:
         console = Console()
         setup_rich_logging(verbose=options.verbose, console=console)
     logging.getLogger().setLevel(log_level)
-
-    if not settings.enable_server_eval:
-        logger.info(
-            "Server-side evaluation is disabled (ENABLE_SERVER_EVAL=false). "
-            "Use the eval client script for pull-based evaluation instead."
-        )
-        return None
 
     if not settings.openrouter_api_key:
         logger.error("OPENROUTER_API_KEY environment variable is not set.")
@@ -348,7 +340,7 @@ def evaluate_cmd(**kwargs: object) -> None:
     """Run LLM evaluation on issues and PRs."""
     options = EvaluateOptions(**kwargs)
     stats = asyncio.run(_main(options))
-    if stats is not None and stats["errored"] > 0:
+    if stats["errored"] > 0:
         sys.exit(1)
 
 

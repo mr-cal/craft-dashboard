@@ -75,15 +75,14 @@ dependencies and releases. To force a full refresh of all projects, see
 Server-side LLM evaluation using OpenRouter. Runs inside the app container and
 writes results directly to the database.
 
-**Prerequisites:** `OPENROUTER_API_KEY` in `.env` and `ENABLE_SERVER_EVAL=true`
-(disabled by default; the pull-based `scripts/eval_client.py` workflow is
-preferred). In production, `.env` lives at `/opt/vps-infra/.env` on the VPS
-(see "Reloading .env in production" in [`docs/deployment.md`](deployment.md)
-for how to edit it and apply changes) — **after editing it you must restart
-the app container** (`podman restart vps-infra_craft-dashboard_1`) for
-`ENABLE_SERVER_EVAL`, `OPENROUTER_MODEL`, etc. to take effect; pydantic-settings
-only reads `.env` at process startup, so re-running `run_llm.py` against a
-container that hasn't been restarted will still see the old values.
+**Prerequisites:** `OPENROUTER_API_KEY` in `.env`. In production, `.env` lives
+at `/opt/vps-infra/.env` on the VPS (see "Reloading .env in production" in
+[`docs/deployment.md`](deployment.md) for how to edit it and apply changes)
+— **after editing it you must restart the app container**
+(`podman restart vps-infra_craft-dashboard_1`) for changes like
+`OPENROUTER_MODEL` to take effect; pydantic-settings only reads `.env` at
+process startup, so re-running `run_llm.py` against a container that hasn't
+been restarted will still see the old values.
 
 The `scripts/` directory isn't a bind mount on the VPS — it's baked into the
 Docker image at build time and only exists at `/app/scripts` inside the
@@ -143,9 +142,8 @@ if OpenRouter returns a 429, every worker pauses (honoring the response's
 `Retry-After` header, or an exponential backoff otherwise) rather than each
 worker independently retrying back into the same limit.
 
-Server-side evaluation is disabled by default (`ENABLE_SERVER_EVAL=false`)
-and has no cron entry in production — there is no daily 6 AM eval job. Run
-it manually when `ENABLE_SERVER_EVAL=true`:
+This is not scheduled by cron; there is no daily eval job. Run it manually
+whenever you like:
 
 ```bash
 # local
