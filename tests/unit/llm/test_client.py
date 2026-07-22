@@ -176,3 +176,17 @@ class TestLLMResponse:
         assert response.content == "hello"
         assert response.total_tokens == 0
         assert response.model == ""
+
+    def test_from_api_response_null_content(self) -> None:
+        """Coerce a null message content (e.g. content filter, max_tokens
+        cutoff with no text) to an empty string instead of leaving it None.
+        """
+        api_data = {
+            "choices": [{"message": {"content": None}}],
+            "usage": {"total_tokens": 10, "prompt_tokens": 10, "completion_tokens": 0},
+        }
+
+        response = LLMResponse.from_api_response(api_data)
+
+        assert response.content == ""
+        assert response.total_tokens == 10

@@ -61,7 +61,12 @@ class LLMResponse:
     @classmethod
     def from_api_response(cls, data: dict) -> LLMResponse:
         """Parse an LLM API response dict."""
-        content = data["choices"][0]["message"]["content"]
+        # Some providers (and thinking models under certain conditions, e.g.
+        # hitting max_tokens or triggering content filters) return a null
+        # message content instead of an empty string. Coerce to "" so
+        # downstream parsing can treat it as an unparsable response instead
+        # of crashing on None.
+        content = data["choices"][0]["message"]["content"] or ""
         usage = data.get("usage", {})
         return cls(
             content=content,
