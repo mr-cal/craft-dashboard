@@ -458,9 +458,7 @@ async def _evaluate_issues(
                         state=issue.state,
                     )
                 except LLMValidationError as exc:
-                    logger.warning(
-                        "Validation failed for issue %s", issue_ref, exc_info=True
-                    )
+                    logger.warning("Validation failed for issue %s: %s", issue_ref, exc)
                     stats["errored"] += 1
                     if strict_validation:
                         strict_failure = exc
