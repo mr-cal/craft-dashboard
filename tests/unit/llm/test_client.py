@@ -164,6 +164,25 @@ class TestLLMResponse:
         assert response.prompt_tokens == 100
         assert response.completion_tokens == 50
         assert response.model == ""
+        assert response.cost_usd is None
+
+    def test_from_api_response_captures_cost(self) -> None:
+        """OpenRouter's own usage.cost is the authoritative billed amount --
+        capture it so callers can prefer it over the static pricing table.
+        """
+        api_data = {
+            "choices": [{"message": {"content": "hello"}}],
+            "usage": {
+                "total_tokens": 154,
+                "prompt_tokens": 17,
+                "completion_tokens": 137,
+                "cost": 0.00013921,
+            },
+        }
+
+        response = LLMResponse.from_api_response(api_data)
+
+        assert response.cost_usd == 0.00013921
 
     def test_from_api_response_missing_usage(self) -> None:
         """Handle response with missing usage data."""
@@ -190,3 +209,49 @@ class TestLLMResponse:
 
         assert response.content == ""
         assert response.total_tokens == 10
+
+
+class TestOpenRouterClientRetryLogging:
+    """Tests for the client-level retry (429/transport errors)."""
+
+    @pytest.mark.asyncio
+    async def test_retry_after_429_is_logged(self, monkeypatch, caplog) -> None:
+        """This retry layer previously logged nothing at all, silently
+        discarding the tokens/cost of the failed attempt. Confirm it now
+        surfaces a warning so retries are visible in run output.
+        """
+        monkeypatch.setattr("asyncio.sleep", AsyncMock())
+        request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+        responses = iter(
+            [
+                httpx.Response(429, request=request),
+                httpx.Response(
+                    200,
+                    json={
+                        "choices": [{"message": {"content": "ok"}}],
+                        "usage": {
+                            "prompt_tokens": 1,
+                            "completion_tokens": 1,
+                            "total_tokens": 2,
+                        },
+                    },
+                    request=request,
+                ),
+            ]
+        )
+
+        async def _fake_post(*_args: object, **_kwargs: object) -> httpx.Response:
+            return next(responses)
+
+        client = OpenRouterClient(api_key="test")
+        caplog.set_level("WARNING")
+        with (
+            patch.object(client, "_http", None),
+            patch("httpx.AsyncClient.post", new=_fake_post),
+        ):
+            result = await client.complete(
+                model="test/model", messages=[{"role": "user", "content": "hi"}]
+            )
+
+        assert result.content == "ok"
+        assert "HTTP retry" in caplog.text

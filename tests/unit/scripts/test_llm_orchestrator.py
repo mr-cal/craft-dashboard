@@ -77,6 +77,7 @@ def _valid_result(*, issue_hash: str) -> dict:
         "tokens_used": 77,
         "prompt_tokens": 30,
         "completion_tokens": 47,
+        "cost_usd": None,
         "issue_data_hash": issue_hash,
     }
 
@@ -305,6 +306,7 @@ class TestEvaluateIssues:
                     "tokens_used": 10,
                     "prompt_tokens": 4,
                     "completion_tokens": 6,
+                    "cost_usd": None,
                     "issue_data_hash": "hash-1",
                 }
             ),
@@ -360,6 +362,7 @@ class TestEvaluateIssues:
                     "tokens_used": 10,
                     "prompt_tokens": 4,
                     "completion_tokens": 6,
+                    "cost_usd": None,
                     "issue_data_hash": "hash-1",
                 }
             ),

@@ -48,6 +48,31 @@ def _make_before_attempt(max_attempts: int) -> Callable[[RetryCallState], None]:
     return _before
 
 
+def _make_before_sleep_log(max_attempts: int) -> Callable[[RetryCallState], None]:
+    """Build a tenacity ``before_sleep`` hook that logs each retry.
+
+    Unlike ``before`` (which tenacity only calls once, ahead of the very
+    first attempt), ``before_sleep`` fires right before every retry, once
+    the previous attempt's failure is known -- this is the layer that was
+    previously completely silent, even though a retried/discarded attempt
+    can still incur real provider cost (e.g. a dropped connection after the
+    model already started generating).
+    """
+
+    def _before_sleep(retry_state: RetryCallState) -> None:
+        exception = retry_state.outcome.exception() if retry_state.outcome else None
+        if exception is None:
+            return
+        logger.warning(
+            "HTTP retry (attempt %d/%d): %s",
+            retry_state.attempt_number,
+            max_attempts,
+            exception,
+        )
+
+    return _before_sleep
+
+
 @dataclass
 class LLMResponse:
     """Parsed response from an LLM API."""
@@ -57,6 +82,11 @@ class LLMResponse:
     completion_tokens: int
     total_tokens: int
     model: str
+    # Actual billed USD cost for this call, as reported by OpenRouter itself
+    # (``usage.cost``). None for backends that don't report it (e.g. the
+    # local LLM server), in which case callers fall back to the static
+    # per-token pricing table.
+    cost_usd: float | None = None
 
     @classmethod
     def from_api_response(cls, data: dict) -> LLMResponse:
@@ -74,6 +104,7 @@ class LLMResponse:
             completion_tokens=usage.get("completion_tokens", 0),
             total_tokens=usage.get("total_tokens", 0),
             model=data.get("model", ""),
+            cost_usd=usage.get("cost"),
         )
 
 
@@ -146,6 +177,7 @@ class OpenRouterClient:
         wait=wait_exponential(multiplier=1, min=4, max=60),
         stop=stop_after_attempt(3),
         before=_make_before_attempt(3),
+        before_sleep=_make_before_sleep_log(3),
         reraise=True,
     )
     async def complete(
@@ -250,6 +282,7 @@ class LocalLLMClient:
         wait=wait_exponential(multiplier=1, min=2, max=30),
         stop=stop_after_attempt(5),
         before=_make_before_attempt(5),
+        before_sleep=_make_before_sleep_log(5),
         reraise=True,
     )
     async def complete(

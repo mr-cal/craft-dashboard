@@ -507,11 +507,18 @@ async def _evaluate_issues(
                     stats["total_tokens"] += result["tokens_used"]
                     stats["total_prompt_tokens"] += result["prompt_tokens"]
                     stats["total_completion_tokens"] += result["completion_tokens"]
-                    cost = estimate_cost_usd(
-                        evaluator.model,
-                        prompt_tokens=result["prompt_tokens"],
-                        completion_tokens=result["completion_tokens"],
-                    )
+                    # Prefer the backend's own reported cost (e.g.
+                    # OpenRouter's usage.cost) when available -- it reflects
+                    # the actual bill exactly, whereas the static per-token
+                    # table is only an approximation and can drift out of
+                    # date.
+                    cost = result["cost_usd"]
+                    if cost is None:
+                        cost = estimate_cost_usd(
+                            evaluator.model,
+                            prompt_tokens=result["prompt_tokens"],
+                            completion_tokens=result["completion_tokens"],
+                        )
                     if cost is None:
                         stats["unpriced_evaluations"] += 1
                     else:

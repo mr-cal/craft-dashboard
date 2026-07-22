@@ -42,6 +42,11 @@ class EvaluationResult(TypedDict):
     tokens_used: int
     prompt_tokens: int
     completion_tokens: int
+    # Actual billed USD cost reported by the backend for this call, if any
+    # (e.g. OpenRouter's ``usage.cost``). None when the backend doesn't
+    # report cost (local LLM server), in which case callers estimate cost
+    # from the static per-token pricing table instead.
+    cost_usd: float | None
     issue_data_hash: str
 
 
@@ -408,6 +413,7 @@ class IssueEvaluator:
                 "tokens_used": response.total_tokens,
                 "prompt_tokens": response.prompt_tokens,
                 "completion_tokens": response.completion_tokens,
+                "cost_usd": response.cost_usd,
                 "issue_data_hash": current_hash,
             }
 
@@ -425,5 +431,6 @@ class IssueEvaluator:
             "tokens_used": response.total_tokens,
             "prompt_tokens": response.prompt_tokens,
             "completion_tokens": response.completion_tokens,
+            "cost_usd": response.cost_usd,
             "issue_data_hash": current_hash,
         }
