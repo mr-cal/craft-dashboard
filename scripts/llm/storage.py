@@ -12,7 +12,7 @@ from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.settings import Settings
-from sqlalchemy import delete, false, func, select, update
+from sqlalchemy import delete, false, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 if TYPE_CHECKING:
@@ -91,7 +91,14 @@ async def store_evaluation_result(
     )
     insert_stmt = insert_stmt.on_conflict_do_update(
         index_elements=[LLMEvaluation.issue_id],
-        index_where=LLMEvaluation.latest.is_(True),
+        # Must match the partial unique index's predicate exactly (Postgres
+        # requires the ON CONFLICT target expression to match the index
+        # definition verbatim for conflict-target inference — `latest IS
+        # true` and `latest = true` are logically equivalent but are
+        # different expression trees to Postgres, so `.is_(True)` here
+        # would silently fail to match `ix_llm_evaluations_latest_issue`
+        # (defined with `postgresql_where=text("latest = true")`).
+        index_where=text("latest = true"),
         set_={
             "model_name": insert_stmt.excluded.model_name,
             "eval_version": insert_stmt.excluded.eval_version,

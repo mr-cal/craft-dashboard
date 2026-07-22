@@ -81,6 +81,16 @@ class TestStoreEvaluationResult:
         assert "WHERE llm_evaluations.issue_id = %(issue_id_1)s" in update_sql
         assert "INSERT INTO llm_evaluations" in insert_sql
         assert "ON CONFLICT (issue_id)" in insert_sql
+        # Must match ix_llm_evaluations_latest_issue's predicate verbatim
+        # (craft_dashboard/models/llm_evaluation.py): Postgres requires the
+        # ON CONFLICT target's WHERE clause to be the *same expression* as
+        # the partial unique index it's inferring, not just logically
+        # equivalent — "latest = true" and "latest IS true" are different
+        # expression trees and do NOT match, causing
+        # InvalidColumnReferenceError at runtime (only caught in production,
+        # since this test previously only checked for "ON CONFLICT (issue_id)"
+        # without checking the WHERE clause text).
+        assert "ON CONFLICT (issue_id) WHERE latest = true" in insert_sql
         assert "DO UPDATE SET" in insert_sql
         assert "eval_version" in insert_sql
         assert "summary = excluded.summary" in insert_sql
