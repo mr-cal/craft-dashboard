@@ -75,6 +75,8 @@ class TestEvaluateCommand:
                 "skipped": 0,
                 "errored": 0,
                 "total_tokens": 0,
+                "total_prompt_tokens": 0,
+                "total_completion_tokens": 0,
                 "estimated_cost_usd": 0.0,
                 "unpriced_evaluations": 0,
             }
@@ -113,6 +115,8 @@ class TestEvaluateCommand:
                 "skipped": 1,
                 "errored": 0,
                 "total_tokens": 500,
+                "total_prompt_tokens": 166,
+                "total_completion_tokens": 334,
                 "estimated_cost_usd": 0.05,
                 "unpriced_evaluations": 0,
             }
@@ -129,6 +133,8 @@ class TestEvaluateCommand:
             "skipped": 1,
             "errored": 0,
             "total_tokens": 500,
+            "total_prompt_tokens": 166,
+            "total_completion_tokens": 334,
             "estimated_cost_usd": 0.05,
             "unpriced_evaluations": 0,
         }
@@ -158,6 +164,8 @@ class TestEvaluateCommand:
                 "skipped": 1,
                 "errored": 0,
                 "total_tokens": 500,
+                "total_prompt_tokens": 166,
+                "total_completion_tokens": 334,
                 "estimated_cost_usd": 0.05,
                 "unpriced_evaluations": 0,
             }
@@ -195,6 +203,8 @@ class TestEvaluateCommand:
                 "skipped": 0,
                 "errored": 3,
                 "total_tokens": 100,
+                "total_prompt_tokens": 33,
+                "total_completion_tokens": 67,
                 "estimated_cost_usd": 0.0,
                 "unpriced_evaluations": 0,
             }
@@ -231,6 +241,8 @@ class TestEvaluateCommand:
                 "skipped": 0,
                 "errored": 0,
                 "total_tokens": 100,
+                "total_prompt_tokens": 33,
+                "total_completion_tokens": 67,
                 "estimated_cost_usd": 0.0,
                 "unpriced_evaluations": 0,
             }
@@ -267,6 +279,8 @@ class TestEvaluateCommand:
                 "skipped": 0,
                 "errored": 0,
                 "total_tokens": 900,
+                "total_prompt_tokens": 300,
+                "total_completion_tokens": 600,
                 "estimated_cost_usd": 0.0123,
                 "unpriced_evaluations": 0,
             }
@@ -307,6 +321,8 @@ class TestEvaluateCommand:
                 "skipped": 0,
                 "errored": 0,
                 "total_tokens": 200,
+                "total_prompt_tokens": 66,
+                "total_completion_tokens": 134,
                 "estimated_cost_usd": 0.0,
                 "unpriced_evaluations": 2,
             }
@@ -347,6 +363,8 @@ class TestEvaluateCommand:
                 "skipped": 0,
                 "errored": 0,
                 "total_tokens": 0,
+                "total_prompt_tokens": 0,
+                "total_completion_tokens": 0,
                 "estimated_cost_usd": 0.0,
                 "unpriced_evaluations": 0,
             }
@@ -387,6 +405,8 @@ class TestEvaluateCommand:
                 "skipped": 0,
                 "errored": 0,
                 "total_tokens": 0,
+                "total_prompt_tokens": 0,
+                "total_completion_tokens": 0,
                 "estimated_cost_usd": 0.0,
                 "unpriced_evaluations": 0,
             }
@@ -444,6 +464,8 @@ class TestEvaluateCommand:
                 "skipped": 0,
                 "errored": 0,
                 "total_tokens": 0,
+                "total_prompt_tokens": 0,
+                "total_completion_tokens": 0,
                 "estimated_cost_usd": 0.0,
                 "unpriced_evaluations": 0,
             }

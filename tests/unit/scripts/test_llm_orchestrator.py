@@ -160,6 +160,8 @@ class TestEvaluateIssues:
             "skipped": 0,
             "errored": 0,
             "total_tokens": 0,
+            "total_prompt_tokens": 0,
+            "total_completion_tokens": 0,
             "estimated_cost_usd": 0.0,
             "unpriced_evaluations": 0,
             "would_evaluate": 2,
@@ -212,6 +214,8 @@ class TestEvaluateIssues:
             "skipped": 1,
             "errored": 0,
             "total_tokens": 77,
+            "total_prompt_tokens": 30,
+            "total_completion_tokens": 47,
             "estimated_cost_usd": 0.0,
             "unpriced_evaluations": 1,
         }
@@ -313,6 +317,8 @@ class TestEvaluateIssues:
             "skipped": 0,
             "errored": 0,
             "total_tokens": 10,
+            "total_prompt_tokens": 4,
+            "total_completion_tokens": 6,
             "estimated_cost_usd": 0.0,
             "unpriced_evaluations": 1,
         }
@@ -367,6 +373,8 @@ class TestEvaluateIssues:
             "skipped": 0,
             "errored": 1,
             "total_tokens": 0,
+            "total_prompt_tokens": 0,
+            "total_completion_tokens": 0,
             "estimated_cost_usd": 0.0,
             "unpriced_evaluations": 0,
         }
@@ -453,6 +461,8 @@ class TestEvaluateIssues:
             "skipped": 0,
             "errored": 0,
             "total_tokens": 77,
+            "total_prompt_tokens": 30,
+            "total_completion_tokens": 47,
             "estimated_cost_usd": 0.0,
             "unpriced_evaluations": 1,
         }
@@ -517,6 +527,8 @@ class TestEvaluateIssues:
             "skipped": 0,
             "errored": 1,
             "total_tokens": 77,
+            "total_prompt_tokens": 30,
+            "total_completion_tokens": 47,
             "estimated_cost_usd": 0.0,
             "unpriced_evaluations": 1,
         }
@@ -584,6 +596,8 @@ class TestEvaluateIssues:
             "skipped": 1,
             "errored": 0,
             "total_tokens": 77,
+            "total_prompt_tokens": 30,
+            "total_completion_tokens": 47,
             "estimated_cost_usd": 0.0,
             "unpriced_evaluations": 1,
         }
@@ -631,6 +645,8 @@ class TestEvaluateIssues:
             "skipped": 0,
             "errored": 0,
             "total_tokens": 77,
+            "total_prompt_tokens": 30,
+            "total_completion_tokens": 47,
             "estimated_cost_usd": 0.0,
             "unpriced_evaluations": 1,
         }
@@ -672,6 +688,8 @@ class TestEvaluateIssues:
             "skipped": 0,
             "errored": 0,
             "total_tokens": 0,
+            "total_prompt_tokens": 0,
+            "total_completion_tokens": 0,
             "estimated_cost_usd": 0.0,
             "unpriced_evaluations": 0,
         }
@@ -730,6 +748,8 @@ class TestEvaluateIssues:
             "skipped": 0,
             "errored": 0,
             "total_tokens": 0,
+            "total_prompt_tokens": 0,
+            "total_completion_tokens": 0,
             "estimated_cost_usd": 0.0,
             "unpriced_evaluations": 0,
         }
@@ -777,6 +797,8 @@ class TestEvaluateIssues:
             "skipped": 0,
             "errored": 0,
             "total_tokens": 5 * 77,
+            "total_prompt_tokens": 5 * 30,
+            "total_completion_tokens": 5 * 47,
             "estimated_cost_usd": 0.0,
             "unpriced_evaluations": 5,
         }

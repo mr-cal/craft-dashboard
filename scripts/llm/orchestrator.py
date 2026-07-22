@@ -60,6 +60,8 @@ class EvaluationStats(TypedDict):
     skipped: int
     errored: int
     total_tokens: int
+    total_prompt_tokens: int
+    total_completion_tokens: int
     estimated_cost_usd: float
     unpriced_evaluations: int
 
@@ -256,6 +258,8 @@ async def _evaluate_issues(
         "skipped": 0,
         "errored": 0,
         "total_tokens": 0,
+        "total_prompt_tokens": 0,
+        "total_completion_tokens": 0,
         "estimated_cost_usd": 0.0,
         "unpriced_evaluations": 0,
     }
@@ -473,6 +477,8 @@ async def _evaluate_issues(
                     )
                     stats["evaluated"] += 1
                     stats["total_tokens"] += result["tokens_used"]
+                    stats["total_prompt_tokens"] += result["prompt_tokens"]
+                    stats["total_completion_tokens"] += result["completion_tokens"]
                     cost = estimate_cost_usd(
                         evaluator.model,
                         prompt_tokens=result["prompt_tokens"],
@@ -493,12 +499,13 @@ async def _evaluate_issues(
                         )
                     outcome = "evaluated"
                     logger.info(
-                        "[%d/%d] Evaluated %s (%s, %d tokens): %s",
+                        "[%d/%d] Evaluated %s (%s, %d in / %d out): %s",
                         stats["evaluated"],
                         total_to_eval,
                         issue_ref,
                         result["suggested_action"],
-                        result["tokens_used"],
+                        result["prompt_tokens"],
+                        result["completion_tokens"],
                         issue.title[:60],
                     )
 

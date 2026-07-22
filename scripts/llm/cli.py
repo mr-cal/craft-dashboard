@@ -207,10 +207,13 @@ async def _main(options: EvaluateOptions) -> dict:
                     f"no pricing data for model {settings.model!r})"
                 )
         logger.info(
-            "Evaluation complete: %d evaluated, %d skipped, %d errors, %d total tokens%s",
+            "Evaluation complete: %d evaluated, %d skipped, %d errors, "
+            "%d in / %d out tokens (%d total)%s",
             stats["evaluated"],
             stats["skipped"],
             stats["errored"],
+            stats["total_prompt_tokens"],
+            stats["total_completion_tokens"],
             stats["total_tokens"],
             cost_note,
         )
