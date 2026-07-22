@@ -576,7 +576,7 @@ class TestAdminPage:
             response = client.get("/admin")
 
         assert response.status_code == 200
-        assert "System Status" in response.text
+        assert "System status" in response.text
         assert 'hx-get="/admin/status"' in response.text
         assert 'hx-trigger="load, every 60s"' in response.text
         assert 'data-system-status-kind="collection"' in response.text
@@ -615,13 +615,13 @@ class TestAdminPage:
             response = client.get("/admin")
 
         assert response.status_code == 200
-        assert "Recent Activity" in response.text
-        assert "REST API Budget" in response.text
+        assert "Recent activity" in response.text
+        assert "REST API budget" in response.text
         assert "4999 / 5000 remaining" in response.text
-        assert "GraphQL API Budget" in response.text
+        assert "GraphQL API budget" in response.text
         assert "4998 / 5000 remaining" in response.text
-        assert "Next Open-Issue Fetch" in response.text
-        assert "2025-01-10 12:40 UTC" in response.text
+        assert "Next open-issue fetch" in response.text
+        assert "2025-01-10 12:40 PM UTC" in response.text
         assert "Closed after merge" in response.text
         assert "#42" in response.text
         assert "#42" in response.text
@@ -649,7 +649,7 @@ class TestAdminPage:
             response = client.get("/admin")
 
         assert response.status_code == 200
-        assert "Next Open-Issue Fetch" in response.text
+        assert "Next open-issue fetch" in response.text
         assert "Unknown" in response.text
 
     def test_admin_page_handles_api_budget_lookup_failures(
@@ -667,7 +667,7 @@ class TestAdminPage:
                 response = client.get("/admin")
 
         assert response.status_code == 200
-        assert "REST API Budget" in response.text
-        assert "GraphQL API Budget" in response.text
+        assert "REST API budget" in response.text
+        assert "GraphQL API budget" in response.text
         assert response.text.count("Unknown") >= 2
         assert "Admin page: API budget lookup failed" in caplog.text

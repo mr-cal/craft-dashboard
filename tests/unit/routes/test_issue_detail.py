@@ -262,7 +262,7 @@ class TestRelatedIssuesSection:
             response = test_client.get("/issues/snapcraft/321")
 
         assert response.status_code == 200
-        assert "Related Issues" in response.text
+        assert "Related issues" in response.text
         assert "Similar bug in core22 builds" in response.text
         assert "91%" in response.text
 
@@ -285,7 +285,7 @@ class TestRelatedIssuesSection:
             response = test_client.get("/issues/snapcraft/321")
 
         assert response.status_code == 200
-        assert "Related Issues" in response.text
+        assert "Related issues" in response.text
         assert "No embedding available" in response.text
 
     def test_related_issues_empty_with_embedding_shows_threshold_notice(
@@ -314,5 +314,5 @@ class TestRelatedIssuesSection:
             response = test_client.get("/issues/snapcraft/321")
 
         assert response.status_code == 200
-        assert "Related Issues" in response.text
+        assert "Related issues" in response.text
         assert "No related issues found above the similarity threshold" in response.text

@@ -286,13 +286,47 @@ class AdminService:
         return [row.name for row in project_result]
 
     async def get_recent_collection_runs(
-        self, limit: int = 20
+        self,
+        limit: int = 20,
+        filtered_issues: dict[str, list[str]] | None = None,
     ) -> list[CollectionRunSummary]:
-        """Get the most recent collection runs with health statistics."""
+        """Get the most recent collection runs with health statistics.
+
+        Args:
+            limit: Maximum number of runs to return.
+            filtered_issues: Issue numbers per project to exclude from the
+                displayed ``issues_collected`` count (e.g. Renovate/Dependabot
+                "Dependency Dashboard" meta-issues), matching
+                ``craft-dashboard.toml``'s ``[issues.filter]`` config. Without
+                this, the count can show issues that are filtered out
+                everywhere else in the UI, which is confusing (e.g. "1 issue
+                collected" but clicking through shows nothing).
+
+        """
         result = await self.session.execute(
             select(CollectionRun).order_by(CollectionRun.started_at.desc()).limit(limit)
         )
         runs = list(result.scalars())
+
+        filtered_counts: dict[int, int] = {}
+        run_ids = [run.id for run in runs]
+        if run_ids and filtered_issues:
+            excl = _build_excluded_issues_condition(filtered_issues)
+            if excl is not None:
+                # `excl` is a NOT(...) clause excluding filtered issues; negate
+                # it to count only the filtered-out issues per run.
+                count_query = (
+                    select(Issue.collection_run_id, func.count())
+                    .join(Project, Issue.project_id == Project.id)
+                    .where(Issue.collection_run_id.in_(run_ids))
+                    .where(~excl)
+                    .group_by(Issue.collection_run_id)
+                )
+                count_rows = await self.session.execute(count_query)
+                filtered_counts = {}
+                for collection_run_id, filtered_count in count_rows.all():
+                    filtered_counts[collection_run_id] = filtered_count
+
         return [
             {
                 "id": run.id,
@@ -301,7 +335,9 @@ class AdminService:
                 "finished_at": run.finished_at,
                 "status": run.status,
                 "projects_processed": run.projects_processed,
-                "issues_collected": run.issues_collected,
+                "issues_collected": max(
+                    run.issues_collected - filtered_counts.get(run.id, 0), 0
+                ),
                 "duration_seconds": run.duration_seconds,
                 "errors": run.errors or [],
             }

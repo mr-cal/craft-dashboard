@@ -12,7 +12,7 @@
     {% for issue in issues %}
     <tr>
       <td style="padding: 0.25rem 0.5rem; white-space: nowrap;">
-        <time class="local-time" datetime="{{ issue.occurred_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ issue.occurred_at.strftime('%Y-%m-%d %H:%M UTC') }}</time>
+        {{ issue.occurred_at | local_datetime }}
       </td>
       <td style="padding: 0.25rem 0.5rem; white-space: nowrap;">
         {{ issue.project }}<br>

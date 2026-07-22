@@ -103,7 +103,7 @@ class TestAdminPageIntegration:
         response = client.get("/admin")
 
         assert response.status_code == 200
-        assert "Project Full-Refresh Schedule" in response.text
+        assert "Project full-refresh schedule" in response.text
 
 
 class TestAdminHealthIntegration:

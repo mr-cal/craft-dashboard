@@ -513,7 +513,7 @@ function updateSnapshotCharts() {
   const ageDatasets = [];
   if (types.issues) {
     ageDatasets.push({
-      label: "Issue Age",
+      label: "Issue age",
       data: selected.map(name => snapshot[name][issueAgeKey]),
       backgroundColor: CHART_COLORS.issues,
       borderColor: CHART_COLORS.issues,
@@ -811,9 +811,9 @@ function populateSnapshotCheckboxes() {
 // Initialize charts
 // ============================================================================
 
-const issuesChart = createLineChart("issues-chart", "Open Issues & PRs (4-week avg)");
-const medianAgeChart = createLineChart("median-age-chart", "Median Age (days, 4-week avg)");
-const closedChart = createLineChart("closed-chart", "Closed per Week (4-week avg)");
+const issuesChart = createLineChart("issues-chart", "Open issues & PRs (4-week avg)");
+const medianAgeChart = createLineChart("median-age-chart", "Median age (days, 4-week avg)");
+const closedChart = createLineChart("closed-chart", "Closed per week (4-week avg)");
 
 const themeObserver = new MutationObserver((mutations) => {
   if (!mutations.some((mutation) => mutation.attributeName === "class" || mutation.attributeName === "data-theme")) {

@@ -14,6 +14,7 @@ from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
 from pydantic import BaseModel
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -136,6 +137,26 @@ def _format_duration_seconds(seconds: float) -> str:
     return f"{hours}h {mins}m {secs}s"
 
 
+def _local_datetime(value: datetime | str | None, empty: str = "—") -> str:
+    """Render a timestamp as a ``<time>`` element upgraded to local time by JS.
+
+    Emits a UTC-labelled fallback (for JS-disabled clients/crawlers) using the
+    same "YYYY-MM-DD HH:MM AM/PM" shape that ``upgradeLocalTimes()`` in
+    base.html produces client-side, so the displayed format is identical
+    whether or not JavaScript has run yet. Accepts an ISO 8601 string as well
+    as a ``datetime``, since some callers pass already-serialized timestamps.
+    """
+    if value is None or value == "":
+        return escape(empty)
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
+    iso = value.strftime("%Y-%m-%dT%H:%M:%SZ")
+    fallback = value.strftime("%Y-%m-%d %I:%M %p UTC")
+    return Markup(
+        f'<time class="local-time" datetime="{iso}">{escape(fallback)}</time>'
+    )
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -175,6 +196,7 @@ def create_app() -> FastAPI:
     template_globals["cache_bust"] = _startup_ts
     templates.env.filters["urlencode_path"] = lambda s: _url_quote(str(s), safe="")
     templates.env.filters["format_duration"] = _format_duration_seconds
+    templates.env.filters["local_datetime"] = _local_datetime
     app.state.templates = templates
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 

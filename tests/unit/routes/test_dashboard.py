@@ -101,7 +101,7 @@ class TestDashboardIndex:
         assert 'role="contentinfo"' in response.text
         assert response.text.count('class="p-card--highlighted"') == 3
         assert "Projects" in response.text
-        assert "Open Issues" in response.text
+        assert "Open issues" in response.text
         assert "Open PRs" in response.text
 
 

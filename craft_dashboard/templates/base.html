@@ -180,6 +180,42 @@
           }
         }
 
+        function pad2(value) {
+          return String(value).padStart(2, "0");
+        }
+
+        // Canonical timestamp format for the whole site: "YYYY-MM-DD HH:MM AM/PM",
+        // rendered in the viewer's local timezone.
+        function formatLocalDateTime(date) {
+          var hours = date.getHours();
+          var ampm = hours >= 12 ? "PM" : "AM";
+          var hour12 = hours % 12 || 12;
+          return (
+            date.getFullYear() +
+            "-" +
+            pad2(date.getMonth() + 1) +
+            "-" +
+            pad2(date.getDate()) +
+            " " +
+            pad2(hour12) +
+            ":" +
+            pad2(date.getMinutes()) +
+            " " +
+            ampm
+          );
+        }
+
+        function upgradeLocalTimes(root) {
+          (root || document)
+            .querySelectorAll("time.local-time[datetime]")
+            .forEach(function (element) {
+              var date = new Date(element.getAttribute("datetime"));
+              if (!Number.isNaN(date.getTime())) {
+                element.textContent = formatLocalDateTime(date);
+              }
+            });
+        }
+
         function formatStatusTimestamp(value) {
           if (!value) {
             return "Never";
@@ -190,10 +226,7 @@
             return value;
           }
 
-          return date.toLocaleString([], {
-            dateStyle: "medium",
-            timeStyle: "short",
-          });
+          return formatLocalDateTime(date);
         }
 
         function updateStatusIndicator(kind, running) {
@@ -234,8 +267,10 @@
         window.showToast = showToast;
         window.dispatchHxTriggers = dispatchHxTriggers;
         window.applySystemStatus = applySystemStatus;
+        window.upgradeLocalTimes = upgradeLocalTimes;
 
         applyTheme(getTheme());
+        upgradeLocalTimes(document);
 
         if (themeToggle) {
           themeToggle.addEventListener("click", function () {
@@ -270,6 +305,10 @@
           } catch (error) {
             console.error(error);
           }
+        });
+
+        document.body.addEventListener("htmx:afterSwap", function (event) {
+          upgradeLocalTimes(event.detail && event.detail.elt ? event.detail.elt : document);
         });
 
         document.body.addEventListener("htmx:responseError", function(event) {

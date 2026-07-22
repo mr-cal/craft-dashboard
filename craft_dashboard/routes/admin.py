@@ -155,7 +155,9 @@ async def admin_page(
     schedule_days = await admin_service.get_schedule_day_counts()
     lifetime_stats = await admin_service.get_lifetime_token_stats()
     recent_stats = await admin_service.get_seven_day_token_stats()
-    collection_runs = await admin_service.get_recent_collection_runs()
+    collection_runs = await admin_service.get_recent_collection_runs(
+        filtered_issues=get_config(request).filtered_issues
+    )
     recent_activity = await admin_service.get_recent_issue_activity(
         filtered_issues=get_config(request).filtered_issues
     )

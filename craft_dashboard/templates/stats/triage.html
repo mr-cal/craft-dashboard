@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Triage Stats - craft-dashboard{% endblock %}
+{% block title %}Triage stats - craft-dashboard{% endblock %}
 {% block content %}
 <h2>Stats</h2>
 {% include "stats/partials/tabs.html" %}
 
 <div class="row--25-75">
   <div class="col">
-    <h3>LLM Triage Status</h3>
+    <h3>LLM triage status</h3>
     <p>{{ evaluated_count }} of {{ total_open }} open issues and PRs have been evaluated.</p>
   </div>
   <div class="col">

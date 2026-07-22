@@ -4,7 +4,7 @@
 <div class="row--25-75">
   <div class="col">
     <h2>Admin</h2>
-    <h3>System Status</h3>
+    <h3>System status</h3>
     <p>Collection and evaluation run history. Click any row to see which issues were collected.</p>
   </div>
   <div class="col">
@@ -28,16 +28,16 @@
     </div>
     <div class="status-grid">
       <div class="status-card">
-        <h4>Next Open-Issue Fetch</h4>
-        <p>{{ next_expected_fetch.strftime("%Y-%m-%d %H:%M UTC") if next_expected_fetch else "Unknown" }}</p>
+        <h4>Next open-issue fetch</h4>
+        <p>{{ next_expected_fetch | local_datetime("Unknown") }}</p>
         <p class="status-detail">Polling every 10 minutes</p>
       </div>
       <div class="status-card">
-        <h4>REST API Budget</h4>
+        <h4>REST API budget</h4>
         <p>{{ api_budget.core_remaining ~ " / " ~ api_budget.core_limit ~ " remaining" if api_budget else "Unknown" }}</p>
       </div>
       <div class="status-card">
-        <h4>GraphQL API Budget</h4>
+        <h4>GraphQL API budget</h4>
         <p>{{ api_budget.graphql_remaining ~ " / " ~ api_budget.graphql_limit ~ " remaining" if api_budget else "Unknown" }}</p>
       </div>
     </div>
@@ -60,7 +60,7 @@
           <td>{{ run.source }}</td>
           <td>
             {% if run.started_at %}
-            <time class="local-time" datetime="{{ run.started_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ run.started_at.strftime('%Y-%m-%d %H:%M UTC') }}</time>
+            {{ run.started_at | local_datetime }}
             {% else %}—{% endif %}
           </td>
           <td>
@@ -148,7 +148,7 @@
     <p style="color: var(--app-text-muted); margin-top: 1rem;">No recent collection runs.</p>
     {% endif %}
 
-    <h3 style="margin-top: 1.5rem;">Recent Activity</h3>
+    <h3 style="margin-top: 1.5rem;">Recent activity</h3>
     <table class="activity-feed">
       <thead>
         <tr>
@@ -162,7 +162,7 @@
         {% for activity in recent_activity %}
         <tr>
           <td>
-            <time class="local-time" datetime="{{ activity.occurred_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ activity.occurred_at.strftime('%Y-%m-%d %H:%M UTC') }}</time>
+            {{ activity.occurred_at | local_datetime }}
           </td>
           <td style="white-space:nowrap;">
             {{ activity.project }}<br>
@@ -205,23 +205,10 @@
 
 <div class="row--25-75">
   <div class="col">
-    <h3>Project Full-Refresh Schedule</h3>
+    <h3>Project full-refresh schedule</h3>
     <p>Open issues are refreshed on every run (every 4 hours). This table shows when each project's full refresh (open + closed issues) is next scheduled.</p>
     {% if next_refresh %}
-    <p style="font-size:0.875rem;">Next full refresh: <strong><time id="next-refresh-time" datetime="{{ next_refresh.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ next_refresh.strftime('%Y-%m-%d %H:%M UTC') }}</time></strong></p>
-    <script>
-      (function () {
-        var el = document.getElementById('next-refresh-time');
-        if (!el) return;
-        try {
-          var d = new Date(el.getAttribute('datetime'));
-          el.textContent = d.toLocaleString(undefined, {
-            year: 'numeric', month: '2-digit', day: '2-digit',
-            hour: '2-digit', minute: '2-digit',
-          });
-        } catch (e) {}
-      })();
-    </script>
+    <p style="font-size:0.875rem;">Next full refresh: <strong>{{ next_refresh | local_datetime }}</strong></p>
     {% else %}
     <p style="font-size:0.875rem;color:var(--app-text-muted);">No upcoming refresh scheduled. Use <em>Redistribute</em> to set one up.</p>
     {% endif %}
@@ -232,8 +219,8 @@
       <thead>
         <tr>
           <th>Project</th>
-          <th>Last Full Refresh</th>
-          <th>Next Full Refresh</th>
+          <th>Last full refresh</th>
+          <th>Next full refresh</th>
         </tr>
       </thead>
       <tbody>
@@ -286,7 +273,7 @@
 
 <div class="row--25-75">
   <div class="col">
-    <h3>LLM Token Usage</h3>
+    <h3>LLM token usage</h3>
     <p>Token consumption by the LLM evaluation pipeline.</p>
     <div style="font-size: 0.875rem; display: flex; flex-direction: column; gap: 0.25rem; margin-top: 1rem;">
       <a href="/issues?llm_status=no_llm&state=open">View issues with no LLM data</a>
@@ -294,7 +281,7 @@
     </div>
   </div>
   <div class="col">
-    <h4>Last 7 Days</h4>
+    <h4>Last 7 days</h4>
     <table>
       <thead>
         <tr>
@@ -343,7 +330,7 @@
 
 <div class="row--25-75">
   <div class="col">
-    <h3>Admin Actions</h3>
+    <h3>Admin actions</h3>
     <div style="margin-bottom: 1rem; display: flex; flex-direction: column; gap: 0.5rem;">
       <label for="admin-token" id="admin-token-label">Admin Token:</label>
       <input type="password" id="admin-token" placeholder="Enter admin token" style="width: 100%;" />
@@ -357,7 +344,7 @@
   <div class="col">
     <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
       <div style="flex: 1; min-width: 200px;">
-        <h4>Refresh Data</h4>
+        <h4>Refresh data</h4>
         <div class="admin-form">
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
             <button class="p-button--positive" id="refresh-open-btn" onclick="triggerRefreshOpen()">Refresh Open Issues</button>
@@ -369,7 +356,7 @@
       </div>
 
       <div style="flex: 1; min-width: 200px;">
-        <h4>Re-evaluate Issues</h4>
+        <h4>Re-evaluate issues</h4>
         <div class="admin-form">
           <div class="admin-form__row">
             <label for="eval-project">Project:</label>
@@ -412,7 +399,7 @@
       </div>
 
       <div style="flex: 1; min-width: 200px;">
-        <h4>Schedule Management</h4>
+        <h4>Schedule management</h4>
         <div class="admin-form">
           <button class="p-button--neutral" id="distribute-btn" onclick="triggerDistribute()">Redistribute Schedule</button>
           <div id="distribute-status" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>

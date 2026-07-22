@@ -27,9 +27,9 @@
           —
         {% endif %}
       </dd>
-      <dt>Created</dt><dd>{{ issue.created_at or "—" }}</dd>
-      <dt>Updated</dt><dd>{{ issue.updated_at or "—" }}</dd>
-      <dt>Closed</dt><dd>{{ issue.closed_at or "—" }}</dd>
+      <dt>Created</dt><dd>{{ issue.created_at | local_datetime }}</dd>
+      <dt>Updated</dt><dd>{{ issue.updated_at | local_datetime }}</dd>
+      <dt>Closed</dt><dd>{{ issue.closed_at | local_datetime }}</dd>
     </dl>
   </section>
 
@@ -85,7 +85,7 @@
     <tbody>
       {% for evaluation in evaluation_history %}
       <tr>
-        <td>{{ evaluation.evaluated_at or "—" }}</td>
+        <td>{{ evaluation.evaluated_at | local_datetime }}</td>
         <td>{{ evaluation.model_name or evaluation.llm_backend or "—" }}</td>
         <td>
           {% if evaluation.scores %}
@@ -122,7 +122,7 @@
     <tbody>
       {% for activity in activity_history %}
       <tr>
-        <td>{{ activity.occurred_at or "—" }}</td>
+        <td>{{ activity.occurred_at | local_datetime }}</td>
         <td>{{ activity.change_type|replace("_", " ") }}</td>
       </tr>
       {% endfor %}
@@ -134,7 +134,7 @@
 </section>
 
 <section class="issue-detail-card">
-  <h3>Related Issues</h3>
+  <h3>Related issues</h3>
   {% if related_issues %}
   <table role="grid">
     <colgroup>
