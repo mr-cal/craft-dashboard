@@ -79,7 +79,24 @@ writes results directly to the database.
 (disabled by default; the pull-based `scripts/eval_client.py` workflow is
 preferred). In production, `.env` lives at `/opt/vps-infra/.env` on the VPS
 (see "Reloading .env in production" in [`docs/deployment.md`](deployment.md)
-for how to edit it and apply changes).
+for how to edit it and apply changes) — **after editing it you must restart
+the app container** (`podman restart vps-infra_craft-dashboard_1`) for
+`ENABLE_SERVER_EVAL`, `OPENROUTER_MODEL`, etc. to take effect; pydantic-settings
+only reads `.env` at process startup, so re-running `run_llm.py` against a
+container that hasn't been restarted will still see the old values.
+
+The `scripts/` directory isn't a bind mount on the VPS — it's baked into the
+Docker image at build time and only exists at `/app/scripts` inside the
+`vps-infra_craft-dashboard_1` container. Always run it via `podman exec`
+(see the production example below), not as a host path.
+
+The model is set via the `OPENROUTER_MODEL` env var (default
+`google/gemini-2.5-flash-lite`) — there is no `--model` CLI flag. Pick any
+model slug from [openrouter.ai/models](https://openrouter.ai/models) (the
+site lists per-token pricing and context length for each); if you change it
+to something not already priced in `scripts/llm/pricing.py`, the cost
+estimate in the completion summary will report it as unpriced rather than
+silently showing $0.
 
 ```
 # evaluate all open issues (manual/opt-in; not run on a schedule by default)
