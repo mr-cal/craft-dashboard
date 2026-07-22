@@ -788,6 +788,56 @@ class TestEvaluateIssues:
         assert persisted_issue_ids == {1, 2, 3, 4, 5}
 
     @pytest.mark.asyncio
+    async def test_limit_is_not_exceeded_under_concurrency(self, monkeypatch) -> None:
+        """Regression test for a race where --limit could be exceeded.
+
+        With concurrency > 1, workers used to check ``stats["evaluated"] >=
+        limit`` and pull a new target under the same lock, but
+        ``stats["evaluated"]`` was only incremented after the (slow) LLM
+        call finished -- so several workers could all pass the check and
+        pull a target before any of them finished, evaluating up to
+        (concurrency - 1) more issues than requested. This reproduced with
+        limit=5, concurrency=8 against 20 available targets: 12 got
+        evaluated instead of 5.
+        """
+        targets = [
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=issue_id),
+                project_name="snapcraft",
+                issue_data_hash=None,
+            )
+            for issue_id in range(1, 21)
+        ]
+
+        async def _evaluate(**_kwargs) -> dict:
+            # Give every worker a chance to race into _next_target() before
+            # any single evaluation "completes" and increments
+            # stats["evaluated"].
+            await asyncio.sleep(0)
+            return _valid_result(issue_hash="hash")
+
+        evaluator = SimpleNamespace(
+            evaluate=AsyncMock(side_effect=_evaluate), model="m"
+        )
+        _stub_target_queries(monkeypatch, targets)
+        store_result = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.store_evaluation_result", store_result
+        )
+
+        stats = await _evaluate_issues(
+            session_factory=object(),
+            evaluator=evaluator,
+            maintainers=set(),
+            resume=False,
+            concurrency=8,
+            limit=5,
+        )
+
+        assert stats["evaluated"] == 5
+        assert store_result.await_count == 5
+
+    @pytest.mark.asyncio
     async def test_concurrency_runs_evaluations_in_parallel(self, monkeypatch) -> None:
         targets = [
             IssueEvaluationTarget(

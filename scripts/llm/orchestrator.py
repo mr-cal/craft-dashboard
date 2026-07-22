@@ -354,18 +354,33 @@ async def _evaluate_issues(
     # still letting workers evaluate concurrently once they have an item.
     stream_lock = asyncio.Lock()
     next_idx = 0
+    # Reserves a "budget slot" the instant an item is dispatched to a worker,
+    # rather than only checking stats["evaluated"] (which is only updated
+    # after the LLM call finishes). Without this, concurrency > 1 lets up to
+    # (concurrency - 1) extra workers race past the limit check before any
+    # of them finish, silently evaluating (and billing) more issues than
+    # --limit requested. The reservation is refunded if the item resolves to
+    # skipped/errored (those don't count against the limit), matching the
+    # limit's single-worker semantics exactly.
+    in_flight_reserved = 0
 
     async def _next_target() -> tuple[int, IssueEvaluationTarget] | None:
-        nonlocal next_idx
+        nonlocal next_idx, in_flight_reserved
         async with stream_lock:
-            if limit > 0 and stats["evaluated"] >= limit:
+            if limit > 0 and stats["evaluated"] + in_flight_reserved >= limit:
                 return None
             try:
                 target = await anext(targets_stream)
             except StopAsyncIteration:
                 return None
             next_idx += 1
+            in_flight_reserved += 1
             return next_idx, target
+
+    async def _release_reservation() -> None:
+        nonlocal in_flight_reserved
+        async with stream_lock:
+            in_flight_reserved -= 1
 
     progress = None
     task_id = None
@@ -418,6 +433,7 @@ async def _evaluate_issues(
                 stats["evaluated"],
             )
             quota_exhausted = True
+            await _release_reservation()
             return
         except Exception:
             logger.exception("Error evaluating issue %s", issue.title)
@@ -444,6 +460,7 @@ async def _evaluate_issues(
                     stats["errored"] += 1
                     if strict_validation:
                         strict_failure = exc
+                        await _release_reservation()
                         return
                     outcome = "errored"
                 else:
@@ -491,6 +508,7 @@ async def _evaluate_issues(
             processed=stats["evaluated"] + stats["skipped"] + stats["errored"],
             total_to_eval=total_to_eval,
         )
+        await _release_reservation()
 
     async def _worker() -> None:
         while True:
