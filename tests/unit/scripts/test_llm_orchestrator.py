@@ -18,9 +18,20 @@ from craft_dashboard.llm.exceptions import (
 from craft_dashboard.models.issue import Issue
 from rich.console import Console
 from scripts.eval_timing import TimingHistory
+from scripts.llm import orchestrator
 from scripts.llm.checkpoint import EvaluationCheckpoint
 from scripts.llm.orchestrator import _evaluate_issues
 from scripts.llm.queries import IssueEvaluationTarget
+
+
+@pytest.fixture(autouse=True)
+def _reset_shutdown_state(monkeypatch: pytest.MonkeyPatch):
+    # Avoid registering a real SIGINT handler (and leaking shutdown state)
+    # across tests; each test starts with a clean slate.
+    orchestrator.shutdown_state["requested"] = False
+    monkeypatch.setattr(orchestrator.signal, "signal", MagicMock())
+    yield
+    orchestrator.shutdown_state["requested"] = False
 
 
 def _make_issue(
@@ -999,3 +1010,53 @@ class TestEvaluateIssues:
         )
 
         assert stats["evaluated"] == 1
+
+    @pytest.mark.asyncio
+    async def test_shutdown_request_stops_before_remaining_targets(
+        self, monkeypatch, caplog
+    ) -> None:
+        """Simulates Ctrl+C: no new targets are picked up, but the
+        already-in-flight evaluation finishes and the checkpoint from it is
+        preserved (not cleared), since the run didn't actually complete.
+        """
+        targets = [
+            IssueEvaluationTarget(
+                issue=_make_issue(issue_id=issue_id),
+                project_name="snapcraft",
+                issue_data_hash=None,
+            )
+            for issue_id in range(1, 4)
+        ]
+
+        async def _evaluate(**_kwargs) -> dict:
+            # Simulate the signal handler firing mid-run, as if the user
+            # pressed Ctrl+C while this issue was being evaluated.
+            orchestrator.shutdown_state["requested"] = True
+            return _valid_result(issue_hash="hash")
+
+        evaluator = SimpleNamespace(
+            evaluate=AsyncMock(side_effect=_evaluate), model="m"
+        )
+        _stub_target_queries(monkeypatch, targets)
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.store_evaluation_result", AsyncMock()
+        )
+        clear_checkpoint = MagicMock()
+        monkeypatch.setattr(
+            "scripts.llm.orchestrator.clear_checkpoint", clear_checkpoint
+        )
+
+        caplog.set_level("INFO")
+        stats = await _evaluate_issues(
+            session_factory=object(),
+            evaluator=evaluator,
+            maintainers=set(),
+            resume=True,
+            concurrency=1,
+        )
+
+        assert stats["evaluated"] == 1
+        assert evaluator.evaluate.await_count == 1
+        clear_checkpoint.assert_not_called()
+        assert "Stopped after Ctrl+C" in caplog.text
+        assert "resume from checkpoint" in caplog.text

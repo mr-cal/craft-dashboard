@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import signal
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict
@@ -76,6 +77,29 @@ logger = logging.getLogger(__name__)
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503})
 _HTTP_TOO_MANY_REQUESTS = 429
 _retry_sleep = asyncio.sleep
+
+# Set by _signal_handler when the user requests a graceful stop (Ctrl+C).
+# Workers check this between issues so any in-flight evaluations finish and
+# get checkpointed normally, instead of the process dying mid-request with a
+# raw KeyboardInterrupt traceback.
+shutdown_state = {"requested": False}
+
+
+def _signal_handler(signum: int, frame: object) -> None:
+    del signum, frame
+    if shutdown_state["requested"]:
+        # Already asked once and the user is still impatient: restore the
+        # default handler and let this second Ctrl+C kill the process
+        # immediately, rather than forcing them to wait for every in-flight
+        # worker to finish.
+        logger.warning("Force quitting (second interrupt received)")
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        return
+    shutdown_state["requested"] = True
+    logger.info(
+        "Stopping after in-flight evaluations finish "
+        "(press Ctrl+C again to force quit)..."
+    )
 
 
 def _is_retryable_evaluation_error(exc: BaseException) -> bool:
@@ -252,7 +276,13 @@ async def _evaluate_issues(
     ``console`` enables a live Rich progress bar (with a persistent-history
     ETA) alongside the existing text logs. When omitted, no progress bar is
     rendered — text logs behave exactly as before.
+
+    A single Ctrl+C stops the run gracefully: no new issues are picked up,
+    but in-flight evaluations finish and get checkpointed normally. A second
+    Ctrl+C force-quits immediately.
     """
+    shutdown_state["requested"] = False
+    signal.signal(signal.SIGINT, _signal_handler)
     stats = {
         "evaluated": 0,
         "skipped": 0,
@@ -517,7 +547,11 @@ async def _evaluate_issues(
 
     async def _worker() -> None:
         while True:
-            if quota_exhausted or strict_failure is not None:
+            if (
+                quota_exhausted
+                or strict_failure is not None
+                or shutdown_state["requested"]
+            ):
                 return
             next_item = await _next_target()
             if next_item is None:
@@ -531,6 +565,18 @@ async def _evaluate_issues(
             await asyncio.gather(*(_worker() for _ in range(worker_count)))
     finally:
         await targets_stream.aclose()
+
+    if shutdown_state["requested"]:
+        logger.info(
+            "Stopped after Ctrl+C: %d evaluated, %d skipped, %d errored.%s",
+            stats["evaluated"],
+            stats["skipped"],
+            stats["errored"],
+            " Re-run with the same filters to resume from checkpoint."
+            if resume
+            else "",
+        )
+        return stats
 
     if limit > 0 and stats["evaluated"] >= limit:
         logger.info("Reached evaluation limit of %d", limit)
