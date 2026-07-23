@@ -789,6 +789,77 @@ class TestLLMServiceStatus:
 
         assert status["status"] == "stalled"
 
+    async def test_last_result_falls_back_to_persisted_evaluation(
+        self, test_db_session
+    ) -> None:
+        """Falls back to the DB when in-memory activity was reset (e.g. by a redeploy).
+
+        ``_last_result_submitted_at`` lives only in process memory, so it's
+        ``None`` right after every app restart even if the worker submitted
+        results for weeks beforehand. The admin page should show that
+        persisted history instead of a misleading "Never".
+        """
+        project = Project(
+            name="charmcraft",
+            category="library",
+            github_org="canonical",
+            display_order=0,
+        )
+        test_db_session.add(project)
+        await test_db_session.flush()
+
+        issue = Issue(
+            project_id=project.id,
+            source="github",
+            external_id="1",
+            issue_type="issue",
+            title="Some issue",
+            body="Body",
+            state="open",
+            author="dev",
+            author_is_maintainer=False,
+            author_is_bot=False,
+            labels=[],
+            created_at=datetime(2025, 1, 1, tzinfo=UTC),
+            updated_at=datetime(2025, 1, 1, tzinfo=UTC),
+            closed_at=None,
+            url="https://example.com/charmcraft/issues/1",
+            metadata_={},
+            comments=[],
+            last_fetched_at=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+        test_db_session.add(issue)
+        await test_db_session.flush()
+
+        last_evaluated_at = datetime(2025, 1, 9, 8, 0, tzinfo=UTC)
+        test_db_session.add(
+            LLMEvaluation(
+                issue_id=issue.id,
+                model_name="gpt-4.1",
+                summary="Summary",
+                suggested_action="keep_open",
+                suggested_action_reason="Still active",
+                scores={},
+                tokens_used=100,
+                prompt_tokens=60,
+                completion_tokens=40,
+                llm_backend="test",
+                evaluated_at=last_evaluated_at,
+                issue_data_hash="hash",
+                latest=True,
+            )
+        )
+        await test_db_session.commit()
+
+        with patch(
+            "craft_dashboard.services.admin_service.get_eval_activity",
+            return_value=(None, None),
+        ):
+            status = await AdminService(test_db_session).get_llm_service_status()
+
+        assert status["status"] == "unknown"
+        assert status["last_result_at"] == last_evaluated_at
+
 
 class TestRecentEvaluations:
     """Tests for AdminService.get_recent_evaluations."""

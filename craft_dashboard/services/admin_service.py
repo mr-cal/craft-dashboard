@@ -581,6 +581,18 @@ class AdminService:
             status = "running"
         else:
             status = "stalled"
+
+        if last_result_at is None:
+            # `_last_result_submitted_at` is in-memory only and resets on
+            # every app restart (frequent here — every push to `main`
+            # redeploys). Fall back to the persisted last evaluation so the
+            # admin page doesn't misleadingly show "Never" for a worker
+            # that's been submitting results for weeks, just not since the
+            # most recent restart.
+            last_result_at = _ensure_utc(
+                await self.session.scalar(select(func.max(LLMEvaluation.evaluated_at)))
+            )
+
         return {
             "status": status,
             "last_poll_at": last_poll_at,

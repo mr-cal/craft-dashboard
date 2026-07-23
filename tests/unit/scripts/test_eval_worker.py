@@ -220,6 +220,43 @@ async def test_run_evaluate_loop_posts_required_summary_embedding(
 
 
 @pytest.mark.asyncio
+async def test_llm_quota_error_pauses_instead_of_crash_looping(
+    monkeypatch: pytest.MonkeyPatch, patched_runtime: dict[str, Any]
+) -> None:
+    """A quota error must back off (pause + sleep) rather than retry instantly.
+
+    Regression test: previously ``LLMQuotaError`` fell through the generic
+    ``except Exception`` in ``_evaluate_issue`` with no backoff at all, so
+    the worker immediately reclaimed and re-failed the next issue in a tight
+    loop until the quota reset on its own hours later.
+    """
+    http_client = _patch_http_client(
+        monkeypatch,
+        get_responses=_with_status(
+            _response(200, json=_make_issue(external_id="100")),
+            _response(200, json=_make_issue(external_id="100")),
+        ),
+        post_responses=[httpx.Response(status_code=200)],
+    )
+    patched_runtime["evaluator"].evaluate = AsyncMock(
+        side_effect=[
+            eval_worker.LLMQuotaError("OpenRouter daily quota exhausted."),
+            SAMPLE_EVALUATE_RESULT,
+        ]
+    )
+
+    await eval_worker.run_evaluate_loop(**DEFAULT_KWARGS)
+
+    # The backoff sleep must have been invoked (not skipped) ...
+    patched_runtime["sleep"].assert_awaited()
+    # ... and the worker must have resumed and completed the retried issue
+    # rather than getting stuck paused or crashing.
+    assert patched_runtime["evaluator"].evaluate.await_count == 2
+    assert http_client.post.await_count == 1
+    assert eval_worker.paused_state["paused"] is False
+
+
+@pytest.mark.asyncio
 async def test_run_evaluate_loop_uses_requested_concurrency(
     monkeypatch: pytest.MonkeyPatch, patched_runtime: dict[str, Any]
 ) -> None:

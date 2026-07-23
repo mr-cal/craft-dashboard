@@ -11,7 +11,7 @@ import termios
 import threading
 import time
 import tty
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -22,6 +22,7 @@ from craft_dashboard.llm.client import (
 )
 from craft_dashboard.llm.embeddings import EmbeddingClient
 from craft_dashboard.llm.evaluator import IssueEvaluator, _compute_content_hash
+from craft_dashboard.llm.exceptions import LLMQuotaError
 from rich.console import Console
 
 from scripts.eval_timing import PHASE_EVALUATE, TimingHistory
@@ -41,6 +42,8 @@ HTTP_CONFLICT = httpx.codes.CONFLICT
 HTTP_TOO_MANY = httpx.codes.TOO_MANY_REQUESTS
 shutdown_state = {"requested": False}
 paused_state = {"paused": False}
+_quota_pause_lock = asyncio.Lock()
+_quota_paused = False
 
 _MAX_ERROR_BODY = 200
 _setup_logging = setup_rich_logging
@@ -238,6 +241,51 @@ async def _sleep_until_next_poll(seconds: int) -> None:
         remaining -= 1
 
 
+def _seconds_until_utc_midnight() -> int:
+    """Seconds remaining until the next UTC day boundary (OpenRouter's quota reset)."""
+    now = datetime.now(tz=UTC)
+    tomorrow = (now + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return max(1, int((tomorrow - now).total_seconds()))
+
+
+async def _enter_quota_backoff() -> None:
+    """Pause every worker until the OpenRouter daily quota resets.
+
+    Without this, each worker that hits ``LLMQuotaError`` immediately loops
+    back through ``_worker_loop`` and retries the very next issue, since
+    neither ``_evaluate_issue``'s generic ``except Exception`` blocks nor
+    ``_worker_loop`` itself impose any backoff for this error — resulting in
+    a tight crash loop that hammers OpenRouter and the database with
+    thousands of doomed requests per hour until quota resets on its own.
+
+    Idempotent across concurrent workers: only the first caller actually
+    logs and sleeps; later callers (or the same worker on its next attempt)
+    see ``_quota_paused`` already set and return immediately, relying on
+    ``paused_state`` (checked by every worker's loop) to keep them idle.
+    """
+    global _quota_paused  # noqa: PLW0603
+    async with _quota_pause_lock:
+        if _quota_paused:
+            return
+        _quota_paused = True
+
+    paused_state["paused"] = True
+    wait_seconds = _seconds_until_utc_midnight()
+    logger.error(
+        "OpenRouter daily quota exhausted. Pausing all workers for %s "
+        "until quota resets at UTC midnight.",
+        _format_elapsed(wait_seconds),
+    )
+    await _sleep_until_next_poll(wait_seconds)
+    paused_state["paused"] = False
+    async with _quota_pause_lock:
+        _quota_paused = False
+    if not shutdown_state["requested"]:
+        logger.info("Quota reset reached, resuming evaluation.")
+
+
 async def _fetch_next_issue(
     runtime: _Runtime, *, server_url: str
 ) -> dict[str, Any] | None:
@@ -335,7 +383,7 @@ async def _post_submission(
     return None
 
 
-async def _evaluate_issue(
+async def _evaluate_issue(  # noqa: PLR0911
     runtime: _Runtime,
     *,
     issue_data: dict[str, Any],
@@ -397,6 +445,11 @@ async def _evaluate_issue(
                 pr_details=issue_data.get("pr_details"),
             )
         )
+    except LLMQuotaError:
+        runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+        await runtime.state.release()
+        await _enter_quota_backoff()
+        return
     except Exception:
         runtime.progress.update(runtime.overall_id, description="Evaluating issues")
         logger.exception(
@@ -424,6 +477,11 @@ async def _evaluate_issue(
                 summary=result["summary"],
             )
         )
+    except LLMQuotaError:
+        runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+        await runtime.state.release()
+        await _enter_quota_backoff()
+        return
     except Exception:
         runtime.progress.update(runtime.overall_id, description="Evaluating issues")
         logger.exception("%s: embedding failed", issue_ref)
@@ -547,8 +605,10 @@ async def run_evaluate_loop(
     embedding for the resulting summary, and submits the finished payload to
     ``POST /api/eval/result``. No direct database access is used.
     """
+    global _quota_paused  # noqa: PLW0603
     shutdown_state["requested"] = False
     paused_state["paused"] = False
+    _quota_paused = False
     signal.signal(signal.SIGINT, _signal_handler)
     console = Console()
     _setup_logging(verbose=verbose, console=console)
