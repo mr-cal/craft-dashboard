@@ -206,6 +206,12 @@ body.is-paper {
   vertical-align: top;
 }
 
+.admin-pager {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
 .issue-detail-layout {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

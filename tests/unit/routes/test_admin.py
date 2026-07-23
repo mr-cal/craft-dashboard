@@ -27,6 +27,9 @@ class _EmptyResult:
     def __iter__(self):
         return iter(())
 
+    def scalar_one(self):
+        return 0
+
     def one(self):
         return SimpleNamespace(
             evaluations=0,
@@ -126,10 +129,15 @@ def _stub_admin_page_metrics(
     next_expected_fetch=None,
 ) -> None:
     async def _fake_recent_activity(
-        self, limit: int = 50, filtered_issues: dict | None = None
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        filtered_issues: dict | None = None,
     ):
-        assert limit == 50
-        return recent_activity if recent_activity is not None else []
+        assert limit == 10
+        assert offset == 0
+        activity = recent_activity if recent_activity is not None else []
+        return activity, len(activity)
 
     async def _fake_api_budget(self):
         if api_budget_exception is not None:

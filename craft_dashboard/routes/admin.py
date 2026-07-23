@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import requests
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from github import GithubException
@@ -34,6 +34,7 @@ router = APIRouter(prefix="/admin")
 
 _ADMIN_SESSION_COOKIE = "admin_session"
 _LOG_SERVICE_UNITS: list[str] = ["collect-data", "craft-dashboard", "run-llm"]
+_ADMIN_PAGE_SIZE = 10
 
 
 class AdminActionResponse(BaseModel):
@@ -144,8 +145,12 @@ async def admin_page(
     collection_runs = await admin_service.get_recent_collection_runs(
         filtered_issues=get_config(request).filtered_issues
     )
-    recent_activity = await admin_service.get_recent_issue_activity(
-        filtered_issues=get_config(request).filtered_issues
+    (
+        recent_activity,
+        recent_activity_total,
+    ) = await admin_service.get_recent_issue_activity(
+        limit=_ADMIN_PAGE_SIZE,
+        filtered_issues=get_config(request).filtered_issues,
     )
     try:
         api_budget = await admin_service.get_api_budget()
@@ -156,7 +161,10 @@ async def admin_page(
     next_refresh = await admin_service.get_next_scheduled_refresh()
     project_refresh_list = await admin_service.get_project_refresh_list()
     llm_service_status = await admin_service.get_llm_service_status()
-    llm_recent_evaluations = await admin_service.get_recent_evaluations()
+    (
+        llm_recent_evaluations,
+        llm_recent_evaluations_total,
+    ) = await admin_service.get_recent_evaluations(limit=_ADMIN_PAGE_SIZE)
     llm_daily_stats = await admin_service.get_daily_evaluation_stats()
 
     return templates.TemplateResponse(
@@ -175,11 +183,69 @@ async def admin_page(
             "recent_completion_tokens": recent_stats["completion_tokens"],
             "collection_runs": collection_runs,
             "recent_activity": recent_activity,
+            "recent_activity_offset": 0,
+            "recent_activity_limit": _ADMIN_PAGE_SIZE,
+            "recent_activity_total": recent_activity_total,
             "api_budget": api_budget,
             "next_expected_fetch": next_expected_fetch,
             "llm_service_status": llm_service_status,
             "llm_recent_evaluations": llm_recent_evaluations,
+            "llm_recent_evaluations_offset": 0,
+            "llm_recent_evaluations_limit": _ADMIN_PAGE_SIZE,
+            "llm_recent_evaluations_total": llm_recent_evaluations_total,
             "llm_daily_stats": llm_daily_stats,
+        },
+    )
+
+
+@router.get("/recent-activity", response_class=HTMLResponse)
+async def recent_activity_fragment(
+    request: Request,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=_ADMIN_PAGE_SIZE, gt=0, le=100),
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    """Return an HTML fragment with one page of recent issue activity."""
+    templates: Jinja2Templates = request.app.state.templates
+    admin_service = AdminService(session)
+    recent_activity, total = await admin_service.get_recent_issue_activity(
+        limit=limit,
+        offset=offset,
+        filtered_issues=get_config(request).filtered_issues,
+    )
+    return templates.TemplateResponse(
+        request,
+        "admin/_recent_activity_rows.html",
+        {
+            "recent_activity": recent_activity,
+            "recent_activity_offset": offset,
+            "recent_activity_limit": limit,
+            "recent_activity_total": total,
+        },
+    )
+
+
+@router.get("/recent-evaluations", response_class=HTMLResponse)
+async def recent_evaluations_fragment(
+    request: Request,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=_ADMIN_PAGE_SIZE, gt=0, le=100),
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    """Return an HTML fragment with one page of recent LLM evaluations."""
+    templates: Jinja2Templates = request.app.state.templates
+    admin_service = AdminService(session)
+    llm_recent_evaluations, total = await admin_service.get_recent_evaluations(
+        limit=limit, offset=offset
+    )
+    return templates.TemplateResponse(
+        request,
+        "admin/_recent_evaluations_rows.html",
+        {
+            "llm_recent_evaluations": llm_recent_evaluations,
+            "llm_recent_evaluations_offset": offset,
+            "llm_recent_evaluations_limit": limit,
+            "llm_recent_evaluations_total": total,
         },
     )
 

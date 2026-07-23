@@ -385,9 +385,10 @@ class AdminService:
     async def get_recent_issue_activity(
         self,
         limit: int = 50,
+        offset: int = 0,
         filtered_issues: dict[str, list[str]] | None = None,
-    ) -> list[ActivityEntry]:
-        """Return the most recent issue/PR change events, newest first.
+    ) -> tuple[list[ActivityEntry], int]:
+        """Return one page of recent issue/PR change events, newest first.
 
         Joined against ``Issue`` for the live GitHub URL; falls back to the
         title recorded at the time of the change if the issue row itself
@@ -395,6 +396,9 @@ class AdminService:
         *filtered_issues* (e.g. Renovate/Dependabot "Dependency Dashboard"
         meta-issues) are excluded so they don't dominate the admin feed with
         noise.
+
+        Returns a tuple of (page of entries, total matching count) so callers
+        can render pagination controls.
         """
         query = (
             select(
@@ -414,10 +418,14 @@ class AdminService:
         excl = _build_excluded_activity_condition(filtered_issues or {})
         if excl is not None:
             query = query.where(excl)
+
+        total_query = select(func.count()).select_from(query.subquery())
+        total = (await self.session.execute(total_query)).scalar_one()
+
         rows = await self.session.execute(
-            query.order_by(IssueActivity.occurred_at.desc()).limit(limit)
+            query.order_by(IssueActivity.occurred_at.desc()).limit(limit).offset(offset)
         )
-        return [
+        activity: list[ActivityEntry] = [
             {
                 "project": row.project_name,
                 "number": str(row.IssueActivity.issue_number),
@@ -429,6 +437,7 @@ class AdminService:
             }
             for row in rows
         ]
+        return activity, total
 
     async def get_api_budget(self) -> RateLimitStatus:
         """Return the current REST and GraphQL API budgets, for the admin page."""
@@ -579,14 +588,17 @@ class AdminService:
         }
 
     async def get_recent_evaluations(
-        self, limit: int = 20
-    ) -> list[RecentEvaluationEntry]:
-        """Return the most recently submitted evaluations, newest first.
+        self, limit: int = 20, offset: int = 0
+    ) -> tuple[list[RecentEvaluationEntry], int]:
+        """Return one page of recently submitted evaluations, newest first.
 
         Deliberately omits token/cost fields — the admin page doesn't surface
         OpenRouter spend.
+
+        Returns a tuple of (page of entries, total matching count) so callers
+        can render pagination controls.
         """
-        query = (
+        base_query = (
             select(
                 LLMEvaluation.issue_id,
                 Project.name.label("project_name"),
@@ -599,11 +611,17 @@ class AdminService:
             .join(Issue, LLMEvaluation.issue_id == Issue.id)
             .join(Project, Issue.project_id == Project.id)
             .where(LLMEvaluation.latest.is_(True))
-            .order_by(LLMEvaluation.evaluated_at.desc())
-            .limit(limit)
         )
-        result = await self.session.execute(query)
-        return [
+
+        total_query = select(func.count()).select_from(base_query.subquery())
+        total = (await self.session.execute(total_query)).scalar_one()
+
+        result = await self.session.execute(
+            base_query.order_by(LLMEvaluation.evaluated_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        evaluations: list[RecentEvaluationEntry] = [
             {
                 "issue_id": row.issue_id,
                 "project": row.project_name,
@@ -615,6 +633,7 @@ class AdminService:
             }
             for row in result
         ]
+        return evaluations, total
 
     async def get_daily_evaluation_stats(
         self, days: int = 14

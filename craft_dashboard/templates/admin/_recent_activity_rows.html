@@ -1,0 +1,54 @@
+<div id="recent-activity-block">
+  <table class="activity-feed">
+    <thead>
+      <tr>
+        <th>When</th>
+        <th>Issue</th>
+        <th>Title</th>
+        <th>Change</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for activity in recent_activity %}
+      <tr>
+        <td>
+          {{ activity.occurred_at | local_datetime }}
+        </td>
+        <td style="white-space:nowrap;">
+          {{ activity.project }}<br>
+          {{ "pr" if activity.issue_type == "pull_request" else "issue" }}
+          {% if activity.url %}
+          <a href="{{ activity.url }}" target="_blank" rel="noopener noreferrer">#{{ activity.number }}</a>
+          {% else %}
+          #{{ activity.number }}
+          {% endif %}
+        </td>
+        <td>
+          <a href="/issues/{{ activity.project | urlencode_path }}/{{ activity.number }}">{{ activity.title|truncate(80) }}</a>
+        </td>
+        <td>{{ activity.change_type }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4">No recent activity.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="admin-pager">
+    <button
+      class="p-button--neutral"
+      hx-get="/admin/recent-activity?offset={{ [recent_activity_offset - recent_activity_limit, 0] | max }}&limit={{ recent_activity_limit }}"
+      hx-target="#recent-activity-block"
+      hx-swap="outerHTML"
+      {% if recent_activity_offset <= 0 %}disabled{% endif %}
+    >Newer</button>
+    <button
+      class="p-button--neutral"
+      hx-get="/admin/recent-activity?offset={{ recent_activity_offset + recent_activity_limit }}&limit={{ recent_activity_limit }}"
+      hx-target="#recent-activity-block"
+      hx-swap="outerHTML"
+      {% if recent_activity_offset + recent_activity_limit >= recent_activity_total %}disabled{% endif %}
+    >Older</button>
+  </div>
+</div>

@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from craft_dashboard.app import create_app
@@ -11,6 +11,7 @@ from craft_dashboard.config import DashboardConfig
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.routes import admin as admin_routes
@@ -594,3 +595,229 @@ class TestCollectionRunIssuesEndpoint:
 
         assert response.status_code == 200
         assert "Showing 100 of 105" in response.text
+
+
+class TestRecentActivityFragmentEndpoint:
+    """Integration tests for the paginated recent activity fragment."""
+
+    def test_returns_first_page(
+        self,
+        client: TestClient,
+        test_db_session: AsyncSession,
+    ) -> None:
+        """GET /admin/recent-activity returns 10 rows and a disabled Newer button."""
+        now = datetime(2025, 6, 21, 12, 0, tzinfo=UTC)
+
+        async def _seed() -> None:
+            project = Project(
+                name="snapcraft", category="application", github_org="canonical"
+            )
+            test_db_session.add(project)
+            await test_db_session.flush()
+
+            test_db_session.add_all(
+                [
+                    IssueActivity(
+                        project_id=project.id,
+                        issue_number=i,
+                        change_type="updated",
+                        title=f"Change {i}",
+                        occurred_at=now - timedelta(hours=i),
+                    )
+                    for i in range(15)
+                ]
+            )
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = client.get("/admin/recent-activity")
+
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert response.text.count("Change ") == 10
+        assert "Change 0" in response.text
+        assert "Change 9" in response.text
+        assert "Change 10" not in response.text
+        assert 'hx-get="/admin/recent-activity?offset=10' in response.text
+
+    def test_returns_second_page(
+        self,
+        client: TestClient,
+        test_db_session: AsyncSession,
+    ) -> None:
+        """Requesting offset=10 returns the remaining rows with Older disabled."""
+        now = datetime(2025, 6, 21, 12, 0, tzinfo=UTC)
+
+        async def _seed() -> None:
+            project = Project(
+                name="snapcraft", category="application", github_org="canonical"
+            )
+            test_db_session.add(project)
+            await test_db_session.flush()
+
+            test_db_session.add_all(
+                [
+                    IssueActivity(
+                        project_id=project.id,
+                        issue_number=i,
+                        change_type="updated",
+                        title=f"Change {i}",
+                        occurred_at=now - timedelta(hours=i),
+                    )
+                    for i in range(15)
+                ]
+            )
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = client.get("/admin/recent-activity", params={"offset": 10})
+
+        assert response.status_code == 200
+        assert response.text.count("Change ") == 5
+        assert "Change 10" in response.text
+        assert "Change 14" in response.text
+        assert 'hx-get="/admin/recent-activity?offset=0' in response.text
+
+
+class TestRecentEvaluationsFragmentEndpoint:
+    """Integration tests for the paginated recent evaluations fragment."""
+
+    def test_returns_first_page(
+        self,
+        client: TestClient,
+        test_db_session: AsyncSession,
+    ) -> None:
+        """GET /admin/recent-evaluations returns 10 rows and a disabled Newer button."""
+        now = datetime(2025, 6, 21, 12, 0, tzinfo=UTC)
+
+        async def _seed() -> None:
+            project = Project(
+                name="snapcraft", category="application", github_org="canonical"
+            )
+            test_db_session.add(project)
+            await test_db_session.flush()
+
+            issues = [
+                Issue(
+                    project_id=project.id,
+                    source="github",
+                    external_id=str(i),
+                    issue_type="issue",
+                    title=f"Issue {i}",
+                    state="open",
+                    author="dev",
+                    author_is_maintainer=False,
+                    author_is_bot=False,
+                    labels=[],
+                    metadata_={},
+                    comments=[],
+                    last_fetched_at=now,
+                )
+                for i in range(15)
+            ]
+            test_db_session.add_all(issues)
+            await test_db_session.flush()
+
+            test_db_session.add_all(
+                [
+                    LLMEvaluation(
+                        issue_id=issues[i].id,
+                        model_name="gpt-4.1",
+                        summary=f"Evaluation {i}",
+                        suggested_action="keep_open",
+                        suggested_action_reason="reason",
+                        scores={},
+                        tokens_used=100,
+                        prompt_tokens=60,
+                        completion_tokens=40,
+                        llm_backend="test",
+                        evaluated_at=now - timedelta(hours=i),
+                        issue_data_hash=f"hash-{i}",
+                        latest=True,
+                    )
+                    for i in range(15)
+                ]
+            )
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = client.get("/admin/recent-evaluations")
+
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert response.text.count("Issue ") == 10
+        assert "Issue 0<" in response.text
+        assert "Issue 9<" in response.text
+        assert "Issue 10<" not in response.text
+        assert 'hx-get="/admin/recent-evaluations?offset=10' in response.text
+
+    def test_returns_second_page(
+        self,
+        client: TestClient,
+        test_db_session: AsyncSession,
+    ) -> None:
+        """Requesting offset=10 returns the remaining rows with Older disabled."""
+        now = datetime(2025, 6, 21, 12, 0, tzinfo=UTC)
+
+        async def _seed() -> None:
+            project = Project(
+                name="snapcraft", category="application", github_org="canonical"
+            )
+            test_db_session.add(project)
+            await test_db_session.flush()
+
+            issues = [
+                Issue(
+                    project_id=project.id,
+                    source="github",
+                    external_id=str(i),
+                    issue_type="issue",
+                    title=f"Issue {i}",
+                    state="open",
+                    author="dev",
+                    author_is_maintainer=False,
+                    author_is_bot=False,
+                    labels=[],
+                    metadata_={},
+                    comments=[],
+                    last_fetched_at=now,
+                )
+                for i in range(15)
+            ]
+            test_db_session.add_all(issues)
+            await test_db_session.flush()
+
+            test_db_session.add_all(
+                [
+                    LLMEvaluation(
+                        issue_id=issues[i].id,
+                        model_name="gpt-4.1",
+                        summary=f"Evaluation {i}",
+                        suggested_action="keep_open",
+                        suggested_action_reason="reason",
+                        scores={},
+                        tokens_used=100,
+                        prompt_tokens=60,
+                        completion_tokens=40,
+                        llm_backend="test",
+                        evaluated_at=now - timedelta(hours=i),
+                        issue_data_hash=f"hash-{i}",
+                        latest=True,
+                    )
+                    for i in range(15)
+                ]
+            )
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = client.get("/admin/recent-evaluations", params={"offset": 10})
+
+        assert response.status_code == 200
+        assert response.text.count("Issue ") == 5
+        assert "Issue 10<" in response.text
+        assert "Issue 14<" in response.text
+        assert 'hx-get="/admin/recent-evaluations?offset=0' in response.text

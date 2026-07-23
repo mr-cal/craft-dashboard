@@ -310,9 +310,9 @@ class TestGetRecentIssueActivity:
         )
         await test_db_session.commit()
 
-        activities = await AdminService(test_db_session).get_recent_issue_activity(
-            limit=2
-        )
+        activities, total = await AdminService(
+            test_db_session
+        ).get_recent_issue_activity(limit=2)
 
         assert [activity["title"] for activity in activities] == [
             "Newest change",
@@ -322,6 +322,52 @@ class TestGetRecentIssueActivity:
         assert activities[0]["number"] == "12"
         assert activities[0]["change_type"] == "updated"
         assert activities[0]["issue_type"] == "issue"
+        assert total == 3
+
+    async def test_respects_offset(self, test_db_session) -> None:
+        """Offset skips the newest rows, for paging further back in time."""
+        project = Project(
+            name="snapcraft",
+            category="application",
+            github_org="canonical",
+            display_order=1,
+        )
+        test_db_session.add(project)
+        await test_db_session.flush()
+
+        test_db_session.add_all(
+            [
+                IssueActivity(
+                    project_id=project.id,
+                    issue_number=11,
+                    change_type="opened",
+                    title="Oldest change",
+                    occurred_at=datetime(2025, 1, 10, 9, 0, tzinfo=UTC),
+                ),
+                IssueActivity(
+                    project_id=project.id,
+                    issue_number=12,
+                    change_type="updated",
+                    title="Newest change",
+                    occurred_at=datetime(2025, 1, 10, 11, 0, tzinfo=UTC),
+                ),
+                IssueActivity(
+                    project_id=project.id,
+                    issue_number=13,
+                    change_type="closed",
+                    title="Middle change",
+                    occurred_at=datetime(2025, 1, 10, 10, 0, tzinfo=UTC),
+                ),
+            ]
+        )
+        await test_db_session.commit()
+
+        activities, total = await AdminService(
+            test_db_session
+        ).get_recent_issue_activity(limit=2, offset=2)
+
+        assert [activity["title"] for activity in activities] == ["Oldest change"]
+        assert total == 3
 
     async def test_joins_issue_for_live_url(self, test_db_session) -> None:
         """The issue's live GitHub URL is joined in when the issue still exists."""
@@ -357,7 +403,9 @@ class TestGetRecentIssueActivity:
         )
         await test_db_session.commit()
 
-        activities = await AdminService(test_db_session).get_recent_issue_activity()
+        activities, _total = await AdminService(
+            test_db_session
+        ).get_recent_issue_activity()
 
         assert (
             activities[0]["url"] == "https://github.com/canonical/snapcraft/issues/12"
@@ -395,9 +443,9 @@ class TestGetRecentIssueActivity:
         )
         await test_db_session.commit()
 
-        activities = await AdminService(test_db_session).get_recent_issue_activity(
-            filtered_issues={"snapcraft": ["4472"]}
-        )
+        activities, _total = await AdminService(
+            test_db_session
+        ).get_recent_issue_activity(filtered_issues={"snapcraft": ["4472"]})
 
         assert [activity["number"] for activity in activities] == ["12"]
 
@@ -748,7 +796,9 @@ class TestRecentEvaluations:
     async def test_returns_evaluations_newest_first(self, test_db_session) -> None:
         await _seed_admin_data(test_db_session)
 
-        recent = await AdminService(test_db_session).get_recent_evaluations(limit=20)
+        recent, total = await AdminService(test_db_session).get_recent_evaluations(
+            limit=20
+        )
 
         assert [entry["suggested_action"] for entry in recent] == [
             "keep_open",
@@ -757,14 +807,29 @@ class TestRecentEvaluations:
         assert recent[0]["project"] == "snapcraft"
         assert recent[0]["model_name"] == "gpt-4.1"
         assert "tokens_used" not in recent[0]
+        assert total == 2
 
     async def test_respects_limit(self, test_db_session) -> None:
         await _seed_admin_data(test_db_session)
 
-        recent = await AdminService(test_db_session).get_recent_evaluations(limit=1)
+        recent, total = await AdminService(test_db_session).get_recent_evaluations(
+            limit=1
+        )
 
         assert len(recent) == 1
         assert recent[0]["suggested_action"] == "keep_open"
+        assert total == 2
+
+    async def test_respects_offset(self, test_db_session) -> None:
+        await _seed_admin_data(test_db_session)
+
+        recent, total = await AdminService(test_db_session).get_recent_evaluations(
+            limit=1, offset=1
+        )
+
+        assert len(recent) == 1
+        assert recent[0]["suggested_action"] == "needs_review"
+        assert total == 2
 
 
 class TestDailyEvaluationStats:

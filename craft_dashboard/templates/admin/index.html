@@ -149,42 +149,7 @@
     {% endif %}
 
     <h3 style="margin-top: 1.5rem;">Recent activity</h3>
-    <table class="activity-feed">
-      <thead>
-        <tr>
-          <th>When</th>
-          <th>Issue</th>
-          <th>Title</th>
-          <th>Change</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for activity in recent_activity %}
-        <tr>
-          <td>
-            {{ activity.occurred_at | local_datetime }}
-          </td>
-          <td style="white-space:nowrap;">
-            {{ activity.project }}<br>
-            {{ "pr" if activity.issue_type == "pull_request" else "issue" }}
-            {% if activity.url %}
-            <a href="{{ activity.url }}" target="_blank" rel="noopener noreferrer">#{{ activity.number }}</a>
-            {% else %}
-            #{{ activity.number }}
-            {% endif %}
-          </td>
-          <td>
-            <a href="/issues/{{ activity.project | urlencode_path }}/{{ activity.number }}">{{ activity.title|truncate(80) }}</a>
-          </td>
-          <td>{{ activity.change_type }}</td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="4">No recent activity.</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    {% include "admin/_recent_activity_rows.html" %}
     <script>
       (function () {
         document.querySelectorAll('time.local-time').forEach(function (el) {
@@ -375,32 +340,7 @@
     <p>No evaluations recorded yet.</p>
     {% endif %}
     <h4 style="margin-top: 1rem;">Recent evaluations</h4>
-    {% if llm_recent_evaluations %}
-    <table>
-      <thead>
-        <tr>
-          <th>Project</th>
-          <th>Issue</th>
-          <th>Model</th>
-          <th>Verdict</th>
-          <th>Evaluated</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for entry in llm_recent_evaluations %}
-        <tr>
-          <td>{{ entry.project }}</td>
-          <td><a href="/issues/{{ entry.project | urlencode_path }}/{{ entry.external_id }}">{{ entry.title }}</a></td>
-          <td>{{ entry.model_name }}</td>
-          <td>{{ entry.suggested_action or "Unknown" }}</td>
-          <td>{{ entry.evaluated_at | local_datetime("Unknown") }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p>No evaluations recorded yet.</p>
-    {% endif %}
+    {% include "admin/_recent_evaluations_rows.html" %}
   </div>
 </div>
 
