@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
@@ -37,11 +38,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 _LOCK_TTL = timedelta(minutes=10)
 
-#: Addresses treated as "local" for rate-limit purposes — a worker running
-#: on the same host as the app (the common case for the continuous
-#: `evaluate` service) needs a much higher `/next` polling budget than a
-#: single external contributor.
-_LOOPBACK_ADDRESSES = frozenset({"127.0.0.1", "::1"})
+#: How recently `/next`/`/result` must have been called for the service to
 
 #: How recently `/next`/`/result` must have been called for the service to
 #: be considered "running" rather than "stalled". A bit more than 2x the
@@ -59,15 +56,35 @@ _last_next_call_at: datetime | None = None
 _last_result_submitted_at: datetime | None = None
 
 
+def _is_local_caller(key: str) -> bool:
+    """Return whether *key* (the caller's IP) counts as "local" for rate limits.
+
+    The continuous `evaluate` worker runs in its own container on the shared
+    `vps-net` Podman network (see docker-compose.llm-evaluate.yml) and calls
+    craft-dashboard by its container hostname, never over loopback — so its
+    source IP is a private container address (e.g. ``10.89.0.x``), not
+    ``127.0.0.1``. A literal-loopback check would misclassify it as an
+    external caller, throttling it to 30/minute under `--concurrency > 1`,
+    which can back the worker off long enough for a `/next` lock to expire
+    and the same issue to be picked up and evaluated twice. Any private
+    (RFC 1918/RFC 4193/loopback) address is treated as local instead, since
+    only same-host/same-network containers can present one here.
+    """
+    try:
+        return ipaddress.ip_address(key).is_private
+    except ValueError:
+        return False
+
+
 def _eval_next_rate_limit(key: str) -> str:
-    """Return a higher `/next` rate limit for loopback callers.
+    """Return a higher `/next` rate limit for local callers.
 
     ``slowapi`` calls this with the resolved rate-limit key (the result of
     ``key_func``, i.e. the caller's IP) when the decorated limit value is a
     callable declaring a ``key`` parameter, letting the limit vary per caller
     without needing to inspect the request directly.
     """
-    return "1000/minute" if key in _LOOPBACK_ADDRESSES else "30/minute"
+    return "1000/minute" if _is_local_caller(key) else "30/minute"
 
 
 def get_eval_activity() -> tuple[datetime | None, datetime | None]:

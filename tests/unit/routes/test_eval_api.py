@@ -15,7 +15,19 @@ class TestEvalNextRateLimit:
         assert eval_api._eval_next_rate_limit("::1") == "1000/minute"
 
     def test_non_loopback_keeps_default_limit(self) -> None:
-        assert eval_api._eval_next_rate_limit("203.0.113.5") == "30/minute"
+        # 8.8.8.8 is a real, globally-routable public IP — ipaddress treats
+        # some documentation/reserved ranges (e.g. 203.0.113.0/24) as
+        # "private" too, so a genuinely public address is used here instead.
+        assert eval_api._eval_next_rate_limit("8.8.8.8") == "30/minute"
+
+    def test_private_container_network_gets_higher_limit(self) -> None:
+        # The continuous evaluate worker calls craft-dashboard over the
+        # shared Podman network (docker-compose.llm-evaluate.yml), so it
+        # presents a private container IP, not a literal loopback address.
+        assert eval_api._eval_next_rate_limit("10.89.0.42") == "1000/minute"
+
+    def test_invalid_key_keeps_default_limit(self) -> None:
+        assert eval_api._eval_next_rate_limit("not-an-ip") == "30/minute"
 
 
 class TestGetEvalActivity:
