@@ -68,7 +68,8 @@ pydantic-settings reads `.env` at startup. To apply changes after editing the
 file on the server:
 
 ```bash
-# Edit the file (SSH into the server first)
+# SSH into the server, then edit the file
+ssh -tt root@167.99.14.211
 nano /opt/vps-infra/.env
 
 # Restart the app container to pick up the new values

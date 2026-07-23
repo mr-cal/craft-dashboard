@@ -10,9 +10,11 @@ Compose app container. In production they run inside the Podman container.
 podman compose exec -T app python scripts/<script>.py
 ```
 
-**Production:**
+**Production:** run from your local machine over SSH — no need to SSH in
+first:
+
 ```bash
-podman exec -i vps-infra_craft-dashboard_1 python scripts/<script>.py
+ssh -tt root@167.99.14.211 "podman exec -it vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/<script>.py"
 ```
 
 ### collect_data.py
@@ -55,14 +57,16 @@ uv run scripts/collect_data.py --source github --limit 25
 uv run scripts/collect_data.py --source github --project snapcraft -v
 ```
 
-In production, two cron jobs run:
+In production, two cron jobs run on the VPS itself (see "Scheduled tasks" in
+[`docs/deployment.md`](deployment.md)). To trigger a collection manually from
+your local machine instead, SSH in and run it in one shot:
 
 ```bash
-# Open-issue and release refresh — every 10 minutes
-podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source github --mode open
+# Open-issue and release refresh
+ssh -tt root@167.99.14.211 "podman exec -it vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source github --mode open"
 
-# Full collection (open + closed issues, launchpad) — daily at 2 AM UTC
-podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source all --mode full
+# Full collection (open + closed issues, launchpad)
+ssh -tt root@167.99.14.211 "podman exec -it vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source all --mode full -v"
 ```
 
 The full-refresh mode (`--mode full`) respects the per-project refresh schedule.
@@ -100,8 +104,11 @@ rather than silently showing $0.
 # start the continuous evaluation service locally
 uv run scripts/run_llm.py evaluate
 
-# start the same service inside the app container
+# start the same service inside the app container (local dev)
 podman compose exec -T app python scripts/run_llm.py evaluate
+
+# production, from your local machine over SSH
+ssh -tt root@167.99.14.211 "podman exec -it vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/run_llm.py evaluate"
 ```
 
 The service polls over HTTP for work, evaluates issues with OpenRouter, and
@@ -121,10 +128,11 @@ creation and closure dates. Run this after the first data collection to
 populate the trends charts with history going back to each project's earliest
 issue.
 
-Run it inside the production container, where `DATABASE_URL` is already set:
+Run it inside the production container, where `DATABASE_URL` is already set,
+from your local machine over SSH:
 
 ```bash
-podman exec -i vps-infra_craft-dashboard_1 python scripts/backfill_snapshots.py
+ssh -tt root@167.99.14.211 "podman exec -it vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/backfill_snapshots.py"
 ```
 
 The script reads all issues from the database and writes snapshot rows for
@@ -150,8 +158,8 @@ a re-fetch of everything regardless of schedule, use `--mode all`:
 ```bash
 # local
 podman compose exec -T app python scripts/collect_data.py --source all --mode all
-# production
-podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source all --mode all
+# production, from your local machine over SSH
+ssh -tt root@167.99.14.211 "podman exec -it vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source all --mode all"
 ```
 
 Alternatively, reset all refresh schedules via the admin endpoint, then run
