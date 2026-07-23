@@ -169,4 +169,18 @@ def build_pending_evaluation_query(
         )
         query = query.where(~is_up_to_date)
 
+    # Concurrent workers (``--concurrency > 1``) each call ``/next`` in
+    # parallel. Without row locking here, two workers can both SELECT the
+    # same candidate issue before either commits the lock-until update in
+    # ``next_issue``, causing the same issue to be evaluated twice (wasted
+    # tokens, and a spurious second write that flips ``latest`` back and
+    # forth). ``FOR UPDATE SKIP LOCKED`` on the ``Issue`` row makes a
+    # concurrent transaction skip an issue that's mid-selection by another
+    # worker and move on to the next candidate instead of blocking or
+    # double-picking it. ``of=Issue`` is required because of the outer join
+    # to ``latest_evaluation``, which may have no matching row (never
+    # evaluated) — only ``Issue`` rows always exist to lock. SQLite (used in
+    # tests) silently ignores ``with_for_update``.
+    query = query.with_for_update(skip_locked=True, of=Issue)
+
     return cast("Select[tuple[Issue, str, LLMEvaluation | None]]", query)
