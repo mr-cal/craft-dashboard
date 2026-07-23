@@ -250,6 +250,12 @@ def evaluate_cmd(
         llm_api_key = os.environ.get("LOCAL_LLM_API_KEY", "")
     else:
         model = settings.model
+        if not model:
+            raise click.UsageError(
+                "OPENROUTER_MODEL is required when --llm-backend=openrouter. "
+                "Set it explicitly (e.g. OPENROUTER_MODEL=qwen/qwen3.6-35b-a3b) "
+                "in the worker's env file."
+            )
 
     asyncio.run(
         run_evaluate_loop(

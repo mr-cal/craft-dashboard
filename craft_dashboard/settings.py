@@ -23,8 +23,11 @@ class Settings(BaseSettings):
     # Eval API token for /api/eval/* endpoints (pull-based evaluation)
     eval_api_token: str = ""
 
-    # OpenRouter model settings
-    openrouter_model: str = "google/gemini-2.5-flash-lite"
+    # OpenRouter model settings. No default: an unset model must fail loudly
+    # rather than silently falling back to some other provider's model (this
+    # is exactly how production once ran on Gemini instead of the intended
+    # qwen model without anyone noticing).
+    openrouter_model: str = ""
 
     # Legacy local embedding model setting. The continuous `evaluate`
     # worker now always uses OpenRouter embeddings instead.
@@ -61,6 +64,8 @@ class Settings(BaseSettings):
             raise ValueError(
                 "OPENROUTER_API_KEY is required for server-side evaluation"
             )
+        if not settings.openrouter_model:
+            raise ValueError("OPENROUTER_MODEL is required for server-side evaluation")
         _ = settings.config_path
 
     def validate_required_secrets(self) -> list[str]:

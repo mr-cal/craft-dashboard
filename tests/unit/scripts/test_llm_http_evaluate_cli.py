@@ -88,3 +88,64 @@ def test_evaluate_requires_openrouter_api_key_even_for_local_backend(
 
     assert result.exit_code != 0
     assert "OPENROUTER_API_KEY" in result.output
+
+
+def test_evaluate_requires_openrouter_model_for_openrouter_backend(
+    monkeypatch,
+) -> None:
+    """OPENROUTER_MODEL must be set explicitly; no silent fallback model."""
+    runner = CliRunner()
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+    monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", AsyncMock())
+
+    def _capture_run(coro):
+        coro.close()
+
+    monkeypatch.setattr("scripts.llm.cli.asyncio.run", _capture_run)
+
+    result = runner.invoke(
+        cli,
+        [
+            "evaluate",
+            "--server",
+            "http://localhost:8000",
+            "--token",
+            "test-token",
+            "--llm-backend",
+            "openrouter",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "OPENROUTER_MODEL" in result.output
+
+
+def test_evaluate_uses_configured_openrouter_model(monkeypatch) -> None:
+    runner = CliRunner()
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.setenv("OPENROUTER_MODEL", "qwen/qwen3.6-35b-a3b")
+    run_loop = AsyncMock()
+    monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
+
+    def _capture_run(coro):
+        coro.close()
+
+    monkeypatch.setattr("scripts.llm.cli.asyncio.run", _capture_run)
+
+    result = runner.invoke(
+        cli,
+        [
+            "evaluate",
+            "--server",
+            "http://localhost:8000",
+            "--token",
+            "test-token",
+            "--llm-backend",
+            "openrouter",
+        ],
+    )
+
+    assert result.exit_code == 0
+    run_loop.assert_called_once()
+    assert run_loop.call_args.kwargs["model"] == "qwen/qwen3.6-35b-a3b"

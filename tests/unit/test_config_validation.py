@@ -18,6 +18,14 @@ class TestSettingsValidation:
         with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
             Settings.validate_config(settings)
 
+    def test_openrouter_backend_requires_model(self, monkeypatch) -> None:
+        """OpenRouter settings require an explicit model; no silent default."""
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+        settings = Settings(openrouter_api_key="sk-test", openrouter_model="")
+
+        with pytest.raises(ValueError, match="OPENROUTER_MODEL"):
+            Settings.validate_config(settings)
+
     def test_openrouter_model_drives_derived_model_property(self, monkeypatch) -> None:
         """Derived model property follows the OpenRouter setting."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
@@ -31,7 +39,9 @@ class TestSettingsValidation:
         """Validation rejects config paths that do not exist."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         settings = Settings(
-            config_file="missing-config.toml", openrouter_api_key="sk-test"
+            config_file="missing-config.toml",
+            openrouter_api_key="sk-test",
+            openrouter_model="qwen/qwen3.6-35b-a3b",
         )
 
         with pytest.raises(ValueError, match="config_file"):
@@ -41,7 +51,9 @@ class TestSettingsValidation:
         """Validation accepts the repository default config file."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         settings = Settings(
-            config_file="craft-dashboard.toml", openrouter_api_key="sk-test"
+            config_file="craft-dashboard.toml",
+            openrouter_api_key="sk-test",
+            openrouter_model="qwen/qwen3.6-35b-a3b",
         )
 
         Settings.validate_config(settings)
