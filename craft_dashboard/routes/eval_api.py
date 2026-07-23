@@ -13,6 +13,7 @@ from scripts.llm.validation import validate_evaluation_result
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
 if TYPE_CHECKING:
@@ -249,7 +250,18 @@ async def next_issue(
     else:
         latest_evaluation.eval_locked_until = lock_until
 
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # ``FOR UPDATE SKIP LOCKED`` in build_pending_evaluation_query makes
+        # this rare, but doesn't eliminate it entirely: a concurrent worker
+        # can commit its own claim on this same never-before-evaluated issue
+        # in the narrow window between our SELECT and our INSERT. Treat that
+        # exactly like "no work available" instead of a 500 — the other
+        # worker already claimed it, so there's nothing for this caller to
+        # do but poll again.
+        await session.rollback()
+        return Response(status_code=204)
 
     return {
         "issue_id": issue.id,

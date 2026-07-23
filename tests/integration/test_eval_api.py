@@ -15,6 +15,7 @@ from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.settings import Settings
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -133,6 +134,40 @@ class TestEvalNextIntegration:
         assert evaluations[0].eval_locked_until.replace(tzinfo=UTC) > datetime.now(
             tz=UTC
         )
+
+    def test_next_returns_204_when_claim_races_with_another_worker(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        """A concurrent worker committing the same claim first must not 500.
+
+        ``FOR UPDATE SKIP LOCKED`` in ``build_pending_evaluation_query`` makes
+        this rare, but doesn't make it impossible: another worker can commit
+        its own claim on the same never-before-evaluated issue in the narrow
+        window between our SELECT and our INSERT. That should surface as
+        "no work available right now" (204), not an internal server error.
+        """
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(id=1, project_id=1, external_id="1", title="Race me")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        original_commit = test_db_session.commit
+
+        async def _commit_conflict() -> None:
+            raise IntegrityError("insert", {}, Exception("duplicate key"))
+
+        test_db_session.commit = _commit_conflict  # type: ignore[method-assign]
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/next", headers={"Authorization": "Bearer " + token}
+            )
+
+        test_db_session.commit = original_commit  # type: ignore[method-assign]
+
+        assert response.status_code == 204
 
     def test_next_skips_locked_issue(self, test_db_session: AsyncSession) -> None:
         project = make_project(id=1, name="snapcraft")
