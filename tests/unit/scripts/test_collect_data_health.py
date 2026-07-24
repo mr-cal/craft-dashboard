@@ -180,9 +180,12 @@ class TestConcurrencyGuard:
         monkeypatch.setattr(
             collect_data, "get_session_factory", lambda engine: "session-factory"
         )
-        get_running = AsyncMock(return_value=running_run)
+        wait_for_available = AsyncMock(return_value=running_run)
         monkeypatch.setattr(
-            collect_data, "_get_running_collection_run", get_running, raising=False
+            collect_data,
+            "_wait_for_source_available",
+            wait_for_available,
+            raising=False,
         )
         monkeypatch.setattr(
             collect_data, "_create_collection_run", create_run, raising=False
@@ -200,7 +203,7 @@ class TestConcurrencyGuard:
         assert excinfo.value.code != 0
         create_run.assert_not_called()
         fake_engine.dispose.assert_awaited_once()
-        get_running.assert_awaited_once_with("session-factory", "github")
+        wait_for_available.assert_awaited_once_with("session-factory", "github")
 
     @pytest.mark.asyncio
     async def test_main_proceeds_when_no_collection_run_exists(
@@ -227,9 +230,12 @@ class TestConcurrencyGuard:
         monkeypatch.setattr(
             collect_data, "get_session_factory", lambda engine: "session-factory"
         )
-        get_running = AsyncMock(return_value=None)
+        wait_for_available = AsyncMock(return_value=None)
         monkeypatch.setattr(
-            collect_data, "_get_running_collection_run", get_running, raising=False
+            collect_data,
+            "_wait_for_source_available",
+            wait_for_available,
+            raising=False,
         )
         monkeypatch.setattr(
             collect_data, "_create_collection_run", create_run, raising=False
@@ -255,7 +261,7 @@ class TestConcurrencyGuard:
         await collect_data._main("github", 0, [], verbose=False, full_refresh=False)
 
         create_run.assert_awaited_once_with("github", "session-factory")
-        get_running.assert_awaited_once_with("session-factory", "github")
+        wait_for_available.assert_awaited_once_with("session-factory", "github")
 
     @pytest.mark.asyncio
     async def test_main_ignores_running_collection_for_other_source(
@@ -272,7 +278,7 @@ class TestConcurrencyGuard:
         create_run = AsyncMock(return_value=run)
         finish_run = AsyncMock()
 
-        async def fake_get_running(
+        async def fake_wait_for_available(
             _session_factory: object, source: str
         ) -> object | None:
             assert source == "github"
@@ -290,8 +296,8 @@ class TestConcurrencyGuard:
         )
         monkeypatch.setattr(
             collect_data,
-            "_get_running_collection_run",
-            AsyncMock(side_effect=fake_get_running),
+            "_wait_for_source_available",
+            AsyncMock(side_effect=fake_wait_for_available),
             raising=False,
         )
         monkeypatch.setattr(
@@ -336,7 +342,7 @@ class TestConcurrencyGuard:
             started_at=datetime(2026, 7, 17, 20, 5, tzinfo=UTC),
         )
 
-        async def fake_get_running(
+        async def fake_wait_for_available(
             _session_factory: object, source: str
         ) -> object | None:
             if source == "github":
@@ -345,7 +351,7 @@ class TestConcurrencyGuard:
                 return launchpad_run
             return None
 
-        get_running = AsyncMock(side_effect=fake_get_running)
+        wait_for_available = AsyncMock(side_effect=fake_wait_for_available)
 
         monkeypatch.setattr(collect_data, "Settings", lambda: settings)
         monkeypatch.setattr(
@@ -358,7 +364,10 @@ class TestConcurrencyGuard:
             collect_data, "get_session_factory", lambda engine: "session-factory"
         )
         monkeypatch.setattr(
-            collect_data, "_get_running_collection_run", get_running, raising=False
+            collect_data,
+            "_wait_for_source_available",
+            wait_for_available,
+            raising=False,
         )
         monkeypatch.setattr(
             collect_data, "_create_collection_run", create_run, raising=False
@@ -369,10 +378,77 @@ class TestConcurrencyGuard:
 
         assert excinfo.value.code != 0
         create_run.assert_not_called()
-        assert get_running.await_args_list == [
+        assert wait_for_available.await_args_list == [
             (("session-factory", "github"), {}),
             (("session-factory", "launchpad"), {}),
         ]
+
+
+class TestWaitForSourceAvailable:
+    @pytest.mark.asyncio
+    async def test_returns_none_immediately_when_source_is_free(
+        self, monkeypatch
+    ) -> None:
+        get_running = AsyncMock(return_value=None)
+        monkeypatch.setattr(
+            collect_data, "_get_running_collection_run", get_running, raising=False
+        )
+        sleep = AsyncMock()
+        monkeypatch.setattr(collect_data.asyncio, "sleep", sleep)
+
+        result = await collect_data._wait_for_source_available(
+            "session-factory", "github"
+        )
+
+        assert result is None
+        get_running.assert_awaited_once_with("session-factory", "github")
+        sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_polls_until_conflicting_run_clears(self, monkeypatch) -> None:
+        running_run = SimpleNamespace(
+            id=5, started_at=datetime(2026, 7, 17, 20, 0, tzinfo=UTC)
+        )
+        get_running = AsyncMock(side_effect=[running_run, running_run, None])
+        monkeypatch.setattr(
+            collect_data, "_get_running_collection_run", get_running, raising=False
+        )
+        sleep = AsyncMock()
+        monkeypatch.setattr(collect_data.asyncio, "sleep", sleep)
+
+        result = await collect_data._wait_for_source_available(
+            "session-factory",
+            "github",
+            wait_timeout=timedelta(minutes=10),
+            poll_interval=timedelta(seconds=1),
+        )
+
+        assert result is None
+        assert get_running.await_count == 3
+        assert sleep.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_gives_up_after_timeout_if_still_conflicting(
+        self, monkeypatch
+    ) -> None:
+        running_run = SimpleNamespace(
+            id=5, started_at=datetime(2026, 7, 17, 20, 0, tzinfo=UTC)
+        )
+        get_running = AsyncMock(return_value=running_run)
+        monkeypatch.setattr(
+            collect_data, "_get_running_collection_run", get_running, raising=False
+        )
+        sleep = AsyncMock()
+        monkeypatch.setattr(collect_data.asyncio, "sleep", sleep)
+
+        result = await collect_data._wait_for_source_available(
+            "session-factory",
+            "github",
+            wait_timeout=timedelta(seconds=0),
+            poll_interval=timedelta(seconds=1),
+        )
+
+        assert result is running_run
 
 
 class _FakeScalarResult:

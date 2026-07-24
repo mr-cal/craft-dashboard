@@ -186,6 +186,52 @@ async def _upsert_collection_watermark(
     await session.commit()
 
 
+# Two crons legitimately share a source (e.g. the 10-minute "open" sweep and
+# the daily schedule-gated "full" refresh both use source="github") and can
+# start in the same minute. Rather than aborting the whole invocation on the
+# very first observed conflict — which would silently and permanently starve
+# the "full" refresh if it keeps losing that race — poll briefly for the
+# other, typically short-lived run to finish before giving up.
+_CONCURRENCY_WAIT_TIMEOUT = timedelta(minutes=6)
+_CONCURRENCY_POLL_INTERVAL = timedelta(seconds=15)
+
+
+async def _wait_for_source_available(
+    session_factory: object,
+    source_name: str,
+    *,
+    wait_timeout: timedelta = _CONCURRENCY_WAIT_TIMEOUT,
+    poll_interval: timedelta = _CONCURRENCY_POLL_INTERVAL,
+) -> CollectionRun | None:
+    """Wait for any in-progress run for ``source_name`` to clear.
+
+    Returns ``None`` once the source is free to use. If a conflicting run is
+    still active after ``wait_timeout`` has elapsed, returns that run so the
+    caller can abort as before.
+    """
+    deadline = datetime.now(UTC) + wait_timeout
+    first_check = True
+    while True:
+        existing_running = await _get_running_collection_run(
+            session_factory, source_name
+        )
+        if existing_running is None:
+            return None
+        if datetime.now(UTC) >= deadline:
+            return existing_running
+        if first_check:
+            logger.info(
+                "Collection run %s in progress for %s (started %s); "
+                "waiting up to %s for it to finish before giving up",
+                existing_running.id,
+                source_name,
+                existing_running.started_at,
+                wait_timeout,
+            )
+            first_check = False
+        await asyncio.sleep(poll_interval.total_seconds())
+
+
 async def _create_collection_run(source: str, session_factory: object) -> CollectionRun:
     """Create a running collection health record."""
     async with session_factory() as session:
@@ -777,9 +823,10 @@ async def _main(
             sources_to_check.append("launchpad")
 
         # NOTE: this checks all requested sources up front and aborts the
-        # entire invocation (SystemExit) on the first conflict found, rather
-        # than skipping only the conflicting source and still running the
-        # others. With --source all, a stuck/long-running launchpad run would
+        # entire invocation (SystemExit) if a conflict is still present after
+        # waiting (see _wait_for_source_available), rather than skipping only
+        # the conflicting source and still running the others. With --source
+        # all, a stuck/long-running launchpad run would
         # currently also block an otherwise-healthy github collection in the
         # same invocation. This is a known, low-urgency gap: production cron
         # always passes an explicit single --source (github or launchpad), so
@@ -787,7 +834,7 @@ async def _main(
         # invocation would need this loosened to per-source skipping instead
         # of an all-or-nothing abort.
         for source_name in sources_to_check:
-            existing_running = await _get_running_collection_run(
+            existing_running = await _wait_for_source_available(
                 session_factory,
                 source_name,
             )
