@@ -11,7 +11,9 @@ from craft_dashboard.app import create_app
 from craft_dashboard.config import DashboardConfig
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION, _compute_content_hash
+from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
+from craft_dashboard.routes import eval_api
 from craft_dashboard.settings import Settings
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -401,6 +403,103 @@ class TestEvalNextIntegration:
 
         assert response.status_code == 200
         assert response.json()["pr_details"] == issue.metadata_
+
+
+class TestQuotaPauseEndpoint:
+    """Integration tests for POST /api/eval/quota-pause."""
+
+    def test_requires_auth(self, test_db_session: AsyncSession) -> None:
+        app, _token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/quota-pause",
+                json={"resume_at": datetime.now(UTC).isoformat()},
+            )
+
+        assert response.status_code == 401
+
+    def test_records_pause_and_reason(
+        self, test_db_session: AsyncSession, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(eval_api, "_quota_paused_until", None)
+        app, token = _create_eval_app(test_db_session)
+        resume_at = datetime.now(UTC) + timedelta(minutes=30)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/quota-pause",
+                json={"resume_at": resume_at.isoformat(), "reason": "quota"},
+                headers={"Authorization": "Bearer " + token},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "recorded"}
+        assert eval_api.get_quota_pause_until() == resume_at
+
+    def test_defaults_reason_to_quota(
+        self, test_db_session: AsyncSession, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(eval_api, "_quota_paused_until", None)
+        app, token = _create_eval_app(test_db_session)
+        resume_at = datetime.now(UTC) + timedelta(minutes=30)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/quota-pause",
+                json={"resume_at": resume_at.isoformat()},
+                headers={"Authorization": "Bearer " + token},
+            )
+
+        assert response.status_code == 200
+
+
+class TestQueueDepthSnapshot:
+    """Integration tests for the queue-depth sampling triggered by GET /next."""
+
+    def test_first_next_call_records_a_snapshot(
+        self, test_db_session: AsyncSession, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(eval_api, "_last_queue_snapshot_at", None)
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(id=1, project_id=1, external_id="42")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/next", headers={"Authorization": "Bearer " + token}
+            )
+
+        assert response.status_code == 200
+        snapshots = asyncio.get_event_loop().run_until_complete(
+            test_db_session.execute(select(EvalQueueSnapshot))
+        )
+        rows = list(snapshots.scalars())
+        assert len(rows) == 1
+        assert rows[0].total_open == 1
+
+    def test_second_call_within_interval_does_not_duplicate(
+        self, test_db_session: AsyncSession, monkeypatch
+    ) -> None:
+        # Throttled so frequent polling doesn't flood the table with samples.
+        monkeypatch.setattr(eval_api, "_last_queue_snapshot_at", datetime.now(UTC))
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(id=1, project_id=1, external_id="42")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            client.get("/api/eval/next", headers={"Authorization": "Bearer " + token})
+
+        snapshots = asyncio.get_event_loop().run_until_complete(
+            test_db_session.execute(select(EvalQueueSnapshot))
+        )
+        assert list(snapshots.scalars()) == []
 
 
 class TestEvalNextPriorityOrdering:

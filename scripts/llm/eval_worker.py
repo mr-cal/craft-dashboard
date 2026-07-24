@@ -241,29 +241,45 @@ async def _sleep_until_next_poll(seconds: int) -> None:
         remaining -= 1
 
 
-def _seconds_until_utc_midnight() -> int:
-    """Seconds remaining until the next UTC day boundary (OpenRouter's quota reset)."""
-    now = datetime.now(tz=UTC)
-    tomorrow = (now + timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-    return max(1, int((tomorrow - now).total_seconds()))
+#: How long to pause every worker after an LLM quota/payment error, before
+#: trying again. Deliberately short (not "until tomorrow") since quota
+#: providers can also free up mid-day (e.g. a shared/team pool), and a
+#: crash-free 30-minute retry is cheap insurance either way.
+_QUOTA_BACKOFF_SECONDS = 30 * 60
 
 
-async def _enter_quota_backoff() -> None:
-    """Pause every worker until the OpenRouter daily quota resets.
+async def _report_quota_pause(runtime: _Runtime, *, resume_at: datetime) -> None:
+    """Tell the server this worker is pausing for a quota backoff.
+
+    Best-effort: if the request fails (e.g. the server is briefly
+    unreachable), the worker still pauses locally — only the admin page's
+    "why is it stalled" context is lost, not the backoff itself.
+    """
+    try:
+        await runtime.http_client.post(
+            "/api/eval/quota-pause",
+            json={"resume_at": resume_at.isoformat(), "reason": "quota"},
+            headers=runtime.headers,
+        )
+    except httpx.HTTPError:
+        logger.warning("Could not report quota pause to server", exc_info=True)
+
+
+async def _enter_quota_backoff(runtime: _Runtime) -> None:
+    """Pause every worker for `_QUOTA_BACKOFF_SECONDS` after a quota error.
 
     Without this, each worker that hits ``LLMQuotaError`` immediately loops
     back through ``_worker_loop`` and retries the very next issue, since
     neither ``_evaluate_issue``'s generic ``except Exception`` blocks nor
     ``_worker_loop`` itself impose any backoff for this error — resulting in
     a tight crash loop that hammers OpenRouter and the database with
-    thousands of doomed requests per hour until quota resets on its own.
+    thousands of doomed requests per hour.
 
     Idempotent across concurrent workers: only the first caller actually
-    logs and sleeps; later callers (or the same worker on its next attempt)
-    see ``_quota_paused`` already set and return immediately, relying on
-    ``paused_state`` (checked by every worker's loop) to keep them idle.
+    logs, reports, and sleeps; later callers (or the same worker on its next
+    attempt) see ``_quota_paused`` already set and return immediately,
+    relying on ``paused_state`` (checked by every worker's loop) to keep
+    them idle.
     """
     global _quota_paused  # noqa: PLW0603
     async with _quota_pause_lock:
@@ -272,18 +288,18 @@ async def _enter_quota_backoff() -> None:
         _quota_paused = True
 
     paused_state["paused"] = True
-    wait_seconds = _seconds_until_utc_midnight()
+    resume_at = datetime.now(tz=UTC) + timedelta(seconds=_QUOTA_BACKOFF_SECONDS)
     logger.error(
-        "OpenRouter daily quota exhausted. Pausing all workers for %s "
-        "until quota resets at UTC midnight.",
-        _format_elapsed(wait_seconds),
+        "LLM quota exhausted. Pausing all workers for %s.",
+        _format_elapsed(_QUOTA_BACKOFF_SECONDS),
     )
-    await _sleep_until_next_poll(wait_seconds)
+    await _report_quota_pause(runtime, resume_at=resume_at)
+    await _sleep_until_next_poll(_QUOTA_BACKOFF_SECONDS)
     paused_state["paused"] = False
     async with _quota_pause_lock:
         _quota_paused = False
     if not shutdown_state["requested"]:
-        logger.info("Quota reset reached, resuming evaluation.")
+        logger.info("Quota backoff elapsed, resuming evaluation.")
 
 
 async def _fetch_next_issue(
@@ -448,7 +464,7 @@ async def _evaluate_issue(  # noqa: PLR0911
     except LLMQuotaError:
         runtime.progress.update(runtime.overall_id, description="Evaluating issues")
         await runtime.state.release()
-        await _enter_quota_backoff()
+        await _enter_quota_backoff(runtime)
         return
     except Exception:
         runtime.progress.update(runtime.overall_id, description="Evaluating issues")
@@ -480,7 +496,7 @@ async def _evaluate_issue(  # noqa: PLR0911
     except LLMQuotaError:
         runtime.progress.update(runtime.overall_id, description="Evaluating issues")
         await runtime.state.release()
-        await _enter_quota_backoff()
+        await _enter_quota_backoff(runtime)
         return
     except Exception:
         runtime.progress.update(runtime.overall_id, description="Evaluating issues")

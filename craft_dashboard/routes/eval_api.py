@@ -25,6 +25,7 @@ from craft_dashboard.llm.content_hash import compute_content_hash
 from craft_dashboard.llm.evaluation_queue import build_pending_evaluation_query
 from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION
 from craft_dashboard.llm.exceptions import LLMValidationError
+from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
@@ -47,6 +48,12 @@ _LOCK_TTL = timedelta(minutes=10)
 #: without flapping.
 _ACTIVITY_STALE_AFTER = timedelta(seconds=90)
 
+#: Minimum gap between recorded queue-depth snapshots. Sampled as a side
+#: effect of `/next` (called by every worker every poll interval regardless
+#: of where it runs), throttled in-memory so concurrent/frequent pollers
+#: don't turn this into an extra query per poll.
+_QUEUE_SNAPSHOT_INTERVAL = timedelta(minutes=5)
+
 # In-memory activity tracking for `AdminService.get_llm_service_status()`.
 # The app runs as a single gunicorn worker process (see Dockerfile), so a
 # module-level timestamp is sufficient — no heartbeat table/DB writes needed.
@@ -55,6 +62,15 @@ _ACTIVITY_STALE_AFTER = timedelta(seconds=90)
 # not a separate signal from a specific caller.
 _last_next_call_at: datetime | None = None
 _last_result_submitted_at: datetime | None = None
+_last_queue_snapshot_at: datetime | None = None
+
+# In-memory quota-pause report from the worker. Any worker instance — the
+# in-cluster continuous service or a one-off run from a developer's laptop —
+# can report this via `POST /api/eval/quota-pause`, since they typically
+# share the same OpenRouter account/quota. Reported over HTTP (like all
+# other worker activity here) rather than assumed from silence, so the
+# admin page can show *why* the worker looks idle instead of just "stalled".
+_quota_paused_until: datetime | None = None
 
 
 def _is_local_caller(key: str) -> bool:
@@ -96,6 +112,105 @@ def get_eval_activity() -> tuple[datetime | None, datetime | None]:
     reaching into this module's internals directly.
     """
     return _last_next_call_at, _last_result_submitted_at
+
+
+def get_quota_pause_until() -> datetime | None:
+    """Return when the worker last reported it would resume after a quota pause.
+
+    Returns ``None`` once that time has passed, so a stale report from hours
+    ago can't linger and misreport a since-recovered worker as paused.
+    """
+    if _quota_paused_until is not None and datetime.now(tz=UTC) >= _quota_paused_until:
+        return None
+    return _quota_paused_until
+
+
+async def _maybe_record_queue_snapshot(
+    session: AsyncSession, *, filtered_issues: dict[str, list[str]] | None
+) -> None:
+    """Record a queue-depth snapshot, throttled to at most once per interval.
+
+    Called from `/next` — hit by every worker (in-cluster or a developer's
+    laptop) on every poll — so queue depth history accumulates automatically
+    whenever the worker is running, without a separate cron sampler.
+    """
+    global _last_queue_snapshot_at  # noqa: PLW0603
+    now = datetime.now(tz=UTC)
+    if (
+        _last_queue_snapshot_at is not None
+        and now - _last_queue_snapshot_at < _QUEUE_SNAPSHOT_INTERVAL
+    ):
+        return
+    _last_queue_snapshot_at = now
+
+    today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    excl = _build_excluded_issues_condition(filtered_issues or {})
+
+    base_query = select(Issue.id).where(Issue.state == "open")
+    if excl is not None:
+        base_query = base_query.where(excl)
+    total_open = await session.scalar(
+        select(func.count()).select_from(base_query.subquery())
+    )
+
+    evaluated_today = await session.scalar(
+        select(func.count(LLMEvaluation.id)).where(
+            LLMEvaluation.evaluated_at >= today_midnight,
+            LLMEvaluation.model_name != "pending",
+        )
+    )
+
+    # Mirrors `eval_status`'s default (open_only=True, force=False,
+    # incomplete=False, stale_days=0) pending-count branch — the
+    # steady-state queue depth, which is what's meaningful to chart over
+    # time. Duplicated rather than shared because `eval_status` is
+    # parameterized for ad hoc queries the snapshot doesn't need.
+    latest_evaluation = aliased(LLMEvaluation)
+    pending_query = (
+        select(Issue.id)
+        .join(Project, Issue.project_id == Project.id)
+        .outerjoin(
+            latest_evaluation,
+            (latest_evaluation.issue_id == Issue.id) & latest_evaluation.latest,
+        )
+        .where(Issue.state == "open")
+    )
+    if excl is not None:
+        pending_query = pending_query.where(excl)
+    old_version = or_(
+        latest_evaluation.eval_version.is_(None),
+        latest_evaluation.eval_version != CURRENT_EVAL_VERSION,
+    )
+    old_version_unlocked = old_version & or_(
+        latest_evaluation.eval_locked_until.is_(None),
+        latest_evaluation.eval_locked_until <= now,
+    )
+    pending_query = pending_query.where(
+        or_(
+            latest_evaluation.id.is_(None),
+            old_version_unlocked,
+            (
+                (latest_evaluation.model_name == "pending")
+                & or_(
+                    latest_evaluation.eval_locked_until.is_(None),
+                    latest_evaluation.eval_locked_until <= now,
+                )
+            ),
+        )
+    )
+    pending = await session.scalar(
+        select(func.count()).select_from(pending_query.subquery())
+    )
+
+    session.add(
+        EvalQueueSnapshot(
+            captured_at=now,
+            pending_count=pending or 0,
+            total_open=total_open or 0,
+            evaluated_today=evaluated_today or 0,
+        )
+    )
+    await session.commit()
 
 
 class EvalResultSubmission(BaseModel):
@@ -215,6 +330,9 @@ async def next_issue(
     global _last_next_call_at  # noqa: PLW0603
     _require_eval_auth(request, authorization)
     _last_next_call_at = datetime.now(tz=UTC)
+    await _maybe_record_queue_snapshot(
+        session, filtered_issues=get_config(request).filtered_issues
+    )
 
     if external_id and not project:
         raise HTTPException(
@@ -362,6 +480,36 @@ async def submit_result(
     await session.commit()
     _last_result_submitted_at = datetime.now(tz=UTC)
     return {"status": "stored", "issue_id": payload.issue_id}
+
+
+class QuotaPauseReport(BaseModel):
+    """Request body for a worker reporting it has entered a quota backoff."""
+
+    resume_at: datetime
+    reason: str = "quota"
+
+
+@router.post("/quota-pause")
+async def report_quota_pause(
+    request: Request,
+    payload: QuotaPauseReport,
+    *,
+    authorization: str = Header(default=""),
+) -> dict[str, str]:
+    """Record that a worker has paused evaluation until an LLM quota resets.
+
+    Any worker instance can call this — the in-cluster continuous service or
+    a one-off run from a developer's laptop — since they typically draw on
+    the same OpenRouter account/quota, so either one hitting the daily/rate
+    limit is equally relevant to "is evaluation making progress right now".
+    The admin page surfaces this as "stalled (quota reached)" instead of a
+    bare "stalled", which would otherwise be indistinguishable from a
+    genuinely broken worker.
+    """
+    global _quota_paused_until  # noqa: PLW0603
+    _require_eval_auth(request, authorization)
+    _quota_paused_until = payload.resume_at
+    return {"status": "recorded"}
 
 
 @router.get("/status")

@@ -168,6 +168,28 @@ body.is-paper {
   background: #f99b11;
 }
 
+.status-dot--running {
+  background: #0e8420;
+}
+
+.status-dot--stalled {
+  background: #c7162b;
+}
+
+.status-dot--stalled_quota {
+  background: #f99b11;
+}
+
+.status-dot--unknown {
+  background: #757575;
+}
+
+.status-card-subtext {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  color: var(--app-muted-text, #757575);
+}
+
 .status-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

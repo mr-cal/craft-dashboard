@@ -12,6 +12,7 @@ from sqlalchemy import String, cast, func, or_, select
 
 from craft_dashboard.collectors.github import GitHubCollector, RateLimitStatus
 from craft_dashboard.models.collection_run import CollectionRun
+from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
@@ -20,7 +21,11 @@ from craft_dashboard.models.refresh_schedule import RefreshSchedule
 from craft_dashboard.repositories.issue_repository import (
     _build_excluded_issues_condition,
 )
-from craft_dashboard.routes.eval_api import _ACTIVITY_STALE_AFTER, get_eval_activity
+from craft_dashboard.routes.eval_api import (
+    _ACTIVITY_STALE_AFTER,
+    get_eval_activity,
+    get_quota_pause_until,
+)
 from craft_dashboard.settings import Settings
 
 if TYPE_CHECKING:
@@ -92,12 +97,14 @@ class LLMServiceStatus(TypedDict):
 
     No direct process/heartbeat signal exists from the worker itself (it's a
     remote HTTP client, possibly not even on this host) — status is inferred
-    from how recently it has called `/api/eval/next` or `/api/eval/result`.
+    from how recently it has called `/api/eval/next` or `/api/eval/result`,
+    plus any self-reported quota-pause (see ``report_quota_pause``).
     """
 
-    status: str  # "running" | "stalled" | "unknown"
+    status: str  # "running" | "stalled" | "stalled_quota" | "unknown"
     last_poll_at: datetime | None
     last_result_at: datetime | None
+    quota_resume_at: datetime | None
 
 
 class RecentEvaluationEntry(TypedDict):
@@ -121,6 +128,15 @@ class DailyEvaluationCount(TypedDict):
 
     date: str
     count: int
+
+
+class QueueDepthPoint(TypedDict):
+    """A single sampled point of eval queue depth, for charting over time."""
+
+    captured_at: datetime
+    pending_count: int
+    total_open: int
+    evaluated_today: int
 
 
 class ActivityEntry(TypedDict):
@@ -570,12 +586,19 @@ class AdminService:
 
         "running" requires a `/next` poll within the stale window (the worker
         polls even when there's nothing to do, so this alone proves it's
-        alive); "stalled" means it *has* called in before but not recently
-        enough; "unknown" means it has never been observed at all (e.g. right
-        after a fresh deploy, before the worker's first poll).
+        alive); "stalled_quota" means the worker self-reported a quota
+        backoff that hasn't resumed yet (see ``report_quota_pause``) — this
+        takes priority over plain "stalled" so an intentional, self-resolving
+        pause isn't confused with a broken worker; "stalled" means it *has*
+        called in before but not recently enough and isn't quota-paused;
+        "unknown" means it has never been observed at all (e.g. right after
+        a fresh deploy, before the worker's first poll).
         """
         last_poll_at, last_result_at = get_eval_activity()
-        if last_poll_at is None:
+        quota_resume_at = get_quota_pause_until()
+        if quota_resume_at is not None:
+            status = "stalled_quota"
+        elif last_poll_at is None:
             status = "unknown"
         elif datetime.now(UTC) - last_poll_at <= _ACTIVITY_STALE_AFTER:
             status = "running"
@@ -588,15 +611,26 @@ class AdminService:
             # redeploys). Fall back to the persisted last evaluation so the
             # admin page doesn't misleadingly show "Never" for a worker
             # that's been submitting results for weeks, just not since the
-            # most recent restart.
+            # most recent restart. Excludes "pending" claim placeholders
+            # (inserted by `/api/eval/next` when it locks a never-before-
+            # evaluated issue) and rows with no summary yet — those aren't
+            # completed results, just in-flight claims, and would otherwise
+            # make this look more recent than the last real evaluation.
             last_result_at = _ensure_utc(
-                await self.session.scalar(select(func.max(LLMEvaluation.evaluated_at)))
+                await self.session.scalar(
+                    select(func.max(LLMEvaluation.evaluated_at)).where(
+                        LLMEvaluation.model_name != "pending",
+                        LLMEvaluation.summary.is_not(None),
+                        LLMEvaluation.summary != "",
+                    )
+                )
             )
 
         return {
             "status": status,
             "last_poll_at": last_poll_at,
             "last_result_at": last_result_at,
+            "quota_resume_at": quota_resume_at,
         }
 
     async def get_recent_evaluations(
@@ -654,19 +688,51 @@ class AdminService:
 
         Counts every submitted evaluation (not just `latest=True` rows), so
         re-evaluations of the same issue each count toward the day they were
-        submitted. No cost fields — the admin page doesn't surface OpenRouter
-        spend.
+        submitted. Excludes `model_name == "pending"` claim placeholders
+        (created by `/api/eval/next` when it locks a never-before-evaluated
+        issue) — those aren't completed evaluations and would otherwise
+        inflate a day's count for issues that are only *in flight*, not
+        actually evaluated yet. No cost fields — the admin page doesn't
+        surface OpenRouter spend.
         """
         since = datetime.now(UTC) - timedelta(days=days)
         day = func.date(LLMEvaluation.evaluated_at)
         query = (
             select(day.label("day"), func.count(LLMEvaluation.id).label("total"))
-            .where(LLMEvaluation.evaluated_at >= since)
+            .where(
+                LLMEvaluation.evaluated_at >= since,
+                LLMEvaluation.model_name != "pending",
+            )
             .group_by(day)
             .order_by(day)
         )
         result = await self.session.execute(query)
         return [{"date": str(row.day), "count": row.total} for row in result]
+
+    async def get_queue_depth_history(self, hours: int = 48) -> list[QueueDepthPoint]:
+        """Return recent eval queue-depth samples for the last `hours` hours.
+
+        Samples are recorded as a side effect of `/api/eval/next` (see
+        ``_maybe_record_queue_snapshot``), throttled to at most one every
+        few minutes — so this reflects queue depth only while some worker
+        (in-cluster or otherwise) has been actively polling.
+        """
+        since = datetime.now(UTC) - timedelta(hours=hours)
+        query = (
+            select(EvalQueueSnapshot)
+            .where(EvalQueueSnapshot.captured_at >= since)
+            .order_by(EvalQueueSnapshot.captured_at)
+        )
+        result = await self.session.execute(query)
+        return [
+            {
+                "captured_at": typing_cast("datetime", _ensure_utc(row.captured_at)),
+                "pending_count": row.pending_count,
+                "total_open": row.total_open,
+                "evaluated_today": row.evaluated_today,
+            }
+            for row in result.scalars()
+        ]
 
     async def update_schedule(self, project: str, days: list[int]) -> None:
         """Update the refresh schedule for a project."""

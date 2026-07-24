@@ -236,7 +236,10 @@ async def test_llm_quota_error_pauses_instead_of_crash_looping(
             _response(200, json=_make_issue(external_id="100")),
             _response(200, json=_make_issue(external_id="100")),
         ),
-        post_responses=[httpx.Response(status_code=200)],
+        post_responses=[
+            httpx.Response(status_code=200),
+            httpx.Response(status_code=200),
+        ],
     )
     patched_runtime["evaluator"].evaluate = AsyncMock(
         side_effect=[
@@ -252,8 +255,18 @@ async def test_llm_quota_error_pauses_instead_of_crash_looping(
     # ... and the worker must have resumed and completed the retried issue
     # rather than getting stuck paused or crashing.
     assert patched_runtime["evaluator"].evaluate.await_count == 2
-    assert http_client.post.await_count == 1
+    # One POST reports the quota pause to the server, the other submits the
+    # successful (retried) evaluation result.
+    assert http_client.post.await_count == 2
     assert eval_worker.paused_state["paused"] is False
+    # Backs off for a fixed 30 minutes, not "until tomorrow".
+    assert eval_worker._QUOTA_BACKOFF_SECONDS == 30 * 60
+    quota_pause_call = next(
+        call
+        for call in http_client.post.await_args_list
+        if call.args[0] == "/api/eval/quota-pause"
+    )
+    assert quota_pause_call.kwargs["json"]["reason"] == "quota"
 
 
 @pytest.mark.asyncio

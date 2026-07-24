@@ -1,6 +1,6 @@
 """Unit tests for craft_dashboard.routes.eval_api helpers."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from craft_dashboard.routes import eval_api
 
@@ -46,3 +46,26 @@ class TestGetEvalActivity:
         monkeypatch.setattr(eval_api, "_last_result_submitted_at", result_at)
 
         assert eval_api.get_eval_activity() == (poll_at, result_at)
+
+
+class TestGetQuotaPauseUntil:
+    """Tests for the module-level quota-pause report accessor."""
+
+    def test_returns_none_when_never_reported(self, monkeypatch) -> None:
+        monkeypatch.setattr(eval_api, "_quota_paused_until", None)
+
+        assert eval_api.get_quota_pause_until() is None
+
+    def test_returns_future_resume_time(self, monkeypatch) -> None:
+        resume_at = datetime.now(UTC) + timedelta(minutes=20)
+        monkeypatch.setattr(eval_api, "_quota_paused_until", resume_at)
+
+        assert eval_api.get_quota_pause_until() == resume_at
+
+    def test_expires_once_resume_time_has_passed(self, monkeypatch) -> None:
+        # A stale report from a since-recovered worker must not linger and
+        # misreport the service as still paused.
+        resume_at = datetime.now(UTC) - timedelta(minutes=1)
+        monkeypatch.setattr(eval_api, "_quota_paused_until", resume_at)
+
+        assert eval_api.get_quota_pause_until() is None

@@ -166,6 +166,7 @@ async def admin_page(
         llm_recent_evaluations_total,
     ) = await admin_service.get_recent_evaluations(limit=_ADMIN_PAGE_SIZE)
     llm_daily_stats = await admin_service.get_daily_evaluation_stats()
+    llm_queue_depth_history = await admin_service.get_queue_depth_history()
 
     return templates.TemplateResponse(
         request,
@@ -194,6 +195,7 @@ async def admin_page(
             "llm_recent_evaluations_limit": _ADMIN_PAGE_SIZE,
             "llm_recent_evaluations_total": llm_recent_evaluations_total,
             "llm_daily_stats": llm_daily_stats,
+            "llm_queue_depth_history": llm_queue_depth_history,
         },
     )
 

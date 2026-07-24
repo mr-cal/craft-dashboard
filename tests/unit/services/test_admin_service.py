@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from craft_dashboard.models.collection_run import CollectionRun
+from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
@@ -732,9 +733,15 @@ class TestLLMServiceStatus:
 
     async def test_status_is_unknown_when_never_polled(self, test_db_session) -> None:
         """No recorded activity yet (e.g. right after a fresh deploy)."""
-        with patch(
-            "craft_dashboard.services.admin_service.get_eval_activity",
-            return_value=(None, None),
+        with (
+            patch(
+                "craft_dashboard.services.admin_service.get_eval_activity",
+                return_value=(None, None),
+            ),
+            patch(
+                "craft_dashboard.services.admin_service.get_quota_pause_until",
+                return_value=None,
+            ),
         ):
             status = await AdminService(test_db_session).get_llm_service_status()
 
@@ -742,6 +749,7 @@ class TestLLMServiceStatus:
             "status": "unknown",
             "last_poll_at": None,
             "last_result_at": None,
+            "quota_resume_at": None,
         }
 
     async def test_status_is_running_when_recently_polled(
@@ -757,6 +765,10 @@ class TestLLMServiceStatus:
                 return_value=(last_poll, last_result),
             ),
             patch(
+                "craft_dashboard.services.admin_service.get_quota_pause_until",
+                return_value=None,
+            ),
+            patch(
                 "craft_dashboard.services.admin_service.datetime", FrozenStatsDateTime
             ),
         ):
@@ -767,7 +779,34 @@ class TestLLMServiceStatus:
             "status": "running",
             "last_poll_at": last_poll,
             "last_result_at": last_result,
+            "quota_resume_at": None,
         }
+
+    async def test_status_is_stalled_quota_when_quota_paused(
+        self, test_db_session
+    ) -> None:
+        """A reported, unexpired quota pause overrides running/stalled."""
+        now = datetime(2025, 1, 10, 12, 0, tzinfo=UTC)
+        last_poll = now - timedelta(seconds=10)
+        resume_at = now + timedelta(minutes=20)
+        with (
+            patch(
+                "craft_dashboard.services.admin_service.get_eval_activity",
+                return_value=(last_poll, None),
+            ),
+            patch(
+                "craft_dashboard.services.admin_service.get_quota_pause_until",
+                return_value=resume_at,
+            ),
+            patch(
+                "craft_dashboard.services.admin_service.datetime", FrozenStatsDateTime
+            ),
+        ):
+            FrozenStatsDateTime.frozen_now = now
+            status = await AdminService(test_db_session).get_llm_service_status()
+
+        assert status["status"] == "stalled_quota"
+        assert status["quota_resume_at"] == resume_at
 
     async def test_status_is_stalled_when_poll_is_too_old(
         self, test_db_session
@@ -779,6 +818,10 @@ class TestLLMServiceStatus:
             patch(
                 "craft_dashboard.services.admin_service.get_eval_activity",
                 return_value=(last_poll, None),
+            ),
+            patch(
+                "craft_dashboard.services.admin_service.get_quota_pause_until",
+                return_value=None,
             ),
             patch(
                 "craft_dashboard.services.admin_service.datetime", FrozenStatsDateTime
@@ -860,8 +903,97 @@ class TestLLMServiceStatus:
         assert status["status"] == "unknown"
         assert status["last_result_at"] == last_evaluated_at
 
+    async def test_last_result_ignores_pending_placeholder_rows(
+        self, test_db_session
+    ) -> None:
+        """A claimed-but-unfinished "pending" row must not count as a result.
 
-class TestRecentEvaluations:
+        ``/api/eval/next`` inserts a placeholder ``LLMEvaluation`` row
+        (``model_name="pending"``, no summary) the moment it claims a
+        never-before-evaluated issue, stamped with the claim time via the
+        column's ``server_default``. That claim time isn't a real result and
+        must not make "Last result" look more recent than the last actual
+        completed evaluation.
+        """
+        project = Project(
+            name="charmcraft",
+            category="library",
+            github_org="canonical",
+            display_order=0,
+        )
+        test_db_session.add(project)
+        await test_db_session.flush()
+
+        issue = Issue(
+            project_id=project.id,
+            source="github",
+            external_id="1",
+            issue_type="issue",
+            title="Some issue",
+            body="Body",
+            state="open",
+            author="dev",
+            author_is_maintainer=False,
+            author_is_bot=False,
+            labels=[],
+            created_at=datetime(2025, 1, 1, tzinfo=UTC),
+            updated_at=datetime(2025, 1, 1, tzinfo=UTC),
+            closed_at=None,
+            url="https://example.com/charmcraft/issues/1",
+            metadata_={},
+            comments=[],
+            last_fetched_at=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+        test_db_session.add(issue)
+        await test_db_session.flush()
+
+        completed_at = datetime(2025, 1, 9, 8, 0, tzinfo=UTC)
+        test_db_session.add(
+            LLMEvaluation(
+                issue_id=issue.id,
+                model_name="gpt-4.1",
+                summary="Summary",
+                suggested_action="keep_open",
+                suggested_action_reason="Still active",
+                scores={},
+                tokens_used=100,
+                prompt_tokens=60,
+                completion_tokens=40,
+                llm_backend="test",
+                evaluated_at=completed_at,
+                issue_data_hash="hash",
+                latest=True,
+            )
+        )
+        # A newer "pending" claim placeholder, e.g. from a fresh poll of a
+        # different issue — must not be picked up as the "last result".
+        test_db_session.add(
+            LLMEvaluation(
+                issue_id=issue.id,
+                model_name="pending",
+                summary=None,
+                suggested_action=None,
+                suggested_action_reason=None,
+                scores={},
+                tokens_used=0,
+                prompt_tokens=0,
+                completion_tokens=0,
+                llm_backend="test",
+                evaluated_at=datetime(2025, 1, 10, 18, 0, tzinfo=UTC),
+                issue_data_hash="hash",
+                latest=False,
+            )
+        )
+        await test_db_session.commit()
+
+        with patch(
+            "craft_dashboard.services.admin_service.get_eval_activity",
+            return_value=(None, None),
+        ):
+            status = await AdminService(test_db_session).get_llm_service_status()
+
+        assert status["last_result_at"] == completed_at
+
     """Tests for AdminService.get_recent_evaluations."""
 
     async def test_returns_evaluations_newest_first(self, test_db_session) -> None:
@@ -935,3 +1067,95 @@ class TestDailyEvaluationStats:
             )
 
         assert len(stats) == 2
+
+    async def test_excludes_pending_placeholder_rows(self, test_db_session) -> None:
+        """A "pending" claim placeholder must not inflate a day's count.
+
+        ``/api/eval/next`` inserts one of these the moment it claims a
+        never-before-evaluated issue, stamped with the claim time — that's
+        an in-flight claim, not a completed evaluation.
+        """
+        await _seed_admin_data(test_db_session)
+        issue = (
+            (await test_db_session.execute(select(Issue).order_by(Issue.id)))
+            .scalars()
+            .first()
+        )
+        test_db_session.add(
+            LLMEvaluation(
+                issue_id=issue.id,
+                model_name="pending",
+                summary=None,
+                suggested_action=None,
+                suggested_action_reason=None,
+                scores={},
+                tokens_used=0,
+                prompt_tokens=0,
+                completion_tokens=0,
+                llm_backend="test",
+                evaluated_at=datetime(2025, 1, 8, 9, 0, tzinfo=UTC),
+                issue_data_hash="hash",
+                latest=False,
+            )
+        )
+        await test_db_session.commit()
+
+        with patch(
+            "craft_dashboard.services.admin_service.datetime", FrozenStatsDateTime
+        ):
+            FrozenStatsDateTime.frozen_now = datetime(2025, 1, 10, 12, 0, tzinfo=UTC)
+            stats = await AdminService(test_db_session).get_daily_evaluation_stats(
+                days=7
+            )
+
+        # Still just the one real evaluation from 2025-01-08; the pending
+        # placeholder on the same day must not add a second count.
+        assert stats == [{"date": "2025-01-08", "count": 1}]
+
+
+class TestQueueDepthHistory:
+    """Tests for AdminService.get_queue_depth_history."""
+
+    async def test_returns_samples_within_window_ordered_by_time(
+        self, test_db_session
+    ) -> None:
+        now = datetime(2025, 1, 10, 12, 0, tzinfo=UTC)
+        test_db_session.add_all(
+            [
+                EvalQueueSnapshot(
+                    captured_at=now - timedelta(hours=1),
+                    pending_count=5,
+                    total_open=50,
+                    evaluated_today=3,
+                ),
+                EvalQueueSnapshot(
+                    captured_at=now - timedelta(hours=72),
+                    pending_count=1,
+                    total_open=40,
+                    evaluated_today=1,
+                ),
+                EvalQueueSnapshot(
+                    captured_at=now - timedelta(minutes=10),
+                    pending_count=6,
+                    total_open=51,
+                    evaluated_today=4,
+                ),
+            ]
+        )
+        await test_db_session.commit()
+
+        with patch(
+            "craft_dashboard.services.admin_service.datetime", FrozenStatsDateTime
+        ):
+            FrozenStatsDateTime.frozen_now = now
+            history = await AdminService(test_db_session).get_queue_depth_history(
+                hours=48
+            )
+
+        assert [point["pending_count"] for point in history] == [5, 6]
+        assert history[0]["captured_at"] < history[1]["captured_at"]
+
+    async def test_returns_empty_list_when_no_samples(self, test_db_session) -> None:
+        history = await AdminService(test_db_session).get_queue_depth_history()
+
+        assert history == []
