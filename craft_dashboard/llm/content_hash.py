@@ -74,11 +74,14 @@ def compute_content_hash(
             for c in sorted(comments, key=lambda c: c.get("created_at") or "")
         )
     pr_details_repr = ""
-    if pr_details:
+    relevant_pr_items = [
+        (key, pr_details[key])
+        for key in HASHED_PR_DETAIL_KEYS
+        if pr_details and key in pr_details
+    ]
+    if relevant_pr_items:
         pr_details_repr = "|" + ";".join(
-            f"{key}={pr_details[key]!r}"
-            for key in HASHED_PR_DETAIL_KEYS
-            if key in pr_details
+            f"{key}={value!r}" for key, value in relevant_pr_items
         )
     content = (
         f"{title}|{body or ''}|{state}|{','.join(sorted(labels))}"
