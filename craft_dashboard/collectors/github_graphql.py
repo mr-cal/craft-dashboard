@@ -438,14 +438,15 @@ def classify_pr_ci_checks(
 
     last_commit = commits[-1]["commit"]
     check_suites = last_commit.get("checkSuites")
-    # checkSuites can come back null if this specific field hit GitHub's
+    # checkSuites (and nested checkRuns) can come back null — or a dict with
+    # a null "nodes" list — if this field hit GitHub's
     # RESOURCE_LIMITS_EXCEEDED error on a heavily-nested query (see
     # _graphql_query's partial-data recovery) — treat as "no CI data".
-    if not check_suites:
+    if not check_suites or not check_suites.get("nodes"):
         return ci_passing, ci_failing, ci_pending
     for suite in check_suites["nodes"]:
         check_runs = suite.get("checkRuns")
-        if not check_runs:
+        if not check_runs or not check_runs.get("nodes"):
             continue
         for check in check_runs["nodes"]:
             conclusion = (check.get("conclusion") or "").upper()

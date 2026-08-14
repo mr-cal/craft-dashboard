@@ -445,8 +445,21 @@ class TestClassifyPrCiChecks:
 
         assert classify_pr_ci_checks(commits) == ([], [], [])
 
+    def test_null_check_suites_nodes_returns_empty_lists(self) -> None:
+        """checkSuites can be a dict with a null "nodes" list too."""
+        commits = [{"commit": {"checkSuites": {"nodes": None}}}]
+
+        assert classify_pr_ci_checks(commits) == ([], [], [])
+
     def test_null_check_runs_returns_empty_lists(self) -> None:
         commits = [{"commit": {"checkSuites": {"nodes": [{"checkRuns": None}]}}}]
+
+        assert classify_pr_ci_checks(commits) == ([], [], [])
+
+    def test_null_check_runs_nodes_returns_empty_lists(self) -> None:
+        commits = [
+            {"commit": {"checkSuites": {"nodes": [{"checkRuns": {"nodes": None}}]}}}
+        ]
 
         assert classify_pr_ci_checks(commits) == ([], [], [])
 
