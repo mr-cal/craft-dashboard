@@ -68,8 +68,11 @@ maintainers = [
 
 launchpad-maintainers = [
     "~sergiusens",
-    "elopio",
-    "kyrofa",
+    "~elopio",
+    "~kyrofa",
+    "~cmatsuoka",
+    "~cjp256",
+    "~mr-cal",
 ]
 
 bots = [
