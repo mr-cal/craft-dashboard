@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from github import GithubException
 from sqlalchemy.dialects import postgresql as pg_dialect
 
 MODULE_PATH = (
@@ -90,6 +91,41 @@ class TestGetOrCreateProject:
         assert "DO UPDATE SET" in compiled
         assert "category" in compiled
         assert "display_order" in compiled
+
+
+class TestSummarizeException:
+    def test_github_exception_is_concise(self) -> None:
+        # Simulate the huge partial GraphQL response PyGithub embeds in `data`.
+        huge_data = {"errors": [{"message": "boom"}], "data": {"x": "y" * 100_000}}
+        exc = GithubException(400, data=huge_data, headers={}, message="400 boom")
+
+        summary = collect_data._summarize_exception(exc)
+
+        assert summary == "400 400 boom"
+        assert len(summary) < 100
+
+    def test_github_exception_without_message_uses_status_only(self) -> None:
+        exc = GithubException(500, data=None, headers={})
+
+        summary = collect_data._summarize_exception(exc)
+
+        assert summary == "500"
+
+    def test_long_generic_exception_is_truncated(self) -> None:
+        exc = ValueError("x" * 1000)
+
+        summary = collect_data._summarize_exception(exc)
+
+        assert summary.startswith("x" * 500)
+        assert summary.endswith("[truncated, 1000 chars total]")
+        assert len(summary) < 600
+
+    def test_short_generic_exception_is_unchanged(self) -> None:
+        exc = ValueError("short error")
+
+        summary = collect_data._summarize_exception(exc)
+
+        assert summary == "short error"
 
 
 class TestCollectGithubLogging:

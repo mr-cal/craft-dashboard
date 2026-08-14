@@ -5,16 +5,20 @@ import re
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
+import pytest
 from craft_dashboard.collectors.github_graphql import (
     _ISSUES_QUERY,
     _PULL_REQUESTS_QUERY,
     _RELEASES_AND_BRANCHES_QUERY,
+    _graphql_query,
+    _summarize_graphql_errors,
     classify_pr_ci_checks,
     classify_pr_review_status,
     paginated_issues,
     paginated_pull_requests,
     paginated_releases_and_branches,
 )
+from github import GithubException
 
 
 def _extract_pagination_arguments(query: str) -> list[tuple[str, str, int]]:
@@ -434,6 +438,101 @@ class TestClassifyPrCiChecks:
 
     def test_no_commits_returns_empty_lists(self) -> None:
         assert classify_pr_ci_checks([]) == ([], [], [])
+
+    def test_null_check_suites_returns_empty_lists(self) -> None:
+        """A node hit by RESOURCE_LIMITS_EXCEEDED may have checkSuites: None."""
+        commits = [{"commit": {"checkSuites": None}}]
+
+        assert classify_pr_ci_checks(commits) == ([], [], [])
+
+    def test_null_check_runs_returns_empty_lists(self) -> None:
+        commits = [{"commit": {"checkSuites": {"nodes": [{"checkRuns": None}]}}}]
+
+        assert classify_pr_ci_checks(commits) == ([], [], [])
+
+
+class TestSummarizeGraphqlErrors:
+    def test_dedupes_and_joins_messages(self) -> None:
+        errors = [
+            {"type": "RESOURCE_LIMITS_EXCEEDED", "message": "Resource limits."},
+            {"type": "RESOURCE_LIMITS_EXCEEDED", "message": "Resource limits."},
+            {"type": "OTHER", "message": "Something else."},
+        ]
+
+        summary = _summarize_graphql_errors(errors)
+
+        assert summary == (
+            "RESOURCE_LIMITS_EXCEEDED: Resource limits.; OTHER: Something else."
+        )
+
+    def test_truncates_long_summary(self) -> None:
+        errors = [{"type": "E", "message": "x" * 1000}]
+
+        summary = _summarize_graphql_errors(errors)
+
+        assert len(summary) <= 520
+        assert summary.endswith("... (truncated)")
+
+    def test_empty_errors_returns_unknown(self) -> None:
+        assert _summarize_graphql_errors([]) == "unknown error"
+
+
+class TestGraphqlQueryPartialRecovery:
+    def test_recovers_partial_data_when_repository_present(self, caplog) -> None:
+        requester = MagicMock()
+        partial_body = {
+            "data": {"repository": {"issues": {"nodes": []}}},
+            "errors": [
+                {"type": "RESOURCE_LIMITS_EXCEEDED", "message": "Resource limits."}
+            ],
+        }
+        requester.graphql_query.side_effect = GithubException(
+            400, data=partial_body, headers={}
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = _graphql_query(
+                requester, _ISSUES_QUERY, {}, owner="canonical", name="rockcraft"
+            )
+
+        assert result == partial_body["data"]
+        assert "RESOURCE_LIMITS_EXCEEDED" in caplog.text
+        # The raw megabyte-scale error body must not leak into the logs.
+        assert "Resource limits." in caplog.text
+
+    def test_raises_concise_error_when_data_unusable(self) -> None:
+        requester = MagicMock()
+        body = {
+            "data": None,
+            "errors": [{"type": "SOME_ERROR", "message": "Totally broken."}],
+        }
+        requester.graphql_query.side_effect = GithubException(
+            400, data=body, headers={}
+        )
+
+        with pytest.raises(GithubException) as exc_info:
+            _graphql_query(
+                requester, _ISSUES_QUERY, {}, owner="canonical", name="rockcraft"
+            )
+
+        assert exc_info.value.data is None
+        assert "SOME_ERROR: Totally broken." in str(exc_info.value)
+        # No raw JSON dump of the (potentially huge) response body.
+        assert "Totally broken." in str(exc_info.value)
+        assert str(exc_info.value).count("Totally broken.") == 1
+
+    def test_returns_data_directly_on_success(self) -> None:
+        requester = MagicMock()
+        requester.graphql_query.return_value = (
+            {},
+            {"data": {"repository": {"issues": {"nodes": []}}}},
+        )
+
+        result = _graphql_query(
+            requester, _ISSUES_QUERY, {}, owner="canonical", name="rockcraft"
+        )
+
+        assert result == {"repository": {"issues": {"nodes": []}}}
 
 
 class TestNodeLimits:

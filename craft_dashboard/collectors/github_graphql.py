@@ -11,6 +11,8 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from github import GithubException
+
 if TYPE_CHECKING:
     from github.Requester import Requester
 
@@ -113,6 +115,72 @@ query($owner: String!, $name: String!, $after: String) {
 """
 
 
+# Cap any GraphQL error summary we log/raise ourselves. Without this,
+# unrecoverable errors would still surface PyGithub's raw exception message,
+# which embeds the *entire* response body (see _graphql_query below).
+_MAX_ERROR_SUMMARY_LENGTH = 500
+
+
+def _summarize_graphql_errors(errors: list[Any]) -> str:
+    """Build a short, human-readable summary from a GraphQL ``errors`` list."""
+    messages = []
+    for error in errors:
+        if isinstance(error, dict):
+            error_type = error.get("type")
+            message = error.get("message", "")
+            messages.append(f"{error_type}: {message}" if error_type else message)
+        else:
+            messages.append(str(error))
+    summary = "; ".join(dict.fromkeys(m for m in messages if m)) or "unknown error"
+    if len(summary) > _MAX_ERROR_SUMMARY_LENGTH:
+        summary = summary[:_MAX_ERROR_SUMMARY_LENGTH] + "... (truncated)"
+    return summary
+
+
+def _graphql_query(
+    requester: "Requester",
+    query: str,
+    variables: dict[str, Any],
+    *,
+    owner: str,
+    name: str,
+) -> dict[str, Any]:
+    """Run a GraphQL query, tolerating partial per-field errors.
+
+    GitHub can return HTTP 200 with *both* a (partial but otherwise valid)
+    ``data`` payload and an ``errors`` list — e.g. ``RESOURCE_LIMITS_EXCEEDED``
+    on one deeply-nested optional field (like a single PR's CI checks) while
+    every other field succeeds. PyGithub's ``graphql_query`` treats *any*
+    ``errors`` entry as fatal and raises, which would otherwise discard an
+    entire page of issues/PRs over one bad optional field, and dumps the
+    *whole* response JSON (potentially megabytes, once GraphQL repeats the
+    error once per affected node) into the exception message.
+
+    This recovers the partial ``data`` when it's usable, logging a short
+    summary of the errors instead. If ``data`` isn't usable, re-raises with
+    a concise summary rather than PyGithub's raw JSON dump.
+    """
+    try:
+        _, response = requester.graphql_query(query, variables)
+        return response["data"]
+    except GithubException as exc:
+        body = exc.data if isinstance(exc.data, dict) else {}
+        partial_data = body.get("data")
+        raw_errors = body.get("errors")
+        errors: list[Any] = raw_errors if isinstance(raw_errors, list) else []
+        summary = _summarize_graphql_errors(errors)
+        if isinstance(partial_data, dict) and partial_data.get("repository"):
+            logger.warning(
+                "GraphQL query for %s/%s returned partial errors "
+                "(using partial data): %s",
+                owner,
+                name,
+                summary,
+            )
+            return partial_data
+        raise GithubException(exc.status, headers=exc.headers, message=summary) from exc
+
+
 def _parse_graphql_datetime(value: str | None) -> datetime | None:
     if value is None:
         return None
@@ -164,11 +232,13 @@ def paginated_issues(
         since.astimezone(UTC).isoformat().replace("+00:00", "Z") if since else None
     )
     while True:
-        _, response = requester.graphql_query(
+        data = _graphql_query(
+            requester,
             _ISSUES_QUERY,
             {"owner": owner, "name": name, "after": after, "since": since_str},
+            owner=owner,
+            name=name,
         )
-        data = response["data"]
         cost = GraphQLCost.from_response(data["rateLimit"])
         logger.debug(
             "GraphQL issues page for %s/%s: cost=%d remaining=%d reset_at=%s",
@@ -212,10 +282,13 @@ def paginated_pull_requests(
     """
     after: str | None = None
     while True:
-        _, response = requester.graphql_query(
-            _PULL_REQUESTS_QUERY, {"owner": owner, "name": name, "after": after}
+        data = _graphql_query(
+            requester,
+            _PULL_REQUESTS_QUERY,
+            {"owner": owner, "name": name, "after": after},
+            owner=owner,
+            name=name,
         )
-        data = response["data"]
         cost = GraphQLCost.from_response(data["rateLimit"])
         logger.debug(
             "GraphQL PRs page for %s/%s: cost=%d remaining=%d reset_at=%s",
@@ -272,11 +345,13 @@ def paginated_releases_and_branches(
     first_page = True
 
     while True:
-        _, response = requester.graphql_query(
+        data = _graphql_query(
+            requester,
             _RELEASES_AND_BRANCHES_QUERY,
             {"owner": owner, "name": name, "after": after},
+            owner=owner,
+            name=name,
         )
-        data = response["data"]
         cost = GraphQLCost.from_response(data["rateLimit"])
         logger.debug(
             "GraphQL releases page for %s/%s: cost=%d remaining=%d reset_at=%s",
@@ -362,8 +437,17 @@ def classify_pr_ci_checks(
         return ci_passing, ci_failing, ci_pending
 
     last_commit = commits[-1]["commit"]
-    for suite in last_commit["checkSuites"]["nodes"]:
-        for check in suite["checkRuns"]["nodes"]:
+    check_suites = last_commit.get("checkSuites")
+    # checkSuites can come back null if this specific field hit GitHub's
+    # RESOURCE_LIMITS_EXCEEDED error on a heavily-nested query (see
+    # _graphql_query's partial-data recovery) — treat as "no CI data".
+    if not check_suites:
+        return ci_passing, ci_failing, ci_pending
+    for suite in check_suites["nodes"]:
+        check_runs = suite.get("checkRuns")
+        if not check_runs:
+            continue
+        for check in check_runs["nodes"]:
             conclusion = (check.get("conclusion") or "").upper()
             if conclusion in ("SUCCESS", "SKIPPED", "NEUTRAL"):
                 ci_passing.append(check["name"])

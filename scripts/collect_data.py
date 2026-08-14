@@ -89,6 +89,32 @@ def _format_duration(seconds: float) -> str:
     return " ".join(parts)
 
 
+_MAX_ERROR_MESSAGE_LENGTH = 500
+
+
+def _summarize_exception(exc: Exception) -> str:
+    """Return a concise, human-readable error message for stats/db storage.
+
+    ``GithubException.__str__`` dumps the *entire* API response body as
+    JSON (see PyGithub's ``GithubException``), which for GraphQL errors can
+    include the whole partial ``data`` payload repeated once per affected
+    node — multi-megabyte error strings that make the admin status page's
+    errors column unreadable. Use the concise ``status``/``message`` for
+    ``GithubException`` (``github_graphql`` already summarizes GraphQL
+    errors before raising), and hard-cap any other exception's message as a
+    safety net against similarly oversized errors from other sources.
+    """
+    if isinstance(exc, GithubException):
+        summary = f"{exc.status}"
+        if exc.message:
+            summary += f" {exc.message}"
+        return summary
+    text = str(exc)
+    if len(text) > _MAX_ERROR_MESSAGE_LENGTH:
+        text = f"{text[:_MAX_ERROR_MESSAGE_LENGTH]}... [truncated, {len(text)} chars total]"
+    return text
+
+
 _GITHUB_RETRY_ATTEMPTS = 3
 _GITHUB_RETRY_BASE_SLEEP = 30  # seconds; doubles each attempt
 
@@ -116,7 +142,7 @@ async def _retry_github(coro_fn: object, description: str) -> object:
                 description,
                 attempt + 1,
                 _GITHUB_RETRY_ATTEMPTS,
-                exc,
+                _summarize_exception(exc),
                 sleep,
             )
             await asyncio.sleep(sleep)
@@ -566,10 +592,13 @@ async def _collect_github(
                     logger.exception(
                         "Failed to collect open GitHub issues for %s", project_name
                     )
-                    stats.errors.append({"project": project_name, "error": str(exc)})
+                    error_summary = _summarize_exception(exc)
+                    stats.errors.append(
+                        {"project": project_name, "error": error_summary}
+                    )
                     async with session_factory() as err_session:
                         await record_refresh_error(
-                            project_id, "github", str(exc), err_session
+                            project_id, "github", error_summary, err_session
                         )
 
                 if mode == "open":
@@ -676,10 +705,11 @@ async def _collect_github(
                 )
             except Exception as exc:
                 logger.exception("Failed to collect GitHub data for %s", project_name)
-                stats.errors.append({"project": project_name, "error": str(exc)})
+                error_summary = _summarize_exception(exc)
+                stats.errors.append({"project": project_name, "error": error_summary})
                 async with session_factory() as err_session:
                     await record_refresh_error(
-                        project_id, "github", str(exc), err_session
+                        project_id, "github", error_summary, err_session
                     )
 
             try:
@@ -696,7 +726,9 @@ async def _collect_github(
                 collector.wait_for_rate_limit()
             except GithubException as exc:
                 logger.warning(
-                    "Could not check GitHub rate limit after %s: %s", project_name, exc
+                    "Could not check GitHub rate limit after %s: %s",
+                    project_name,
+                    _summarize_exception(exc),
                 )
 
             # Avoid GitHub secondary rate limits between repos
@@ -772,7 +804,9 @@ async def _collect_launchpad(
                 )
             except Exception as exc:
                 logger.exception("Failed to collect Launchpad data for %s", lp_name)
-                stats.errors.append({"project": lp_name, "error": str(exc)})
+                stats.errors.append(
+                    {"project": lp_name, "error": _summarize_exception(exc)}
+                )
 
     return stats
 
@@ -864,7 +898,9 @@ async def _main(
                     status="failed",
                     projects_processed=0,
                     issues_collected=0,
-                    errors=[{"source": source_name, "error": str(exc)}],
+                    errors=[
+                        {"source": source_name, "error": _summarize_exception(exc)}
+                    ],
                 )
                 raise
 
