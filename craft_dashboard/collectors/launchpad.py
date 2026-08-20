@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from launchpadlib.launchpad import Launchpad
+    from lazr.restfulclient.resource import Entry
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +16,11 @@ from craft_dashboard.llm.content_hash import compute_content_hash
 __all__ = ["LaunchpadCollector"]
 
 logger = logging.getLogger(__name__)
+
+#: Maximum number of recent bug comments to store per Launchpad bug,
+#: matching the shape (but not necessarily the count) of GitHub's
+#: `_fetch_issue_comments`.
+_MAX_COMMENTS = 50
 
 _OPEN_STATUSES = frozenset(
     {
@@ -53,6 +59,36 @@ def _map_lp_status(lp_status: str) -> str:
     if lp_status in _CLOSED_STATUSES:
         return "closed"
     return "open"
+
+
+def _fetch_bug_comments(bug: "Entry") -> list[dict]:
+    """Fetch the last 50 messages on a Launchpad bug as comment dicts.
+
+    The first entry in ``bug.messages`` is the bug description itself (not
+    a reply), so it's skipped to avoid duplicating ``Issue.body``.
+
+    Args:
+        bug: A launchpadlib Bug resource.
+
+    Returns:
+        List of comment dicts, each with author/body/created_at/type.
+
+    """
+    messages = list(bug.messages)[1:]
+    recent = messages[-_MAX_COMMENTS:]
+    return [
+        {
+            "author": str(m.owner_link).rsplit("/", 1)[-1]
+            if m.owner_link
+            else "unknown",
+            "body": (m.content or "")[:1000],
+            "created_at": m.date_created.replace(tzinfo=UTC).isoformat()
+            if m.date_created
+            else None,
+            "type": "comment",
+        }
+        for m in recent
+    ]
 
 
 class LaunchpadCollector:
@@ -156,6 +192,16 @@ class LaunchpadCollector:
             author_is_maintainer = author in self._maintainers if author else False
             labels = list(bug.tags)
 
+            try:
+                comments = _fetch_bug_comments(bug)
+            except Exception:  # noqa: BLE001 - a single bug's comments should not abort collection
+                logger.warning(
+                    "Failed to fetch comments for Launchpad bug %s",
+                    bug.id,
+                    exc_info=True,
+                )
+                comments = []
+
             stmt = insert(Issue).values(
                 project_id=project_id,
                 source="launchpad",
@@ -168,6 +214,7 @@ class LaunchpadCollector:
                 author_is_maintainer=author_is_maintainer,
                 author_is_bot=False,
                 labels=labels,
+                comments=comments,
                 created_at=bug.date_created.replace(tzinfo=UTC)
                 if bug.date_created
                 else None,
@@ -180,7 +227,7 @@ class LaunchpadCollector:
                 url=bug.web_link,
                 metadata_={"importance": task.importance, "status": task.status},
                 content_hash=compute_content_hash(
-                    bug.title, bug.description, state, labels
+                    bug.title, bug.description, state, labels, comments=comments
                 ),
                 last_fetched_at=datetime.now(tz=UTC),
                 collection_run_id=collection_run_id,
@@ -193,6 +240,7 @@ class LaunchpadCollector:
                 }
                 | {
                     "metadata": stmt.excluded.metadata,
+                    "comments": stmt.excluded.comments,
                 },
             )
             await session.execute(stmt)

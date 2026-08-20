@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from craft_dashboard.collectors.launchpad import (
     LaunchpadCollector,
+    _fetch_bug_comments,
     _map_lp_status,
 )
 
@@ -321,3 +322,304 @@ class TestCollectBugsIncremental:
             "Subsequent run should pass modified_since"
         )
         assert call_kwargs["modified_since"] == last_fetched
+
+
+def _make_mock_message(owner_link: str | None, content: str, created: datetime):
+    """Create a mock Launchpad bug message (comment)."""
+    message = MagicMock()
+    message.owner_link = owner_link
+    message.content = content
+    message.date_created = created
+    return message
+
+
+class TestFetchBugComments:
+    """Tests for _fetch_bug_comments()."""
+
+    def test_skips_first_message_as_description(self) -> None:
+        """The first bug.messages entry (the description) is excluded."""
+        mock_bug = MagicMock()
+        mock_bug.messages = [
+            _make_mock_message(
+                "https://api.launchpad.net/1.0/~author",
+                "Original description",
+                datetime(2024, 1, 1, tzinfo=UTC),
+            ),
+            _make_mock_message(
+                "https://api.launchpad.net/1.0/~commenter",
+                "A reply",
+                datetime(2024, 1, 2, tzinfo=UTC),
+            ),
+        ]
+
+        comments = _fetch_bug_comments(mock_bug)
+
+        assert len(comments) == 1
+        assert comments[0]["author"] == "~commenter"
+        assert comments[0]["body"] == "A reply"
+        assert comments[0]["type"] == "comment"
+
+    def test_no_messages_beyond_description_returns_empty(self) -> None:
+        """A bug with only the description message has no comments."""
+        mock_bug = MagicMock()
+        mock_bug.messages = [
+            _make_mock_message(
+                "https://api.launchpad.net/1.0/~author",
+                "Original description",
+                datetime(2024, 1, 1, tzinfo=UTC),
+            ),
+        ]
+
+        assert _fetch_bug_comments(mock_bug) == []
+
+    def test_keeps_only_last_50_comments(self) -> None:
+        """Only the most recent 50 comments (after the description) are kept."""
+        mock_bug = MagicMock()
+        description = _make_mock_message(
+            "https://api.launchpad.net/1.0/~author",
+            "Original description",
+            datetime(2024, 1, 1, tzinfo=UTC),
+        )
+        replies = [
+            _make_mock_message(
+                "https://api.launchpad.net/1.0/~commenter",
+                f"Reply {i}",
+                datetime(2024, 1, 2, tzinfo=UTC),
+            )
+            for i in range(60)
+        ]
+        mock_bug.messages = [description, *replies]
+
+        comments = _fetch_bug_comments(mock_bug)
+
+        assert len(comments) == 50
+        # Should keep the most recent 50, i.e. replies 10..59.
+        assert comments[0]["body"] == "Reply 10"
+        assert comments[-1]["body"] == "Reply 59"
+
+    def test_truncates_long_comment_body(self) -> None:
+        """A comment body longer than 1000 chars is truncated."""
+        mock_bug = MagicMock()
+        mock_bug.messages = [
+            _make_mock_message(
+                "https://api.launchpad.net/1.0/~author",
+                "Original description",
+                datetime(2024, 1, 1, tzinfo=UTC),
+            ),
+            _make_mock_message(
+                "https://api.launchpad.net/1.0/~commenter",
+                "x" * 2000,
+                datetime(2024, 1, 2, tzinfo=UTC),
+            ),
+        ]
+
+        comments = _fetch_bug_comments(mock_bug)
+
+        assert len(comments[0]["body"]) == 1000
+
+    def test_none_owner_link_defaults_to_unknown(self) -> None:
+        """A message with no owner_link is attributed to 'unknown'."""
+        mock_bug = MagicMock()
+        mock_bug.messages = [
+            _make_mock_message(
+                "https://api.launchpad.net/1.0/~author",
+                "Original description",
+                datetime(2024, 1, 1, tzinfo=UTC),
+            ),
+            _make_mock_message(None, "A reply", datetime(2024, 1, 2, tzinfo=UTC)),
+        ]
+
+        comments = _fetch_bug_comments(mock_bug)
+
+        assert comments[0]["author"] == "unknown"
+
+    def test_none_date_created_stores_none(self) -> None:
+        """A message with no date_created stores created_at=None."""
+        mock_bug = MagicMock()
+        mock_bug.messages = [
+            _make_mock_message(
+                "https://api.launchpad.net/1.0/~author",
+                "Original description",
+                datetime(2024, 1, 1, tzinfo=UTC),
+            ),
+            _make_mock_message(
+                "https://api.launchpad.net/1.0/~commenter", "A reply", None
+            ),
+        ]
+
+        comments = _fetch_bug_comments(mock_bug)
+
+        assert comments[0]["created_at"] is None
+
+
+class TestCollectBugsComments:
+    """Tests for comment fetching/storage/hashing inside collect_bugs()."""
+
+    def _make_mock_task(self, messages: list) -> MagicMock:
+        mock_bug = MagicMock()
+        mock_bug.id = 789
+        mock_bug.title = "Bug with comments"
+        mock_bug.description = "Original description"
+        mock_bug.tags = []
+        mock_bug.date_created = datetime(2024, 1, 1, tzinfo=UTC)
+        mock_bug.date_last_updated = datetime(2024, 1, 2, tzinfo=UTC)
+        mock_bug.web_link = "https://bugs.launchpad.net/bugs/789"
+        mock_bug.messages = messages
+
+        mock_task = MagicMock()
+        mock_task.bug = mock_bug
+        mock_task.status = "New"
+        mock_task.owner_link = "https://api.launchpad.net/1.0/~author"
+        mock_task.importance = "Low"
+        mock_task.date_closed = None
+        return mock_task
+
+    def _make_mock_lp(self, tasks: list) -> MagicMock:
+        mock_project = MagicMock()
+        mock_project.searchTasks.return_value = tasks
+        mock_lp = MagicMock()
+        mock_lp.projects.__getitem__.return_value = mock_project
+        return mock_lp
+
+    def _make_insert_patch(self, captured: dict):
+        def fake_insert(table):
+            chain = MagicMock()
+            chain.on_conflict_do_update.return_value = MagicMock()
+
+            def capture_values(**kw):
+                captured.update(kw)
+                return chain
+
+            stmt = MagicMock()
+            stmt.values = capture_values
+            return stmt
+
+        return fake_insert
+
+    async def test_comments_stored_on_issue(self, mocker) -> None:
+        """Fetched comments (excluding the description) are stored on the Issue."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        messages = [
+            _make_mock_message(
+                "https://api.launchpad.net/1.0/~author",
+                "Original description",
+                datetime(2024, 1, 1, tzinfo=UTC),
+            ),
+            _make_mock_message(
+                "https://api.launchpad.net/1.0/~commenter",
+                "A reply",
+                datetime(2024, 1, 2, tzinfo=UTC),
+            ),
+        ]
+        mock_task = self._make_mock_task(messages)
+        mocker.patch.object(
+            collector, "_get_launchpad", return_value=self._make_mock_lp([mock_task])
+        )
+
+        captured: dict = {}
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._make_insert_patch(captured),
+        )
+
+        await collector.collect_bugs("snapcraft", 1, AsyncMock())
+
+        assert captured["comments"] == [
+            {
+                "author": "~commenter",
+                "body": "A reply",
+                "created_at": "2024-01-02T00:00:00+00:00",
+                "type": "comment",
+            }
+        ]
+
+    async def test_no_comments_beyond_description_stores_empty_list(
+        self, mocker
+    ) -> None:
+        """A bug with no replies (only the description) stores comments=[]."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        messages = [
+            _make_mock_message(
+                "https://api.launchpad.net/1.0/~author",
+                "Original description",
+                datetime(2024, 1, 1, tzinfo=UTC),
+            ),
+        ]
+        mock_task = self._make_mock_task(messages)
+        mocker.patch.object(
+            collector, "_get_launchpad", return_value=self._make_mock_lp([mock_task])
+        )
+
+        captured: dict = {}
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._make_insert_patch(captured),
+        )
+
+        await collector.collect_bugs("snapcraft", 1, AsyncMock())
+
+        assert captured["comments"] == []
+
+    async def test_new_comment_changes_content_hash(self, mocker) -> None:
+        """Adding a new comment to an otherwise-unchanged bug changes content_hash."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        description_message = _make_mock_message(
+            "https://api.launchpad.net/1.0/~author",
+            "Original description",
+            datetime(2024, 1, 1, tzinfo=UTC),
+        )
+
+        async def _run_with_messages(messages: list) -> str:
+            mock_task = self._make_mock_task(messages)
+            mocker.patch.object(
+                collector,
+                "_get_launchpad",
+                return_value=self._make_mock_lp([mock_task]),
+            )
+            captured: dict = {}
+            mocker.patch(
+                "sqlalchemy.dialects.postgresql.insert",
+                side_effect=self._make_insert_patch(captured),
+            )
+            await collector.collect_bugs("snapcraft", 1, AsyncMock())
+            return captured["content_hash"]
+
+        hash_without_comment = await _run_with_messages([description_message])
+        hash_with_comment = await _run_with_messages(
+            [
+                description_message,
+                _make_mock_message(
+                    "https://api.launchpad.net/1.0/~commenter",
+                    "A new reply",
+                    datetime(2024, 1, 3, tzinfo=UTC),
+                ),
+            ]
+        )
+
+        assert hash_without_comment != hash_with_comment
+
+    async def test_comment_fetch_failure_does_not_abort_collection(
+        self, mocker
+    ) -> None:
+        """A bug whose comments fail to fetch still gets collected, with comments=[]."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        mock_task = self._make_mock_task([])
+        # Force _fetch_bug_comments (called with this bug) to raise.
+        mocker.patch(
+            "craft_dashboard.collectors.launchpad._fetch_bug_comments",
+            side_effect=RuntimeError("boom"),
+        )
+        mocker.patch.object(
+            collector, "_get_launchpad", return_value=self._make_mock_lp([mock_task])
+        )
+
+        captured: dict = {}
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._make_insert_patch(captured),
+        )
+
+        count = await collector.collect_bugs("snapcraft", 1, AsyncMock())
+
+        assert count == 1
+        assert captured["comments"] == []
