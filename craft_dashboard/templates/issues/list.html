@@ -193,7 +193,8 @@
            hx-swap="outerHTML"
            hx-include=".filter-bar [name]"
            hx-indicator="#loading-indicator"
-           hx-trigger="search"
+           hx-trigger="search, keyup[key=='Enter']"
+           hx-sync="this:replace"
            style="min-width:200px;" />
   </div>
 
