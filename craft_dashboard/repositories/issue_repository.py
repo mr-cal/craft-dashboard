@@ -113,6 +113,79 @@ def _build_excluded_issues_condition(
     return ~combined
 
 
+def _apply_common_filters(
+    query: Select,
+    filters: IssueFilters,
+    *,
+    filtered_issues: dict[str, list[str]],
+) -> Select:
+    """Apply the state/project/source/type/action/author-role/llm-status filters.
+
+    Shared between IssueRepository.search() and semantic_search() so semantic
+    results always respect the same active filters as literal results (e.g.
+    "state=open" must exclude closed issues from both). Does NOT apply the
+    literal free-text search condition itself, since semantic search uses
+    embedding similarity instead of ILIKE matching for that.
+
+    Requires that Issue and Project are already joined in the calling query,
+    and that LLMEvaluation is outer-joined if filters.action or
+    filters.llm_status may be used.
+    """
+    excl = _build_excluded_issues_condition(filtered_issues)
+    if excl is not None:
+        query = query.where(excl)
+
+    if filters.state:
+        state_list = [s.strip() for s in filters.state.split(",") if s.strip()]
+        if len(state_list) == 1:
+            query = query.where(Issue.state == state_list[0])
+        elif state_list:
+            query = query.where(Issue.state.in_(state_list))
+
+    if filters.project:
+        project_list = [p.strip() for p in filters.project.split(",") if p.strip()]
+        if len(project_list) == 1:
+            query = query.where(Project.name == project_list[0])
+        else:
+            query = query.where(Project.name.in_(project_list))
+    if filters.source:
+        query = query.where(Issue.source == filters.source)
+    if filters.issue_type:
+        type_list = [t.strip() for t in filters.issue_type.split(",") if t.strip()]
+        if len(type_list) == 1:
+            query = query.where(Issue.issue_type == type_list[0])
+        elif type_list:
+            query = query.where(Issue.issue_type.in_(type_list))
+    if filters.action:
+        action_list = [a.strip() for a in filters.action.split(",") if a.strip()]
+        if len(action_list) == 1:
+            query = query.where(LLMEvaluation.suggested_action == action_list[0])
+        elif action_list:
+            query = query.where(LLMEvaluation.suggested_action.in_(action_list))
+    query = _apply_author_role_filter(query, filters.author_role)
+
+    if filters.llm_status == "no_llm":
+        query = query.where(LLMEvaluation.id.is_(None))
+    elif filters.llm_status == "partial_llm":
+        query = query.where(
+            LLMEvaluation.id.is_not(None)
+            & (
+                LLMEvaluation.summary.is_(None)
+                | (LLMEvaluation.summary == "")
+                | (
+                    (Issue.state == "open")
+                    & (
+                        LLMEvaluation.suggested_action.is_(None)
+                        | (LLMEvaluation.suggested_action == "")
+                        | LLMEvaluation.scores.is_(None)
+                    )
+                )
+            )
+        )
+
+    return query
+
+
 class IssueRepository:
     """Repository for issue-related read queries."""
 
@@ -237,72 +310,28 @@ class IssueRepository:
             )
         )
 
-        excl = _build_excluded_issues_condition(self.filtered_issues)
-        if excl is not None:
-            query = query.where(excl)
-
-        if filters.state:
-            state_list = [s.strip() for s in filters.state.split(",") if s.strip()]
-            if len(state_list) == 1:
-                query = query.where(Issue.state == state_list[0])
-            elif state_list:
-                query = query.where(Issue.state.in_(state_list))
-
-        if filters.project:
-            project_list = [p.strip() for p in filters.project.split(",") if p.strip()]
-            if len(project_list) == 1:
-                query = query.where(Project.name == project_list[0])
-            else:
-                query = query.where(Project.name.in_(project_list))
-        if filters.source:
-            query = query.where(Issue.source == filters.source)
-        if filters.issue_type:
-            type_list = [t.strip() for t in filters.issue_type.split(",") if t.strip()]
-            if len(type_list) == 1:
-                query = query.where(Issue.issue_type == type_list[0])
-            elif type_list:
-                query = query.where(Issue.issue_type.in_(type_list))
-        if filters.action:
-            action_list = [a.strip() for a in filters.action.split(",") if a.strip()]
-            if len(action_list) == 1:
-                query = query.where(LLMEvaluation.suggested_action == action_list[0])
-            elif action_list:
-                query = query.where(LLMEvaluation.suggested_action.in_(action_list))
-        query = _apply_author_role_filter(query, filters.author_role)
+        query = _apply_common_filters(
+            query, filters, filtered_issues=self.filtered_issues
+        )
 
         if filters.search:
+            # Literal search is intentionally narrow: only exact-ish matches
+            # on title, project, and issue number. Body/summary/author
+            # relevance is handled by semantic search instead, since ILIKE
+            # matching against long free text is noisy and buries the exact
+            # matches a user is actually looking for (e.g. "2078" should
+            # surface issue #2078 first, not a bunch of unrelated issues
+            # whose body happens to mention "2078").
             tokens = filters.search.strip().split()
             for token in tokens:
                 clean = token.lstrip("#")
                 conditions: list[ColumnElement[bool]] = [
                     Issue.title.ilike(f"%{token}%"),
-                    Issue.body.ilike(f"%{token}%"),
-                    Issue.author.ilike(f"%{token}%"),
                     Project.name.ilike(f"%{token}%"),
-                    LLMEvaluation.summary.ilike(f"%{token}%"),
                 ]
                 if clean.isdigit():
                     conditions.append(Issue.external_id == clean)
                 query = query.where(or_(*conditions))
-
-        if filters.llm_status == "no_llm":
-            query = query.where(LLMEvaluation.id.is_(None))
-        elif filters.llm_status == "partial_llm":
-            query = query.where(
-                LLMEvaluation.id.is_not(None)
-                & (
-                    LLMEvaluation.summary.is_(None)
-                    | (LLMEvaluation.summary == "")
-                    | (
-                        (Issue.state == "open")
-                        & (
-                            LLMEvaluation.suggested_action.is_(None)
-                            | (LLMEvaluation.suggested_action == "")
-                            | LLMEvaluation.scores.is_(None)
-                        )
-                    )
-                )
-            )
 
         count_query = select(func.count()).select_from(query.subquery())
         total = await self.session.scalar(count_query) or 0
@@ -465,88 +494,84 @@ class IssueRepository:
         self,
         *,
         query_embedding: list[float],
+        filters: IssueFilters,
         exclude_issue_ids: set[int] | None = None,
         limit: int = 25,
         similarity_threshold: float = 0.70,
     ) -> list[IssueView]:
         """Return issues ranked by cosine similarity to query_embedding.
 
-        Uses pgvector's <=> (cosine distance) operator via the HNSW index on
+        Uses pgvector's cosine_distance() operator via the HNSW index on
         issues.search_embedding, mirroring the existing find_similar_issues()
         query pattern. Returns [] when there are no matches above the
         threshold. exclude_issue_ids lets the caller drop issues already
         present in the literal-search results, since semantic-search results
         are appended as a second tier after those.
+
+        Applies the same active filters (state, project, source, type,
+        action, author_role, llm_status, filtered_issues) as
+        IssueRepository.search(), so semantic results never leak issues that
+        the user has explicitly filtered out (e.g. closed issues while
+        filtering state=open). The free-text search condition itself is not
+        applied here since this *is* the free-text (embedding) search.
         """
         distance_threshold = 1.0 - similarity_threshold
         exclude_ids = exclude_issue_ids or set()
+        distance = Issue.search_embedding.cosine_distance(query_embedding)
 
-        sql = sa_text("""
-            SELECT
-                i.id                  AS id,
-                i.source              AS source,
-                i.external_id         AS external_id,
-                i.title               AS title,
-                i.author              AS author,
-                i.issue_type          AS issue_type,
-                i.state               AS state,
-                i.url                 AS url,
-                i.labels              AS labels,
-                i.created_at          AS created_at,
-                i.updated_at          AS updated_at,
-                i.author_is_maintainer AS author_is_maintainer,
-                i.author_is_bot       AS author_is_bot,
-                p.name                AS project_name,
-                e.summary             AS summary,
-                e.suggested_action    AS suggested_action,
-                e.suggested_action_reason AS suggested_action_reason,
-                e.scores              AS scores,
-                (i.search_embedding <=> CAST(:embedding AS vector)) AS distance
-            FROM issues i
-            JOIN projects p ON p.id = i.project_id
-            LEFT JOIN llm_evaluations e
-                ON e.issue_id = i.id AND e.latest = true
-            WHERE i.search_embedding IS NOT NULL
-              AND NOT (i.id = ANY(:exclude_ids))
-              AND (i.search_embedding <=> CAST(:embedding AS vector)) < :distance_threshold
-            ORDER BY distance
-            LIMIT :limit
-        """)
-
-        result = await self.session.execute(
-            sql,
-            {
-                "embedding": str(query_embedding),
-                "exclude_ids": list(exclude_ids),
-                "distance_threshold": distance_threshold,
-                "limit": limit,
-            },
+        query = (
+            select(
+                Issue,
+                Project.name.label("project_name"),
+                LLMEvaluation.summary,
+                LLMEvaluation.suggested_action,
+                LLMEvaluation.suggested_action_reason,
+                LLMEvaluation.scores,
+                distance.label("distance"),
+            )
+            .join(Project, Issue.project_id == Project.id)
+            .outerjoin(
+                LLMEvaluation,
+                (LLMEvaluation.issue_id == Issue.id) & LLMEvaluation.latest,
+            )
+            .where(Issue.search_embedding.is_not(None))
+            .where(distance < distance_threshold)
         )
+        if exclude_ids:
+            query = query.where(Issue.id.notin_(exclude_ids))
+
+        query = _apply_common_filters(
+            query, filters, filtered_issues=self.filtered_issues
+        )
+        query = query.order_by(distance.asc()).limit(limit)
+
+        result = await self.session.execute(query)
 
         issues = []
         for row in result:
+            issue = row[0]
             scores = row.scores or {}
             issues.append(
                 IssueView(
-                    id=row.id,
+                    id=issue.id,
                     project_name=row.project_name,
-                    source=row.source,
-                    external_id=row.external_id,
-                    title=row.title,
-                    author=row.author,
-                    issue_type=row.issue_type,
-                    state=row.state,
-                    url=row.url,
+                    source=issue.source,
+                    external_id=issue.external_id,
+                    title=issue.title,
+                    author=issue.author,
+                    issue_type=issue.issue_type,
+                    state=issue.state,
+                    url=issue.url,
                     summary=row.summary,
                     suggested_action=row.suggested_action,
                     suggested_action_reason=row.suggested_action_reason,
                     scores=scores,
-                    age_days=_compute_age_days(row.created_at),
-                    labels=list(row.labels or []),
-                    created_at=row.created_at,
-                    updated_at=row.updated_at,
-                    author_is_maintainer=row.author_is_maintainer,
-                    author_is_bot=row.author_is_bot,
+                    age_days=_compute_age_days(issue.created_at),
+                    labels=list(issue.labels or []),
+                    created_at=issue.created_at,
+                    updated_at=issue.updated_at,
+                    author_is_maintainer=issue.author_is_maintainer,
+                    author_is_bot=issue.author_is_bot,
                     staleness=scores.get("staleness"),
                     complexity=scores.get("complexity"),
                     support_request=scores.get("support_request"),

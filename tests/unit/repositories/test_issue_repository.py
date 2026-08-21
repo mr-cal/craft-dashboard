@@ -3,7 +3,6 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.project import Project
@@ -770,16 +769,29 @@ class TestQueryIssuesSearch:
 
         assert len(issues) == 0
 
-    async def test_search_by_body(self, test_db_session) -> None:
-        """Search filter matches issues by body text, not just title/author/summary."""
+    async def test_search_by_project_name(self, test_db_session) -> None:
+        """Search filter matches issues by project name."""
+        await _seed_projects_and_issues(test_db_session)
+
+        issues, *_ = await _query(test_db_session, search="charmcraft", sort_by="title")
+
+        assert len(issues) > 0
+        assert all(i["project_name"] == "charmcraft" for i in issues)
+
+    async def test_search_does_not_match_body(self, test_db_session) -> None:
+        """Literal search is narrow: title/project/number only, not body.
+
+        Body-content relevance is handled by semantic search instead, so
+        ILIKE matching against long free text doesn't bury exact
+        title/number/project matches under noisy hits.
+        """
         await _seed_projects_and_issues(test_db_session)
 
         # "traceback" only appears in the body of the "empty manifest" issue,
-        # not in its title, author, project name, or LLM summary.
+        # not in its title, project name, or issue number.
         issues, *_ = await _query(test_db_session, search="traceback", sort_by="title")
 
-        assert len(issues) == 1
-        assert issues[0]["title"] == "fix: handle empty manifest gracefully"
+        assert len(issues) == 0
 
 
 class TestQueryIssuesPerPage:
@@ -1176,6 +1188,21 @@ class TestFindSimilarIssues:
 
 class _SemanticSearchRow:
     def __init__(self, **kwargs) -> None:
+        self.issue = _FakeIssue(**{k: v for k, v in kwargs.items() if k != "distance"})
+        self.project_name = kwargs["project_name"]
+        self.summary = kwargs["summary"]
+        self.suggested_action = kwargs["suggested_action"]
+        self.suggested_action_reason = kwargs["suggested_action_reason"]
+        self.scores = kwargs["scores"]
+        self.distance = kwargs["distance"]
+
+    def __getitem__(self, index: int):
+        assert index == 0
+        return self.issue
+
+
+class _FakeIssue:
+    def __init__(self, **kwargs) -> None:
         self.__dict__.update(kwargs)
 
 
@@ -1232,6 +1259,7 @@ class TestSemanticSearch:
 
         result = await IssueRepository(session).semantic_search(
             query_embedding=[0.1] * 1024,
+            filters=IssueFilters(),
         )
 
         assert [issue.id for issue in result] == [1, 2]
@@ -1246,12 +1274,60 @@ class TestSemanticSearch:
 
         await IssueRepository(session).semantic_search(
             query_embedding=[0.1] * 1024,
+            filters=IssueFilters(),
             exclude_issue_ids={1, 2},
             limit=5,
             similarity_threshold=0.8,
         )
 
-        _, params = session.execute.await_args.args
-        assert sorted(params["exclude_ids"]) == [1, 2]
-        assert params["limit"] == 5
-        assert params["distance_threshold"] == pytest.approx(0.2)
+        (query,) = session.execute.await_args.args
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert "issues.id NOT IN (1, 2)" in compiled or (
+            "issues.id NOT IN (2, 1)" in compiled
+        )
+        assert "LIMIT 5" in compiled
+        # similarity_threshold=0.8 -> distance_threshold=0.2 (float rounding)
+        assert "0.19999999" in compiled or "0.2" in compiled
+
+    async def test_respects_active_filters(self, test_db_session) -> None:
+        """Semantic search must not return issues excluded by active filters.
+
+        e.g. filtering state=open should never surface a closed issue, even
+        if its embedding is within the similarity threshold.
+        """
+        await _seed_projects_and_issues(test_db_session)
+
+        rows = [
+            _SemanticSearchRow(
+                id=999,
+                source="github",
+                external_id="999",
+                title="Closed issue that would otherwise match",
+                author="alice",
+                issue_type="issue",
+                state="closed",
+                url="https://example.com/999",
+                labels=[],
+                created_at=FIXED_NOW,
+                updated_at=FIXED_NOW,
+                author_is_maintainer=True,
+                author_is_bot=False,
+                project_name="snapcraft",
+                summary=None,
+                suggested_action=None,
+                suggested_action_reason=None,
+                scores=None,
+                distance=0.1,
+            ),
+        ]
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=iter(rows))
+
+        await IssueRepository(session).semantic_search(
+            query_embedding=[0.1] * 1024,
+            filters=IssueFilters(state="open"),
+        )
+
+        (query,) = session.execute.await_args.args
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert "issues.state = 'open'" in compiled

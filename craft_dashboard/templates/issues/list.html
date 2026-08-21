@@ -186,16 +186,19 @@
 
   <div class="filter-group">
     <label>Search</label>
-    <input type="search" name="search" placeholder="Title, body, issue number... (press Enter)"
-           value="{{ filter_search or '' }}"
-           hx-get="/issues/table"
-           hx-target="#issue-table"
-           hx-swap="outerHTML"
-           hx-include=".filter-bar [name]"
-           hx-indicator="#loading-indicator"
-           hx-trigger="search, keyup[key=='Enter']"
-           hx-sync="this:replace"
-           style="min-width:200px;" />
+    <div class="search-input-wrap">
+      <i class="p-icon--search search-input-icon" aria-hidden="true"></i>
+      <input type="search" name="search" placeholder="Title, project, issue number... (press Enter)"
+             value="{{ filter_search or '' }}"
+             hx-get="/issues/table"
+             hx-target="#issue-table"
+             hx-swap="outerHTML"
+             hx-include=".filter-bar [name]"
+             hx-indicator="#loading-indicator"
+             hx-trigger="search, keyup[key=='Enter']"
+             hx-sync="this:replace"
+             style="min-width:200px;" />
+    </div>
   </div>
 
   <div class="filter-group">

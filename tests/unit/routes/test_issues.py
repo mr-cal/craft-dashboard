@@ -68,7 +68,6 @@ class TestIssueContext:
 
         assert context == {
             "issues": [],
-            "semantic_issues": [],
             "project_names": ["snapcraft", "charmcraft"],
             "filter_project": "snapcraft",
             "filter_source": "github",

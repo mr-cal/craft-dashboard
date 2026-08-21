@@ -80,7 +80,6 @@ class IssueTemplateContext(TypedDict):
     """Template context used by issue list and partial responses."""
 
     issues: list[IssueView]
-    semantic_issues: list[IssueView]
     project_names: list[str]
     filter_project: str
     filter_source: str
@@ -188,6 +187,7 @@ async def _run_semantic_search(
     try:
         return await repo.semantic_search(
             query_embedding=query_embedding,
+            filters=filters,
             exclude_issue_ids=existing_issue_ids,
             limit=top_n,
             similarity_threshold=similarity_threshold,
@@ -210,17 +210,20 @@ async def _build_issue_context(
 ) -> IssueTemplateContext:
     """Build the template context for issue list rendering.
 
-    When filters.search is set, literal (ILIKE) matches are returned first,
-    exactly as ranked by IssueRepository.search(); any additional issues
-    found only via semantic search are appended below as a second tier (no
-    score blending between the two, since ILIKE match and cosine distance
-    aren't on comparable scales).
+    When filters.search is set, literal (title/project/number) matches and
+    semantically-similar matches are merged into a single ranked list:
+    literal matches first (exact/near-exact matches a user is looking for),
+    followed by any additional issues found only via semantic search,
+    appended below with no score blending (ILIKE match and cosine distance
+    aren't on comparable scales). Rendered as one seamless list with no
+    divider between the two, since to the user this is just "search
+    results".
     """
     repo = IssueRepository(session, filtered_issues=filtered_issues)
     result = await repo.search(filters)
     project_names = await repo.get_project_names()
 
-    semantic_issues: list[IssueView] = []
+    combined_issues = result.issues
     if filters.search.strip():
         semantic_issues = await _run_semantic_search(
             session,
@@ -232,6 +235,7 @@ async def _build_issue_context(
             similarity_threshold=semantic_search_similarity_threshold,
             filtered_issues=filtered_issues,
         )
+        combined_issues = [*result.issues, *semantic_issues]
 
     normalized_scores = scores.strip()
     active_scores: list[str] = [
@@ -245,8 +249,7 @@ async def _build_issue_context(
         active_scores = cast(list[str], DEFAULT_SCORES.split(","))
 
     context: IssueTemplateContext = {
-        "issues": result.issues,
-        "semantic_issues": semantic_issues,
+        "issues": combined_issues,
         "project_names": project_names,
         "filter_project": filters.project,
         "filter_source": filters.source,

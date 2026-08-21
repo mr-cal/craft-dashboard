@@ -544,6 +544,23 @@ html.is-dark-theme .similarity-fill {
   color: var(--app-text);
 }
 
+.search-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-input-wrap .search-input-icon {
+  position: absolute;
+  left: 0.5rem;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.search-input-wrap input[type="search"] {
+  padding-left: 2rem;
+}
+
 /* Custom multi-select dropdown */
 .multiselect {
   position: relative;
