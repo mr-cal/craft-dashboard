@@ -234,6 +234,13 @@ class EvalResultSubmission(BaseModel):
     # Every evaluation includes an embedding — there is no more deferred
     # embedding step, so this is required, not optional.
     summary_embedding: list[float]
+    # Embedding of the issue's title+body (not the LLM summary), used for
+    # semantic issue search. Stored on Issue.search_embedding rather than
+    # LLMEvaluation, since it describes the issue's content, not this
+    # particular evaluation. Required for the same reason as
+    # summary_embedding above — computed unconditionally by the worker
+    # alongside the summary embedding.
+    search_embedding: list[float]
 
 
 def _require_eval_auth(request: Request, authorization: str = "") -> None:
@@ -460,6 +467,7 @@ async def submit_result(
         )
         .values(latest=False, eval_locked_until=None)
     )
+    issue.search_embedding = payload.search_embedding
     session.add(
         LLMEvaluation(
             issue_id=payload.issue_id,

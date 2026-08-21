@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     related_issues_top_n: int = 10
     related_issues_similarity_threshold: float = 0.70
 
+    # Semantic issue search — shown on the issues list page, appended after
+    # literal ILIKE matches. Uses the same OpenRouter embedding model as
+    # Issue.search_embedding/LLMEvaluation.summary_embedding so query
+    # embeddings live in the same vector space.
+    semantic_search_embedding_model: str = "openai/text-embedding-3-small"
+    semantic_search_top_n: int = 10
+    semantic_search_similarity_threshold: float = 0.70
+
     # Database pool settings
     db_pool_size: int = 5
     db_max_overflow: int = 10

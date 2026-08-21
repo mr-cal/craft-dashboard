@@ -1,5 +1,6 @@
 """Issue and PR triage routes."""
 
+import ipaddress
 import logging
 from dataclasses import asdict
 from enum import StrEnum
@@ -12,9 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException
 
 from craft_dashboard.dependencies import get_config, get_db_session
+from craft_dashboard.llm.client import OPENROUTER_BASE_URL
+from craft_dashboard.llm.embeddings import EmbeddingClient
 from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION, _compute_content_hash
 from craft_dashboard.models.views import IssueFilters, IssueView
 from craft_dashboard.repositories.issue_repository import IssueRepository
+from craft_dashboard.routes.eval_api import limiter
 
 if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
@@ -26,6 +30,40 @@ router = APIRouter(prefix="/issues")
 VALID_PER_PAGE = {100, 250, 1000}
 PER_PAGE_ALL = 0  # sentinel for "show all"
 DEFAULT_PER_PAGE = 100
+
+# Semantic search only ever fires on explicit submit (Enter/search button,
+# not live-as-you-type), but it still calls an external OpenRouter embedding
+# API per search, so it's rate-limited separately from the rest of the
+# (free, local) issue list/table endpoints. Mirrors the local/external split
+# used for the eval worker's endpoints in eval_api.py.
+SEMANTIC_SEARCH_QUERY_MAX_LENGTH = 200
+
+
+def _is_local_caller(key: str) -> bool:
+    """Return whether *key* (the caller's IP) counts as "local" for rate limits."""
+    try:
+        return ipaddress.ip_address(key).is_private
+    except ValueError:
+        return False
+
+
+def _semantic_search_rate_limit(key: str) -> str:
+    """Return a higher semantic-search rate limit for local callers."""
+    return "1000/minute" if _is_local_caller(key) else "20/minute"
+
+
+def _semantic_search_cost(request: Request) -> int:
+    """Return the rate-limit "cost" of a request to a shared issues endpoint.
+
+    slowapi's ``exempt_when`` callable takes no arguments, so it can't see
+    the request's query params. Using ``cost`` instead (which *does* receive
+    the request) lets us only count against the limit when the request
+    actually carries a non-empty ``search`` query param (i.e. will trigger a
+    semantic-search embedding call); plain filter/sort/pagination requests
+    to the same endpoint cost 0 and never count against the limit.
+    """
+    return 1 if request.query_params.get("search", "").strip() else 0
+
 
 ALL_SCORES = {
     "staleness": "Staleness",
@@ -42,6 +80,7 @@ class IssueTemplateContext(TypedDict):
     """Template context used by issue list and partial responses."""
 
     issues: list[IssueView]
+    semantic_issues: list[IssueView]
     project_names: list[str]
     filter_project: str
     filter_source: str
@@ -109,17 +148,90 @@ def _build_issue_filters(
     )
 
 
+async def _run_semantic_search(
+    session: AsyncSession,
+    *,
+    filters: IssueFilters,
+    existing_issue_ids: set[int],
+    openrouter_api_key: str,
+    embedding_model: str,
+    top_n: int,
+    similarity_threshold: float,
+    filtered_issues: dict[str, list[str]] | None = None,
+) -> list[IssueView]:
+    """Return semantically-similar issues not already in existing_issue_ids.
+
+    Truncated/invalid queries are handled by the caller (query length is
+    capped before this is called). Any embedding/query failure is logged and
+    treated as "no semantic results" rather than failing the whole page, so
+    a flaky OpenRouter call never breaks basic issue-list browsing.
+    """
+    query = filters.search.strip()
+    if not query or not openrouter_api_key:
+        return []
+
+    embed_client = EmbeddingClient(
+        base_url=OPENROUTER_BASE_URL,
+        model=embedding_model,
+        api_key=openrouter_api_key,
+        ca_cert="",
+    )
+    try:
+        query_embedding = await embed_client.embed(query, dimensions=1024)
+    except Exception:  # noqa: BLE001
+        logger.warning("Semantic search embedding failed for query", exc_info=True)
+        return []
+    finally:
+        await embed_client.close()
+
+    repo = IssueRepository(session, filtered_issues=filtered_issues)
+    try:
+        return await repo.semantic_search(
+            query_embedding=query_embedding,
+            exclude_issue_ids=existing_issue_ids,
+            limit=top_n,
+            similarity_threshold=similarity_threshold,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Semantic search query failed", exc_info=True)
+        return []
+
+
 async def _build_issue_context(
     session: AsyncSession,
     *,
     filters: IssueFilters,
     scores: str,
     filtered_issues: dict[str, list[str]] | None = None,
+    openrouter_api_key: str = "",
+    semantic_search_embedding_model: str = "",
+    semantic_search_top_n: int = 10,
+    semantic_search_similarity_threshold: float = 0.70,
 ) -> IssueTemplateContext:
-    """Build the template context for issue list rendering."""
+    """Build the template context for issue list rendering.
+
+    When filters.search is set, literal (ILIKE) matches are returned first,
+    exactly as ranked by IssueRepository.search(); any additional issues
+    found only via semantic search are appended below as a second tier (no
+    score blending between the two, since ILIKE match and cosine distance
+    aren't on comparable scales).
+    """
     repo = IssueRepository(session, filtered_issues=filtered_issues)
     result = await repo.search(filters)
     project_names = await repo.get_project_names()
+
+    semantic_issues: list[IssueView] = []
+    if filters.search.strip():
+        semantic_issues = await _run_semantic_search(
+            session,
+            filters=filters,
+            existing_issue_ids={issue.id for issue in result.issues},
+            openrouter_api_key=openrouter_api_key,
+            embedding_model=semantic_search_embedding_model,
+            top_n=semantic_search_top_n,
+            similarity_threshold=semantic_search_similarity_threshold,
+            filtered_issues=filtered_issues,
+        )
 
     normalized_scores = scores.strip()
     active_scores: list[str] = [
@@ -134,6 +246,7 @@ async def _build_issue_context(
 
     context: IssueTemplateContext = {
         "issues": result.issues,
+        "semantic_issues": semantic_issues,
         "project_names": project_names,
         "filter_project": filters.project,
         "filter_source": filters.source,
@@ -182,6 +295,7 @@ def _build_original_issue_url(issue: dict[str, Any]) -> str:
 
 
 @router.get("", response_class=HTMLResponse)
+@limiter.limit(_semantic_search_rate_limit, cost=_semantic_search_cost)
 async def issue_list(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
@@ -193,13 +307,16 @@ async def issue_list(
     author_role: str = Query("", alias="author_role"),
     sort: str = Query("staleness", alias="sort"),
     page: int = Query(1, ge=1),
-    search: str = Query("", alias="search"),
+    search: str = Query(
+        "", alias="search", max_length=SEMANTIC_SEARCH_QUERY_MAX_LENGTH
+    ),
     per_page: str = Query("", alias="per_page"),
     scores: str = Query(DEFAULT_SCORES, alias="scores"),
     llm_status: str = Query("", alias="llm_status"),
 ) -> HTMLResponse:
     """Render the issue triage list page."""
     templates: Jinja2Templates = request.app.state.templates
+    settings = request.app.state.settings
     effective_per_page = _normalize_per_page(_parse_per_page(per_page))
 
     filters = IssueFilters(
@@ -220,6 +337,10 @@ async def issue_list(
         filters=filters,
         scores=scores,
         filtered_issues=get_config(request).filtered_issues,
+        openrouter_api_key=settings.openrouter_api_key,
+        semantic_search_embedding_model=settings.semantic_search_embedding_model,
+        semantic_search_top_n=settings.semantic_search_top_n,
+        semantic_search_similarity_threshold=settings.semantic_search_similarity_threshold,
     )
 
     return templates.TemplateResponse(
@@ -230,6 +351,7 @@ async def issue_list(
 
 
 @router.get("/table", response_class=HTMLResponse)
+@limiter.limit(_semantic_search_rate_limit, cost=_semantic_search_cost)
 async def issue_table_partial(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
@@ -241,13 +363,16 @@ async def issue_table_partial(
     author_role: str = Query("", alias="author_role"),
     sort: str = Query("staleness", alias="sort"),
     page: int = Query(1, ge=1),
-    search: str = Query("", alias="search"),
+    search: str = Query(
+        "", alias="search", max_length=SEMANTIC_SEARCH_QUERY_MAX_LENGTH
+    ),
     per_page: str = Query("", alias="per_page"),
     scores: str = Query(DEFAULT_SCORES, alias="scores"),
     llm_status: str = Query("", alias="llm_status"),
 ) -> HTMLResponse:
     """Return just the issue table partial (for HTMX swapping)."""
     templates: Jinja2Templates = request.app.state.templates
+    settings = request.app.state.settings
     effective_per_page = _normalize_per_page(_parse_per_page(per_page))
 
     filters = IssueFilters(
@@ -268,6 +393,10 @@ async def issue_table_partial(
         filters=filters,
         scores=scores,
         filtered_issues=get_config(request).filtered_issues,
+        openrouter_api_key=settings.openrouter_api_key,
+        semantic_search_embedding_model=settings.semantic_search_embedding_model,
+        semantic_search_top_n=settings.semantic_search_top_n,
+        semantic_search_similarity_threshold=settings.semantic_search_similarity_threshold,
     )
 
     return templates.TemplateResponse(

@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.project import Project
@@ -769,6 +770,17 @@ class TestQueryIssuesSearch:
 
         assert len(issues) == 0
 
+    async def test_search_by_body(self, test_db_session) -> None:
+        """Search filter matches issues by body text, not just title/author/summary."""
+        await _seed_projects_and_issues(test_db_session)
+
+        # "traceback" only appears in the body of the "empty manifest" issue,
+        # not in its title, author, project name, or LLM summary.
+        issues, *_ = await _query(test_db_session, search="traceback", sort_by="title")
+
+        assert len(issues) == 1
+        assert issues[0]["title"] == "fix: handle empty manifest gracefully"
+
 
 class TestQueryIssuesPerPage:
     async def test_items_per_page_limits_results(self, test_db_session) -> None:
@@ -1160,3 +1172,86 @@ class TestFindSimilarIssues:
         repo = IssueRepository(test_db_session)
         result = await repo.find_similar_issues(issue_id=99999)
         assert result == []
+
+
+class _SemanticSearchRow:
+    def __init__(self, **kwargs) -> None:
+        self.__dict__.update(kwargs)
+
+
+class TestSemanticSearch:
+    """Tests for IssueRepository.semantic_search."""
+
+    async def test_returns_issue_views_ordered_by_similarity(self) -> None:
+        rows = [
+            _SemanticSearchRow(
+                id=1,
+                source="github",
+                external_id="10",
+                title="Fix YAML parser crash",
+                author="alice",
+                issue_type="issue",
+                state="open",
+                url="https://example.com/10",
+                labels=["bug"],
+                created_at=FIXED_NOW,
+                updated_at=FIXED_NOW,
+                author_is_maintainer=True,
+                author_is_bot=False,
+                project_name="snapcraft",
+                summary="Parser crashes on malformed input.",
+                suggested_action="needs_triage",
+                suggested_action_reason="Needs investigation.",
+                scores={"staleness": 5},
+                distance=0.1,
+            ),
+            _SemanticSearchRow(
+                id=2,
+                source="github",
+                external_id="20",
+                title="Improve error handling",
+                author="bob",
+                issue_type="issue",
+                state="open",
+                url="https://example.com/20",
+                labels=[],
+                created_at=FIXED_NOW,
+                updated_at=FIXED_NOW,
+                author_is_maintainer=False,
+                author_is_bot=False,
+                project_name="charmcraft",
+                summary=None,
+                suggested_action=None,
+                suggested_action_reason=None,
+                scores=None,
+                distance=0.3,
+            ),
+        ]
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=iter(rows))
+
+        result = await IssueRepository(session).semantic_search(
+            query_embedding=[0.1] * 1024,
+        )
+
+        assert [issue.id for issue in result] == [1, 2]
+        assert result[0].title == "Fix YAML parser crash"
+        assert result[0].staleness == 5
+        assert result[1].summary is None
+        assert result[1].scores == {}
+
+    async def test_passes_exclude_ids_and_thresholds_to_query(self) -> None:
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=iter([]))
+
+        await IssueRepository(session).semantic_search(
+            query_embedding=[0.1] * 1024,
+            exclude_issue_ids={1, 2},
+            limit=5,
+            similarity_threshold=0.8,
+        )
+
+        _, params = session.execute.await_args.args
+        assert sorted(params["exclude_ids"]) == [1, 2]
+        assert params["limit"] == 5
+        assert params["distance_threshold"] == pytest.approx(0.2)

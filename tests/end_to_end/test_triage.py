@@ -107,6 +107,7 @@ class TestTriagePage:
     const searchInput = await page.$('input[name="search"], input[type="search"], #search');
     if (searchInput) {
       await searchInput.type('snapcraft');
+      await searchInput.press('Enter');
       await new Promise(r => setTimeout(r, 1500));
     }
 
@@ -344,6 +345,7 @@ class TestTriagePage:
     const searchInput = await page.$('input[name="search"], input[type="search"]');
     if (searchInput) {
       await searchInput.type('a');
+      await searchInput.press('Enter');
       await new Promise(r => setTimeout(r, 2500));
     }
 

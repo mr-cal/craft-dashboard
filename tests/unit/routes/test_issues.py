@@ -14,6 +14,8 @@ from craft_dashboard.routes.issues import (
     DEFAULT_SCORES,
     INVERTED_SCORES,
     _build_issue_context,
+    _run_semantic_search,
+    _semantic_search_cost,
 )
 from fastapi.testclient import TestClient
 
@@ -66,6 +68,7 @@ class TestIssueContext:
 
         assert context == {
             "issues": [],
+            "semantic_issues": [],
             "project_names": ["snapcraft", "charmcraft"],
             "filter_project": "snapcraft",
             "filter_source": "github",
@@ -418,3 +421,156 @@ class TestIssueTablePartial:
             items_per_page=250,
             llm_status="partial_llm",
         )
+
+
+class TestSemanticSearchQueryCap:
+    """Tests for the semantic search query length cap and rate-limit cost."""
+
+    def test_search_query_over_max_length_returns_422(self) -> None:
+        """A search query longer than the configured cap is rejected."""
+        app = create_app()
+        app.dependency_overrides[get_db_session] = _override_issue_db_session
+        too_long = "a" * 201
+
+        with (
+            patch.object(IssueRepository, "search", return_value=EMPTY_QUERY_RESULT),
+            patch.object(
+                IssueRepository, "get_project_names", return_value=["snapcraft"]
+            ),
+        ):
+            with TestClient(app) as client:
+                response = client.get(f"/issues?search={too_long}")
+
+        assert response.status_code == 422
+
+    def test_table_partial_search_query_over_max_length_returns_422(self) -> None:
+        """The /issues/table partial enforces the same search query length cap."""
+        app = create_app()
+        app.dependency_overrides[get_db_session] = _override_issue_db_session
+        too_long = "a" * 201
+
+        with (
+            patch.object(IssueRepository, "search", return_value=EMPTY_QUERY_RESULT),
+            patch.object(
+                IssueRepository, "get_project_names", return_value=["snapcraft"]
+            ),
+        ):
+            with TestClient(app) as client:
+                response = client.get(f"/issues/table?search={too_long}")
+
+        assert response.status_code == 422
+
+
+class TestSemanticSearchRateLimitCost:
+    """Tests for the rate-limit cost function used by the search endpoints."""
+
+    def test_cost_is_zero_without_search_query(self) -> None:
+        """Requests without a search query cost nothing against the rate limit."""
+        request = SimpleNamespace(query_params={})
+        assert _semantic_search_cost(request) == 0
+
+    def test_cost_is_zero_for_blank_search_query(self) -> None:
+        """A blank/whitespace-only search query also costs nothing."""
+        request = SimpleNamespace(query_params={"search": "   "})
+        assert _semantic_search_cost(request) == 0
+
+    def test_cost_is_one_with_search_query(self) -> None:
+        """A non-empty search query costs 1 against the rate limit."""
+        request = SimpleNamespace(query_params={"search": "core24"})
+        assert _semantic_search_cost(request) == 1
+
+
+class TestRunSemanticSearch:
+    """Tests for the _run_semantic_search helper."""
+
+    async def _run(self, **overrides):
+        filters = IssueFilters(search="core24")
+        kwargs = {
+            "session": _IssueSession(),
+            "filters": filters,
+            "existing_issue_ids": set(),
+            "openrouter_api_key": "test-key",
+            "embedding_model": "openai/text-embedding-3-small",
+            "top_n": 10,
+            "similarity_threshold": 0.7,
+        }
+        kwargs.update(overrides)
+        return await _run_semantic_search(**kwargs)
+
+    async def test_returns_empty_without_search_query(self) -> None:
+        """No search text means no semantic search is attempted."""
+        result = await self._run(filters=IssueFilters(search="   "))
+        assert result == []
+
+    async def test_returns_empty_without_api_key(self) -> None:
+        """No OpenRouter API key means no semantic search is attempted."""
+        result = await self._run(openrouter_api_key="")
+        assert result == []
+
+    async def test_returns_empty_and_logs_on_embed_failure(self) -> None:
+        """An embedding failure is swallowed and treated as no results."""
+        with patch("craft_dashboard.routes.issues.EmbeddingClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.embed.side_effect = RuntimeError("boom")
+            mock_client_cls.return_value = mock_client
+
+            result = await self._run()
+
+        assert result == []
+        mock_client.close.assert_awaited_once()
+
+    async def test_returns_empty_and_logs_on_query_failure(self) -> None:
+        """A repository query failure is swallowed and treated as no results."""
+        with (
+            patch("craft_dashboard.routes.issues.EmbeddingClient") as mock_client_cls,
+            patch.object(
+                IssueRepository,
+                "semantic_search",
+                AsyncMock(side_effect=RuntimeError("boom")),
+            ),
+        ):
+            mock_client = AsyncMock()
+            mock_client.embed.return_value = [0.1] * 1024
+            mock_client_cls.return_value = mock_client
+
+            result = await self._run()
+
+        assert result == []
+
+    async def test_returns_repository_results_on_success(self) -> None:
+        """A successful embed + query returns the repository's semantic matches."""
+        expected = [
+            IssueView(
+                id=99,
+                project_name="snapcraft",
+                source="github",
+                external_id="42",
+                title="Related issue",
+                author="bob",
+                issue_type="issue",
+                state="open",
+                url="https://example.test/issues/42",
+                summary=None,
+                suggested_action=None,
+                suggested_action_reason=None,
+                scores={},
+                age_days=1,
+            )
+        ]
+        with (
+            patch("craft_dashboard.routes.issues.EmbeddingClient") as mock_client_cls,
+            patch.object(
+                IssueRepository,
+                "semantic_search",
+                AsyncMock(return_value=expected),
+            ) as mock_search,
+        ):
+            mock_client = AsyncMock()
+            mock_client.embed.return_value = [0.1] * 1024
+            mock_client_cls.return_value = mock_client
+
+            result = await self._run()
+
+        assert result == expected
+        mock_search.assert_awaited_once()
+        mock_client.close.assert_awaited_once()

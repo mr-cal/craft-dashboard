@@ -186,14 +186,14 @@
 
   <div class="filter-group">
     <label>Search</label>
-    <input type="search" name="search" placeholder="Title or issue number..."
+    <input type="search" name="search" placeholder="Title, body, issue number... (press Enter)"
            value="{{ filter_search or '' }}"
            hx-get="/issues/table"
            hx-target="#issue-table"
            hx-swap="outerHTML"
            hx-include=".filter-bar [name]"
            hx-indicator="#loading-indicator"
-           hx-trigger="keyup changed delay:500ms"
+           hx-trigger="search"
            style="min-width:200px;" />
   </div>
 

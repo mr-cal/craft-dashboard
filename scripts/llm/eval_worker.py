@@ -25,6 +25,7 @@ from craft_dashboard.llm.evaluator import IssueEvaluator, _compute_content_hash
 from craft_dashboard.llm.exceptions import LLMQuotaError
 from rich.console import Console
 
+from scripts import backfill_search_embeddings
 from scripts.eval_timing import PHASE_EVALUATE, TimingHistory
 from scripts.llm.console import format_elapsed, make_progress, setup_rich_logging
 
@@ -140,6 +141,22 @@ async def _embed_summary(
 ) -> list[float]:
     """Compute the required summary embedding for a finished evaluation."""
     return await embed_client.embed(f"{title}. {summary}", dimensions=1024)
+
+
+async def _embed_search_text(
+    embed_client: EmbeddingClient,
+    *,
+    title: str,
+    body: str | None,
+) -> list[float]:
+    """Compute the issue's search embedding (title+body) for semantic search.
+
+    Uses the same text shape as ``scripts/backfill_search_embeddings.py``
+    (``build_search_embedding_text``) so historical and ongoing embeddings
+    live in the same vector space.
+    """
+    text = backfill_search_embeddings.build_search_embedding_text(title, body)
+    return await embed_client.embed(text, dimensions=1024)
 
 
 def create_llm_client_for_backend(
@@ -504,6 +521,23 @@ async def _evaluate_issue(  # noqa: PLR0911
         await runtime.state.release()
         return
 
+    try:
+        search_embedding = await _embed_search_text(
+            runtime.embed_client,
+            title=issue_data["title"],
+            body=issue_data.get("body"),
+        )
+    except LLMQuotaError:
+        runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+        await runtime.state.release()
+        await _enter_quota_backoff(runtime)
+        return
+    except Exception:
+        runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+        logger.exception("%s: search embedding failed", issue_ref)
+        await runtime.state.release()
+        return
+
     submission: dict[str, Any] = {
         "issue_id": issue_data["issue_id"],
         "content_hash": result["issue_data_hash"],
@@ -517,6 +551,7 @@ async def _evaluate_issue(  # noqa: PLR0911
         "model_used": runtime.model,
         "llm_backend": runtime.llm_backend,
         "summary_embedding": embedding,
+        "search_embedding": search_embedding,
     }
 
     runtime.progress.update(

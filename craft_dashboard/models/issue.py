@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -71,6 +72,15 @@ class Issue(Base):
     # re-evaluation" is detected without recomputing a hash for every issue
     # on every poll.
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # OpenRouter embedding (openai/text-embedding-3-small, 1024 dims) of
+    # f"{title}\n\n{body}", used for semantic search over issue titles and
+    # descriptions. Shares the same vector space as
+    # LLMEvaluation.summary_embedding. Populated by the one-time
+    # scripts/backfill_search_embeddings.py backfill and kept fresh going
+    # forward by scripts/llm/eval_worker.py whenever content_hash changes.
+    search_embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(1024), nullable=True
+    )
     last_fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

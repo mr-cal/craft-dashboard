@@ -276,6 +276,7 @@ class IssueRepository:
                 clean = token.lstrip("#")
                 conditions: list[ColumnElement[bool]] = [
                     Issue.title.ilike(f"%{token}%"),
+                    Issue.body.ilike(f"%{token}%"),
                     Issue.author.ilike(f"%{token}%"),
                     Project.name.ilike(f"%{token}%"),
                     LLMEvaluation.summary.ilike(f"%{token}%"),
@@ -459,6 +460,100 @@ class IssueRepository:
             }
             for row in result
         ]
+
+    async def semantic_search(
+        self,
+        *,
+        query_embedding: list[float],
+        exclude_issue_ids: set[int] | None = None,
+        limit: int = 25,
+        similarity_threshold: float = 0.70,
+    ) -> list[IssueView]:
+        """Return issues ranked by cosine similarity to query_embedding.
+
+        Uses pgvector's <=> (cosine distance) operator via the HNSW index on
+        issues.search_embedding, mirroring the existing find_similar_issues()
+        query pattern. Returns [] when there are no matches above the
+        threshold. exclude_issue_ids lets the caller drop issues already
+        present in the literal-search results, since semantic-search results
+        are appended as a second tier after those.
+        """
+        distance_threshold = 1.0 - similarity_threshold
+        exclude_ids = exclude_issue_ids or set()
+
+        sql = sa_text("""
+            SELECT
+                i.id                  AS id,
+                i.source              AS source,
+                i.external_id         AS external_id,
+                i.title               AS title,
+                i.author              AS author,
+                i.issue_type          AS issue_type,
+                i.state               AS state,
+                i.url                 AS url,
+                i.labels              AS labels,
+                i.created_at          AS created_at,
+                i.updated_at          AS updated_at,
+                i.author_is_maintainer AS author_is_maintainer,
+                i.author_is_bot       AS author_is_bot,
+                p.name                AS project_name,
+                e.summary             AS summary,
+                e.suggested_action    AS suggested_action,
+                e.suggested_action_reason AS suggested_action_reason,
+                e.scores              AS scores,
+                (i.search_embedding <=> CAST(:embedding AS vector)) AS distance
+            FROM issues i
+            JOIN projects p ON p.id = i.project_id
+            LEFT JOIN llm_evaluations e
+                ON e.issue_id = i.id AND e.latest = true
+            WHERE i.search_embedding IS NOT NULL
+              AND NOT (i.id = ANY(:exclude_ids))
+              AND (i.search_embedding <=> CAST(:embedding AS vector)) < :distance_threshold
+            ORDER BY distance
+            LIMIT :limit
+        """)
+
+        result = await self.session.execute(
+            sql,
+            {
+                "embedding": str(query_embedding),
+                "exclude_ids": list(exclude_ids),
+                "distance_threshold": distance_threshold,
+                "limit": limit,
+            },
+        )
+
+        issues = []
+        for row in result:
+            scores = row.scores or {}
+            issues.append(
+                IssueView(
+                    id=row.id,
+                    project_name=row.project_name,
+                    source=row.source,
+                    external_id=row.external_id,
+                    title=row.title,
+                    author=row.author,
+                    issue_type=row.issue_type,
+                    state=row.state,
+                    url=row.url,
+                    summary=row.summary,
+                    suggested_action=row.suggested_action,
+                    suggested_action_reason=row.suggested_action_reason,
+                    scores=scores,
+                    age_days=_compute_age_days(row.created_at),
+                    labels=list(row.labels or []),
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
+                    author_is_maintainer=row.author_is_maintainer,
+                    author_is_bot=row.author_is_bot,
+                    staleness=scores.get("staleness"),
+                    complexity=scores.get("complexity"),
+                    support_request=scores.get("support_request"),
+                    confidence=scores.get("confidence"),
+                )
+            )
+        return issues
 
     async def get_project_names(self) -> list[str]:
         """Get non-aggregate project names with issues, ordered by display_order."""

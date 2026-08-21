@@ -210,12 +210,17 @@ async def test_run_evaluate_loop_posts_required_summary_embedding(
         api_key="test-openrouter-key",
         ca_cert="",
     )
-    patched_runtime["embed_client"].embed.assert_awaited_once_with(
+    patched_runtime["embed_client"].embed.assert_any_await(
         "Test issue. This is a test summary for the issue evaluation.",
+        dimensions=1024,
+    )
+    patched_runtime["embed_client"].embed.assert_any_await(
+        "Test issue\n\nTest body content here for the issue",
         dimensions=1024,
     )
     posted = http_client.post.await_args.kwargs["json"]
     assert posted["summary_embedding"] == [0.1, 0.2, 0.3]
+    assert posted["search_embedding"] == [0.1, 0.2, 0.3]
     assert posted["llm_backend"] == "local"
 
 

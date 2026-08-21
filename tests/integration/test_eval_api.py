@@ -12,6 +12,7 @@ from craft_dashboard.config import DashboardConfig
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION, _compute_content_hash
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
+from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.routes import eval_api
 from craft_dashboard.settings import Settings
@@ -930,6 +931,7 @@ class TestEvalResultIntegration:
                     "content_hash": "stale-hash",
                     "summary": "This summary is definitely long enough.",
                     "summary_embedding": [0.1] * 1024,
+                    "search_embedding": [0.1] * 1024,
                     "scores": {
                         "staleness": 1,
                         "complexity": 3,
@@ -970,6 +972,7 @@ class TestEvalResultIntegration:
                     "content_hash": current_hash,
                     "summary": "too short",
                     "summary_embedding": [0.1] * 1024,
+                    "search_embedding": [0.1] * 1024,
                     "scores": {
                         "staleness": 1,
                         "complexity": 3,
@@ -1040,6 +1043,7 @@ class TestEvalResultIntegration:
                     "model_used": "haiku",
                     "llm_backend": "local",
                     "summary_embedding": [0.1] * 1024,
+                    "search_embedding": [0.1] * 1024,
                 },
             )
 
@@ -1106,6 +1110,7 @@ class TestEvalResultIntegration:
                     "model_used": "haiku",
                     "llm_backend": "local",
                     "summary_embedding": [0.1] * 1024,
+                    "search_embedding": [0.1] * 1024,
                 },
             )
 
@@ -1120,7 +1125,12 @@ class TestEvalResultIntegration:
     def test_submit_result_stores_embedding(
         self, test_db_session: AsyncSession
     ) -> None:
-        """Submitted summary_embedding is persisted on the LLMEvaluation row."""
+        """Submitted summary_embedding is persisted on the LLMEvaluation row.
+
+        Submitted search_embedding is persisted on the Issue row, since it
+        describes the issue's content (title+body) rather than this
+        particular evaluation.
+        """
         project = make_project(id=1, name="snapcraft")
         issue = make_issue(id=1, project_id=1, title="Regression in pack step")
         asyncio.get_event_loop().run_until_complete(
@@ -1135,6 +1145,7 @@ class TestEvalResultIntegration:
             issue.comments,
         )
         embedding = [0.1] * 1024
+        search_embedding = [0.2] * 1024
 
         with TestClient(app) as client:
             response = client.post(
@@ -1158,6 +1169,7 @@ class TestEvalResultIntegration:
                     "model_used": "haiku",
                     "llm_backend": "local",
                     "summary_embedding": embedding,
+                    "search_embedding": search_embedding,
                 },
             )
 
@@ -1168,6 +1180,11 @@ class TestEvalResultIntegration:
         )
         assert len(evaluations) == 1
         assert list(evaluations[0].summary_embedding) == embedding
+
+        refreshed_issue = asyncio.get_event_loop().run_until_complete(
+            test_db_session.get(Issue, 1)
+        )
+        assert list(refreshed_issue.search_embedding) == search_embedding
 
     """Integration tests for GET /api/eval/status."""
 

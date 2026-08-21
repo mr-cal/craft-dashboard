@@ -61,7 +61,7 @@
       </tr>
     </thead>
     <tbody>
-      {% for issue in issues %}
+      {% macro issue_row(issue) %}
       <tr>
         <td data-col="issue" style="white-space:nowrap;">
           {{ issue.project_name }}<br>
@@ -98,6 +98,9 @@
         {% endfor %}
         <td class="summary-cell" data-col="summary">{{ (issue.summary or "")|truncate(350) }}</td>
       </tr>
+      {% endmacro %}
+      {% for issue in issues %}
+        {{ issue_row(issue) }}
       {% else %}
       <tr>
         <td colspan="{{ 6 + (active_scores|length) }}">
@@ -106,6 +109,16 @@
         </td>
       </tr>
       {% endfor %}
+      {% if semantic_issues %}
+      <tr class="semantic-search-divider">
+        <td colspan="{{ 6 + (active_scores|length) }}" style="background:var(--app-surface-alt, #f4f4f4);font-weight:600;">
+          Related issues (semantic match, not an exact text match)
+        </td>
+      </tr>
+      {% for issue in semantic_issues %}
+        {{ issue_row(issue) }}
+      {% endfor %}
+      {% endif %}
     </tbody>
   </table>
 
