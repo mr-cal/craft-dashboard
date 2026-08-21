@@ -550,16 +550,28 @@ html.is-dark-theme .similarity-fill {
   align-items: center;
 }
 
-.search-input-wrap .search-input-icon {
-  position: absolute;
-  left: 0.5rem;
-  pointer-events: none;
-  opacity: 0.6;
+.search-input-wrap input[type="search"] {
+  padding-right: 2.25rem;
 }
 
-.search-input-wrap input[type="search"] {
-  padding-left: 2rem;
+.search-input-wrap .search-input-button {
+  position: absolute;
+  right: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0.25rem;
+  opacity: 0.7;
+  color: inherit;
 }
+
+.search-input-wrap .search-input-button:hover {
+  opacity: 1;
+}
+
 
 /* Custom multi-select dropdown */
 .multiselect {
