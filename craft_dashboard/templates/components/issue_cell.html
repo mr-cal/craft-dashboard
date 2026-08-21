@@ -1,0 +1,25 @@
+{# Partial: shared issue-cell formatting used across admin/issue tables.
+
+Renders the canonical `<td>` used by issues/partials/issue_table.html:
+"Project" on one line, then "issue"/"pr" #external_id (linked when a URL is
+known), with the issue's state shown beneath when it isn't "open".
+
+Expects the following variables set by the caller before including this
+partial (Jinja `include` shares the parent template's context, so plain
+variable names are used rather than a macro to keep call sites simple):
+  - issue_cell_project: project display name
+  - issue_cell_number: external_id (issue/PR number)
+  - issue_cell_type: "pull_request" or "issue" (anything else renders as "issue")
+  - issue_cell_url: optional link to the issue/PR on GitHub/Launchpad
+  - issue_cell_state: optional issue state; only rendered when not "open"
+#}
+<td style="white-space:nowrap;">
+  {{ issue_cell_project }}<br>
+  {{ "pr" if issue_cell_type == "pull_request" else "issue" }}
+  {% if issue_cell_url %}
+  <a href="{{ issue_cell_url }}" target="_blank" rel="noopener">#{{ issue_cell_number }}</a>
+  {% else %}
+  #{{ issue_cell_number }}
+  {% endif %}
+  {% if issue_cell_state and issue_cell_state != "open" %}<br><span style="color:var(--app-text-muted);font-size:0.8em;">{{ issue_cell_state }}</span>{% endif %}
+</td>

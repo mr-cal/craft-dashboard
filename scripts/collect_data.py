@@ -8,6 +8,7 @@ Usage:
     uv run scripts/collect_data.py --source github --limit 25
     uv run scripts/collect_data.py --source github --project snapcraft --project rockcraft
     uv run scripts/collect_data.py --source github --limit 25 --project snapcraft
+    uv run scripts/collect_data.py --mode rotation
 
 Environment variables:
     DATABASE_URL: PostgreSQL connection URL
@@ -36,6 +37,7 @@ from craft_dashboard.collectors.dependencies import DependencyCollector
 from craft_dashboard.collectors.github import GitHubCollector
 from craft_dashboard.collectors.launchpad import LaunchpadCollector
 from craft_dashboard.collectors.scheduler import (
+    get_least_recently_refreshed,
     is_due_for_refresh,
     record_refresh_error,
     update_refresh_schedule,
@@ -802,11 +804,29 @@ async def _collect_launchpad(
                     lp_project_name,
                     _format_duration(time.monotonic() - snapshot_started_at),
                 )
+
+                # Record last_refreshed_at so the hourly rotation (see
+                # `get_least_recently_refreshed`) can consider Launchpad
+                # projects alongside GitHub ones. Launchpad has no
+                # open/full split or schedule gate of its own — every call
+                # here is already a full bug collection — so this is purely
+                # bookkeeping for rotation ordering, not a gate on this path.
+                await update_refresh_schedule(
+                    project_id,
+                    "launchpad",
+                    config.refresh_interval_days,
+                    session,
+                )
             except Exception as exc:
                 logger.exception("Failed to collect Launchpad data for %s", lp_name)
                 stats.errors.append(
                     {"project": lp_name, "error": _summarize_exception(exc)}
                 )
+                error_summary = _summarize_exception(exc)
+                async with session_factory() as err_session:
+                    await record_refresh_error(
+                        project_id, "launchpad", error_summary, err_session
+                    )
 
     return stats
 
@@ -850,37 +870,6 @@ async def _main(
     logger.info("Collection mode: %s", mode)
 
     try:
-        sources_to_check: list[str] = []
-        if source in ("all", "github"):
-            sources_to_check.append("github")
-        if source in ("all", "launchpad"):
-            sources_to_check.append("launchpad")
-
-        # NOTE: this checks all requested sources up front and aborts the
-        # entire invocation (SystemExit) if a conflict is still present after
-        # waiting (see _wait_for_source_available), rather than skipping only
-        # the conflicting source and still running the others. With --source
-        # all, a stuck/long-running launchpad run would
-        # currently also block an otherwise-healthy github collection in the
-        # same invocation. This is a known, low-urgency gap: production cron
-        # always passes an explicit single --source (github or launchpad), so
-        # it isn't hit in practice today, but a future --source all cron
-        # invocation would need this loosened to per-source skipping instead
-        # of an all-or-nothing abort.
-        for source_name in sources_to_check:
-            existing_running = await _wait_for_source_available(
-                session_factory,
-                source_name,
-            )
-            if existing_running is not None:
-                logger.warning(
-                    "Collection run %s already in progress for %s (started %s); skipping this invocation",
-                    existing_running.id,
-                    source_name,
-                    existing_running.started_at,
-                )
-                raise SystemExit(1)
-
         run_started_at = time.monotonic()
         stats = CollectionStats()
 
@@ -914,37 +903,134 @@ async def _main(
             )
             return source_stats
 
-        if source in ("all", "github"):
-            stats.merge(
-                await _run_source(
-                    "github",
-                    lambda run_id: _collect_github(
-                        settings,
-                        config,
-                        session_factory,
-                        limit=limit,
-                        projects=project_filter,
-                        run_started_at=run_started_at,
-                        full_refresh=full_refresh,
-                        force_schedule=force_schedule,
-                        collection_run_id=run_id,
-                        mode=mode,
-                    ),
+        if mode == "rotation":
+            # Continuous rotation: pick exactly one project+source pair
+            # (across both GitHub and Launchpad) — whichever has gone
+            # longest without a full refresh — and fully refresh just that
+            # one. Replaces the old weekly-distributed schedule: run this
+            # hourly and every project eventually gets refreshed as the
+            # rotation cycles through the full list. This mode ignores
+            # --source/--project; the rotation always chooses its own
+            # target.
+            async with session_factory() as session:
+                target = await get_least_recently_refreshed(session)
+
+            if target is None:
+                logger.warning("Rotation: no projects found; nothing to refresh")
+            else:
+                _project_id, project_name, target_source = target
+                existing_running = await _wait_for_source_available(
+                    session_factory, target_source
                 )
-            )
-        if source in ("all", "launchpad"):
-            stats.merge(
-                await _run_source(
-                    "launchpad",
-                    lambda run_id: _collect_launchpad(
-                        config,
-                        session_factory,
-                        projects=project_filter,
-                        run_started_at=run_started_at,
-                        collection_run_id=run_id,
-                    ),
+                if existing_running is not None:
+                    logger.warning(
+                        "Collection run %s already in progress for %s (started %s); "
+                        "skipping this invocation",
+                        existing_running.id,
+                        target_source,
+                        existing_running.started_at,
+                    )
+                    raise SystemExit(1)
+
+                logger.info(
+                    "Rotation: selected %s (%s) for full refresh",
+                    project_name,
+                    target_source,
                 )
-            )
+                if target_source == "launchpad":
+                    lp_name = project_name.removesuffix(" (launchpad)")
+                    stats.merge(
+                        await _run_source(
+                            "launchpad",
+                            lambda run_id, _lp=lp_name: _collect_launchpad(
+                                config,
+                                session_factory,
+                                projects=[_lp],
+                                run_started_at=run_started_at,
+                                collection_run_id=run_id,
+                            ),
+                        )
+                    )
+                else:
+                    stats.merge(
+                        await _run_source(
+                            "github",
+                            lambda run_id, _pn=project_name: _collect_github(
+                                settings,
+                                config,
+                                session_factory,
+                                limit=limit,
+                                projects=[_pn],
+                                run_started_at=run_started_at,
+                                force_schedule=True,
+                                collection_run_id=run_id,
+                                mode="all",
+                            ),
+                        )
+                    )
+        else:
+            sources_to_check: list[str] = []
+            if source in ("all", "github"):
+                sources_to_check.append("github")
+            if source in ("all", "launchpad"):
+                sources_to_check.append("launchpad")
+
+            # NOTE: this checks all requested sources up front and aborts the
+            # entire invocation (SystemExit) if a conflict is still present after
+            # waiting (see _wait_for_source_available), rather than skipping only
+            # the conflicting source and still running the others. With --source
+            # all, a stuck/long-running launchpad run would
+            # currently also block an otherwise-healthy github collection in the
+            # same invocation. This is a known, low-urgency gap: production cron
+            # always passes an explicit single --source (github or launchpad), so
+            # it isn't hit in practice today, but a future --source all cron
+            # invocation would need this loosened to per-source skipping instead
+            # of an all-or-nothing abort.
+            for source_name in sources_to_check:
+                existing_running = await _wait_for_source_available(
+                    session_factory,
+                    source_name,
+                )
+                if existing_running is not None:
+                    logger.warning(
+                        "Collection run %s already in progress for %s (started %s); skipping this invocation",
+                        existing_running.id,
+                        source_name,
+                        existing_running.started_at,
+                    )
+                    raise SystemExit(1)
+
+            if source in ("all", "github"):
+                stats.merge(
+                    await _run_source(
+                        "github",
+                        lambda run_id: _collect_github(
+                            settings,
+                            config,
+                            session_factory,
+                            limit=limit,
+                            projects=project_filter,
+                            run_started_at=run_started_at,
+                            full_refresh=full_refresh,
+                            force_schedule=force_schedule,
+                            collection_run_id=run_id,
+                            mode=mode,
+                        ),
+                    )
+                )
+            if source in ("all", "launchpad"):
+                stats.merge(
+                    await _run_source(
+                        "launchpad",
+                        lambda run_id: _collect_launchpad(
+                            config,
+                            session_factory,
+                            projects=project_filter,
+                            run_started_at=run_started_at,
+                            collection_run_id=run_id,
+                        ),
+                    )
+                )
         logger.info(
             "Collection complete: %d projects processed, %d issues collected, total time: %s",
             len(stats.projects_processed),
@@ -1016,13 +1102,16 @@ async def _main(
 )
 @click.option(
     "--mode",
-    type=click.Choice(["open", "full", "all"]),
+    type=click.Choice(["open", "full", "all", "rotation"]),
     default="open",
     help=(
         "Collection mode: 'open' (default) refreshes open issues for every project on "
         "every run with no schedule gate; 'full' refreshes all issues (open + closed) "
         "per the per-project schedule; 'all' forces a full collection for every project "
-        "regardless of schedule."
+        "regardless of schedule; 'rotation' picks exactly one project (GitHub or "
+        "Launchpad, whichever has gone longest without a full refresh) and fully "
+        "refreshes just that one — intended to run hourly, cycling through every "
+        "project over time. Ignores --source/--project."
     ),
 )
 def main(

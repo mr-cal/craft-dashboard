@@ -501,6 +501,53 @@ class TestQueueDepthSnapshot:
         )
         assert list(snapshots.scalars()) == []
 
+    def test_total_open_does_not_fan_out_across_projects(
+        self, test_db_session: AsyncSession, monkeypatch
+    ) -> None:
+        """Regression test: total_open must equal the real open-issue count.
+
+        Previously `total_open`'s query applied a `Project.name`-referencing
+        exclusion filter without ever joining `Project`, causing Postgres to
+        implicitly cross-join every project into the count — multiplying the
+        true open-issue count by the number of projects. With 3 projects and
+        2 real open issues, the buggy query would have produced 6, not 2.
+        """
+        monkeypatch.setattr(eval_api, "_last_queue_snapshot_at", None)
+        projects = [
+            make_project(id=1, name="snapcraft"),
+            make_project(id=2, name="charmcraft"),
+            make_project(id=3, name="rockcraft"),
+        ]
+        issues = [
+            make_issue(id=1, project_id=1, external_id="1", state="open"),
+            make_issue(id=2, project_id=2, external_id="2", state="open"),
+        ]
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, *projects, *issues)
+        )
+        app, token = _create_eval_app(test_db_session)
+        # A non-empty `filtered_issues` config is what triggers the
+        # `Project.name`-referencing exclusion clause in the query — without
+        # it, `_build_excluded_issues_condition` returns None and the
+        # cartesian-product bug this test guards against never manifests.
+        app.state.config = DashboardConfig(
+            maintainers=["alice", "bob"],
+            filtered_issues={"snapcraft": ["999"]},
+        )
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/next", headers={"Authorization": "Bearer " + token}
+            )
+
+        assert response.status_code in (200, 204)
+        snapshots = asyncio.get_event_loop().run_until_complete(
+            test_db_session.execute(select(EvalQueueSnapshot))
+        )
+        rows = list(snapshots.scalars())
+        assert len(rows) == 1
+        assert rows[0].total_open == 2
+
 
 class TestEvalNextPriorityOrdering:
     """Priority ordering tests for GET /api/eval/next."""

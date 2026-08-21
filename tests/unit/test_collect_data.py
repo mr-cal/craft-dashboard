@@ -41,6 +41,9 @@ class _FakeSession:
     async def execute(self, _stmt: object) -> _FakeResult:
         return _FakeResult(self._result_value)
 
+    async def commit(self) -> None:
+        pass
+
 
 class _RecordingSession:
     """Fake session that records executed statements."""
@@ -424,3 +427,106 @@ class TestMainLogging:
             "Collection complete: 2 projects processed, 50 issues collected, total time: 2m 15s"
             in caplog.text
         )
+
+
+class TestRotationMode:
+    """Tests for `--mode rotation`, the hourly continuous-rotation selector."""
+
+    def _patch_common(self, monkeypatch) -> None:
+        fake_engine = MagicMock()
+        fake_engine.dispose = AsyncMock()
+        settings = SimpleNamespace(
+            log_level="INFO",
+            config_file="craft-dashboard.toml",
+            database_url="postgresql://db/test",
+        )
+        monkeypatch.setattr(collect_data, "Settings", lambda: settings)
+        monkeypatch.setattr(collect_data, "load_config", lambda path: SimpleNamespace())
+        monkeypatch.setattr(collect_data, "get_engine", lambda url: fake_engine)
+        monkeypatch.setattr(
+            collect_data, "get_session_factory", lambda engine: _make_session_factory()
+        )
+        monkeypatch.setattr(
+            collect_data,
+            "_wait_for_source_available",
+            AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr(
+            collect_data,
+            "_create_collection_run",
+            AsyncMock(return_value=SimpleNamespace(id=1)),
+        )
+        monkeypatch.setattr(collect_data, "_finish_collection_run", AsyncMock())
+
+    @pytest.mark.asyncio
+    async def test_rotation_selects_github_project(self, monkeypatch) -> None:
+        """Rotation mode fully refreshes just the selected GitHub project."""
+        self._patch_common(monkeypatch)
+        monkeypatch.setattr(
+            collect_data,
+            "get_least_recently_refreshed",
+            AsyncMock(return_value=(1, "charmcraft", "github")),
+        )
+        collect_github_mock = AsyncMock(
+            return_value=collect_data.CollectionStats(
+                projects_processed={"charmcraft"}, issues_collected=5
+            )
+        )
+        monkeypatch.setattr(collect_data, "_collect_github", collect_github_mock)
+        collect_launchpad_mock = AsyncMock()
+        monkeypatch.setattr(collect_data, "_collect_launchpad", collect_launchpad_mock)
+
+        await collect_data._main("all", 0, [], verbose=False, mode="rotation")
+
+        collect_github_mock.assert_awaited_once()
+        _args, kwargs = collect_github_mock.await_args
+        assert kwargs["projects"] == ["charmcraft"]
+        assert kwargs["force_schedule"] is True
+        assert kwargs["mode"] == "all"
+        collect_launchpad_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rotation_selects_launchpad_project(self, monkeypatch) -> None:
+        """Rotation mode strips the ' (launchpad)' display suffix before collecting."""
+        self._patch_common(monkeypatch)
+        monkeypatch.setattr(
+            collect_data,
+            "get_least_recently_refreshed",
+            AsyncMock(return_value=(2, "snapcraft (launchpad)", "launchpad")),
+        )
+        collect_github_mock = AsyncMock()
+        monkeypatch.setattr(collect_data, "_collect_github", collect_github_mock)
+        collect_launchpad_mock = AsyncMock(
+            return_value=collect_data.CollectionStats(
+                projects_processed={"snapcraft"}, issues_collected=3
+            )
+        )
+        monkeypatch.setattr(collect_data, "_collect_launchpad", collect_launchpad_mock)
+
+        await collect_data._main("all", 0, [], verbose=False, mode="rotation")
+
+        collect_launchpad_mock.assert_awaited_once()
+        _args, kwargs = collect_launchpad_mock.await_args
+        assert kwargs["projects"] == ["snapcraft"]
+        collect_github_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rotation_no_projects_is_a_noop(self, monkeypatch, caplog) -> None:
+        """With no projects to rotate to, rotation logs a warning and returns cleanly."""
+        self._patch_common(monkeypatch)
+        monkeypatch.setattr(
+            collect_data,
+            "get_least_recently_refreshed",
+            AsyncMock(return_value=None),
+        )
+        collect_github_mock = AsyncMock()
+        collect_launchpad_mock = AsyncMock()
+        monkeypatch.setattr(collect_data, "_collect_github", collect_github_mock)
+        monkeypatch.setattr(collect_data, "_collect_launchpad", collect_launchpad_mock)
+
+        caplog.set_level(logging.WARNING)
+        await collect_data._main("all", 0, [], verbose=False, mode="rotation")
+
+        assert "Rotation: no projects found" in caplog.text
+        collect_github_mock.assert_not_awaited()
+        collect_launchpad_mock.assert_not_awaited()

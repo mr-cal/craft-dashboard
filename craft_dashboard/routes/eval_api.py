@@ -146,7 +146,11 @@ async def _maybe_record_queue_snapshot(
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     excl = _build_excluded_issues_condition(filtered_issues or {})
 
-    base_query = select(Issue.id).where(Issue.state == "open")
+    base_query = (
+        select(Issue.id)
+        .join(Project, Issue.project_id == Project.id)
+        .where(Issue.state == "open")
+    )
     if excl is not None:
         base_query = base_query.where(excl)
     total_open = await session.scalar(

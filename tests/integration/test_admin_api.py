@@ -100,12 +100,12 @@ class TestAdminPageIntegration:
     def test_admin_page_empty_db(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The admin page still renders when the database is empty."""
+        """The refresh schedule tab still renders when the database is empty."""
         _stub_admin_page_metrics(monkeypatch)
-        response = client.get("/admin")
+        response = client.get("/admin/schedule")
 
         assert response.status_code == 200
-        assert "Project full-refresh schedule" in response.text
+        assert "Refresh schedule" in response.text
 
     def test_admin_page_shows_llm_evaluation_service_section(
         self,
@@ -160,7 +160,7 @@ class TestAdminPageIntegration:
 
         asyncio.get_event_loop().run_until_complete(_seed())
 
-        response = client.get("/admin")
+        response = client.get("/admin/evaluations")
 
         assert response.status_code == 200
         assert "LLM evaluation service" in response.text

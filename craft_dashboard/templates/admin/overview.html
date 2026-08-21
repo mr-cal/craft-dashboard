@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Admin - craft-dashboard{% endblock %}
+{% block content %}
+<h2>Admin</h2>
+{% include "admin/partials/tabs.html" %}
+
+<div class="row--25-75">
+  <div class="col">
+    <h3>System status</h3>
+    <p>Collection and evaluation run history. Click any row to see which issues were collected.</p>
+  </div>
+  <div class="col">
+    <div
+      data-system-status-poller
+      hx-get="/admin/status"
+      hx-trigger="load, every 60s"
+      hx-swap="none"
+      hx-indicator="#loading-indicator"
+    >
+      <div class="system-status-badges" aria-label="Collection and evaluation status">
+        <span class="system-status-indicator" data-system-status-kind="collection" title="Collection idle">
+          <span class="system-status-dot"></span>
+          <span>Collection</span>
+        </span>
+        <span class="system-status-indicator" data-system-status-kind="evaluation" title="Evaluation idle">
+          <span class="system-status-dot"></span>
+          <span>Evaluation</span>
+        </span>
+      </div>
+    </div>
+    <div class="status-grid">
+      <div class="status-card">
+        <h4>Next open-issue fetch</h4>
+        <p>{{ next_expected_fetch | local_datetime("Unknown") }}</p>
+        <p class="status-detail">Polling every 10 minutes</p>
+      </div>
+      <div class="status-card">
+        <h4>REST API budget</h4>
+        <p>{{ api_budget.core_remaining ~ " / " ~ api_budget.core_limit ~ " remaining" if api_budget else "Unknown" }}</p>
+      </div>
+      <div class="status-card">
+        <h4>GraphQL API budget</h4>
+        <p>{{ api_budget.graphql_remaining ~ " / " ~ api_budget.graphql_limit ~ " remaining" if api_budget else "Unknown" }}</p>
+      </div>
+    </div>
+    {% if collection_runs %}
+    <table style="margin-top: 1rem;">
+      <thead>
+        <tr>
+          <th>Source</th>
+          <th>Started</th>
+          <th>Status</th>
+          <th>Projects</th>
+          <th>Issues</th>
+          <th>Duration</th>
+          <th>Errors</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in collection_runs %}
+        <tr class="run-row" data-run-id="{{ run.id }}" style="cursor: pointer;" title="Click to expand issues collected in this run">
+          <td>{{ run.source }}</td>
+          <td>
+            {% if run.started_at %}
+            {{ run.started_at | local_datetime }}
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if run.status == "failed" %}
+            <span style="color: var(--color-error, #c0392b); font-weight: 600;">{{ run.status }}</span>
+            {% elif run.status == "interrupted" %}
+            <span style="color: var(--app-caution, #e67e22);" title="Process was killed mid-run (container restart or OOM)">{{ run.status }}</span>
+            {% elif run.status == "running" %}
+            <span style="color: var(--color-warning, #e67e22);">{{ run.status }}</span>
+            {% elif run.errors %}
+            <span style="color: var(--color-warning, #e67e22);" title="Completed with errors">{{ run.status }} ⚠</span>
+            {% else %}
+            {{ run.status }}
+            {% endif %}
+          </td>
+          <td>{{ run.projects_processed }}</td>
+          <td>{{ run.issues_collected }}</td>
+          <td>
+            {% if run.status == "running" and run.started_at %}
+            <span class="run-elapsed" data-started-at="{{ run.started_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">running…</span>
+            {% else %}
+            {{ run.duration_seconds | format_duration if run.duration_seconds is not none else "—" }}
+            {% endif %}
+          </td>
+          <td>
+            {% if run.errors %}
+            <ul style="margin: 0; padding-left: 1rem;">
+              {% for error in run.errors %}
+              <li>{{ error.project or error.source or "run" }}: {{ error.error }}</li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            —
+            {% endif %}
+          </td>
+        </tr>
+        <tr class="run-detail-row" id="run-detail-{{ run.id }}" style="display: none;">
+          <td colspan="7" id="run-detail-content-{{ run.id }}" style="padding: 0.5rem 1rem 1rem; background: var(--color-mid-light, #f5f5f5);"></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <script>
+      (function () {
+        function formatElapsed(startedAt) {
+          var seconds = Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 1000));
+          var m = Math.floor(seconds / 60);
+          var s = seconds % 60;
+          return m + "m " + s + "s";
+        }
+        function tickElapsed() {
+          document.querySelectorAll('.run-elapsed').forEach(function (el) {
+            var started = new Date(el.dataset.startedAt);
+            el.textContent = formatElapsed(started) + " (running)";
+          });
+        }
+        tickElapsed();
+        setInterval(tickElapsed, 1000);
+      })();
+    </script>
+    <script>
+      (function () {
+        document.querySelectorAll('.run-row').forEach(function (row) {
+          row.addEventListener('click', function () {
+            var runId = this.dataset.runId;
+            var detailRow = document.getElementById('run-detail-' + runId);
+            if (detailRow.style.display !== 'none') {
+              detailRow.style.display = 'none';
+              return;
+            }
+            detailRow.style.display = '';
+            var content = document.getElementById('run-detail-content-' + runId);
+            if (content.dataset.loaded) return;
+            content.innerHTML = '<span style="color:var(--app-text-muted)">Loading\u2026</span>';
+            htmx.ajax('GET', '/admin/collection-runs/' + runId + '/issues', {
+              target: '#run-detail-content-' + runId,
+              swap: 'innerHTML',
+            });
+            content.dataset.loaded = '1';
+          });
+        });
+      })();
+    </script>
+    {% else %}
+    <p style="color: var(--app-text-muted); margin-top: 1rem;">No recent collection runs.</p>
+    {% endif %}
+
+    <h3 style="margin-top: 1.5rem;">Recent activity</h3>
+    {% include "admin/_recent_activity_rows.html" %}
+    <script>
+      (function () {
+        document.querySelectorAll('time.local-time').forEach(function (el) {
+          try {
+            var d = new Date(el.getAttribute('datetime'));
+            el.textContent = d.toLocaleString(undefined, {
+              year: 'numeric', month: '2-digit', day: '2-digit',
+              hour: '2-digit', minute: '2-digit',
+            });
+          } catch (e) {}
+        });
+      })();
+    </script>
+  </div>
+</div>
+{% endblock %}

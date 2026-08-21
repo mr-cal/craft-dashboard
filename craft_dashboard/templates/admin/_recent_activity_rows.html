@@ -2,31 +2,28 @@
   <table class="activity-feed">
     <thead>
       <tr>
-        <th>When</th>
         <th>Issue</th>
         <th>Title</th>
         <th>Change</th>
+        <th>When</th>
       </tr>
     </thead>
     <tbody>
       {% for activity in recent_activity %}
       <tr>
-        <td>
-          {{ activity.occurred_at | local_datetime }}
-        </td>
-        <td style="white-space:nowrap;">
-          {{ activity.project }}<br>
-          {{ "pr" if activity.issue_type == "pull_request" else "issue" }}
-          {% if activity.url %}
-          <a href="{{ activity.url }}" target="_blank" rel="noopener noreferrer">#{{ activity.number }}</a>
-          {% else %}
-          #{{ activity.number }}
-          {% endif %}
-        </td>
+        {% set issue_cell_project = activity.project %}
+        {% set issue_cell_number = activity.number %}
+        {% set issue_cell_type = activity.issue_type %}
+        {% set issue_cell_url = activity.url %}
+        {% set issue_cell_state = none %}
+        {% include "components/issue_cell.html" %}
         <td>
           <a href="/issues/{{ activity.project | urlencode_path }}/{{ activity.number }}">{{ activity.title|truncate(80) }}</a>
         </td>
         <td>{{ activity.change_type }}</td>
+        <td>
+          {{ activity.occurred_at | local_datetime }}
+        </td>
       </tr>
       {% else %}
       <tr>

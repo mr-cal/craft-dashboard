@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
 from craft_dashboard.models.issue import Issue
@@ -11,6 +12,7 @@ from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.refresh_schedule import RefreshSchedule
+from craft_dashboard.services import admin_service as admin_service_module
 from craft_dashboard.services.admin_service import AdminService
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
@@ -23,19 +25,6 @@ class FrozenStatsDateTime(datetime):
     """Frozen datetime for deterministic token stats."""
 
     frozen_now = datetime(2025, 1, 10, 12, 0, tzinfo=UTC)
-
-    @classmethod
-    def now(cls, tz=None):
-        """Return a fixed current time."""
-        if tz is None:
-            return cls.frozen_now.replace(tzinfo=None)
-        return cls.frozen_now.astimezone(tz)
-
-
-class FrozenScheduleDateTime(datetime):
-    """Frozen datetime for deterministic schedule updates."""
-
-    frozen_now = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
 
     @classmethod
     def now(cls, tz=None):
@@ -152,21 +141,25 @@ async def _seed_admin_data(session) -> None:
                 project_id=snapcraft.id,
                 source="github",
                 next_refresh_at=datetime(2025, 1, 6, 10, 0, tzinfo=UTC),
+                last_refreshed_at=datetime(2025, 1, 9, 10, 0, tzinfo=UTC),
             ),
             RefreshSchedule(
                 project_id=snapcraft.id,
                 source="launchpad",
                 next_refresh_at=datetime(2025, 1, 8, 10, 0, tzinfo=UTC),
+                last_refreshed_at=None,
             ),
             RefreshSchedule(
                 project_id=charmcraft.id,
                 source="github",
                 next_refresh_at=datetime(2025, 1, 10, 10, 0, tzinfo=UTC),
+                last_refreshed_at=datetime(2025, 1, 5, 10, 0, tzinfo=UTC),
             ),
             RefreshSchedule(
                 project_id=aggregate.id,
                 source="github",
                 next_refresh_at=datetime(2025, 1, 12, 10, 0, tzinfo=UTC),
+                last_refreshed_at=datetime(2025, 1, 8, 10, 0, tzinfo=UTC),
             ),
         ]
     )
@@ -225,16 +218,21 @@ class TestAdminService:
             "completion_tokens": 50,
         }
 
-    async def test_get_schedule_groups_days_by_project(self, test_db_session) -> None:
-        """Schedules are grouped by project with unique weekday values."""
+    async def test_get_project_refresh_list_orders_by_rotation_ascending(
+        self, test_db_session
+    ) -> None:
+        """Refresh list excludes aggregates, includes both sources, ordered
+        by last_refreshed_at ascending (never-refreshed first)."""
         await _seed_admin_data(test_db_session)
 
-        schedule = await AdminService(test_db_session).get_schedule()
+        refresh_list = await AdminService(test_db_session).get_project_refresh_list()
 
-        assert schedule == [
-            {"project": "charmcraft", "days": [4]},
-            {"project": "snapcraft", "days": [0, 2]},
+        assert [(e["project"], e["source"]) for e in refresh_list] == [
+            ("snapcraft", "launchpad"),  # never refreshed -> sorts first
+            ("charmcraft", "github"),
+            ("snapcraft", "github"),
         ]
+        assert all("next_refresh_at" not in e for e in refresh_list)
 
     async def test_get_project_names_excludes_aggregate_projects(
         self, test_db_session
@@ -246,29 +244,29 @@ class TestAdminService:
 
         assert project_names == ["charmcraft", "snapcraft"]
 
-    async def test_update_schedule_sets_next_refresh_dates_for_project(
-        self, test_db_session
+    @pytest.mark.parametrize(
+        ("ts", "expected"),
+        [
+            (None, None),
+            (datetime(2025, 1, 10, 0, 1, tzinfo=UTC), 0),  # today
+            (datetime(2025, 1, 9, 23, 59, tzinfo=UTC), 1),  # yesterday
+            (datetime(2025, 1, 5, 10, 0, tzinfo=UTC), 5),  # 5 days ago
+        ],
+    )
+    async def test_days_delta_uses_calendar_dates_not_floored_duration(
+        self, ts, expected
     ) -> None:
-        """Updating a project schedule rewrites its source refresh dates."""
-        await _seed_admin_data(test_db_session)
+        """`_days_delta` compares calendar dates, not a floored duration.
 
+        Regression test for the "1 day ago" bug: a timestamp from moments
+        ago used to floor to -1 day via `timedelta.days`, always rendering
+        "1 day ago" instead of "today".
+        """
         with patch(
-            "craft_dashboard.services.admin_service.datetime", FrozenScheduleDateTime
+            "craft_dashboard.services.admin_service.datetime", FrozenStatsDateTime
         ):
-            await AdminService(test_db_session).update_schedule("snapcraft", [1, 3])
-
-        result = await test_db_session.execute(
-            select(RefreshSchedule)
-            .join(Project, Project.id == RefreshSchedule.project_id)
-            .where(Project.name == "snapcraft")
-            .order_by(RefreshSchedule.source)
-        )
-        schedules = result.scalars().all()
-
-        assert [schedule.next_refresh_at for schedule in schedules] == [
-            datetime(2025, 1, 7, 9, 0),
-            datetime(2025, 1, 9, 9, 0),
-        ]
+            FrozenStatsDateTime.frozen_now = datetime(2025, 1, 10, 12, 0, tzinfo=UTC)
+            assert admin_service_module._days_delta(ts) == expected
 
 
 class TestGetRecentIssueActivity:
@@ -1159,3 +1157,84 @@ class TestQueueDepthHistory:
         history = await AdminService(test_db_session).get_queue_depth_history()
 
         assert history == []
+
+
+class TestOutdatedEvaluationCounts:
+    """Tests for AdminService.get_outdated_evaluation_counts."""
+
+    async def test_buckets_by_reason(self, test_db_session) -> None:
+        """Both seeded issues are open, evaluated, but with a null
+        eval_version — they should both land in version_outdated."""
+        await _seed_admin_data(test_db_session)
+
+        counts = await AdminService(test_db_session).get_outdated_evaluation_counts()
+
+        assert counts == {
+            "never_evaluated": 0,
+            "version_outdated": 2,
+            "content_changed": 0,
+        }
+
+    async def test_never_evaluated_issue_is_counted(self, test_db_session) -> None:
+        await _seed_admin_data(test_db_session)
+        project = (
+            (
+                await test_db_session.execute(
+                    select(Project).where(Project.name == "snapcraft")
+                )
+            )
+            .scalars()
+            .first()
+        )
+        test_db_session.add(
+            Issue(
+                project_id=project.id,
+                source="github",
+                external_id="99",
+                issue_type="issue",
+                title="Unevaluated issue",
+                body="",
+                state="open",
+                author="dev",
+                author_is_maintainer=False,
+                author_is_bot=False,
+                labels=[],
+                created_at=datetime(2025, 1, 1, tzinfo=UTC),
+                updated_at=datetime(2025, 1, 1, tzinfo=UTC),
+                closed_at=None,
+                url="https://example.com/snapcraft/issues/99",
+                metadata_={},
+                comments=[],
+                last_fetched_at=datetime(2025, 1, 1, tzinfo=UTC),
+            )
+        )
+        await test_db_session.commit()
+
+        counts = await AdminService(test_db_session).get_outdated_evaluation_counts()
+
+        assert counts["never_evaluated"] == 1
+
+    async def test_content_changed_issue_is_counted(self, test_db_session) -> None:
+        await _seed_admin_data(test_db_session)
+        issue = (
+            (await test_db_session.execute(select(Issue).order_by(Issue.id)))
+            .scalars()
+            .first()
+        )
+        issue.content_hash = "new-content"
+        evaluation = (
+            (
+                await test_db_session.execute(
+                    select(LLMEvaluation).where(LLMEvaluation.issue_id == issue.id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        evaluation.eval_version = admin_service_module.CURRENT_EVAL_VERSION
+        evaluation.issue_data_hash = "stale-content"
+        await test_db_session.commit()
+
+        counts = await AdminService(test_db_session).get_outdated_evaluation_counts()
+
+        assert counts["content_changed"] == 1

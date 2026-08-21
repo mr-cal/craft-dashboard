@@ -7,7 +7,6 @@ import logging
 import pathlib
 import sys
 import urllib.parse
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import requests
@@ -132,16 +131,14 @@ async def collection_status(
 
 
 @router.get("", response_class=HTMLResponse)
-async def admin_page(
+async def admin_overview_page(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
-    """Render the admin dashboard page."""
+    """Render the admin Overview tab: system status, collection runs, recent activity."""
     templates: Jinja2Templates = request.app.state.templates
 
     admin_service = AdminService(session)
-    lifetime_stats = await admin_service.get_lifetime_token_stats()
-    recent_stats = await admin_service.get_seven_day_token_stats()
     collection_runs = await admin_service.get_recent_collection_runs(
         filtered_issues=get_config(request).filtered_issues
     )
@@ -158,8 +155,33 @@ async def admin_page(
         logger.warning("Admin page: API budget lookup failed: %s", exc)
         api_budget = None
     next_expected_fetch = await admin_service.get_next_expected_fetch()
-    next_refresh = await admin_service.get_next_scheduled_refresh()
-    project_refresh_list = await admin_service.get_project_refresh_list()
+
+    return templates.TemplateResponse(
+        request,
+        "admin/overview.html",
+        {
+            "collection_runs": collection_runs,
+            "recent_activity": recent_activity,
+            "recent_activity_offset": 0,
+            "recent_activity_limit": _ADMIN_PAGE_SIZE,
+            "recent_activity_total": recent_activity_total,
+            "api_budget": api_budget,
+            "next_expected_fetch": next_expected_fetch,
+        },
+    )
+
+
+@router.get("/evaluations", response_class=HTMLResponse)
+async def admin_evaluations_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    """Render the admin LLM Evaluations tab."""
+    templates: Jinja2Templates = request.app.state.templates
+
+    admin_service = AdminService(session)
+    lifetime_stats = await admin_service.get_lifetime_token_stats()
+    recent_stats = await admin_service.get_seven_day_token_stats()
     llm_service_status = await admin_service.get_llm_service_status()
     (
         llm_recent_evaluations,
@@ -167,13 +189,14 @@ async def admin_page(
     ) = await admin_service.get_recent_evaluations(limit=_ADMIN_PAGE_SIZE)
     llm_daily_stats = await admin_service.get_daily_evaluation_stats()
     llm_queue_depth_history = await admin_service.get_queue_depth_history()
+    outdated_evaluation_counts = await admin_service.get_outdated_evaluation_counts(
+        filtered_issues=get_config(request).filtered_issues
+    )
 
     return templates.TemplateResponse(
         request,
-        "admin/index.html",
+        "admin/evaluations.html",
         {
-            "next_refresh": next_refresh,
-            "project_refresh_list": project_refresh_list,
             "total_evaluations": lifetime_stats["evaluations"],
             "total_tokens": lifetime_stats["tokens"],
             "total_prompt_tokens": lifetime_stats["prompt_tokens"],
@@ -182,13 +205,6 @@ async def admin_page(
             "recent_tokens": recent_stats["tokens"],
             "recent_prompt_tokens": recent_stats["prompt_tokens"],
             "recent_completion_tokens": recent_stats["completion_tokens"],
-            "collection_runs": collection_runs,
-            "recent_activity": recent_activity,
-            "recent_activity_offset": 0,
-            "recent_activity_limit": _ADMIN_PAGE_SIZE,
-            "recent_activity_total": recent_activity_total,
-            "api_budget": api_budget,
-            "next_expected_fetch": next_expected_fetch,
             "llm_service_status": llm_service_status,
             "llm_recent_evaluations": llm_recent_evaluations,
             "llm_recent_evaluations_offset": 0,
@@ -196,7 +212,26 @@ async def admin_page(
             "llm_recent_evaluations_total": llm_recent_evaluations_total,
             "llm_daily_stats": llm_daily_stats,
             "llm_queue_depth_history": llm_queue_depth_history,
+            "outdated_evaluation_counts": outdated_evaluation_counts,
         },
+    )
+
+
+@router.get("/schedule", response_class=HTMLResponse)
+async def admin_schedule_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    """Render the admin Refresh Schedule tab: the hourly rotation order."""
+    templates: Jinja2Templates = request.app.state.templates
+
+    admin_service = AdminService(session)
+    project_refresh_list = await admin_service.get_project_refresh_list()
+
+    return templates.TemplateResponse(
+        request,
+        "admin/schedule.html",
+        {"project_refresh_list": project_refresh_list},
     )
 
 
@@ -276,7 +311,7 @@ class RefreshRequest(BaseModel):
 
     project: str = ""
     force_schedule: bool = False
-    mode: str = "open"  # "open" | "full" | "all"
+    mode: str = "open"  # "open" | "full" | "all" | "rotation"
 
 
 @router.post("/refresh")
@@ -334,6 +369,7 @@ async def trigger_refresh(
         "open": "open issues only",
         "full": "scheduled full refresh",
         "all": "all issues (forced)",
+        "rotation": "next project in the hourly rotation",
     }
     msg += f" ({mode_labels.get(params.mode, params.mode)})"
     if params.force_schedule:
@@ -347,105 +383,6 @@ async def trigger_refresh(
     )
 
 
-@router.post("/distribute")
-async def distribute_refresh_schedule(
-    request: Request,
-    authorization: str = Header(default=""),
-    session: AsyncSession = Depends(get_db_session),
-) -> JSONResponse:
-    """Distribute refresh schedules evenly over the next N days by issue count.
-
-    Projects with more issues are spaced further apart so that each unit of
-    time processes roughly the same number of issues, rather than giving each
-    project an equal time slot regardless of its size.
-
-    Requires admin authentication via Bearer token.
-    """
-    from sqlalchemy import func
-
-    from craft_dashboard.models.issue import Issue
-    from craft_dashboard.models.refresh_schedule import (
-        RefreshSchedule,
-    )
-
-    _require_admin_auth(request, authorization)
-    _verify_origin(request)
-
-    settings = request.app.state.settings
-    refresh_age_days = settings.refresh_age_days
-
-    result = await session.execute(select(RefreshSchedule))
-    schedules = list(result.scalars())
-
-    if not schedules:
-        return JSONResponse(
-            {"status": "success", "message": "No schedules to distribute.", "count": 0},
-            headers=_build_toast_headers(
-                "Refresh schedule redistributed for 0 projects.", "success"
-            ),
-        )
-
-    # Get issue count per (project_id, source) so we can weight by workload.
-    issue_counts_result = await session.execute(
-        select(
-            Issue.project_id,
-            Issue.source,
-            func.count(Issue.id).label("issue_count"),
-        ).group_by(Issue.project_id, Issue.source)
-    )
-    issue_counts: dict[tuple[int, str], int] = {
-        (row.project_id, row.source): row.issue_count for row in issue_counts_result
-    }
-
-    # Assign each schedule a weight (minimum 1 so new projects still get a slot).
-    weights = [max(1, issue_counts.get((s.project_id, s.source), 0)) for s in schedules]
-
-    # Greedy bin packing: sort heaviest-first, assign each to the lightest day.
-    # This minimises the maximum-day load and gives the most even distribution.
-    order = sorted(range(len(schedules)), key=lambda i: -weights[i])
-    day_totals = [0] * refresh_age_days
-    day_assignments: list[list[int]] = [[] for _ in range(refresh_age_days)]
-
-    for orig_idx in order:
-        lightest_day = min(range(refresh_age_days), key=lambda d: day_totals[d])
-        day_assignments[lightest_day].append(orig_idx)
-        day_totals[lightest_day] += weights[orig_idx]
-
-    # Use midnight-aligned day boundaries so assignments match the calendar-day
-    # buckets that get_schedule_day_counts uses.  Start from tomorrow so nothing
-    # is scheduled in tonight's remaining hours.
-    # Stagger within the first hour of midnight UTC so the 2 AM UTC daily cron
-    # always picks up every project scheduled for that calendar day.
-    now = datetime.now(UTC)
-    tomorrow_midnight = now.replace(
-        hour=0, minute=0, second=0, microsecond=0
-    ) + timedelta(days=1)
-    for day_idx, assigned_indices in enumerate(day_assignments):
-        day_start = tomorrow_midnight + timedelta(days=day_idx)
-        for slot, orig_idx in enumerate(assigned_indices):
-            schedules[orig_idx].next_refresh_at = day_start + timedelta(seconds=slot)
-
-    await session.commit()
-    total_schedules = len(schedules)
-    logger.info(
-        "Admin: distributed %d schedules over %d days (weighted by issue count)",
-        total_schedules,
-        refresh_age_days,
-    )
-
-    return JSONResponse(
-        {
-            "status": "success",
-            "message": f"Distributed {total_schedules} schedules over {refresh_age_days} days.",
-            "count": total_schedules,
-        },
-        headers=_build_toast_headers(
-            f"Refresh schedule redistributed for {total_schedules} projects.",
-            "success",
-        ),
-    )
-
-
 @router.get("/health")
 async def admin_health(
     request: Request,
@@ -453,7 +390,7 @@ async def admin_health(
     session: AsyncSession = Depends(get_db_session),
 ) -> JSONResponse:
     """Detailed health check: DB connectivity and collection status."""
-    from sqlalchemy import select, text
+    from sqlalchemy import text
 
     from craft_dashboard.models.refresh_schedule import (
         RefreshSchedule,

@@ -41,8 +41,8 @@ def test_launchpad_exports() -> None:
 def test_scheduler_exports() -> None:
     assert hasattr(scheduler, "__all__")
     assert scheduler.__all__ == [
+        "get_least_recently_refreshed",
         "is_due_for_refresh",
-        "distribute_refresh_dates",
-        "update_refresh_schedule",
         "record_refresh_error",
+        "update_refresh_schedule",
     ]

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Refresh Schedule - Admin - craft-dashboard{% endblock %}
+{% block content %}
+<h2>Admin</h2>
+{% include "admin/partials/tabs.html" %}
+
+<div class="row--25-75">
+  <div class="col">
+    <h3>Refresh schedule</h3>
+    <p>
+      Open issues are refreshed on every run (every 10 minutes). Separately,
+      an hourly rotation picks exactly one project/source pair — whichever
+      has gone longest without a full refresh (open + closed issues) — and
+      fully refreshes it. This table shows that rotation order: the top row
+      is up next.
+    </p>
+  </div>
+  <div class="col">
+    {% if project_refresh_list %}
+    <table>
+      <thead>
+        <tr>
+          <th>Project</th>
+          <th>Source</th>
+          <th>Last full refresh</th>
+          <th>Consecutive failures</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in project_refresh_list %}
+        <tr>
+          <td>{{ entry.project }}</td>
+          <td>{{ entry.source }}</td>
+          <td style="font-size:0.875rem;">
+            {% if entry.last_refreshed_at %}
+              {% set d = entry.days_since_last %}
+              {% if d == 0 %}
+                {{ entry.last_refreshed_at.strftime('%Y-%m-%d') }} (today)
+              {% elif d == 1 %}
+                {{ entry.last_refreshed_at.strftime('%Y-%m-%d') }} (yesterday)
+              {% else %}
+                {{ entry.last_refreshed_at.strftime('%Y-%m-%d') }} ({{ d }} days ago)
+              {% endif %}
+            {% else %}
+            <span style="color:var(--app-text-muted);">never</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if entry.consecutive_failures > 0 %}
+            <span style="color:var(--app-caution);">{{ entry.consecutive_failures }}</span>
+            {% else %}
+            0
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="font-size:0.875rem;color:var(--app-text-muted);">No refresh schedule data. Run a collection first.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

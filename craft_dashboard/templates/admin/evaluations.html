@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}LLM Evaluations - Admin - craft-dashboard{% endblock %}
+{% block content %}
+<h2>Admin</h2>
+{% include "admin/partials/tabs.html" %}
+
+<div class="row--25-75">
+  <div class="col">
+    <h3>LLM token usage</h3>
+    <p>Token consumption by the LLM evaluation pipeline.</p>
+    <div style="font-size: 0.875rem; display: flex; flex-direction: column; gap: 0.25rem; margin-top: 1rem;">
+      <a href="/issues?llm_status=no_llm&state=open">View issues with no LLM data</a>
+      <a href="/issues?llm_status=partial_llm&state=open">View issues with incomplete LLM data</a>
+    </div>
+  </div>
+  <div class="col">
+    <h4>Last 7 days</h4>
+    <table>
+      <thead>
+        <tr>
+          <th>Evaluations</th>
+          <th>Total Tokens</th>
+          <th>Input Tokens</th>
+          <th>Output Tokens</th>
+          <th>Avg Tokens per Eval</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>{{ "{:,}".format(recent_evaluations) }}</td>
+          <td>{{ "{:,}".format(recent_tokens) }}</td>
+          <td>{{ "{:,}".format(recent_prompt_tokens) }}</td>
+          <td>{{ "{:,}".format(recent_completion_tokens) }}</td>
+          <td>{{ "{:,.0f}".format(recent_tokens / recent_evaluations) if recent_evaluations > 0 else "N/A" }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <h4>Lifetime</h4>
+    <table>
+      <thead>
+        <tr>
+          <th>Evaluations</th>
+          <th>Total Tokens</th>
+          <th>Input Tokens</th>
+          <th>Output Tokens</th>
+          <th>Avg Tokens per Eval</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>{{ "{:,}".format(total_evaluations) }}</td>
+          <td>{{ "{:,}".format(total_tokens) }}</td>
+          <td>{{ "{:,}".format(total_prompt_tokens) }}</td>
+          <td>{{ "{:,}".format(total_completion_tokens) }}</td>
+          <td>{{ "{:,.0f}".format(total_tokens / total_evaluations) if total_evaluations > 0 else "N/A" }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<hr class="p-rule" />
+
+<div class="row--25-75">
+  <div class="col">
+    <h3>LLM evaluation service</h3>
+    <p>Status of the continuous <code>evaluate</code> worker, and its recent output.</p>
+    {% set llm_status_labels = {
+      "running": "Running",
+      "stalled": "Stalled",
+      "stalled_quota": "Stalled (quota reached)",
+      "unknown": "Unknown",
+    } %}
+    <div class="status-grid">
+      <div class="status-card">
+        <h4>Status</h4>
+        <p>
+          <span class="system-status-indicator" data-llm-service-status="{{ llm_service_status.status }}">
+            <span class="system-status-dot status-dot--{{ llm_service_status.status }}"></span>
+            <span>{{ llm_status_labels.get(llm_service_status.status, llm_service_status.status) }}</span>
+          </span>
+        </p>
+        {% if llm_service_status.status == "stalled_quota" %}
+        <p class="status-card-subtext">Resumes {{ llm_service_status.quota_resume_at | local_datetime }}</p>
+        {% endif %}
+      </div>
+      <div class="status-card">
+        <h4>Last poll</h4>
+        <p>{{ llm_service_status.last_poll_at | local_datetime("Never") }}</p>
+      </div>
+      <div class="status-card">
+        <h4>Last result</h4>
+        <p>{{ llm_service_status.last_result_at | local_datetime("Never") }}</p>
+      </div>
+    </div>
+    <h4 style="margin-top: 1rem;">Open issues needing (re-)evaluation</h4>
+    <table>
+      <thead>
+        <tr>
+          <th>Never evaluated</th>
+          <th>Eval version outdated</th>
+          <th>Content changed since last eval</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>{{ "{:,}".format(outdated_evaluation_counts.never_evaluated) }}</td>
+          <td>{{ "{:,}".format(outdated_evaluation_counts.version_outdated) }}</td>
+          <td>{{ "{:,}".format(outdated_evaluation_counts.content_changed) }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="col">
+    <h4>Daily evaluations (last 14 days)</h4>
+    {% if llm_daily_stats %}
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Evaluations</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for day in llm_daily_stats %}
+        <tr>
+          <td>{{ day.date }}</td>
+          <td>{{ "{:,}".format(day.count) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>No evaluations recorded yet.</p>
+    {% endif %}
+    <h4 style="margin-top: 1rem;">Recent evaluations</h4>
+    {% include "admin/_recent_evaluations_rows.html" %}
+  </div>
+</div>
+
+<hr class="p-rule" />
+
+<div class="row">
+  <div class="col">
+    <h3>Eval queue depth over time</h3>
+    <p>
+      Pending issues (queued for evaluation), sampled from worker polls of
+      <code>/api/eval/next</code>. Only accumulates while some worker
+      (in-cluster or remote) is actively polling.
+    </p>
+    {% if llm_queue_depth_history %}
+    <canvas id="queue-depth-chart" height="80"></canvas>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script>
+      (function () {
+        const labels = {{ llm_queue_depth_history | map(attribute="captured_at") | map("string") | list | tojson }};
+        const pending = {{ llm_queue_depth_history | map(attribute="pending_count") | list | tojson }};
+        const totalOpen = {{ llm_queue_depth_history | map(attribute="total_open") | list | tojson }};
+        new Chart(document.getElementById("queue-depth-chart"), {
+          type: "line",
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                label: "Pending",
+                data: pending,
+                borderColor: "#c7162b",
+                backgroundColor: "rgba(199, 22, 43, 0.1)",
+                tension: 0.2,
+                pointRadius: 0,
+              },
+              {
+                label: "Total open",
+                data: totalOpen,
+                borderColor: "#0e8420",
+                backgroundColor: "rgba(14, 132, 32, 0.1)",
+                tension: 0.2,
+                pointRadius: 0,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            interaction: { mode: "index", intersect: false },
+            scales: {
+              x: { ticks: { maxTicksLimit: 8 } },
+              y: { beginAtZero: true },
+            },
+          },
+        });
+      })();
+    </script>
+    {% else %}
+    <p>No queue depth samples recorded yet.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

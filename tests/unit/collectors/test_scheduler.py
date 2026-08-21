@@ -4,10 +4,11 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from craft_dashboard.collectors.scheduler import (
-    distribute_refresh_dates,
+    get_least_recently_refreshed,
     is_due_for_refresh,
     record_refresh_error,
 )
+from craft_dashboard.models.project import Project
 from craft_dashboard.models.refresh_schedule import RefreshSchedule
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -41,50 +42,116 @@ class TestIsDueForRefresh:
         assert is_due_for_refresh(next_refresh_at=future) is False
 
 
-class TestDistributeRefreshDates:
-    """Tests for distribute_refresh_dates."""
+class TestGetLeastRecentlyRefreshed:
+    """Tests for get_least_recently_refreshed (the hourly rotation selector)."""
 
-    def test_distributes_evenly(self) -> None:
-        """Projects are spread across the interval."""
-        project_ids = [1, 2, 3]
-        interval_days = 7
+    async def test_no_projects_returns_none(self, test_db_session) -> None:
+        """With no projects at all, there's nothing to rotate to."""
+        assert await get_least_recently_refreshed(test_db_session) is None
 
-        result = distribute_refresh_dates(project_ids, interval_days)
+    async def test_never_refreshed_project_wins(self, test_db_session) -> None:
+        """A project with no RefreshSchedule row at all is most overdue."""
+        test_db_session.add_all(
+            [
+                Project(id=1, name="charmcraft", category="application"),
+                Project(id=2, name="rockcraft", category="application"),
+            ]
+        )
+        await test_db_session.flush()
+        test_db_session.add(
+            RefreshSchedule(
+                project_id=2,
+                source="github",
+                last_refreshed_at=datetime.now(tz=UTC) - timedelta(hours=1),
+            )
+        )
+        await test_db_session.commit()
 
-        assert len(result) == 3
-        # All dates should be in the future
+        result = await get_least_recently_refreshed(test_db_session)
+
+        assert result == (1, "charmcraft", "github")
+
+    async def test_oldest_last_refreshed_wins(self, test_db_session) -> None:
+        """The project refreshed longest ago is picked over a recently-refreshed one."""
         now = datetime.now(tz=UTC)
-        for pid, dt in result:
-            assert dt > now
-            assert pid in project_ids
+        test_db_session.add_all(
+            [
+                Project(id=1, name="charmcraft", category="application"),
+                Project(id=2, name="rockcraft", category="application"),
+            ]
+        )
+        await test_db_session.flush()
+        test_db_session.add_all(
+            [
+                RefreshSchedule(
+                    project_id=1,
+                    source="github",
+                    last_refreshed_at=now - timedelta(hours=1),
+                ),
+                RefreshSchedule(
+                    project_id=2,
+                    source="github",
+                    last_refreshed_at=now - timedelta(hours=5),
+                ),
+            ]
+        )
+        await test_db_session.commit()
 
-    def test_empty_projects(self) -> None:
-        """Empty project list returns empty result."""
-        result = distribute_refresh_dates([], 7)
+        result = await get_least_recently_refreshed(test_db_session)
 
-        assert result == []
+        assert result == (2, "rockcraft", "github")
 
-    def test_single_project(self) -> None:
-        """Single project gets first slot."""
-        result = distribute_refresh_dates([42], 7)
+    async def test_launchpad_project_included(self, test_db_session) -> None:
+        """Launchpad projects (category='launchpad') are eligible and labeled correctly."""
+        now = datetime.now(tz=UTC)
+        test_db_session.add_all(
+            [
+                Project(id=1, name="charmcraft", category="application"),
+                Project(id=2, name="snapcraft (launchpad)", category="launchpad"),
+            ]
+        )
+        await test_db_session.flush()
+        test_db_session.add_all(
+            [
+                RefreshSchedule(
+                    project_id=1,
+                    source="github",
+                    last_refreshed_at=now - timedelta(hours=1),
+                ),
+                RefreshSchedule(
+                    project_id=2,
+                    source="launchpad",
+                    last_refreshed_at=now - timedelta(days=1),
+                ),
+            ]
+        )
+        await test_db_session.commit()
 
-        assert len(result) == 1
-        assert result[0][0] == 42
+        result = await get_least_recently_refreshed(test_db_session)
 
-    def test_two_projects_spacing(self) -> None:
-        """Two projects should be approximately half the interval apart."""
-        result = distribute_refresh_dates([1, 2], interval_days=2)
-        assert len(result) == 2
-        gap = (result[1][1] - result[0][1]).total_seconds()
-        assert 86300 < gap < 86500
+        assert result == (2, "snapcraft (launchpad)", "launchpad")
 
-    def test_many_projects(self) -> None:
-        """Many projects all get unique times."""
-        ids = list(range(1, 21))
-        result = distribute_refresh_dates(ids, interval_days=7)
-        assert len(result) == 20
-        times = [dt for _, dt in result]
-        assert len(set(times)) == 20
+    async def test_aggregate_project_excluded(self, test_db_session) -> None:
+        """The synthetic 'all-projects' aggregate row is never selected."""
+        test_db_session.add_all(
+            [
+                Project(id=1, name="all-projects", category="aggregate"),
+                Project(id=2, name="charmcraft", category="application"),
+            ]
+        )
+        await test_db_session.flush()
+        test_db_session.add(
+            RefreshSchedule(
+                project_id=2,
+                source="github",
+                last_refreshed_at=datetime.now(tz=UTC),
+            )
+        )
+        await test_db_session.commit()
+
+        result = await get_least_recently_refreshed(test_db_session)
+
+        assert result == (2, "charmcraft", "github")
 
 
 class TestRecordRefreshError:

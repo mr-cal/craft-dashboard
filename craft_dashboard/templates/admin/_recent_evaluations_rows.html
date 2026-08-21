@@ -5,15 +5,22 @@
       <tr>
         <th>Project</th>
         <th>Issue</th>
+        <th>Title</th>
         <th>Model</th>
         <th>Verdict</th>
-        <th>Evaluated</th>
+        <th>When</th>
       </tr>
     </thead>
     <tbody>
       {% for entry in llm_recent_evaluations %}
       <tr>
         <td>{{ entry.project }}</td>
+        {% set issue_cell_project = entry.project %}
+        {% set issue_cell_number = entry.external_id %}
+        {% set issue_cell_type = entry.issue_type %}
+        {% set issue_cell_url = entry.url %}
+        {% set issue_cell_state = entry.state %}
+        {% include "components/issue_cell.html" %}
         <td><a href="/issues/{{ entry.project | urlencode_path }}/{{ entry.external_id }}">{{ entry.title }}</a></td>
         <td>{{ entry.model_name }}</td>
         <td>{{ entry.suggested_action or "Unknown" }}</td>

@@ -3,13 +3,14 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import Row, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "get_least_recently_refreshed",
     "is_due_for_refresh",
-    "distribute_refresh_dates",
-    "update_refresh_schedule",
     "record_refresh_error",
+    "update_refresh_schedule",
 ]
 
 logger = logging.getLogger(__name__)
@@ -30,34 +31,63 @@ def is_due_for_refresh(next_refresh_at: datetime | None) -> bool:
     return datetime.now(tz=UTC) >= next_refresh_at
 
 
-def distribute_refresh_dates(
-    project_ids: list[int],
-    interval_days: int,
-) -> list[tuple[int, datetime]]:
-    """Distribute refresh dates evenly across an interval.
+async def get_least_recently_refreshed(
+    session: AsyncSession,
+) -> tuple[int, str, str] | None:
+    """Return the (project_id, project_name, source) most overdue for a full refresh.
 
-    Spreads projects across the interval so API calls are distributed
-    over time rather than all happening at once.
+    Used by the hourly continuous rotation (``--mode rotation`` in
+    ``scripts/collect_data.py``) to pick exactly one project+source pair per
+    cron tick, replacing the old weekly-distributed ``next_refresh_at``
+    schedule. Every non-aggregate project (GitHub *and* Launchpad) is
+    eligible, ordered by ``RefreshSchedule.last_refreshed_at`` ascending —
+    projects never refreshed sort first, then the least-recently-refreshed
+    project, so repeated calls cycle round-robin through the full project
+    list over time.
 
-    Args:
-        project_ids: List of project database IDs.
-        interval_days: Number of days over which to spread refreshes.
+    A project's source is derived from ``Project.category`` (Launchpad
+    projects are created with ``category="launchpad"``; everything else is
+    GitHub) rather than a dedicated column, matching how
+    ``scripts/collect_data.py`` creates project rows.
 
     Returns:
-        List of (project_id, next_refresh_at) tuples.
+        None if there are no non-aggregate projects at all.
 
     """
-    if not project_ids:
-        return []
+    from craft_dashboard.models.project import Project
+    from craft_dashboard.models.refresh_schedule import RefreshSchedule
 
-    now = datetime.now(tz=UTC)
-    total_seconds = interval_days * 86400
-    interval = total_seconds / len(project_ids)
+    projects_result = await session.execute(
+        select(Project.id, Project.name, Project.category).where(
+            Project.category != "aggregate"
+        )
+    )
+    projects = list(projects_result.all())
+    if not projects:
+        return None
 
-    return [
-        (pid, now + timedelta(seconds=interval * (i + 1)))
-        for i, pid in enumerate(project_ids)
-    ]
+    schedules_result = await session.execute(
+        select(
+            RefreshSchedule.project_id,
+            RefreshSchedule.source,
+            RefreshSchedule.last_refreshed_at,
+        )
+    )
+    last_refreshed: dict[tuple[int, str], datetime | None] = {
+        (row.project_id, row.source): row.last_refreshed_at for row in schedules_result
+    }
+    never = datetime.min.replace(tzinfo=UTC)
+
+    def sort_key(row: Row) -> tuple[int, datetime, str]:
+        source = "launchpad" if row.category == "launchpad" else "github"
+        last = last_refreshed.get((row.id, source))
+        if last is None:
+            return (0, never, row.name)
+        return (1, last, row.name)
+
+    best = min(projects, key=sort_key)
+    source = "launchpad" if best.category == "launchpad" else "github"
+    return best.id, best.name, source
 
 
 async def update_refresh_schedule(
