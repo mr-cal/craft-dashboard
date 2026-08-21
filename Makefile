@@ -63,4 +63,13 @@ clean:  ## Clean build artifacts and caches
 
 .PHONY: test-e2e
 test-e2e:  ## Run end-to-end tests (requires Docker)
+	@if [ ! -d /tmp/node_modules/puppeteer ]; then \
+		echo "Installing puppeteer into /tmp/node_modules..."; \
+		npm install --prefix /tmp puppeteer; \
+	fi
+	@if [ ! -d /tmp/.cache/puppeteer/chrome ]; then \
+		echo "Installing headless Chrome into /tmp/.cache/puppeteer (required by tests/end_to_end/helpers.py, which runs scripts with HOME=/tmp)..."; \
+		mkdir -p /tmp/.cache; \
+		HOME=/tmp PUPPETEER_CACHE_DIR=/tmp/.cache/puppeteer npx --prefix /tmp puppeteer browsers install chrome; \
+	fi
 	CRAFT_DASHBOARD_E2E=1 uv run pytest tests/end_to_end/ -v -x --timeout=300
