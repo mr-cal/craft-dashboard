@@ -41,9 +41,16 @@ class Settings(BaseSettings):
     # literal ILIKE matches. Uses the same OpenRouter embedding model as
     # Issue.search_embedding/LLMEvaluation.summary_embedding so query
     # embeddings live in the same vector space.
+    #
+    # Note: text-embedding-3-small cosine similarities for genuinely related
+    # (but non-duplicate) issue text typically land around 0.30-0.45 in
+    # practice, not the ~0.70+ one might expect from a "similarity" score.
+    # We use a low floor mainly to filter out totally unrelated noise, and
+    # rely on cosine-distance ranking + semantic_search_top_n to surface the
+    # best matches rather than a high absolute cutoff.
     semantic_search_embedding_model: str = "openai/text-embedding-3-small"
     semantic_search_top_n: int = 10
-    semantic_search_similarity_threshold: float = 0.70
+    semantic_search_similarity_threshold: float = 0.25
 
     # Database pool settings
     db_pool_size: int = 5
