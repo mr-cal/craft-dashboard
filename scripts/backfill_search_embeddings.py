@@ -35,14 +35,22 @@ from craft_dashboard.models.issue import Issue
 
 logger = logging.getLogger(__name__)
 
+# openai/text-embedding-3-small has an 8191-token limit. Cap the embedded
+# text well under that (roughly 3 chars/token for typical GitHub issue
+# text) so unusually large bodies (seen in production, e.g. CI log dumps)
+# don't trigger a 400 from the embeddings endpoint.
+_MAX_EMBEDDING_TEXT_CHARS = 20_000
+
 
 def build_search_embedding_text(title: str, body: str | None) -> str:
     """Return the exact text shape used for Issue.search_embedding.
 
     Shared with ``scripts/llm/eval_worker.py`` so the backfill and the
     ongoing per-evaluation recomputation always embed the same text shape.
+    Truncated to stay within the embedding model's token limit.
     """
-    return f"{title}\n\n{body or ''}"
+    text = f"{title}\n\n{body or ''}"
+    return text[:_MAX_EMBEDDING_TEXT_CHARS]
 
 
 async def _update_batch(

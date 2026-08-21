@@ -66,6 +66,15 @@ def test_build_search_embedding_text_handles_missing_body() -> None:
     assert text == "Issue title\n\n"
 
 
+def test_build_search_embedding_text_truncates_huge_bodies() -> None:
+    huge_body = "x" * 100_000
+    text = backfill_search_embeddings.build_search_embedding_text(
+        "Issue title", huge_body
+    )
+
+    assert len(text) == backfill_search_embeddings._MAX_EMBEDDING_TEXT_CHARS
+
+
 @pytest.mark.asyncio
 async def test_run_backfill_uses_openrouter_batch_embeddings(monkeypatch) -> None:
     engine = MagicMock()
