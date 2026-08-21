@@ -157,3 +157,60 @@ async def test_run_backfill_dry_run_does_not_embed(monkeypatch) -> None:
     )
 
     embedding_client.embed_batch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_backfill_skips_row_that_fails_even_at_per_row_level(
+    monkeypatch,
+) -> None:
+    """A row whose embedding call fails even after batch fallback is skipped, not fatal."""
+    engine = MagicMock()
+    engine.dispose = AsyncMock()
+    rows = [
+        (1, "Good issue", "body"),
+        (2, "Bad issue", "body"),
+        (3, "Another good issue", "body"),
+    ]
+    session_factory = _FakeSessionFactory(rows)
+    embedding_client = MagicMock()
+    embedding_client.embed_batch = AsyncMock(
+        side_effect=RuntimeError("batch embedding failed")
+    )
+
+    async def _embed(text, dimensions):
+        del dimensions
+        if "Bad issue" in text:
+            raise RuntimeError("per-row embedding failed")
+        return [0.1, 0.2, 0.3]
+
+    embedding_client.embed = AsyncMock(side_effect=_embed)
+    embedding_client.close = AsyncMock()
+
+    monkeypatch.setattr(
+        backfill_search_embeddings,
+        "create_async_engine",
+        MagicMock(return_value=engine),
+    )
+    monkeypatch.setattr(
+        backfill_search_embeddings,
+        "sessionmaker",
+        MagicMock(return_value=session_factory),
+    )
+    monkeypatch.setattr(
+        backfill_search_embeddings,
+        "EmbeddingClient",
+        MagicMock(return_value=embedding_client),
+    )
+
+    await backfill_search_embeddings.run_backfill(
+        database_url="postgresql+asyncpg://localhost/test",
+        openrouter_api_key="test-openrouter-key",
+        embedding_model="openai/text-embedding-3-small",
+        batch_size=100,
+        limit=0,
+        dry_run=False,
+    )
+
+    # The two good rows are embedded and persisted; the bad row is skipped
+    # rather than crashing the whole backfill run.
+    assert embedding_client.embed.await_count == 3

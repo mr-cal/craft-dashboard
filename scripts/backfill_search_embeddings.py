@@ -140,9 +140,19 @@ async def run_backfill(
                         exc,
                     )
                     for issue_id, title, body in rows:
-                        embedding = await embedding_client.embed(
-                            build_search_embedding_text(title, body), dimensions=1024
-                        )
+                        try:
+                            embedding = await embedding_client.embed(
+                                build_search_embedding_text(title, body),
+                                dimensions=1024,
+                            )
+                        except Exception:
+                            logger.warning(
+                                "Skipping issue %d: embedding failed even at the"
+                                " per-row level",
+                                issue_id,
+                                exc_info=True,
+                            )
+                            continue
                         async with async_session() as session, session.begin():
                             await session.execute(
                                 update(Issue)
