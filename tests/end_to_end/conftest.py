@@ -127,7 +127,9 @@ def base_url() -> str:
         yield url
     finally:
         logger.info("Tearing down Docker Compose stack")
-        _compose("down", "-v", "--remove-orphans", check=False, timeout=60)
+        # Generous timeout: on this resource-constrained shared host, docker
+        # compose teardown itself can be slow under memory/CPU pressure.
+        _compose("down", "-v", "--remove-orphans", check=False, timeout=180)
 
 
 @pytest.fixture(scope="session")
