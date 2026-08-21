@@ -1,6 +1,7 @@
 """Tests for the data collection script logging."""
 
 import importlib.util
+import json
 import logging
 import pathlib
 from collections.abc import AsyncIterator
@@ -9,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import urllib3.exceptions
 from github import GithubException
 from sqlalchemy.dialects import postgresql as pg_dialect
 
@@ -129,6 +131,111 @@ class TestSummarizeException:
         summary = collect_data._summarize_exception(exc)
 
         assert summary == "short error"
+
+
+class TestRetryGithub:
+    """Tests for _retry_github's transient-error retry behavior.
+
+    Regression coverage for the craft-parts production incident: GitHub
+    occasionally truncates a large GraphQL response mid-stream, which
+    PyGithub surfaces as a bare TypeError, json.JSONDecodeError, or
+    urllib3/requests connection error rather than a GithubException — these
+    used to bypass retry entirely and permanently fail the collection run.
+    """
+
+    @pytest.mark.asyncio
+    async def test_retries_github_exception(self) -> None:
+        attempts = 0
+
+        async def flaky() -> str:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise GithubException(503, data=None, headers={})
+            return "ok"
+
+        collect_data._GITHUB_RETRY_BASE_SLEEP = 0
+        result = await collect_data._retry_github(flaky, "test op")
+
+        assert result == "ok"
+        assert attempts == 3
+
+    @pytest.mark.asyncio
+    async def test_retries_json_decode_error(self) -> None:
+        attempts = 0
+
+        async def flaky() -> str:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 2:
+                raise json.JSONDecodeError("Unterminated string", "{", 5)
+            return "ok"
+
+        collect_data._GITHUB_RETRY_BASE_SLEEP = 0
+        result = await collect_data._retry_github(flaky, "test op")
+
+        assert result == "ok"
+        assert attempts == 2
+
+    @pytest.mark.asyncio
+    async def test_retries_nonetype_typeerror(self) -> None:
+        """Covers PyGithub's `if "errors" in data` crashing when a truncated
+        response body causes `data` to end up `None`."""
+        attempts = 0
+
+        async def flaky() -> str:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 2:
+                raise TypeError("argument of type 'NoneType' is not iterable")
+            return "ok"
+
+        collect_data._GITHUB_RETRY_BASE_SLEEP = 0
+        result = await collect_data._retry_github(flaky, "test op")
+
+        assert result == "ok"
+        assert attempts == 2
+
+    @pytest.mark.asyncio
+    async def test_retries_protocol_error(self) -> None:
+        attempts = 0
+
+        async def flaky() -> str:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 2:
+                raise urllib3.exceptions.ProtocolError("Response ended prematurely")
+            return "ok"
+
+        collect_data._GITHUB_RETRY_BASE_SLEEP = 0
+        result = await collect_data._retry_github(flaky, "test op")
+
+        assert result == "ok"
+        assert attempts == 2
+
+    @pytest.mark.asyncio
+    async def test_reraises_transient_error_after_exhausting_attempts(self) -> None:
+        async def always_fails() -> str:
+            raise json.JSONDecodeError("Unterminated string", "{", 5)
+
+        collect_data._GITHUB_RETRY_BASE_SLEEP = 0
+        with pytest.raises(json.JSONDecodeError):
+            await collect_data._retry_github(always_fails, "test op")
+
+    @pytest.mark.asyncio
+    async def test_does_not_retry_unrelated_exception(self) -> None:
+        attempts = 0
+
+        async def flaky() -> str:
+            nonlocal attempts
+            attempts += 1
+            raise ValueError("not a transient/network error")
+
+        collect_data._GITHUB_RETRY_BASE_SLEEP = 0
+        with pytest.raises(ValueError, match="not a transient/network error"):
+            await collect_data._retry_github(flaky, "test op")
+
+        assert attempts == 1
 
 
 class TestCollectGithubLogging:
