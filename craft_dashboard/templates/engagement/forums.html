@@ -10,8 +10,8 @@
     <div class="col-12">
       <h2>Forum activity</h2>
       <p>
-        Monthly post counts across the snapcraft, charmhub, and rockcraft
-        Discourse forums (every category tracked, not just a curated subset).
+        New topics per day (rolling average) across the snapcraft, charmhub, and
+        discourse Discourse forums (every category tracked, not just a curated subset).
         Toggle "all categories" or individual categories to compare activity over time.
       </p>
       <div id="engagement-loading" style="text-align:center;padding:2rem;">
@@ -21,17 +21,46 @@
   </div>
 </div>
 
+<!-- Filters Section -->
+<div class="p-strip is-shallow">
+  <div class="row">
+    <div class="col-12" style="display:flex;flex-wrap:wrap;gap:1.5rem;align-items:flex-end;">
+
+      <!-- Date Range -->
+      <div class="filter-group">
+        <label>Date Range</label>
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+          <input type="date" id="date-start" />
+          <span>to</span>
+          <input type="date" id="date-end" />
+          <button class="p-button--neutral is-small" id="btn-date-apply">Apply</button>
+          <button class="p-button--neutral is-small" id="btn-date-reset">Reset</button>
+        </div>
+      </div>
+
+      <!-- Tooltip toggle -->
+      <div class="filter-group" style="align-self:flex-end;">
+        <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;">
+          <input type="checkbox" id="hide-tooltips" />
+          Hide tooltips
+        </label>
+      </div>
+
+    </div>
+  </div>
+</div>
+
 {% for forum in forums %}
 <div class="row"><hr class="p-rule" /></div>
 <div class="p-strip" data-forum-section="{{ forum.name }}">
   <div class="row">
     <div class="col-12">
-      <h3 class="p-heading--4">{{ forum.name }}</h3>
+      <h3 class="p-heading--4">{{ forum.display_name }}</h3>
       <p><a href="{{ forum.base_url }}" target="_blank" rel="noopener">{{ forum.base_url }}</a></p>
     </div>
   </div>
   <div class="row">
-    <div class="col-3">
+    <div class="col-3" style="max-height:70vh;overflow-y:auto;">
       <h4 class="p-heading--5">Categories</h4>
       <div
         id="engagement-{{ forum.name }}-checkboxes"
@@ -39,12 +68,13 @@
       ></div>
     </div>
     <div class="col-9">
-      <canvas
-        id="engagement-{{ forum.name }}-chart"
-        role="img"
-        aria-label="Line chart showing monthly post counts for {{ forum.name }} by category"
-        style="width:100%;height:400px;"
-      ></canvas>
+      <div data-engagement-chart-wrapper style="position:relative;width:100%;height:400px;">
+        <canvas
+          id="engagement-{{ forum.name }}-chart"
+          role="img"
+          aria-label="Line chart showing new topics per day for {{ forum.display_name }} by category"
+        ></canvas>
+      </div>
     </div>
   </div>
 </div>

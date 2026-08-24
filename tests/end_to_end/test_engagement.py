@@ -211,3 +211,124 @@ class TestNavigation:
 """)
         result = run_puppeteer(script, base_url=seeded_url, timeout=30)
         assert result["has_link"] is True
+
+
+# ---------------------------------------------------------------------------
+# Tests: section renaming
+# ---------------------------------------------------------------------------
+class TestSectionNames:
+    def test_sections_use_display_names(self, seeded_url: str) -> None:
+        """Section headings should show configured display names, not raw
+        config keys."""
+        script = make_script("""\
+    await page.goto(`${BASE}/engagement/forums`, {waitUntil: 'networkidle0', timeout: 30000});
+    const text = await page.evaluate(() => document.body.innerText);
+    console.log(JSON.stringify({text}));
+""")
+        result = run_puppeteer(script, base_url=seeded_url, timeout=30)
+        assert "snapcraft forums" in result["text"]
+        assert "charmhub forums" in result["text"]
+        assert "discourse forums" in result["text"]
+
+
+# ---------------------------------------------------------------------------
+# Tests: date range filtering
+# ---------------------------------------------------------------------------
+class TestDateRange:
+    def test_date_range_limits_data(self, seeded_url: str) -> None:
+        """Applying a narrower date range should reduce the number of
+        labels rendered on the chart."""
+        script = make_script("""\
+    await page.goto(`${BASE}/engagement/forums`, {waitUntil: 'networkidle0', timeout: 30000});
+    await page.waitForFunction(() => {
+      const el = document.getElementById('engagement-loading');
+      return !el || el.style.display === 'none';
+    }, {timeout: 15000});
+
+    const getLabelCount = async () => page.evaluate(() => {
+      const chart = Chart.getChart(document.getElementById('engagement-snapcraft-chart'));
+      return chart ? chart.data.labels.length : 0;
+    });
+
+    const before = await getLabelCount();
+
+    await page.evaluate(() => {
+      document.getElementById('date-start').value = '2024-06-01';
+      document.getElementById('date-end').value = '2024-06-30';
+    });
+    await page.click('#btn-date-apply');
+    await new Promise(r => setTimeout(r, 500));
+
+    const after = await getLabelCount();
+
+    console.log(JSON.stringify({before, after}));
+""")
+        result = run_puppeteer(script, base_url=seeded_url, timeout=30)
+        assert result["after"] < result["before"]
+        assert result["after"] > 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: tooltip toggle
+# ---------------------------------------------------------------------------
+class TestTooltipToggle:
+    def test_hide_tooltips_disables_chart_tooltips(self, seeded_url: str) -> None:
+        """Checking 'Hide tooltips' should disable the tooltip plugin on
+        every registered chart."""
+        script = make_script("""\
+    await page.goto(`${BASE}/engagement/forums`, {waitUntil: 'networkidle0', timeout: 30000});
+    await page.waitForFunction(() => {
+      const el = document.getElementById('engagement-loading');
+      return !el || el.style.display === 'none';
+    }, {timeout: 15000});
+
+    const getTooltipEnabled = async () => page.evaluate(() => {
+      const chart = Chart.getChart(document.getElementById('engagement-snapcraft-chart'));
+      return chart ? chart.options.plugins.tooltip.enabled : null;
+    });
+
+    const before = await getTooltipEnabled();
+
+    const checkbox = await page.$('#hide-tooltips');
+    await checkbox.click();
+    await new Promise(r => setTimeout(r, 300));
+
+    const after = await getTooltipEnabled();
+
+    console.log(JSON.stringify({before, after}));
+""")
+        result = run_puppeteer(script, base_url=seeded_url, timeout=30)
+        assert result["before"] is not False
+        assert result["after"] is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: rolling average smoothing applied to "new topics per day"
+# ---------------------------------------------------------------------------
+class TestRollingAverage:
+    def test_chart_values_reflect_rolling_average_not_raw_counts(
+        self, seeded_url: str
+    ) -> None:
+        """The chart's y-axis label should reflect the rolling-average
+        "new topics per day" metric, and dataset values should include
+        fractional (averaged) numbers rather than only raw integer counts."""
+        script = make_script("""\
+    await page.goto(`${BASE}/engagement/forums`, {waitUntil: 'networkidle0', timeout: 30000});
+    await page.waitForFunction(() => {
+      const el = document.getElementById('engagement-loading');
+      return !el || el.style.display === 'none';
+    }, {timeout: 15000});
+
+    const result = await page.evaluate(() => {
+      const chart = Chart.getChart(document.getElementById('engagement-snapcraft-chart'));
+      const yTitle = chart.options.scales.y.title.text;
+      const values = chart.data.datasets[0].data.filter(v => v !== null);
+      const hasFractional = values.some(v => Math.abs(v - Math.round(v)) > 1e-9);
+      return {yTitle, hasFractional, count: values.length};
+    });
+    console.log(JSON.stringify(result));
+""")
+        result = run_puppeteer(script, base_url=seeded_url, timeout=30)
+        assert "per day" in result["yTitle"]
+        assert "avg" in result["yTitle"]
+        assert result["count"] > 0

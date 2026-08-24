@@ -41,6 +41,7 @@ async def forums_page(
         forums.append(
             {
                 "name": name,
+                "display_name": forum_config.display_name or f"{name} forum",
                 "base_url": forum_config.base_url,
                 "categories": categories,
                 "default_categories": list(forum_config.default_categories),
@@ -59,15 +60,15 @@ async def forums_data(
     session: AsyncSession = Depends(get_db_session),
     forum: str = Query(...),
 ) -> JSONResponse:
-    """Return monthly post-count series for a forum, one per category plus "all".
+    """Return daily new-topic-count series for a forum, one per category plus "all".
 
-    Buckets every topic by the month it was created in and sums
-    ``posts_count`` (the topic's total reply count as of the last
-    collector run) into that month — matching the topic-level-aggregate
-    storage model described in plans/33-forum-activity-tracker.md (no
-    individual post bodies/timestamps are stored). Returns every category's
-    series in one response so the frontend can toggle visibility locally
-    without a round trip per checkbox change.
+    Buckets every topic by the day it was created and counts the number of
+    new topics created that day, per category (plus an "all categories"
+    series). This uses each topic's exact creation timestamp, which is
+    precise, unlike ``posts_count`` (a topic's total reply count as of the
+    last collector run, not tied to when individual replies happened).
+    Returns every category's series in one response so the frontend can
+    toggle visibility locally without a round trip per checkbox change.
     """
     exists = await session.scalar(
         select(ForumBackfillState.id).where(ForumBackfillState.forum == forum).limit(1)
@@ -80,26 +81,26 @@ async def forums_data(
         raise HTTPException(status_code=404, detail=f"Forum '{forum}' not found")
 
     result = await session.execute(
-        select(
-            ForumTopic.created_at, ForumTopic.posts_count, ForumTopic.category
-        ).where(ForumTopic.forum == forum)
+        select(ForumTopic.created_at, ForumTopic.category).where(
+            ForumTopic.forum == forum
+        )
     )
 
-    all_by_month: dict[str, int] = defaultdict(int)
-    category_by_month: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    all_by_day: dict[str, int] = defaultdict(int)
+    category_by_day: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     for row in result:
-        month_key = row.created_at.strftime("%Y-%m")
-        all_by_month[month_key] += row.posts_count
-        category_by_month[row.category][month_key] += row.posts_count
+        day_key = row.created_at.strftime("%Y-%m-%d")
+        all_by_day[day_key] += 1
+        category_by_day[row.category][day_key] += 1
 
-    months = sorted(all_by_month)
-    all_series = [all_by_month[m] for m in months]
+    days = sorted(all_by_day)
+    all_series = [all_by_day[d] for d in days]
     categories_series = {
-        category: [by_month.get(m, 0) for m in months]
-        for category, by_month in sorted(category_by_month.items())
+        category: [by_day.get(d, 0) for d in days]
+        for category, by_day in sorted(category_by_day.items())
     }
 
     return JSONResponse(
-        {"months": months, "all": all_series, "categories": categories_series}
+        {"days": days, "all": all_series, "categories": categories_series}
     )

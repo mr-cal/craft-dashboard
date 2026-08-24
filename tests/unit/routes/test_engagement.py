@@ -33,7 +33,10 @@ def _config() -> DashboardConfig:
                 base_url="https://forum.snapcraft.io",
                 default_categories=["general"],
             ),
-            "charmcraft": ForumConfig(base_url="https://discourse.charmhub.io"),
+            "charmcraft": ForumConfig(
+                base_url="https://discourse.charmhub.io",
+                display_name="charmhub forums",
+            ),
         },
     )
 
@@ -90,6 +93,18 @@ class TestForumsPage:
         assert 'data-forum-section="snapcraft"' in response.text
         assert 'data-forum-section="charmcraft"' in response.text
 
+    def test_uses_configured_display_name_with_fallback(
+        self, test_client: TestClient
+    ) -> None:
+        """snapcraft has no display_name configured in _config(), so falls
+        back to "{name} forum"; charmcraft's configured display_name is used
+        verbatim."""
+        response = test_client.get("/engagement/forums")
+
+        assert response.status_code == 200
+        assert "snapcraft forum<" in response.text
+        assert "charmhub forums<" in response.text
+
     def test_nav_shows_engagement_link(self, test_client: TestClient) -> None:
         response = test_client.get("/engagement/forums")
 
@@ -129,7 +144,7 @@ class TestForumsData:
 
         assert response.status_code == 404
 
-    async def test_buckets_posts_by_month(
+    async def test_buckets_topics_per_day(
         self, test_client: TestClient, test_db_session: AsyncSession
     ) -> None:
         test_db_session.add_all(
@@ -144,7 +159,7 @@ class TestForumsData:
                 _topic(
                     "snapcraft",
                     2,
-                    created_at=datetime(2024, 3, 20, tzinfo=UTC),
+                    created_at=datetime(2024, 3, 5, tzinfo=UTC),
                     posts_count=6,
                     category="questions",
                 ),
@@ -163,10 +178,10 @@ class TestForumsData:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["months"] == ["2024-03", "2024-04"]
-        assert data["all"] == [10, 2]
-        assert data["categories"]["bugs"] == [4, 2]
-        assert data["categories"]["questions"] == [6, 0]
+        assert data["days"] == ["2024-03-05", "2024-04-01"]
+        assert data["all"] == [2, 1]
+        assert data["categories"]["bugs"] == [1, 1]
+        assert data["categories"]["questions"] == [1, 0]
 
     async def test_forum_known_via_backfill_state_but_no_topics_returns_empty_series(
         self, test_client: TestClient, test_db_session: AsyncSession
@@ -182,5 +197,5 @@ class TestForumsData:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["months"] == []
+        assert data["days"] == []
         assert data["all"] == []

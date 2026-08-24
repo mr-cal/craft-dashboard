@@ -114,11 +114,14 @@ rockcraft = "1.15"
 [forums.snapcraft]
 base-url = "https://forum.snapcraft.io"
 default-categories = ["snapcraft"]
+display-name = "snapcraft forums"
 
 [forums.charmcraft]
 base-url = "https://discourse.charmhub.io"
 default-categories = []
+display-name = "charmhub forums"
 
 [forums.rockcraft]
 base-url = "https://discourse.ubuntu.com"
 default-categories = []
+display-name = "discourse forums"

@@ -27,6 +27,9 @@ class ForumConfig(BaseModel):
     #: Categories pre-checked by default on the Engagement forum-activity
     #: graph, alongside the always-default-checked "all categories" series.
     default_categories: list[str] = Field(default_factory=list)
+    #: Human-readable section heading on the Engagement page (e.g.
+    #: "snapcraft forums"). Falls back to "{key} forum" if not configured.
+    display_name: str | None = None
 
     @classmethod
     def validate(cls, value: object) -> ForumConfig:

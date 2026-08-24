@@ -134,6 +134,7 @@ class TestDashboardConfig:
                 [forums.snapcraft]
                 base-url = "https://forum.snapcraft.io"
                 default-categories = ["snapcraft", "questions"]
+                display-name = "snapcraft forums"
 
                 [forums.charmcraft]
                 base-url = "https://discourse.charmhub.io"
@@ -148,8 +149,10 @@ class TestDashboardConfig:
             "snapcraft",
             "questions",
         ]
-        # default_categories is optional and defaults to an empty list.
+        assert config.forums["snapcraft"].display_name == "snapcraft forums"
+        # default_categories and display_name are optional.
         assert config.forums["charmcraft"].default_categories == []
+        assert config.forums["charmcraft"].display_name is None
 
     def test_load_config_forum_has_no_categories_field(
         self, tmp_path: pathlib.Path

@@ -1,155 +1,78 @@
 // Engagement page: one Chart.js line graph per Discourse forum, with a flat
-// per-category checkbox filter ("all categories" + individual categories)
-// mirroring the checkbox/chart patterns in trends.js.
+// per-category checkbox filter ("all categories" + individual categories),
+// a rolling-average smoothed "new topics per day" metric, and shared
+// date-range/tooltip-toggle controls (see chart-common.js).
+
+import {
+  CHART_COLORS,
+  createChartRegistry,
+  createCheckboxItem,
+  rollingAverage,
+  wireDateRangeFilter,
+} from "/static/js/chart-common.js";
+
+const ROLLING_WINDOW_DAYS = 30;
+const DEFAULT_START_DATE = "2017-01-01";
 
 try {
-  const CHART_COLORS = {
-    palette: [
-      "#E95420", "#0E8420", "#0066CC", "#772953", "#AEA79F",
-      "#333333", "#007AA6", "#C7162B", "#F99B11", "#38B44A",
-      "#5E2750", "#77216F", "#335280",
-    ],
-  };
-
   const rootElement = document.documentElement;
-  const registeredCharts = [];
-
-  function getThemeColors() {
-    const themeName = rootElement.dataset.theme;
-    const isDark = document.documentElement.classList.contains("is-dark-theme") || themeName === "dark";
-    const textColor = isDark ? "#f3f3f3" : "#111";
-    const gridColor = isDark ? "#4b5563" : "#e5e5e5";
-    return { isDark, textColor, gridColor };
-  }
-
-  function applyChartDefaults() {
-    const { textColor, gridColor } = getThemeColors();
-    Chart.defaults.color = textColor;
-    Chart.defaults.borderColor = gridColor;
-    return { textColor, gridColor };
-  }
-
-  function applyScaleTheme(scales, themeColors) {
-    Object.values(scales || {}).forEach((scale) => {
-      if (!scale) return;
-      scale.grid = { ...(scale.grid || {}), color: themeColors.gridColor };
-      scale.border = { ...(scale.border || {}), color: themeColors.gridColor };
-      scale.ticks = { ...(scale.ticks || {}), color: themeColors.textColor };
-      if (scale.title) {
-        scale.title = { ...scale.title, color: themeColors.textColor };
-      }
-    });
-  }
-
-  function applyChartTheme(chart) {
-    const themeColors = applyChartDefaults();
-    applyScaleTheme(chart.options.scales, themeColors);
-    if (chart.options.plugins?.legend?.labels) {
-      chart.options.plugins.legend.labels.color = themeColors.textColor;
-    }
-    if (chart.options.plugins?.tooltip) {
-      chart.options.plugins.tooltip.titleColor = themeColors.textColor;
-      chart.options.plugins.tooltip.bodyColor = themeColors.textColor;
-      chart.options.plugins.tooltip.borderColor = themeColors.gridColor;
-      chart.options.plugins.tooltip.backgroundColor = themeColors.isDark ? "#111827" : "#ffffff";
-    }
-  }
-
-  function registerChart(chart) {
-    applyChartTheme(chart);
-    registeredCharts.push(chart);
-    return chart;
-  }
-
-  function createCheckboxItem(container, { id, label, checked, onChange, color }) {
-    const labelEl = document.createElement("label");
-    labelEl.style.cssText = "display:flex;align-items:center;gap:0.4rem;cursor:pointer;margin-bottom:0.3rem;";
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.id = id;
-    cb.checked = checked;
-    cb.addEventListener("change", () => onChange(cb.checked));
-    labelEl.appendChild(cb);
-    if (color) {
-      const swatch = document.createElement("span");
-      swatch.style.cssText = `display:inline-block;width:12px;height:12px;flex-shrink:0;background:${color};border:1px solid #666;`;
-      labelEl.appendChild(swatch);
-    }
-    labelEl.appendChild(document.createTextNode(label));
-    container.appendChild(labelEl);
-  }
-
-  function createLineChart(canvasId, yLabel) {
-    const themeColors = applyChartDefaults();
-    return registerChart(new Chart(document.getElementById(canvasId), {
-      type: "line",
-      data: { labels: [], datasets: [] },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        elements: { point: { radius: 0 } },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            mode: "index",
-            intersect: false,
-            titleColor: themeColors.textColor,
-            bodyColor: themeColors.textColor,
-            borderColor: themeColors.gridColor,
-            backgroundColor: themeColors.isDark ? "#111827" : "#ffffff",
-          },
-        },
-        scales: {
-          x: {
-            display: true,
-            title: { display: true, text: "Month", color: themeColors.textColor },
-            ticks: { color: themeColors.textColor },
-            grid: { color: themeColors.gridColor },
-            border: { color: themeColors.gridColor },
-          },
-          y: {
-            display: true,
-            beginAtZero: true,
-            title: { display: true, text: yLabel, color: themeColors.textColor },
-            ticks: { precision: 0, color: themeColors.textColor },
-            grid: { color: themeColors.gridColor },
-            border: { color: themeColors.gridColor },
-          },
-        },
-        interaction: { mode: "nearest", axis: "x", intersect: false },
-      },
-    }));
-  }
+  const registry = createChartRegistry(rootElement);
+  const { createLineChart, registeredCharts } = registry;
 
   const forums = window.ENGAGEMENT_FORUMS || [];
-  const forumData = {}; // name -> { months, all, categories }
+  const forumData = {}; // name -> { days, all, categories }
+  const forumCharts = {}; // name -> Chart
 
   async function loadForum(forum) {
     const response = await fetch(`/engagement/forums/data?forum=${encodeURIComponent(forum.name)}`);
     if (!response.ok) {
       // No data yet (e.g. backfill hasn't run) — leave the chart empty
       // rather than failing the whole page.
-      forumData[forum.name] = { months: [], all: [], categories: {} };
+      forumData[forum.name] = { days: [], all: [], categories: {} };
       return;
     }
     forumData[forum.name] = await response.json();
   }
 
-  function updateForumChart(forum, chart) {
-    const data = forumData[forum.name];
-    const checkboxContainer = document.getElementById(`engagement-${forum.name}-checkboxes`);
+  // Slice a forum's day-bucketed data to [startDate, endDate], returning a
+  // new data object shaped like the raw fetch response.
+  function sliceForumData(data, startDate, endDate) {
+    const days = data.days;
+    let startIdx = days.findIndex((d) => new Date(d) >= startDate);
+    let endIdx = days.findLastIndex((d) => new Date(d) <= endDate);
+    if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) {
+      return { days: [], all: [], categories: {} };
+    }
+    const categories = {};
+    for (const [category, series] of Object.entries(data.categories)) {
+      categories[category] = series.slice(startIdx, endIdx + 1);
+    }
+    return {
+      days: days.slice(startIdx, endIdx + 1),
+      all: data.all.slice(startIdx, endIdx + 1),
+      categories,
+    };
+  }
+
+  let currentRange = null; // { startDate, endDate } | null (null = unfiltered)
+
+  function updateForumChart(forum) {
+    const chart = forumCharts[forum.name];
+    const raw = forumData[forum.name];
+    const data = currentRange ? sliceForumData(raw, currentRange.startDate, currentRange.endDate) : raw;
+
     const selectedCategories = forum.categories.filter((category) => {
       const cb = document.getElementById(`engagement-${forum.name}-category-${category}`);
       return cb?.checked;
     });
     const allCategoriesCb = document.getElementById(`engagement-${forum.name}-all-categories`);
 
-    chart.data.labels = data.months;
+    chart.data.labels = data.days;
     const datasets = [];
     if (allCategoriesCb?.checked) {
       datasets.push({
         label: "all categories",
-        data: data.all,
+        data: rollingAverage(data.all, ROLLING_WINDOW_DAYS),
         borderColor: CHART_COLORS.palette[0],
         backgroundColor: CHART_COLORS.palette[0] + "20",
         borderWidth: 2,
@@ -159,9 +82,10 @@ try {
     }
     selectedCategories.forEach((category, i) => {
       const color = CHART_COLORS.palette[(i + 1) % CHART_COLORS.palette.length];
+      const series = data.categories[category] || data.days.map(() => 0);
       datasets.push({
         label: category,
-        data: data.categories[category] || data.months.map(() => 0),
+        data: rollingAverage(series, ROLLING_WINDOW_DAYS),
         borderColor: color,
         backgroundColor: color + "20",
         borderWidth: 2,
@@ -171,10 +95,13 @@ try {
     });
     chart.data.datasets = datasets;
     chart.update();
-    void checkboxContainer; // referenced for clarity; no direct manipulation needed here
   }
 
-  function populateForumCheckboxes(forum, chart) {
+  function updateAllCharts() {
+    forums.forEach((forum) => updateForumChart(forum));
+  }
+
+  function populateForumCheckboxes(forum) {
     const container = document.getElementById(`engagement-${forum.name}-checkboxes`);
     const defaultCategories = new Set(
       (container.dataset.defaultCategories || "")
@@ -187,7 +114,7 @@ try {
       id: `engagement-${forum.name}-all-categories`,
       label: "all categories",
       checked: true,
-      onChange: () => updateForumChart(forum, chart),
+      onChange: () => updateForumChart(forum),
       color: CHART_COLORS.palette[0],
     });
 
@@ -196,7 +123,7 @@ try {
         id: `engagement-${forum.name}-category-${category}`,
         label: category,
         checked: defaultCategories.has(category),
-        onChange: () => updateForumChart(forum, chart),
+        onChange: () => updateForumChart(forum),
         color: CHART_COLORS.palette[(i + 1) % CHART_COLORS.palette.length],
       });
     });
@@ -205,18 +132,39 @@ try {
   await Promise.all(forums.map(loadForum));
 
   forums.forEach((forum) => {
-    const chart = createLineChart(`engagement-${forum.name}-chart`, "Posts per month");
-    populateForumCheckboxes(forum, chart);
-    updateForumChart(forum, chart);
+    const chart = createLineChart(
+      `engagement-${forum.name}-chart`,
+      `New topics per day (${ROLLING_WINDOW_DAYS}-day avg)`,
+      "Date"
+    );
+    forumCharts[forum.name] = chart;
+    populateForumCheckboxes(forum);
+    updateForumChart(forum);
   });
 
-  const themeObserver = new MutationObserver(() => {
-    registeredCharts.forEach((chart) => {
-      applyChartTheme(chart);
-      chart.update("none");
-    });
+  registry.watchTheme();
+  registry.wireTooltipToggle("hide-tooltips");
+
+  // Cap each chart's rendered height to a fraction of the viewport height,
+  // so forums with very large category lists (e.g. discourse forums, with
+  // 100+ categories) don't stretch the chart column to match the tall
+  // checkbox column.
+  const MAX_CHART_VH = 70;
+  document.querySelectorAll("[data-engagement-chart-wrapper]").forEach((wrapper) => {
+    wrapper.style.maxHeight = `${MAX_CHART_VH}vh`;
   });
-  themeObserver.observe(rootElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
+
+  const startInput = document.getElementById("date-start");
+  if (startInput) {
+    startInput.dataset.defaultStart = DEFAULT_START_DATE;
+  }
+  wireDateRangeFilter({
+    onApply: (startDate, endDate) => {
+      currentRange = { startDate, endDate };
+      updateAllCharts();
+    },
+  });
+  document.getElementById("btn-date-reset").click();
 
   document.getElementById("engagement-loading").style.display = "none";
 } catch (error) {
