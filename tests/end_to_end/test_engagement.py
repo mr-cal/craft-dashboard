@@ -84,6 +84,39 @@ class TestChartRendering:
             assert len(chart["labels"]) > 0, f"{forum} chart has no month labels"
             assert len(chart["datasets"]) > 0, f"{forum} chart has no datasets"
 
+    def test_chart_canvas_fills_its_wrapper(self, seeded_url: str) -> None:
+        """The canvas must be sized to its wrapper div (width/height: 100%),
+        not left at Chart.js's tiny default 300x150 canvas size — a
+        regression where the canvas ends up rendering at ~20% of the
+        intended chart area."""
+        script = make_script("""\
+    await page.goto(`${BASE}/engagement/forums`, {waitUntil: 'networkidle0', timeout: 30000});
+    await page.waitForFunction(() => {
+      const el = document.getElementById('engagement-loading');
+      return !el || el.style.display === 'none';
+    }, {timeout: 15000});
+
+    const result = await page.evaluate(() => {
+      const wrapper = document.querySelector('[data-engagement-chart-wrapper]');
+      const canvas = wrapper.querySelector('canvas');
+      const w = wrapper.getBoundingClientRect();
+      const c = canvas.getBoundingClientRect();
+      return {
+        wrapperHeight: w.height,
+        canvasHeight: c.height,
+        wrapperWidth: w.width,
+        canvasWidth: c.width,
+      };
+    });
+    console.log(JSON.stringify(result));
+""")
+        result = run_puppeteer(script, base_url=seeded_url, timeout=30)
+        # Canvas should closely match its wrapper's dimensions (allowing a
+        # small margin for borders/rounding), not the Chart.js default
+        # 300x150 fallback.
+        assert result["canvasWidth"] >= result["wrapperWidth"] * 0.9
+        assert result["canvasHeight"] >= result["wrapperHeight"] * 0.9
+
     def test_default_categories_are_shown_by_default(self, seeded_url: str) -> None:
         """On first load, only 'all categories' (plus any per-forum default
         categories) should be visible as datasets — other categories start
