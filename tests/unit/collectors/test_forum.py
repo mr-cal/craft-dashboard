@@ -322,6 +322,45 @@ class TestBackfillNextBatch:
         )
         assert state.category_progress["7"]["done"] is True
 
+    async def test_fully_drains_a_single_large_category_within_budget(
+        self, collector: ForumCollector, test_db_session: AsyncSession
+    ) -> None:
+        """A category spanning several pages is fully drained in one batch
+        call rather than only advancing by a single page, so the request
+        budget isn't wasted once only a few large categories remain."""
+        collector.years_lookback = 50  # avoid the cutoff tripping on fixture dates
+        responses = iter(
+            [
+                _single_category_response(),
+                _category_page_response(
+                    "https://forum.example.io", "bugs", 7, [_make_topic(1)], more=True
+                ),
+                _category_page_response(
+                    "https://forum.example.io", "bugs", 7, [_make_topic(2)], more=True
+                ),
+                _category_page_response(
+                    "https://forum.example.io", "bugs", 7, [_make_topic(3)], more=False
+                ),
+            ]
+        )
+
+        async def _fake_get(_self, url, params=None, **_kw):
+            return next(responses)
+
+        with (
+            patch("httpx.AsyncClient.get", new=_fake_get),
+            patch("craft_dashboard.collectors.forum.insert", new=sqlite_insert),
+        ):
+            count = await collector.backfill_next_batch(
+                "snapcraft", test_db_session, max_requests=10
+            )
+
+        assert count == 3
+        state = await test_db_session.scalar(
+            select(ForumBackfillState).where(ForumBackfillState.forum == "snapcraft")
+        )
+        assert state.category_progress["7"]["done"] is True
+
     async def test_respects_max_requests_across_categories(
         self, collector: ForumCollector, test_db_session: AsyncSession
     ) -> None:

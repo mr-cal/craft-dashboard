@@ -367,31 +367,35 @@ class ForumCollector:
                 break
             cat_key = str(category_id)
             cat_progress = dict(progress.get(cat_key, {"next_page": 0, "done": False}))
-            if cat_progress.get("done"):
-                continue
 
-            page = cat_progress["next_page"]
-            topics, more_url = await self._get_category_topics_page(
-                config.base_url, slug, category_id, page
-            )
-            requests_made += 1
+            # Keep paging through *this* category until it's done or the
+            # batch's request budget runs out, rather than moving on after
+            # a single page — otherwise, once most categories are done, a
+            # handful of large remaining categories would each advance by
+            # only one page per call, wasting the rest of max_requests.
+            while not cat_progress.get("done") and requests_made < max_requests:
+                page = cat_progress["next_page"]
+                topics, more_url = await self._get_category_topics_page(
+                    config.base_url, slug, category_id, page
+                )
+                requests_made += 1
 
-            if not topics:
-                cat_progress["done"] = True
-                progress[cat_key] = cat_progress
-                continue
+                if not topics:
+                    cat_progress["done"] = True
+                    break
 
-            topics_upserted += await self._upsert_topics(
-                forum, slug, config.base_url, topics, session
-            )
-            oldest_seen = min(
-                _parse_discourse_datetime(t["created_at"]) for t in topics
-            )
-            reached_cutoff = oldest_seen.date() < oldest_target
-            if more_url is None or reached_cutoff:
-                cat_progress["done"] = True
-            else:
-                cat_progress["next_page"] = page + 1
+                topics_upserted += await self._upsert_topics(
+                    forum, slug, config.base_url, topics, session
+                )
+                oldest_seen = min(
+                    _parse_discourse_datetime(t["created_at"]) for t in topics
+                )
+                reached_cutoff = oldest_seen.date() < oldest_target
+                if more_url is None or reached_cutoff:
+                    cat_progress["done"] = True
+                else:
+                    cat_progress["next_page"] = page + 1
+
             progress[cat_key] = cat_progress
 
         state.category_progress = progress
