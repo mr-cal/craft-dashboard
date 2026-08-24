@@ -3,13 +3,15 @@
 
 Two complementary jobs keep forum data current:
 
-* **backfill** — walks one not-yet-covered month backward per run, per
-  forum, until ``years-lookback`` (default 7 years) of history is covered.
-  Intended to run frequently (e.g. every 15 minutes) so the initial
-  historical backfill completes in a reasonable number of days without
-  ever issuing a long-running blocking request.
-* **refresh** — re-fetches the current month (and the previous month, if it
-  ended after the last refresh) for every forum whose
+* **backfill** — advances each forum's historical backfill by up to
+  ``--max-requests-per-batch`` category-listing pages per run, resuming a
+  persisted per-category cursor so a full historical scrape spreads across
+  as many scheduled runs as it takes without ever blocking too long.
+  Stops automatically once a category's full history is fetched or
+  ``years-lookback`` (default 15 years — effectively "all" history for
+  these forums) is covered.
+* **refresh** — re-fetches the newest topics in every category (down to
+  the previous calendar month) for any forum whose
   ``last_incremental_refresh_at`` is more than ``--refresh-interval-days``
   (default 5) old. Self-healing: a missed run just means the next run sees
   an older timestamp and still catches up, with no separate catch-up logic.
@@ -37,7 +39,11 @@ from sqlalchemy import select
 # Add project root to path
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from craft_dashboard.collectors.forum import ForumCollector
+from craft_dashboard.collectors.forum import (
+    DEFAULT_MAX_REQUESTS_PER_BATCH,
+    DEFAULT_YEARS_LOOKBACK,
+    ForumCollector,
+)
 from craft_dashboard.config import load_config
 from craft_dashboard.database import get_engine, get_session_factory
 from craft_dashboard.models.forum import ForumBackfillState
@@ -71,13 +77,16 @@ async def _run_backfill(
     collector: ForumCollector,
     session_factory,
     forums: list[str],
+    max_requests_per_batch: int,
 ) -> int:
-    """Backfill one not-yet-covered month per forum. Returns topics upserted."""
+    """Advance historical backfill by one batch per forum. Returns topics upserted."""
     total = 0
     for forum in forums:
         async with session_factory() as session:
             try:
-                total += await collector.backfill_next_month(forum, session)
+                total += await collector.backfill_next_batch(
+                    forum, session, max_requests=max_requests_per_batch
+                )
             except Exception:
                 logger.exception("Backfill failed for forum %r", forum)
     return total
@@ -124,6 +133,7 @@ async def _main(
     verbose: bool,
     refresh_interval_days: int,
     years_lookback: int,
+    max_requests_per_batch: int,
 ) -> None:
     """Run forum data collection."""
     settings = Settings()
@@ -172,7 +182,7 @@ async def _main(
         topics_upserted = 0
         if mode in ("backfill", "all"):
             topics_upserted += await _run_backfill(
-                collector, session_factory, forum_names
+                collector, session_factory, forum_names, max_requests_per_batch
             )
         if mode in ("refresh", "all"):
             topics_upserted += await _run_refresh(
@@ -197,9 +207,9 @@ async def _main(
     type=click.Choice(["backfill", "refresh", "all"]),
     default="all",
     help=(
-        "'backfill' walks one not-yet-covered historical month backward per "
-        "forum; 'refresh' re-fetches recent months for forums overdue per "
-        "--refresh-interval-days; 'all' runs both."
+        "'backfill' advances each forum's historical category-listing scan "
+        "by one batch; 'refresh' re-fetches recent topics for forums overdue "
+        "per --refresh-interval-days; 'all' runs both."
     ),
 )
 @click.option(
@@ -212,13 +222,19 @@ async def _main(
     "--refresh-interval-days",
     default=_DEFAULT_REFRESH_INTERVAL_DAYS,
     type=int,
-    help="Re-refresh recent months for a forum only if this many days have passed since its last refresh.",
+    help="Re-refresh recent topics for a forum only if this many days have passed since its last refresh.",
 )
 @click.option(
     "--years-lookback",
-    default=7,
+    default=DEFAULT_YEARS_LOOKBACK,
     type=int,
-    help="How many years of history to backfill before stopping.",
+    help="How many years of history to backfill before stopping (default covers effectively all history).",
+)
+@click.option(
+    "--max-requests-per-batch",
+    default=DEFAULT_MAX_REQUESTS_PER_BATCH,
+    type=int,
+    help="Upper bound on category-listing page requests fetched per forum per backfill run.",
 )
 @click.option(
     "--verbose",
@@ -232,6 +248,7 @@ def main(
     forums: tuple[str, ...],
     refresh_interval_days: int,
     years_lookback: int,
+    max_requests_per_batch: int,
     verbose: bool,
 ) -> None:
     """Collect Discourse forum activity data."""
@@ -242,6 +259,7 @@ def main(
             verbose,
             refresh_interval_days=refresh_interval_days,
             years_lookback=years_lookback,
+            max_requests_per_batch=max_requests_per_batch,
         )
     )
 

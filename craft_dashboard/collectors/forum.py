@@ -4,22 +4,40 @@ Tracks every category on each configured forum (no per-forum category
 scoping — see the storage feasibility analysis in the plan). Two entry
 points are used by the scheduling logic in ``scripts/collect_forum_data.py``:
 
-- ``backfill_month``: pulls one calendar month of topics via Discourse's
-  ``search.json`` endpoint. Used both for historical backfill (one month
-  per scheduled run, walking backward) and for refreshing recent months.
-- ``refresh_recent``: re-runs ``backfill_month`` for the current month (and
-  the previous month, if it "ended after the last refresh") so topics that
-  got new replies have their ``posts_count``/``last_posted_at`` updated.
+- ``backfill_next_batch``: walks each category's topic list one page at a
+  time (see "Why category listings, not search.json" below), upserting
+  topics and advancing a resumable per-category page cursor. Bounded by
+  ``max_requests`` per call so a single scheduled run never blocks for too
+  long; self-healing across runs since progress is persisted.
+- ``refresh_recent``: re-scans the first page(s) of every category (newest
+  topics first) to catch ``posts_count``/``last_posted_at`` updates on
+  topics created in the current or previous month.
 
 Also caches each forum's category list (``refresh_categories``), which
 backs the per-category checkbox filter on the Engagement page.
+
+Why category listings, not search.json
+---------------------------------------
+An earlier version of this collector used Discourse's ``/search.json``
+endpoint with an ``after:``/``before:`` date-range query, paginating until
+a page came back empty. That pagination is **not reliable**: Discourse's
+search index can return an empty page in the middle of a real result set
+(confirmed against forum.snapcraft.io — page 3 of a query returned zero
+topics while pages 4-5 returned dozens more, none of which overlapped with
+pages 1-2). Stopping at the first empty page silently dropped topics,
+which is why some categories showed suspiciously sparse or all-zero months.
+
+Discourse's per-category topic list (``GET /c/{slug}/{id}.json?order=created``)
+paginates properly instead: each page's ``more_topics_url`` is only null
+once every topic in the category has been returned, and topics are
+strictly ordered by creation date, so backfill can also stop early once it
+sees a topic older than any configured lookback cutoff.
 """
 
 from __future__ import annotations
 
-import calendar
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
 import httpx
@@ -47,18 +65,17 @@ __all__ = ["ForumCollector"]
 logger = logging.getLogger(__name__)
 
 HTTP_TOO_MANY_REQUESTS = 429
-#: Discourse's search.json returns results in pages of up to this many
-#: topics; used as a loop-termination signal (a short page means we've
-#: reached the end of this month's results).
-_SEARCH_PAGE_SIZE = 50
-#: Hard cap on pages fetched per month, as a defensive backstop against an
-#: unexpectedly large month or the search API's known relevance-ordering
-#: quirks (it isn't strictly paginated the way an offset/limit API would be).
-_MAX_PAGES_PER_MONTH = 60
-#: Default historical backfill lookback, matching the reference gist's
-#: ``YEARS = 7``.
-DEFAULT_YEARS_LOOKBACK = 7
-_ONE_DAY = timedelta(days=1)
+#: Default historical backfill lookback. Set generously high (these forums
+#: were all created well within the last 15 years) so a fresh backfill
+#: effectively collects "all" history rather than a rolling window — see
+#: the storage-feasibility analysis in plans/33-forum-activity-tracker.md
+#: for why keeping full history is cheap enough to just do.
+DEFAULT_YEARS_LOOKBACK = 15
+#: Safety cap on category-listing pages fetched in a single
+#: ``backfill_next_batch`` call, so one scheduled run can't block
+#: indefinitely; progress is resumed on the next call via the persisted
+#: per-category page cursor.
+DEFAULT_MAX_REQUESTS_PER_BATCH = 300
 
 
 def _is_retriable(exc: BaseException) -> bool:
@@ -115,14 +132,6 @@ def _before_sleep_log(retry_state: RetryCallState) -> None:
     )
 
 
-def _month_bounds(year: int, month: int) -> tuple[date, date]:
-    """Return the (inclusive start, exclusive end) dates for a calendar month."""
-    start = date(year, month, 1)
-    days_in_month = calendar.monthrange(year, month)[1]
-    end = date(year, month, days_in_month) + _ONE_DAY
-    return start, end
-
-
 def _add_months(d: date, delta: int) -> date:
     """Return the first day of the month ``delta`` months from ``d``."""
     month_index = d.month - 1 + delta
@@ -131,9 +140,9 @@ def _add_months(d: date, delta: int) -> date:
     return date(year, month, 1)
 
 
-def _months_between(earlier: date, later: date) -> int:
-    """Return the whole number of months between two first-of-month dates."""
-    return (later.year - earlier.year) * 12 + (later.month - earlier.month)
+def _parse_discourse_datetime(value: str) -> datetime:
+    """Parse a Discourse ISO-8601 timestamp (Z suffix) into an aware datetime."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _flatten_categories(categories_payload: dict) -> list[dict]:
@@ -171,8 +180,8 @@ class ForumCollector:
         self.years_lookback = years_lookback
         self._http: httpx.AsyncClient | None = None
         # Per-run cache of category id -> slug, keyed by forum. Refetched
-        # once per collector instance (not per month) to avoid redundant
-        # /categories.json calls during a multi-month backfill run.
+        # once per collector instance (not per batch) to avoid redundant
+        # /categories.json calls during a multi-batch backfill run.
         self._category_map_cache: dict[str, dict[int, str]] = {}
 
     @property
@@ -211,6 +220,23 @@ class ForumCollector:
             self._category_map_cache[forum] = {c["id"]: c["slug"] for c in categories}
         return self._category_map_cache[forum]
 
+    async def _get_category_topics_page(
+        self, base_url: str, slug: str, category_id: int, page: int
+    ) -> tuple[list[dict], str | None]:
+        """Fetch one page of a category's topic list, newest-created first.
+
+        Returns:
+            (topics, more_topics_url) — more_topics_url is None once the
+            last page of the category has been reached.
+
+        """
+        payload = await self._get_json(
+            f"{base_url}/c/{slug}/{category_id}.json",
+            params={"order": "created", "page": page},
+        )
+        topic_list = payload.get("topic_list", {})
+        return topic_list.get("topics", []), topic_list.get("more_topics_url")
+
     async def _get_backfill_state(
         self, forum: str, session: AsyncSession
     ) -> ForumBackfillState:
@@ -219,7 +245,9 @@ class ForumCollector:
             select(ForumBackfillState).where(ForumBackfillState.forum == forum)
         )
         if state is None:
-            state = ForumBackfillState(forum=forum, categories_cache=[])
+            state = ForumBackfillState(
+                forum=forum, categories_cache=[], category_progress={}
+            )
             session.add(state)
             await session.flush()
         return state
@@ -248,204 +276,188 @@ class ForumCollector:
         logger.info("Forum categories cached: %s — %d categories", forum, len(slugs))
         return len(slugs)
 
-    async def backfill_month(
+    async def _upsert_topics(
         self,
         forum: str,
-        year: int,
-        month: int,
+        category_slug: str,
+        base_url: str,
+        topics: list[dict],
         session: AsyncSession,
     ) -> int:
-        """Backfill (or refresh) one calendar month of topics for a forum.
+        """Upsert a page of topics for one category. Returns count upserted."""
+        now = datetime.now(tz=UTC)
+        for topic in topics:
+            created_at = _parse_discourse_datetime(topic["created_at"])
+            last_posted_at = None
+            if topic.get("last_posted_at"):
+                last_posted_at = _parse_discourse_datetime(topic["last_posted_at"])
+            stmt = insert(ForumTopic).values(
+                forum=forum,
+                category=category_slug,
+                external_id=topic["id"],
+                title=topic["title"],
+                posts_count=topic.get("posts_count", 0),
+                like_count=topic.get("like_count", 0),
+                created_at=created_at,
+                last_posted_at=last_posted_at,
+                url=f"{base_url}/t/{topic.get('slug', '')}/{topic['id']}",
+                last_fetched_at=now,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["forum", "external_id"],
+                set_={
+                    "category": stmt.excluded.category,
+                    "title": stmt.excluded.title,
+                    "posts_count": stmt.excluded.posts_count,
+                    "like_count": stmt.excluded.like_count,
+                    "last_posted_at": stmt.excluded.last_posted_at,
+                    "last_fetched_at": stmt.excluded.last_fetched_at,
+                },
+            )
+            await session.execute(stmt)
+        await session.commit()
+        return len(topics)
 
-        Walks Discourse's search.json across the whole forum (every
-        category), upserting a ForumTopic row per topic found. Safe to call
-        repeatedly for the same month — upsert-by-(forum, external_id)
-        means re-running it just refreshes posts_count/last_posted_at for
-        topics that got new replies.
+    async def backfill_next_batch(
+        self,
+        forum: str,
+        session: AsyncSession,
+        *,
+        max_requests: int = DEFAULT_MAX_REQUESTS_PER_BATCH,
+    ) -> int:
+        """Advance historical backfill by up to ``max_requests`` category pages.
+
+        Walks every not-yet-fully-backfilled category, fetching its next
+        not-yet-fetched page (cursor resumed from ``category_progress``),
+        upserting topics, and marking a category "done" once its
+        ``more_topics_url`` is null or a topic older than the configured
+        years-lookback cutoff is seen. Safe to call repeatedly (e.g. once
+        per scheduled run) until every category is done, at which point
+        it's a fast no-op.
 
         Args:
             forum: Forum key from craft-dashboard.toml's [forums.*] sections.
-            year: Calendar year of the month to backfill.
-            month: Calendar month (1-12) to backfill.
             session: An async SQLAlchemy session.
+            max_requests: Upper bound on category-listing pages fetched in
+                this call.
 
         Returns:
-            The number of distinct topics upserted for this month.
+            The number of topics upserted in this batch.
 
         """
         config = self.forums[forum]
-        start, end = _month_bounds(year, month)
+        state = await self._get_backfill_state(forum, session)
         category_map = await self._get_category_map(forum, config.base_url)
 
-        seen_ids: set[int] = set()
-        page = 1
-        while page <= _MAX_PAGES_PER_MONTH:
-            payload = await self._get_json(
-                f"{config.base_url}/search.json",
-                params={
-                    "q": f"after:{start.isoformat()} before:{end.isoformat()}",
-                    "page": page,
-                },
-            )
-            topics = payload.get("topics", [])
-            new_topics = [t for t in topics if t["id"] not in seen_ids]
-            if not new_topics:
-                break
-
-            now = datetime.now(tz=UTC)
-            for topic in new_topics:
-                seen_ids.add(topic["id"])
-                created_at = datetime.fromisoformat(
-                    topic["created_at"].replace("Z", "+00:00")
-                )
-                last_posted_at = None
-                if topic.get("last_posted_at"):
-                    last_posted_at = datetime.fromisoformat(
-                        topic["last_posted_at"].replace("Z", "+00:00")
-                    )
-                category_slug = category_map.get(
-                    topic.get("category_id"), str(topic.get("category_id", ""))
-                )
-                stmt = insert(ForumTopic).values(
-                    forum=forum,
-                    category=category_slug,
-                    external_id=topic["id"],
-                    title=topic["title"],
-                    posts_count=topic.get("posts_count", 0),
-                    like_count=topic.get("like_count", 0),
-                    created_at=created_at,
-                    last_posted_at=last_posted_at,
-                    url=f"{config.base_url}/t/{topic.get('slug', '')}/{topic['id']}",
-                    last_fetched_at=now,
-                )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["forum", "external_id"],
-                    set_={
-                        "category": stmt.excluded.category,
-                        "title": stmt.excluded.title,
-                        "posts_count": stmt.excluded.posts_count,
-                        "like_count": stmt.excluded.like_count,
-                        "last_posted_at": stmt.excluded.last_posted_at,
-                        "last_fetched_at": stmt.excluded.last_fetched_at,
-                    },
-                )
-                await session.execute(stmt)
-
-            await session.commit()
-
-            if len(topics) < _SEARCH_PAGE_SIZE:
-                break
-            page += 1
-
-        logger.debug(
-            "Forum backfill: %s %04d-%02d — %d topics (page-level detail)",
-            forum,
-            year,
-            month,
-            len(seen_ids),
-        )
-        return len(seen_ids)
-
-    async def refresh_recent(self, forum: str, session: AsyncSession) -> int:
-        """Refresh the current month (and previous month if due) for a forum.
-
-        Per the "re-refresh the current month, or previous month if it ended
-        after the last refresh" rule: if the previous month's last day is
-        after the last successful refresh, that month is refreshed too (it
-        may have gotten late updates after the last refresh already ran).
-
-        Args:
-            forum: Forum key from craft-dashboard.toml's [forums.*] sections.
-            session: An async SQLAlchemy session.
-
-        Returns:
-            Total topics upserted across the refreshed month(s).
-
-        """
-        state = await self._get_backfill_state(forum, session)
-        now = datetime.now(tz=UTC)
-        today = now.date()
-
-        total = await self.backfill_month(forum, today.year, today.month, session)
-
-        previous_month_start = _add_months(date(today.year, today.month, 1), -1)
-        _, previous_month_end = _month_bounds(
-            previous_month_start.year, previous_month_start.month
-        )
-        last_refresh = state.last_incremental_refresh_at
-        previous_month_ended_after_last_refresh = (
-            last_refresh is None or last_refresh.date() < previous_month_end
-        )
-        if previous_month_ended_after_last_refresh:
-            total += await self.backfill_month(
-                forum,
-                previous_month_start.year,
-                previous_month_start.month,
-                session,
-            )
-
-        state.last_incremental_refresh_at = now
-        await session.commit()
-        logger.info(
-            "Forum refresh: %s (current%s month) — %d topics updated",
-            forum,
-            " + previous" if previous_month_ended_after_last_refresh else "",
-            total,
-        )
-        return total
-
-    async def backfill_next_month(self, forum: str, session: AsyncSession) -> int:
-        """Backfill the next not-yet-covered month, going backward in time.
-
-        Intended to be called once per scheduled run (e.g. daily) so a full
-        historical backfill spreads out across many days instead of
-        blocking in one long run. Self-healing: always resumes from
-        ``earliest_month_backfilled`` rather than a fixed offset, so a
-        missed run just means the next run picks up where it left off.
-
-        Returns:
-            The number of topics upserted for the month backfilled, or 0 if
-            the configured lookback window has already been fully covered.
-
-        """
-        state = await self._get_backfill_state(forum, session)
         today = datetime.now(tz=UTC).date()
         oldest_target = _add_months(
             date(today.year, today.month, 1), -12 * self.years_lookback
         )
 
-        if state.earliest_month_backfilled is None:
-            target_month = date(today.year, today.month, 1)
-        else:
-            earliest = state.earliest_month_backfilled.date()
-            if earliest <= oldest_target:
-                logger.info(
-                    "Forum backfill: %s — fully backfilled to %s, nothing to do",
-                    forum,
-                    oldest_target.isoformat(),
-                )
-                return 0
-            target_month = _add_months(earliest, -1)
+        progress: dict[str, dict] = dict(state.category_progress or {})
+        topics_upserted = 0
+        requests_made = 0
 
-        months_remaining = _months_between(oldest_target, target_month)
-        count = await self.backfill_month(
-            forum, target_month.year, target_month.month, session
-        )
+        for category_id, slug in category_map.items():
+            if requests_made >= max_requests:
+                break
+            cat_key = str(category_id)
+            cat_progress = dict(progress.get(cat_key, {"next_page": 0, "done": False}))
+            if cat_progress.get("done"):
+                continue
 
-        state.earliest_month_backfilled = datetime(
-            target_month.year, target_month.month, 1, tzinfo=UTC
-        )
+            page = cat_progress["next_page"]
+            topics, more_url = await self._get_category_topics_page(
+                config.base_url, slug, category_id, page
+            )
+            requests_made += 1
+
+            if not topics:
+                cat_progress["done"] = True
+                progress[cat_key] = cat_progress
+                continue
+
+            topics_upserted += await self._upsert_topics(
+                forum, slug, config.base_url, topics, session
+            )
+            oldest_seen = min(
+                _parse_discourse_datetime(t["created_at"]) for t in topics
+            )
+            reached_cutoff = oldest_seen.date() < oldest_target
+            if more_url is None or reached_cutoff:
+                cat_progress["done"] = True
+            else:
+                cat_progress["next_page"] = page + 1
+            progress[cat_key] = cat_progress
+
+        state.category_progress = progress
         await session.commit()
 
+        done_count = sum(1 for v in progress.values() if v.get("done"))
+        total_count = len(category_map)
         logger.info(
-            "Forum backfill: %s %04d-%02d — %d topics "
-            "(running total covers back to %04d-%02d, ~%d months remaining)",
+            "Forum backfill: %s — %d/%d categories complete, "
+            "%d topics upserted this batch (%d page requests)",
             forum,
-            target_month.year,
-            target_month.month,
-            count,
-            target_month.year,
-            target_month.month,
-            months_remaining,
+            done_count,
+            total_count,
+            topics_upserted,
+            requests_made,
         )
-        return count
+        return topics_upserted
+
+    async def refresh_recent(self, forum: str, session: AsyncSession) -> int:
+        """Re-scan the newest topics in every category to catch recent activity.
+
+        For each category, re-fetches page(s) of its newest-first topic
+        list (independent of the backfill cursor) until a topic older than
+        the previous calendar month is seen, upserting each page. This
+        refreshes ``posts_count``/``last_posted_at`` for topics created in
+        the current or previous month — matching the original "current +
+        previous month" refresh scope (it doesn't catch new replies on
+        older topics, which is an accepted tradeoff for topic-level
+        aggregate tracking; see plans/33-forum-activity-tracker.md).
+
+        Args:
+            forum: Forum key from craft-dashboard.toml's [forums.*] sections.
+            session: An async SQLAlchemy session.
+
+        Returns:
+            Total topics upserted across all categories.
+
+        """
+        config = self.forums[forum]
+        state = await self._get_backfill_state(forum, session)
+        now = datetime.now(tz=UTC)
+        today = now.date()
+        previous_month_start = _add_months(date(today.year, today.month, 1), -1)
+        category_map = await self._get_category_map(forum, config.base_url)
+
+        total = 0
+        for category_id, slug in category_map.items():
+            page = 0
+            while True:
+                topics, more_url = await self._get_category_topics_page(
+                    config.base_url, slug, category_id, page
+                )
+                if not topics:
+                    break
+                total += await self._upsert_topics(
+                    forum, slug, config.base_url, topics, session
+                )
+                oldest_seen = min(
+                    _parse_discourse_datetime(t["created_at"]) for t in topics
+                )
+                if more_url is None or oldest_seen.date() < previous_month_start:
+                    break
+                page += 1
+
+        state.last_incremental_refresh_at = now
+        await session.commit()
+        logger.info(
+            "Forum refresh: %s — %d topics updated across %d categories",
+            forum,
+            total,
+            len(category_map),
+        )
+        return total

@@ -19,13 +19,15 @@ if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
 
 
 class _FakeCollector:
-    """Records which forums backfill_next_month/refresh_recent were called for."""
+    """Records which forums backfill_next_batch/refresh_recent were called for."""
 
     def __init__(self) -> None:
         self.backfill_calls: list[str] = []
         self.refresh_calls: list[str] = []
 
-    async def backfill_next_month(self, forum: str, _session: AsyncSession) -> int:
+    async def backfill_next_batch(
+        self, forum: str, _session: AsyncSession, *, max_requests: int = 300
+    ) -> int:
         self.backfill_calls.append(forum)
         return 1
 
@@ -44,15 +46,15 @@ def session_factory(
 
 
 class TestRunBackfill:
-    """Tests for _run_backfill: one month per forum, per call."""
+    """Tests for _run_backfill: one batch per forum, per call."""
 
-    async def test_calls_backfill_next_month_for_every_forum(
+    async def test_calls_backfill_next_batch_for_every_forum(
         self, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
         collector = _FakeCollector()
 
         total = await collect_forum_data._run_backfill(
-            collector, session_factory, ["snapcraft", "charmcraft"]
+            collector, session_factory, ["snapcraft", "charmcraft"], 300
         )
 
         assert total == 2
@@ -63,14 +65,14 @@ class TestRunBackfill:
     ) -> None:
         """One forum's backfill raising shouldn't stop the others."""
         collector = _FakeCollector()
-        collector.backfill_next_month = AsyncMock(side_effect=[RuntimeError("boom"), 1])
+        collector.backfill_next_batch = AsyncMock(side_effect=[RuntimeError("boom"), 1])
 
         total = await collect_forum_data._run_backfill(
-            collector, session_factory, ["snapcraft", "charmcraft"]
+            collector, session_factory, ["snapcraft", "charmcraft"], 300
         )
 
         assert total == 1
-        assert collector.backfill_next_month.await_count == 2
+        assert collector.backfill_next_batch.await_count == 2
 
 
 class TestRunRefresh:

@@ -61,6 +61,14 @@ class ForumBackfillState(Base):
     only needs a periodic refresh, matching the other cache fields here.
     This cached category list backs the Engagement page's per-category
     checkbox filter panel.
+
+    Historical backfill walks each category's topic list (GET
+    /c/{slug}/{id}.json?order=created), which Discourse paginates reliably
+    (unlike /search.json — see plans/33-forum-activity-tracker.md's
+    "Search API pagination is unreliable" note). ``category_progress``
+    tracks a resumable per-category cursor so a multi-thousand-topic
+    backfill can spread across several scheduled runs without re-fetching
+    pages it already covered.
     """
 
     __tablename__ = "forum_backfill_state"
@@ -68,11 +76,11 @@ class ForumBackfillState(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     forum: Mapped[str] = mapped_column(String(50), nullable=False)
-    #: First day of the earliest month that has been fully backfilled.
-    #: None means backfill hasn't started yet.
-    earliest_month_backfilled: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    #: Per-category backfill cursor: {category_id (str): {"next_page": int,
+    #: "done": bool}}. "done" means either the category's oldest topic page
+    #: was reached (more_topics_url is null) or a topic older than the
+    #: configured years-lookback cutoff was seen.
+    category_progress: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     #: When refresh_recent() last completed successfully for this forum.
     last_incremental_refresh_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -85,4 +93,4 @@ class ForumBackfillState(Base):
 
     def __repr__(self) -> str:
         """Return a string representation."""
-        return f"<ForumBackfillState(forum={self.forum!r}, earliest_month_backfilled={self.earliest_month_backfilled!r})>"
+        return f"<ForumBackfillState(forum={self.forum!r}, category_progress={self.category_progress!r})>"
