@@ -174,6 +174,17 @@ def forums() -> dict[str, ForumConfig]:
     }
 
 
+class TestHttpClient:
+    """Tests for the lazily-created HTTP client."""
+
+    def test_follows_redirects(self, forums: dict[str, ForumConfig]) -> None:
+        """Discourse category slugs can be renamed, 301-redirecting the old
+        slug's URL to the new one; the client must follow it rather than
+        erroring, since the category id in the URL is still valid."""
+        collector = ForumCollector(forums)
+        assert collector.http.follow_redirects is True
+
+
 @pytest.fixture
 def collector(forums: dict[str, ForumConfig]) -> ForumCollector:
     return ForumCollector(forums, years_lookback=1)

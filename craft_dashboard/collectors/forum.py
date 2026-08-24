@@ -188,7 +188,11 @@ class ForumCollector:
     def http(self) -> httpx.AsyncClient:
         """Return a persistent HTTP client, creating one if needed."""
         if self._http is None or self._http.is_closed:
-            self._http = httpx.AsyncClient(timeout=30.0)
+            # Discourse category slugs can change (categories get renamed),
+            # in which case the old slug 301-redirects to the new one; the
+            # id in the URL still resolves correctly either way, so just
+            # follow the redirect rather than treating it as an error.
+            self._http = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
         return self._http
 
     async def close(self) -> None:
