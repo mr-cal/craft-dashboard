@@ -200,6 +200,11 @@ In production (Podman), use `podman exec` instead of `docker compose exec`:
 # Refreshes closed issues per the per-project schedule (refresh-interval-days).
 0 2 * * * root podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_data.py --source all --mode full
 
+# Forum activity backfill+refresh (snapcraft/charmhub/rockcraft Discourse) — every 15 minutes
+# Advances the historical backfill by one month per forum, and refreshes
+# recent months every 5 days. See "collect_forum_data.py" in how-to.md.
+*/15 * * * * root podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_forum_data.py --mode all
+
 # Database backup — daily at 3 AM UTC
 0 3 * * * root podman exec -i vps-infra_postgres_1 pg_dump -U craft_dashboard craft_dashboard | gzip > /opt/vps-infra/backups/craft-dashboard-$(date +\%Y\%m\%d).sql.gz
 ```

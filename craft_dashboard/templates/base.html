@@ -53,6 +53,9 @@
             <li class="p-navigation__item {% if request.url.path.startswith('/stats') %}is-selected{% endif %}">
               <a class="p-navigation__link" href="/stats/trends">Stats</a>
             </li>
+            <li class="p-navigation__item {% if request.url.path.startswith('/engagement') %}is-selected{% endif %}">
+              <a class="p-navigation__link" href="/engagement/forums">Engagement</a>
+            </li>
           </ul>
           <ul class="p-navigation__items" style="margin-left: auto;">
             <li class="p-navigation__item p-navigation__item--theme-toggle">

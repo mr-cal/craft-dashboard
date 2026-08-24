@@ -5,7 +5,7 @@ import textwrap
 import tomllib
 
 import pytest
-from craft_dashboard.config import load_config
+from craft_dashboard.config import ForumConfig, load_config
 
 
 class TestDashboardConfig:
@@ -106,3 +106,68 @@ class TestDashboardConfig:
         config = load_config(config_file)
 
         assert config.filtered_issues == {}
+
+    def test_load_config_no_forums_defaults_to_empty_dict(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Config without any [forums.*] sections has forums={}."""
+        config_file = tmp_path / "craft-dashboard.toml"
+        config_file.write_text(
+            textwrap.dedent("""\
+                craft-applications = ["snapcraft"]
+                maintainers = ["alice"]
+            """)
+        )
+
+        config = load_config(config_file)
+
+        assert config.forums == {}
+
+    def test_load_config_parses_forums(self, tmp_path: pathlib.Path) -> None:
+        """[forums.*] sections parse into ForumConfig with base_url/default_tags."""
+        config_file = tmp_path / "craft-dashboard.toml"
+        config_file.write_text(
+            textwrap.dedent("""\
+                craft-applications = ["snapcraft"]
+                maintainers = ["alice"]
+
+                [forums.snapcraft]
+                base-url = "https://forum.snapcraft.io"
+                default-tags = ["bug", "question"]
+
+                [forums.charmcraft]
+                base-url = "https://discourse.charmhub.io"
+            """)
+        )
+
+        config = load_config(config_file)
+
+        assert set(config.forums) == {"snapcraft", "charmcraft"}
+        assert config.forums["snapcraft"].base_url == "https://forum.snapcraft.io"
+        assert config.forums["snapcraft"].default_tags == ["bug", "question"]
+        # default_tags is optional and defaults to an empty list.
+        assert config.forums["charmcraft"].default_tags == []
+
+    def test_load_config_forum_has_no_categories_field(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """ForumConfig has no `categories` field: every forum is fully tracked."""
+        assert "categories" not in ForumConfig.model_fields
+
+    def test_load_config_forum_missing_base_url_raises(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A [forums.*] section without base-url fails validation."""
+        config_file = tmp_path / "craft-dashboard.toml"
+        config_file.write_text(
+            textwrap.dedent("""\
+                craft-applications = ["snapcraft"]
+                maintainers = ["alice"]
+
+                [forums.snapcraft]
+                default-tags = ["bug"]
+            """)
+        )
+
+        with pytest.raises(Exception):  # noqa: B017, PT011 - pydantic ValidationError
+            load_config(config_file)

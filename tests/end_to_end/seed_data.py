@@ -316,6 +316,59 @@ def _make_llm_evaluations(
 
 
 # ---------------------------------------------------------------------------
+# Forum activity - topics spread over the last several months so the
+# Engagement page's trend charts have real month-to-month variation.
+# ---------------------------------------------------------------------------
+FORUMS = ["snapcraft", "charmcraft", "rockcraft"]
+FORUM_TAGS = ["bug", "question", "feature", "docs"]
+
+
+def _make_forum_topics(forum_name: str) -> list[dict]:
+    """Generate forum topic rows spanning the last 6 months for a forum."""
+    now = datetime(2024, 7, 1, 12, 0, 0, tzinfo=UTC)
+    topics = []
+    topic_id = 0
+    # 6 months, a handful of topics per month, cycling through tags so each
+    # tag has a distinct (and differing) monthly series.
+    for month_offset in range(6):
+        created = now - timedelta(days=30 * month_offset + 3)
+        for i in range(3):
+            topic_id += 1
+            tag = FORUM_TAGS[(month_offset + i) % len(FORUM_TAGS)]
+            posts_count = 2 + i + month_offset
+            topics.append(
+                {
+                    "forum": forum_name,
+                    "category": "general",
+                    "external_id": topic_id,
+                    "title": f"[{forum_name}] Test topic {topic_id}",
+                    "posts_count": posts_count,
+                    "like_count": i,
+                    "tags": json.dumps([tag]),
+                    "created_at": (created - timedelta(days=i)).isoformat(),
+                    "last_posted_at": created.isoformat(),
+                    "url": f"https://{forum_name}.example.com/t/{topic_id}",
+                    "last_fetched_at": now.isoformat(),
+                }
+            )
+    return topics
+
+
+def _make_forum_tags(forum_name: str) -> list[dict]:
+    """Generate forum_tags cache rows for a forum."""
+    now = datetime(2024, 7, 1, 12, 0, 0, tzinfo=UTC)
+    return [
+        {
+            "forum": forum_name,
+            "tag_name": tag,
+            "topic_count": 5,
+            "last_seen_at": now.isoformat(),
+        }
+        for tag in FORUM_TAGS
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 def generate_seed_sql() -> str:
@@ -331,6 +384,9 @@ def generate_seed_sql() -> str:
     stmts.append("DELETE FROM snapshots;")
     stmts.append("DELETE FROM refresh_schedule;")
     stmts.append("DELETE FROM projects;")
+    stmts.append("DELETE FROM forum_topics;")
+    stmts.append("DELETE FROM forum_tags;")
+    stmts.append("DELETE FROM forum_backfill_state;")
 
     for pid, proj in enumerate(PROJECTS, start=1):
         stmts.append(
@@ -418,6 +474,37 @@ def generate_seed_sql() -> str:
                 )
         issue_id_counter += issue_count
 
+    for forum_name in FORUMS:
+        for topic in _make_forum_topics(forum_name):
+            cols = ", ".join(topic.keys())
+            vals = []
+            for v in topic.values():
+                if v is None:
+                    vals.append("NULL")
+                elif isinstance(v, bool):
+                    vals.append("true" if v else "false")
+                elif isinstance(v, (int, float)):
+                    vals.append(str(v))
+                else:
+                    vals.append(f"'{str(v).replace(chr(39), chr(39) + chr(39))}'")
+            stmts.append(
+                f"INSERT INTO forum_topics ({cols}) VALUES ({', '.join(vals)});"
+            )
+
+        for tag_row in _make_forum_tags(forum_name):
+            cols = ", ".join(tag_row.keys())
+            vals = []
+            for v in tag_row.values():
+                if v is None:
+                    vals.append("NULL")
+                elif isinstance(v, bool):
+                    vals.append("true" if v else "false")
+                elif isinstance(v, (int, float)):
+                    vals.append(str(v))
+                else:
+                    vals.append(f"'{str(v).replace(chr(39), chr(39) + chr(39))}'")
+            stmts.append(f"INSERT INTO forum_tags ({cols}) VALUES ({', '.join(vals)});")
+
     # Reset sequence counters
     stmts.extend(
         f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
@@ -429,6 +516,8 @@ def generate_seed_sql() -> str:
             "releases",
             "dependencies",
             "llm_evaluations",
+            "forum_topics",
+            "forum_tags",
         )
     )
 

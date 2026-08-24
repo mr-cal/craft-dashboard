@@ -27,6 +27,7 @@ from craft_dashboard.dependencies import get_db_session, set_session_factory
 from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.routes.admin import router as admin_router
 from craft_dashboard.routes.dashboard import router as dashboard_router
+from craft_dashboard.routes.engagement import router as engagement_router
 from craft_dashboard.routes.eval_api import limiter as eval_api_limiter
 from craft_dashboard.routes.eval_api import router as eval_api_router
 from craft_dashboard.routes.issues import router as issues_router
@@ -235,6 +236,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(issues_router)
     app.include_router(stats_router)
+    app.include_router(engagement_router)
     app.include_router(admin_router)
     app.include_router(eval_api_router)
 

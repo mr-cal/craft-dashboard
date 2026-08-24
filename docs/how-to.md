@@ -74,6 +74,51 @@ If a project is not yet due, it skips the issue fetch but still collects
 dependencies and releases. To force a full refresh of all projects, see
 "Force-refresh all data" below.
 
+### collect_forum_data.py
+
+Fetches topic activity from the snapcraft, charmhub, and rockcraft Discourse
+forums (all categories, every forum tracked in full) for the Engagement
+page's trend graphs.
+
+Two modes are used in production, run from the same cron tick:
+
+**Backfill** (`--mode backfill`): walks one not-yet-covered historical month
+backward per forum, per run — intended to run frequently (every 15 minutes)
+so the initial multi-year historical backfill completes over a few days
+without ever issuing one long blocking request. Stops automatically once
+`--years-lookback` (default 7) years of history are covered.
+
+**Refresh** (`--mode refresh`): re-fetches the current month (and the
+previous month, if it ended after the last refresh) for any forum whose
+last refresh is more than `--refresh-interval-days` (default 5) old.
+Self-healing — a missed run just means the next run sees an older
+timestamp and still catches up.
+
+```bash
+# both backfill and refresh in one run (default mode)
+uv run scripts/collect_forum_data.py --mode all
+
+# only advance the historical backfill by one month per forum
+uv run scripts/collect_forum_data.py --mode backfill
+
+# only refresh recent months
+uv run scripts/collect_forum_data.py --mode refresh
+
+# limit to specific forums
+uv run scripts/collect_forum_data.py --mode backfill --forum snapcraft
+
+# verbose logging (per-page fetches, retry/backoff details)
+uv run scripts/collect_forum_data.py --mode backfill --forum snapcraft -v
+```
+
+To watch backfill progress, tail the app container logs (see "Check logs"
+below) — each month backfilled logs a single readable line at INFO level,
+e.g.:
+
+```
+Forum backfill: snapcraft 2024-03 — 142 topics (running total covers back to 2024-03, ~34 months remaining)
+```
+
 ### run_llm.py
 
 Server-side LLM evaluation using OpenRouter. The `evaluate` entrypoint now runs

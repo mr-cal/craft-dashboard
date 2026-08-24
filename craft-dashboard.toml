@@ -106,3 +106,19 @@ starflow = [33]
 charmcraft = "3.0"
 snapcraft = "8.0"
 rockcraft = "1.15"
+
+# Forums to track for the Engagement > Forum Activity page. Every forum is
+# always tracked in full (all categories) — see
+# plans/33-forum-activity-tracker.md for why no per-forum category scoping
+# is configured.
+[forums.snapcraft]
+base-url = "https://forum.snapcraft.io"
+default-tags = ["bug", "question"]
+
+[forums.charmcraft]
+base-url = "https://discourse.charmhub.io"
+default-tags = ["bug", "question"]
+
+[forums.rockcraft]
+base-url = "https://discourse.ubuntu.com"
+default-tags = ["bug", "question"]

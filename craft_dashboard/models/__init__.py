@@ -5,6 +5,7 @@ from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.models.collection_watermark import CollectionWatermark
 from craft_dashboard.models.dependency import Dependency
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
+from craft_dashboard.models.forum import ForumBackfillState, ForumTag, ForumTopic
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
@@ -20,6 +21,9 @@ __all__ = [
     "CollectionWatermark",
     "Dependency",
     "EvalQueueSnapshot",
+    "ForumBackfillState",
+    "ForumTag",
+    "ForumTopic",
     "Issue",
     "IssueActivity",
     "LLMEvaluation",
