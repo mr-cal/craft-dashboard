@@ -90,6 +90,7 @@ class TestChartRendering:
         regression where the canvas ends up rendering at ~20% of the
         intended chart area."""
         script = make_script("""\
+    await page.setViewport({width: 1400, height: 900});
     await page.goto(`${BASE}/engagement/forums`, {waitUntil: 'networkidle0', timeout: 30000});
     await page.waitForFunction(() => {
       const el = document.getElementById('engagement-loading');
@@ -102,6 +103,7 @@ class TestChartRendering:
       const w = wrapper.getBoundingClientRect();
       const c = canvas.getBoundingClientRect();
       return {
+        viewportHeight: window.innerHeight,
         wrapperHeight: w.height,
         canvasHeight: c.height,
         wrapperWidth: w.width,
@@ -116,6 +118,10 @@ class TestChartRendering:
         # 300x150 fallback.
         assert result["canvasWidth"] >= result["wrapperWidth"] * 0.9
         assert result["canvasHeight"] >= result["wrapperHeight"] * 0.9
+        # The wrapper itself should occupy a substantial portion of the
+        # viewport height (targeting ~70vh), not collapse to a small
+        # fixed pixel height regardless of screen size.
+        assert result["wrapperHeight"] >= result["viewportHeight"] * 0.5
 
     def test_default_categories_are_shown_by_default(self, seeded_url: str) -> None:
         """On first load, only 'all categories' (plus any per-forum default
