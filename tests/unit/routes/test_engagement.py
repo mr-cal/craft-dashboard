@@ -8,7 +8,7 @@ import pytest
 from craft_dashboard.app import create_app
 from craft_dashboard.config import DashboardConfig, ForumConfig
 from craft_dashboard.dependencies import get_config, get_db_session
-from craft_dashboard.models.forum import ForumTag, ForumTopic
+from craft_dashboard.models.forum import ForumBackfillState, ForumTopic
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
@@ -30,7 +30,8 @@ def _config() -> DashboardConfig:
         maintainers=["alice"],
         forums={
             "snapcraft": ForumConfig(
-                base_url="https://forum.snapcraft.io", default_tags=["bug"]
+                base_url="https://forum.snapcraft.io",
+                default_categories=["general"],
             ),
             "charmcraft": ForumConfig(base_url="https://discourse.charmhub.io"),
         },
@@ -63,16 +64,15 @@ def _topic(
     *,
     created_at: datetime,
     posts_count: int = 5,
-    tags: list[str] | None = None,
+    category: str = "general",
 ) -> ForumTopic:
     return ForumTopic(
         forum=forum,
-        category="general",
+        category=category,
         external_id=external_id,
         title=f"Topic {external_id}",
         posts_count=posts_count,
         like_count=0,
-        tags=tags if tags is not None else [],
         created_at=created_at,
         last_fetched_at=datetime.now(tz=UTC),
     )
@@ -96,23 +96,21 @@ class TestForumsPage:
         assert response.status_code == 200
         assert 'href="/engagement/forums"' in response.text
 
-    def test_embeds_default_tags_for_checkbox_prechecking(
+    def test_embeds_default_categories_for_checkbox_prechecking(
         self, test_client: TestClient
     ) -> None:
         response = test_client.get("/engagement/forums")
 
         assert response.status_code == 200
-        assert '"default_tags": ["bug"]' in response.text
+        assert '"default_categories": ["general"]' in response.text
 
-    async def test_includes_cached_tags_from_forum_tag_table(
+    async def test_includes_cached_categories_from_backfill_state(
         self, test_client: TestClient, test_db_session: AsyncSession
     ) -> None:
         test_db_session.add(
-            ForumTag(
+            ForumBackfillState(
                 forum="snapcraft",
-                tag_name="question",
-                topic_count=3,
-                last_seen_at=datetime.now(tz=UTC),
+                categories_cache=["general", "questions"],
             )
         )
         await test_db_session.commit()
@@ -120,7 +118,7 @@ class TestForumsPage:
         response = test_client.get("/engagement/forums")
 
         assert response.status_code == 200
-        assert '"question"' in response.text
+        assert '"questions"' in response.text
 
 
 class TestForumsData:
@@ -141,21 +139,21 @@ class TestForumsData:
                     1,
                     created_at=datetime(2024, 3, 5, tzinfo=UTC),
                     posts_count=4,
-                    tags=["bug"],
+                    category="bugs",
                 ),
                 _topic(
                     "snapcraft",
                     2,
                     created_at=datetime(2024, 3, 20, tzinfo=UTC),
                     posts_count=6,
-                    tags=["question"],
+                    category="questions",
                 ),
                 _topic(
                     "snapcraft",
                     3,
                     created_at=datetime(2024, 4, 1, tzinfo=UTC),
                     posts_count=2,
-                    tags=["bug"],
+                    category="bugs",
                 ),
             ]
         )
@@ -167,41 +165,16 @@ class TestForumsData:
         data = response.json()
         assert data["months"] == ["2024-03", "2024-04"]
         assert data["all"] == [10, 2]
-        assert data["tags"]["bug"] == [4, 2]
-        assert data["tags"]["question"] == [6, 0]
+        assert data["categories"]["bugs"] == [4, 2]
+        assert data["categories"]["questions"] == [6, 0]
 
-    async def test_topics_without_tags_only_count_toward_all(
+    async def test_forum_known_via_backfill_state_but_no_topics_returns_empty_series(
         self, test_client: TestClient, test_db_session: AsyncSession
     ) -> None:
+        """A forum known via ForumBackfillState (categories refreshed) but
+        with no topics backfilled yet should return empty series, not 404."""
         test_db_session.add(
-            _topic(
-                "snapcraft",
-                1,
-                created_at=datetime(2024, 1, 1, tzinfo=UTC),
-                posts_count=7,
-                tags=[],
-            )
-        )
-        await test_db_session.commit()
-
-        response = test_client.get("/engagement/forums/data?forum=snapcraft")
-
-        data = response.json()
-        assert data["all"] == [7]
-        assert data["tags"] == {}
-
-    async def test_forum_with_only_cached_tag_but_no_topics_returns_empty_series(
-        self, test_client: TestClient, test_db_session: AsyncSession
-    ) -> None:
-        """A forum known via ForumTag (categories/tags refreshed) but with no
-        topics backfilled yet should return empty series, not 404."""
-        test_db_session.add(
-            ForumTag(
-                forum="charmcraft",
-                tag_name="bug",
-                topic_count=0,
-                last_seen_at=datetime.now(tz=UTC),
-            )
+            ForumBackfillState(forum="charmcraft", categories_cache=["general"])
         )
         await test_db_session.commit()
 

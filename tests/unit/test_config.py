@@ -124,7 +124,7 @@ class TestDashboardConfig:
         assert config.forums == {}
 
     def test_load_config_parses_forums(self, tmp_path: pathlib.Path) -> None:
-        """[forums.*] sections parse into ForumConfig with base_url/default_tags."""
+        """[forums.*] sections parse into ForumConfig with base_url/default_categories."""
         config_file = tmp_path / "craft-dashboard.toml"
         config_file.write_text(
             textwrap.dedent("""\
@@ -133,7 +133,7 @@ class TestDashboardConfig:
 
                 [forums.snapcraft]
                 base-url = "https://forum.snapcraft.io"
-                default-tags = ["bug", "question"]
+                default-categories = ["snapcraft", "questions"]
 
                 [forums.charmcraft]
                 base-url = "https://discourse.charmhub.io"
@@ -144,9 +144,12 @@ class TestDashboardConfig:
 
         assert set(config.forums) == {"snapcraft", "charmcraft"}
         assert config.forums["snapcraft"].base_url == "https://forum.snapcraft.io"
-        assert config.forums["snapcraft"].default_tags == ["bug", "question"]
-        # default_tags is optional and defaults to an empty list.
-        assert config.forums["charmcraft"].default_tags == []
+        assert config.forums["snapcraft"].default_categories == [
+            "snapcraft",
+            "questions",
+        ]
+        # default_categories is optional and defaults to an empty list.
+        assert config.forums["charmcraft"].default_categories == []
 
     def test_load_config_forum_has_no_categories_field(
         self, tmp_path: pathlib.Path
@@ -165,7 +168,7 @@ class TestDashboardConfig:
                 maintainers = ["alice"]
 
                 [forums.snapcraft]
-                default-tags = ["bug"]
+                default-categories = ["snapcraft"]
             """)
         )
 

@@ -11,9 +11,8 @@ points are used by the scheduling logic in ``scripts/collect_forum_data.py``:
   the previous month, if it "ended after the last refresh") so topics that
   got new replies have their ``posts_count``/``last_posted_at`` updated.
 
-Also caches each forum's category list and tag list (``refresh_categories``/
-``refresh_tags``), which back the dynamic per-tag checkbox filter on the
-Engagement page.
+Also caches each forum's category list (``refresh_categories``), which
+backs the per-category checkbox filter on the Engagement page.
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from craft_dashboard.models.forum import ForumBackfillState, ForumTag, ForumTopic
+from craft_dashboard.models.forum import ForumBackfillState, ForumTopic
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -249,35 +248,6 @@ class ForumCollector:
         logger.info("Forum categories cached: %s — %d categories", forum, len(slugs))
         return len(slugs)
 
-    async def refresh_tags(self, forum: str, session: AsyncSession) -> int:
-        """Refresh the cached tag list for a forum (backs the tag checkboxes).
-
-        Returns:
-            The number of tags cached.
-
-        """
-        config = self.forums[forum]
-        payload = await self._get_json(f"{config.base_url}/tags.json")
-        tags = payload.get("tags", [])
-        now = datetime.now(tz=UTC)
-
-        for tag in tags:
-            stmt = insert(ForumTag).values(
-                forum=forum,
-                tag_name=tag["name"],
-                topic_count=tag.get("count", 0),
-                last_seen_at=now,
-            )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["forum", "tag_name"],
-                set_={"topic_count": stmt.excluded.topic_count, "last_seen_at": now},
-            )
-            await session.execute(stmt)
-
-        await session.commit()
-        logger.info("Forum tags cached: %s — %d tags", forum, len(tags))
-        return len(tags)
-
     async def backfill_month(
         self,
         forum: str,
@@ -343,7 +313,6 @@ class ForumCollector:
                     title=topic["title"],
                     posts_count=topic.get("posts_count", 0),
                     like_count=topic.get("like_count", 0),
-                    tags=topic.get("tags") or [],
                     created_at=created_at,
                     last_posted_at=last_posted_at,
                     url=f"{config.base_url}/t/{topic.get('slug', '')}/{topic['id']}",
@@ -356,7 +325,6 @@ class ForumCollector:
                         "title": stmt.excluded.title,
                         "posts_count": stmt.excluded.posts_count,
                         "like_count": stmt.excluded.like_count,
-                        "tags": stmt.excluded.tags,
                         "last_posted_at": stmt.excluded.last_posted_at,
                         "last_fetched_at": stmt.excluded.last_fetched_at,
                     },

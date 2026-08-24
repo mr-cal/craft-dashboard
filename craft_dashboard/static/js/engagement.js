@@ -1,6 +1,6 @@
 // Engagement page: one Chart.js line graph per Discourse forum, with a flat
-// per-tag checkbox filter ("all tags" + individual tags) mirroring the
-// checkbox/chart patterns in trends.js.
+// per-category checkbox filter ("all categories" + individual categories)
+// mirroring the checkbox/chart patterns in trends.js.
 
 try {
   const CHART_COLORS = {
@@ -122,14 +122,14 @@ try {
   }
 
   const forums = window.ENGAGEMENT_FORUMS || [];
-  const forumData = {}; // name -> { months, all, tags }
+  const forumData = {}; // name -> { months, all, categories }
 
   async function loadForum(forum) {
     const response = await fetch(`/engagement/forums/data?forum=${encodeURIComponent(forum.name)}`);
     if (!response.ok) {
       // No data yet (e.g. backfill hasn't run) — leave the chart empty
       // rather than failing the whole page.
-      forumData[forum.name] = { months: [], all: [], tags: {} };
+      forumData[forum.name] = { months: [], all: [], categories: {} };
       return;
     }
     forumData[forum.name] = await response.json();
@@ -138,17 +138,17 @@ try {
   function updateForumChart(forum, chart) {
     const data = forumData[forum.name];
     const checkboxContainer = document.getElementById(`engagement-${forum.name}-checkboxes`);
-    const selectedTags = forum.tags.filter((tag) => {
-      const cb = document.getElementById(`engagement-${forum.name}-tag-${tag}`);
+    const selectedCategories = forum.categories.filter((category) => {
+      const cb = document.getElementById(`engagement-${forum.name}-category-${category}`);
       return cb?.checked;
     });
-    const allTagsCb = document.getElementById(`engagement-${forum.name}-all-tags`);
+    const allCategoriesCb = document.getElementById(`engagement-${forum.name}-all-categories`);
 
     chart.data.labels = data.months;
     const datasets = [];
-    if (allTagsCb?.checked) {
+    if (allCategoriesCb?.checked) {
       datasets.push({
-        label: "all tags",
+        label: "all categories",
         data: data.all,
         borderColor: CHART_COLORS.palette[0],
         backgroundColor: CHART_COLORS.palette[0] + "20",
@@ -157,11 +157,11 @@ try {
         tension: 0.1,
       });
     }
-    selectedTags.forEach((tag, i) => {
+    selectedCategories.forEach((category, i) => {
       const color = CHART_COLORS.palette[(i + 1) % CHART_COLORS.palette.length];
       datasets.push({
-        label: tag,
-        data: data.tags[tag] || data.months.map(() => 0),
+        label: category,
+        data: data.categories[category] || data.months.map(() => 0),
         borderColor: color,
         backgroundColor: color + "20",
         borderWidth: 2,
@@ -176,26 +176,26 @@ try {
 
   function populateForumCheckboxes(forum, chart) {
     const container = document.getElementById(`engagement-${forum.name}-checkboxes`);
-    const defaultTags = new Set(
-      (container.dataset.defaultTags || "")
+    const defaultCategories = new Set(
+      (container.dataset.defaultCategories || "")
         .split(",")
-        .map((t) => t.trim())
+        .map((c) => c.trim())
         .filter(Boolean)
     );
 
     createCheckboxItem(container, {
-      id: `engagement-${forum.name}-all-tags`,
-      label: "all tags",
+      id: `engagement-${forum.name}-all-categories`,
+      label: "all categories",
       checked: true,
       onChange: () => updateForumChart(forum, chart),
       color: CHART_COLORS.palette[0],
     });
 
-    forum.tags.forEach((tag, i) => {
+    forum.categories.forEach((category, i) => {
       createCheckboxItem(container, {
-        id: `engagement-${forum.name}-tag-${tag}`,
-        label: tag,
-        checked: defaultTags.has(tag),
+        id: `engagement-${forum.name}-category-${category}`,
+        label: category,
+        checked: defaultCategories.has(category),
         onChange: () => updateForumChart(forum, chart),
         color: CHART_COLORS.palette[(i + 1) % CHART_COLORS.palette.length],
       });

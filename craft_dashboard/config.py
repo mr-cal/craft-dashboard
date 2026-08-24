@@ -24,9 +24,9 @@ class ForumConfig(BaseModel):
     """
 
     base_url: str
-    #: Tags pre-checked by default on the Engagement forum-activity graph,
-    #: alongside the always-default-checked "all tags" series.
-    default_tags: list[str] = Field(default_factory=list)
+    #: Categories pre-checked by default on the Engagement forum-activity
+    #: graph, alongside the always-default-checked "all categories" series.
+    default_categories: list[str] = Field(default_factory=list)
 
     @classmethod
     def validate(cls, value: object) -> ForumConfig:

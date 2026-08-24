@@ -15,7 +15,7 @@ from craft_dashboard.collectors.forum import (
     _retry_after_seconds,
 )
 from craft_dashboard.config import ForumConfig
-from craft_dashboard.models.forum import ForumBackfillState, ForumTag, ForumTopic
+from craft_dashboard.models.forum import ForumBackfillState, ForumTopic
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
@@ -30,7 +30,6 @@ def _make_topic(
     *,
     created_at: str = "2024-03-05T10:00:00.000Z",
     last_posted_at: str | None = "2024-03-06T10:00:00.000Z",
-    tags: list[str] | None = None,
     category_id: int = 7,
     posts_count: int = 3,
 ) -> dict:
@@ -39,7 +38,6 @@ def _make_topic(
         "title": f"Topic {topic_id}",
         "posts_count": posts_count,
         "like_count": 1,
-        "tags": tags if tags is not None else ["bug"],
         "created_at": created_at,
         "last_posted_at": last_posted_at,
         "category_id": category_id,
@@ -70,11 +68,6 @@ def _categories_response() -> httpx.Response:
         },
         request=request,
     )
-
-
-def _tags_response(tags: list[dict]) -> httpx.Response:
-    request = httpx.Request("GET", "https://forum.example.io/tags.json")
-    return httpx.Response(200, json={"tags": tags}, request=request)
 
 
 class TestDateHelpers:
@@ -169,7 +162,7 @@ class TestRetryPredicates:
 def forums() -> dict[str, ForumConfig]:
     return {
         "snapcraft": ForumConfig(
-            base_url="https://forum.example.io", default_tags=["bug"]
+            base_url="https://forum.example.io", default_categories=["bugs"]
         )
     }
 
@@ -216,7 +209,6 @@ class TestBackfillMonth:
         )
         assert {r.external_id for r in rows} == {1, 2}
         assert rows[0].category == "bugs"
-        assert rows[0].tags == ["bug"]
 
     async def test_stops_when_page_returns_no_new_topics(
         self, collector: ForumCollector, test_db_session: AsyncSession
@@ -338,8 +330,8 @@ class TestBackfillMonth:
         assert "before:2024-03-01" in search_params[0]["q"]
 
 
-class TestRefreshCategoriesAndTags:
-    """Tests for refresh_categories / refresh_tags."""
+class TestRefreshCategories:
+    """Tests for refresh_categories."""
 
     async def test_refresh_categories_caches_slugs(
         self, collector: ForumCollector, test_db_session: AsyncSession
@@ -370,65 +362,6 @@ class TestRefreshCategoriesAndTags:
 
         assert "Forum categories cached: snapcraft" in caplog.text
         assert "3 categories" in caplog.text
-
-    async def test_refresh_tags_upserts_rows(
-        self, collector: ForumCollector, test_db_session: AsyncSession
-    ) -> None:
-        async def _fake_get(_self, url, params=None, **_kw):
-            return _tags_response(
-                [{"name": "bug", "count": 5}, {"name": "question", "count": 2}]
-            )
-
-        with (
-            patch("httpx.AsyncClient.get", new=_fake_get),
-            patch("craft_dashboard.collectors.forum.insert", new=sqlite_insert),
-        ):
-            count = await collector.refresh_tags("snapcraft", test_db_session)
-
-        assert count == 2
-        rows = (
-            (
-                await test_db_session.execute(
-                    select(ForumTag).where(ForumTag.forum == "snapcraft")
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert {r.tag_name for r in rows} == {"bug", "question"}
-
-    async def test_refresh_tags_updates_existing_count(
-        self, collector: ForumCollector, test_db_session: AsyncSession
-    ) -> None:
-        async def _fake_get_1(_self, url, params=None, **_kw):
-            return _tags_response([{"name": "bug", "count": 5}])
-
-        async def _fake_get_2(_self, url, params=None, **_kw):
-            return _tags_response([{"name": "bug", "count": 42}])
-
-        with (
-            patch("httpx.AsyncClient.get", new=_fake_get_1),
-            patch("craft_dashboard.collectors.forum.insert", new=sqlite_insert),
-        ):
-            await collector.refresh_tags("snapcraft", test_db_session)
-
-        with (
-            patch("httpx.AsyncClient.get", new=_fake_get_2),
-            patch("craft_dashboard.collectors.forum.insert", new=sqlite_insert),
-        ):
-            await collector.refresh_tags("snapcraft", test_db_session)
-
-        rows = (
-            (
-                await test_db_session.execute(
-                    select(ForumTag).where(ForumTag.tag_name == "bug")
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert len(rows) == 1
-        assert rows[0].topic_count == 42
 
 
 class TestBackfillNextMonth:

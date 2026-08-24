@@ -160,17 +160,14 @@ async def _main(
     collector = ForumCollector(forums, years_lookback=years_lookback)
     run_started_at = time.monotonic()
     try:
-        # Category/tag caches are cheap and used by the Engagement page's
-        # checkboxes, so refresh them on every run regardless of mode.
+        # The category cache is cheap and used by the Engagement page's
+        # checkboxes, so refresh it on every run regardless of mode.
         for forum in forum_names:
             async with session_factory() as session:
                 try:
                     await collector.refresh_categories(forum, session)
-                    await collector.refresh_tags(forum, session)
                 except Exception:
-                    logger.exception(
-                        "Failed to refresh categories/tags for forum %r", forum
-                    )
+                    logger.exception("Failed to refresh categories for forum %r", forum)
 
         topics_upserted = 0
         if mode in ("backfill", "all"):

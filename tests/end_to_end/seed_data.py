@@ -320,7 +320,7 @@ def _make_llm_evaluations(
 # Engagement page's trend charts have real month-to-month variation.
 # ---------------------------------------------------------------------------
 FORUMS = ["snapcraft", "charmcraft", "rockcraft"]
-FORUM_TAGS = ["bug", "question", "feature", "docs"]
+FORUM_CATEGORIES = ["bugs", "questions", "features", "docs"]
 
 
 def _make_forum_topics(forum_name: str) -> list[dict]:
@@ -328,23 +328,22 @@ def _make_forum_topics(forum_name: str) -> list[dict]:
     now = datetime(2024, 7, 1, 12, 0, 0, tzinfo=UTC)
     topics = []
     topic_id = 0
-    # 6 months, a handful of topics per month, cycling through tags so each
-    # tag has a distinct (and differing) monthly series.
+    # 6 months, a handful of topics per month, cycling through categories so
+    # each category has a distinct (and differing) monthly series.
     for month_offset in range(6):
         created = now - timedelta(days=30 * month_offset + 3)
         for i in range(3):
             topic_id += 1
-            tag = FORUM_TAGS[(month_offset + i) % len(FORUM_TAGS)]
+            category = FORUM_CATEGORIES[(month_offset + i) % len(FORUM_CATEGORIES)]
             posts_count = 2 + i + month_offset
             topics.append(
                 {
                     "forum": forum_name,
-                    "category": "general",
+                    "category": category,
                     "external_id": topic_id,
                     "title": f"[{forum_name}] Test topic {topic_id}",
                     "posts_count": posts_count,
                     "like_count": i,
-                    "tags": json.dumps([tag]),
                     "created_at": (created - timedelta(days=i)).isoformat(),
                     "last_posted_at": created.isoformat(),
                     "url": f"https://{forum_name}.example.com/t/{topic_id}",
@@ -354,18 +353,14 @@ def _make_forum_topics(forum_name: str) -> list[dict]:
     return topics
 
 
-def _make_forum_tags(forum_name: str) -> list[dict]:
-    """Generate forum_tags cache rows for a forum."""
+def _make_forum_backfill_state(forum_name: str) -> dict:
+    """Generate a forum_backfill_state row caching the forum's categories."""
     now = datetime(2024, 7, 1, 12, 0, 0, tzinfo=UTC)
-    return [
-        {
-            "forum": forum_name,
-            "tag_name": tag,
-            "topic_count": 5,
-            "last_seen_at": now.isoformat(),
-        }
-        for tag in FORUM_TAGS
-    ]
+    return {
+        "forum": forum_name,
+        "categories_cache": json.dumps(sorted(FORUM_CATEGORIES)),
+        "categories_cached_at": now.isoformat(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +380,6 @@ def generate_seed_sql() -> str:
     stmts.append("DELETE FROM refresh_schedule;")
     stmts.append("DELETE FROM projects;")
     stmts.append("DELETE FROM forum_topics;")
-    stmts.append("DELETE FROM forum_tags;")
     stmts.append("DELETE FROM forum_backfill_state;")
 
     for pid, proj in enumerate(PROJECTS, start=1):
@@ -491,10 +485,10 @@ def generate_seed_sql() -> str:
                 f"INSERT INTO forum_topics ({cols}) VALUES ({', '.join(vals)});"
             )
 
-        for tag_row in _make_forum_tags(forum_name):
-            cols = ", ".join(tag_row.keys())
+        for state_row in [_make_forum_backfill_state(forum_name)]:
+            cols = ", ".join(state_row.keys())
             vals = []
-            for v in tag_row.values():
+            for v in state_row.values():
                 if v is None:
                     vals.append("NULL")
                 elif isinstance(v, bool):
@@ -503,7 +497,9 @@ def generate_seed_sql() -> str:
                     vals.append(str(v))
                 else:
                     vals.append(f"'{str(v).replace(chr(39), chr(39) + chr(39))}'")
-            stmts.append(f"INSERT INTO forum_tags ({cols}) VALUES ({', '.join(vals)});")
+            stmts.append(
+                f"INSERT INTO forum_backfill_state ({cols}) VALUES ({', '.join(vals)});"
+            )
 
     # Reset sequence counters
     stmts.extend(
@@ -517,7 +513,7 @@ def generate_seed_sql() -> str:
             "dependencies",
             "llm_evaluations",
             "forum_topics",
-            "forum_tags",
+            "forum_backfill_state",
         )
     )
 

@@ -1,8 +1,9 @@
 """End-to-end tests for the Engagement (forum activity) page.
 
 Mirrors the structure of test_trends.py: verifies charts render with real
-data for each tracked forum, the loading spinner disappears, tag checkboxes
-toggle chart datasets, and default tags are pre-checked on load.
+data for each tracked forum, the loading spinner disappears, category
+checkboxes toggle chart datasets, and default categories are pre-checked
+on load.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from tests.end_to_end.helpers import make_script, run_puppeteer
-from tests.end_to_end.seed_data import FORUM_TAGS, FORUMS
+from tests.end_to_end.seed_data import FORUM_CATEGORIES, FORUMS
 
 pytestmark = [
     pytest.mark.e2e,
@@ -83,25 +84,32 @@ class TestChartRendering:
             assert len(chart["labels"]) > 0, f"{forum} chart has no month labels"
             assert len(chart["datasets"]) > 0, f"{forum} chart has no datasets"
 
-    def test_default_tags_are_shown_by_default(self, seeded_url: str) -> None:
-        """On first load, only default tags ('bug', 'question') plus 'all tags'
-        should be visible as datasets — other tags start unchecked.
+    def test_default_categories_are_shown_by_default(self, seeded_url: str) -> None:
+        """On first load, only 'all categories' (plus any per-forum default
+        categories) should be visible as datasets — other categories start
+        unchecked.
         """
         data = _get_all_charts(seeded_url)
         for forum in FORUMS:
             labels = {ds["label"] for ds in data[forum]["datasets"]}
-            assert "all tags" in labels, f"{forum} should show 'all tags' by default"
-            # Non-default tags (feature, docs) should not be shown yet.
-            assert "feature" not in labels, f"{forum} should not default-show 'feature'"
+            assert "all categories" in labels, (
+                f"{forum} should show 'all categories' by default"
+            )
+            # Non-default categories should not be shown yet.
+            assert "features" not in labels, (
+                f"{forum} should not default-show 'features'"
+            )
             assert "docs" not in labels, f"{forum} should not default-show 'docs'"
 
 
 # ---------------------------------------------------------------------------
-# Tests: tag checkbox toggling
+# Tests: category checkbox toggling
 # ---------------------------------------------------------------------------
-class TestTagToggling:
-    def test_toggling_all_tags_checkbox_removes_dataset(self, seeded_url: str) -> None:
-        """Unchecking 'all tags' should remove the 'all tags' dataset."""
+class TestCategoryToggling:
+    def test_toggling_all_categories_checkbox_removes_dataset(
+        self, seeded_url: str
+    ) -> None:
+        """Unchecking 'all categories' should remove the 'all categories' dataset."""
         script = make_script("""\
     await page.goto(`${BASE}/engagement/forums`, {waitUntil: 'networkidle0', timeout: 30000});
     await page.waitForFunction(() => {
@@ -116,8 +124,8 @@ class TestTagToggling:
 
     const before = await getLabels();
 
-    const allTagsCb = await page.$('#engagement-snapcraft-all-tags');
-    await allTagsCb.click();
+    const allCategoriesCb = await page.$('#engagement-snapcraft-all-categories');
+    await allCategoriesCb.click();
     await new Promise(r => setTimeout(r, 500));
 
     const after = await getLabels();
@@ -125,12 +133,12 @@ class TestTagToggling:
     console.log(JSON.stringify({before, after}));
 """)
         result = run_puppeteer(script, base_url=seeded_url, timeout=30)
-        assert "all tags" in result["before"]
-        assert "all tags" not in result["after"]
+        assert "all categories" in result["before"]
+        assert "all categories" not in result["after"]
 
-    def test_checking_a_tag_adds_a_dataset(self, seeded_url: str) -> None:
-        """Checking an individual (non-default) tag checkbox should add its
-        dataset to the chart.
+    def test_checking_a_category_adds_a_dataset(self, seeded_url: str) -> None:
+        """Checking an individual (non-default) category checkbox should add
+        its dataset to the chart.
         """
         script = make_script("""\
     await page.goto(`${BASE}/engagement/forums`, {waitUntil: 'networkidle0', timeout: 30000});
@@ -146,8 +154,8 @@ class TestTagToggling:
 
     const before = await getLabels();
 
-    const tagCb = await page.$('#engagement-snapcraft-tag-feature');
-    await tagCb.click();
+    const categoryCb = await page.$('#engagement-snapcraft-category-features');
+    await categoryCb.click();
     await new Promise(r => setTimeout(r, 500));
 
     const after = await getLabels();
@@ -155,16 +163,17 @@ class TestTagToggling:
     console.log(JSON.stringify({before, after}));
 """)
         result = run_puppeteer(script, base_url=seeded_url, timeout=30)
-        assert "feature" not in result["before"]
-        assert "feature" in result["after"]
+        assert "features" not in result["before"]
+        assert "features" in result["after"]
 
 
 # ---------------------------------------------------------------------------
-# Tests: tag checkboxes list every discovered tag
+# Tests: category checkboxes list every discovered category
 # ---------------------------------------------------------------------------
-class TestTagCheckboxes:
-    def test_all_forum_tags_have_checkboxes(self, seeded_url: str) -> None:
-        """Every tag cached in forum_tags should render as a checkbox."""
+class TestCategoryCheckboxes:
+    def test_all_forum_categories_have_checkboxes(self, seeded_url: str) -> None:
+        """Every category cached in forum_backfill_state should render as a
+        checkbox."""
         script = make_script("""\
     await page.goto(`${BASE}/engagement/forums`, {waitUntil: 'networkidle0', timeout: 30000});
     await page.waitForFunction(() => {
@@ -172,19 +181,21 @@ class TestTagCheckboxes:
       return !el || el.style.display === 'none';
     }, {timeout: 15000});
 
-    const ids = TAG_IDS;
+    const ids = CATEGORY_IDS;
     const result = {};
     for (const id of ids) {
       result[id] = !!(await page.$(`#${id}`));
     }
     console.log(JSON.stringify(result));
 """)
-        tag_ids = [f"engagement-snapcraft-tag-{tag}" for tag in FORUM_TAGS]
-        tag_ids_json = "[" + ", ".join(f"'{t}'" for t in tag_ids) + "]"
-        script = script.replace("TAG_IDS", tag_ids_json)
+        category_ids = [
+            f"engagement-snapcraft-category-{category}" for category in FORUM_CATEGORIES
+        ]
+        category_ids_json = "[" + ", ".join(f"'{c}'" for c in category_ids) + "]"
+        script = script.replace("CATEGORY_IDS", category_ids_json)
         result = run_puppeteer(script, base_url=seeded_url, timeout=30)
-        for tag_id in tag_ids:
-            assert result[tag_id] is True, f"checkbox {tag_id} should exist"
+        for category_id in category_ids:
+            assert result[category_id] is True, f"checkbox {category_id} should exist"
 
 
 # ---------------------------------------------------------------------------

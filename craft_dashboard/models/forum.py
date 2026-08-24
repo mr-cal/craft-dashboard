@@ -8,17 +8,17 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from craft_dashboard.models.base import Base
 
-__all__ = ["ForumBackfillState", "ForumTag", "ForumTopic"]
+__all__ = ["ForumBackfillState", "ForumTopic"]
 
 
 class ForumTopic(Base):
     """A topic on a tracked Discourse forum, with topic-level metadata only.
 
     This intentionally stores topic-level aggregates (post/like counts,
-    tags, timestamps) rather than individual post bodies — see the storage
-    feasibility analysis in plans/33-forum-activity-tracker.md Step 1 for
-    why that's sufficient (and negligible in size) for the current
-    trend-graph requirements.
+    category, timestamps) rather than individual post bodies — see the
+    storage feasibility analysis in plans/33-forum-activity-tracker.md
+    Step 1 for why that's sufficient (and negligible in size) for the
+    current trend-graph requirements.
     """
 
     __tablename__ = "forum_topics"
@@ -28,15 +28,15 @@ class ForumTopic(Base):
     #: Forum key from craft-dashboard.toml's [forums.*] sections, e.g.
     #: "snapcraft", "charmcraft", "rockcraft".
     forum: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    #: Discourse category slug the topic belongs to (informational only —
-    #: every category on the forum is tracked, none are filtered out).
-    category: Mapped[str] = mapped_column(String(100), nullable=False)
+    #: Discourse category slug the topic belongs to — every category on the
+    #: forum is tracked and this is what backs the Engagement page's
+    #: per-category checkbox filter.
+    category: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     #: Discourse's own topic id.
     external_id: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     posts_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     like_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    tags: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
@@ -59,6 +59,8 @@ class ForumBackfillState(Base):
     Also caches the forum's resolved category list (rather than adding a
     separate table for it) since it's small, single-row-per-forum data that
     only needs a periodic refresh, matching the other cache fields here.
+    This cached category list backs the Engagement page's per-category
+    checkbox filter panel.
     """
 
     __tablename__ = "forum_backfill_state"
@@ -84,27 +86,3 @@ class ForumBackfillState(Base):
     def __repr__(self) -> str:
         """Return a string representation."""
         return f"<ForumBackfillState(forum={self.forum!r}, earliest_month_backfilled={self.earliest_month_backfilled!r})>"
-
-
-class ForumTag(Base):
-    """A tag discovered on a tracked forum, cached from GET /tags.json.
-
-    Backs the dynamic per-tag checkbox filter on the Engagement forum
-    activity page (Step 5) — refreshed periodically (e.g. daily) so newly
-    created tags appear automatically without a deploy.
-    """
-
-    __tablename__ = "forum_tags"
-    __table_args__ = (UniqueConstraint("forum", "tag_name"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    forum: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    tag_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    topic_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    last_seen_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-    def __repr__(self) -> str:
-        """Return a string representation."""
-        return f"<ForumTag(forum={self.forum!r}, tag_name={self.tag_name!r})>"

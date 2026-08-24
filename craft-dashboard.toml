@@ -113,12 +113,12 @@ rockcraft = "1.15"
 # is configured.
 [forums.snapcraft]
 base-url = "https://forum.snapcraft.io"
-default-tags = ["bug", "question"]
+default-categories = ["snapcraft"]
 
 [forums.charmcraft]
 base-url = "https://discourse.charmhub.io"
-default-tags = ["bug", "question"]
+default-categories = []
 
 [forums.rockcraft]
 base-url = "https://discourse.ubuntu.com"
-default-tags = ["bug", "question"]
+default-categories = []
