@@ -78,6 +78,15 @@
       </div>
     </div>
   </div>
+  {% if forum.name == "rockcraft" %}
+  <div class="row">
+    <div class="col-9 col-start-large-4">
+      <p><em>Note: The increase in traffic in early 2025 is due to UbuntuForums.org
+        <a href="https://web.archive.org/web/20241208054719/fridge.ubuntu.com/2024/12/08/ubuntu-forums-migration/" target="_blank" rel="noopener">migrating</a>
+        to the "Support and Help" category on discourse.ubuntu.com</em></p>
+    </div>
+  </div>
+  {% endif %}
 </div>
 {% endfor %}
 {% endblock %}
