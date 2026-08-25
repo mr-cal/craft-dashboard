@@ -5,6 +5,7 @@ See plans/33-forum-activity-tracker.md for the full design.
 
 import json
 from collections import defaultdict
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -60,15 +61,18 @@ async def forums_data(
     session: AsyncSession = Depends(get_db_session),
     forum: str = Query(...),
 ) -> JSONResponse:
-    """Return daily new-topic-count series for a forum, one per category plus "all".
+    """Return weekly new-topic-count series for a forum, one per category plus "all".
 
-    Buckets every topic by the day it was created and counts the number of
-    new topics created that day, per category (plus an "all categories"
-    series). This uses each topic's exact creation timestamp, which is
-    precise, unlike ``posts_count`` (a topic's total reply count as of the
-    last collector run, not tied to when individual replies happened).
-    Returns every category's series in one response so the frontend can
-    toggle visibility locally without a round trip per checkbox change.
+    Buckets every topic by the ISO week (Monday) it was created in and counts
+    the number of new topics created that week, per category (plus an "all
+    categories" series). This uses each topic's exact creation timestamp,
+    which is precise, unlike ``posts_count`` (a topic's total reply count as
+    of the last collector run, not tied to when individual replies
+    happened). Weekly buckets are used (rather than daily) since some forums
+    span roughly a decade of history, and per-day counts became too sparse
+    to average and plot legibly. Returns every category's series in one
+    response so the frontend can toggle visibility locally without a round
+    trip per checkbox change.
     """
     exists = await session.scalar(
         select(ForumBackfillState.id).where(ForumBackfillState.forum == forum).limit(1)
@@ -86,21 +90,22 @@ async def forums_data(
         )
     )
 
-    all_by_day: dict[str, int] = defaultdict(int)
-    category_by_day: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    all_by_week: dict[str, int] = defaultdict(int)
+    category_by_week: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     for row in result:
-        day_key = row.created_at.strftime("%Y-%m-%d")
-        all_by_day[day_key] += 1
-        category_by_day[row.category][day_key] += 1
+        week_start = row.created_at.date() - timedelta(days=row.created_at.weekday())
+        week_key = week_start.strftime("%Y-%m-%d")
+        all_by_week[week_key] += 1
+        category_by_week[row.category][week_key] += 1
 
-    days = sorted(all_by_day)
-    all_series = [all_by_day[d] for d in days]
+    weeks = sorted(all_by_week)
+    all_series = [all_by_week[w] for w in weeks]
     categories_series = {
-        category: [by_day.get(d, 0) for d in days]
-        for category, by_day in sorted(category_by_day.items())
+        category: [by_week.get(w, 0) for w in weeks]
+        for category, by_week in sorted(category_by_week.items())
     }
 
     return JSONResponse(
-        {"days": days, "all": all_series, "categories": categories_series}
+        {"weeks": weeks, "all": all_series, "categories": categories_series}
     )

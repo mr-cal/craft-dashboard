@@ -144,7 +144,7 @@ class TestForumsData:
 
         assert response.status_code == 404
 
-    async def test_buckets_topics_per_day(
+    async def test_buckets_topics_per_week(
         self, test_client: TestClient, test_db_session: AsyncSession
     ) -> None:
         test_db_session.add_all(
@@ -178,7 +178,9 @@ class TestForumsData:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["days"] == ["2024-03-05", "2024-04-01"]
+        # 2024-03-05 (Tue) falls in the week starting Monday 2024-03-04;
+        # 2024-04-01 (Mon) is itself a week start.
+        assert data["weeks"] == ["2024-03-04", "2024-04-01"]
         assert data["all"] == [2, 1]
         assert data["categories"]["bugs"] == [1, 1]
         assert data["categories"]["questions"] == [1, 0]
@@ -197,5 +199,5 @@ class TestForumsData:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["days"] == []
+        assert data["weeks"] == []
         assert data["all"] == []

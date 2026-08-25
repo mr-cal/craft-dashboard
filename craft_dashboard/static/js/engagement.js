@@ -1,6 +1,6 @@
 // Engagement page: one Chart.js line graph per Discourse forum, with a flat
 // per-category checkbox filter ("all categories" + individual categories),
-// a rolling-average smoothed "new topics per day" metric, and shared
+// a rolling-average smoothed "new topics per week" metric, and shared
 // date-range/tooltip-toggle controls (see chart-common.js).
 
 import {
@@ -11,7 +11,7 @@ import {
   wireDateRangeFilter,
 } from "/static/js/chart-common.js";
 
-const ROLLING_WINDOW_DAYS = 30;
+const ROLLING_WINDOW_WEEKS = 4;
 const DEFAULT_START_DATE = "2017-01-01";
 
 try {
@@ -20,7 +20,7 @@ try {
   const { createLineChart, registeredCharts } = registry;
 
   const forums = window.ENGAGEMENT_FORUMS || [];
-  const forumData = {}; // name -> { days, all, categories }
+  const forumData = {}; // name -> { weeks, all, categories }
   const forumCharts = {}; // name -> Chart
 
   async function loadForum(forum) {
@@ -28,7 +28,7 @@ try {
     if (!response.ok) {
       // No data yet (e.g. backfill hasn't run) — leave the chart empty
       // rather than failing the whole page.
-      forumData[forum.name] = { days: [], all: [], categories: {} };
+      forumData[forum.name] = { weeks: [], all: [], categories: {} };
       return;
     }
     forumData[forum.name] = await response.json();
@@ -37,18 +37,18 @@ try {
   // Slice a forum's day-bucketed data to [startDate, endDate], returning a
   // new data object shaped like the raw fetch response.
   function sliceForumData(data, startDate, endDate) {
-    const days = data.days;
-    let startIdx = days.findIndex((d) => new Date(d) >= startDate);
-    let endIdx = days.findLastIndex((d) => new Date(d) <= endDate);
+    const weeks = data.weeks;
+    let startIdx = weeks.findIndex((w) => new Date(w) >= startDate);
+    let endIdx = weeks.findLastIndex((w) => new Date(w) <= endDate);
     if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) {
-      return { days: [], all: [], categories: {} };
+      return { weeks: [], all: [], categories: {} };
     }
     const categories = {};
     for (const [category, series] of Object.entries(data.categories)) {
       categories[category] = series.slice(startIdx, endIdx + 1);
     }
     return {
-      days: days.slice(startIdx, endIdx + 1),
+      weeks: weeks.slice(startIdx, endIdx + 1),
       all: data.all.slice(startIdx, endIdx + 1),
       categories,
     };
@@ -57,7 +57,7 @@ try {
   let currentRange = null; // { startDate, endDate } | null (null = unfiltered)
 
   // Round a rolling-average value for display; whole-number "topics per
-  // day" reads more cleanly than a bouncing decimal, and the underlying
+  // week" reads more cleanly than a bouncing decimal, and the underlying
   // average is still computed at full precision before rounding.
   function roundOrNull(value) {
     return value === null ? null : Math.round(value);
@@ -74,12 +74,12 @@ try {
     });
     const allCategoriesCb = document.getElementById(`engagement-${forum.name}-all-categories`);
 
-    chart.data.labels = data.days;
+    chart.data.labels = data.weeks;
     const datasets = [];
     if (allCategoriesCb?.checked) {
       datasets.push({
         label: "all categories",
-        data: rollingAverage(data.all, ROLLING_WINDOW_DAYS).map(roundOrNull),
+        data: rollingAverage(data.all, ROLLING_WINDOW_WEEKS).map(roundOrNull),
         borderColor: CHART_COLORS.palette[0],
         backgroundColor: CHART_COLORS.palette[0] + "20",
         borderWidth: 2,
@@ -89,10 +89,10 @@ try {
     }
     selectedCategories.forEach((category, i) => {
       const color = CHART_COLORS.palette[(i + 1) % CHART_COLORS.palette.length];
-      const series = data.categories[category] || data.days.map(() => 0);
+      const series = data.categories[category] || data.weeks.map(() => 0);
       datasets.push({
         label: category,
-        data: rollingAverage(series, ROLLING_WINDOW_DAYS).map(roundOrNull),
+        data: rollingAverage(series, ROLLING_WINDOW_WEEKS).map(roundOrNull),
         borderColor: color,
         backgroundColor: color + "20",
         borderWidth: 2,
@@ -141,7 +141,7 @@ try {
   forums.forEach((forum) => {
     const chart = createLineChart(
       `engagement-${forum.name}-chart`,
-      `New topics per day (${ROLLING_WINDOW_DAYS}-day avg)`,
+      `New topics per week (${ROLLING_WINDOW_WEEKS}-week avg)`,
       "Date"
     );
     forumCharts[forum.name] = chart;

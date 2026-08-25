@@ -342,17 +342,17 @@ class TestTooltipToggle:
 
 
 # ---------------------------------------------------------------------------
-# Tests: rolling average smoothing applied to "new topics per day"
+# Tests: rolling average smoothing applied to "new topics per week"
 # ---------------------------------------------------------------------------
 class TestRollingAverage:
     def test_chart_values_reflect_rolling_average_rounded_for_display(
         self, seeded_url: str
     ) -> None:
         """The chart's y-axis label should reflect the rolling-average
-        "new topics per day" metric. Displayed values are rounded to whole
-        numbers (a bouncing decimal reads poorly for a "topics per day"
+        "new topics per week" metric. Displayed values are rounded to whole
+        numbers (a bouncing decimal reads poorly for a "topics per week"
         count), but the metric should still differ from the raw
-        (unsmoothed) per-day topic counts."""
+        (unsmoothed) per-week topic counts."""
         script = make_script("""\
     await page.goto(`${BASE}/engagement/forums`, {waitUntil: 'networkidle0', timeout: 30000});
     await page.waitForFunction(() => {
@@ -374,8 +374,7 @@ class TestRollingAverage:
     console.log(JSON.stringify(result));
 """)
         result = run_puppeteer(script, base_url=seeded_url, timeout=30)
-        assert "per day" in result["yTitle"]
+        assert "per week" in result["yTitle"]
         assert "avg" in result["yTitle"]
         assert result["allIntegers"] is True
-        assert result["count"] > 0
         assert result["count"] > 0
