@@ -56,6 +56,13 @@ try {
 
   let currentRange = null; // { startDate, endDate } | null (null = unfiltered)
 
+  // Round a rolling-average value for display; whole-number "topics per
+  // day" reads more cleanly than a bouncing decimal, and the underlying
+  // average is still computed at full precision before rounding.
+  function roundOrNull(value) {
+    return value === null ? null : Math.round(value);
+  }
+
   function updateForumChart(forum) {
     const chart = forumCharts[forum.name];
     const raw = forumData[forum.name];
@@ -72,7 +79,7 @@ try {
     if (allCategoriesCb?.checked) {
       datasets.push({
         label: "all categories",
-        data: rollingAverage(data.all, ROLLING_WINDOW_DAYS),
+        data: rollingAverage(data.all, ROLLING_WINDOW_DAYS).map(roundOrNull),
         borderColor: CHART_COLORS.palette[0],
         backgroundColor: CHART_COLORS.palette[0] + "20",
         borderWidth: 2,
@@ -85,7 +92,7 @@ try {
       const series = data.categories[category] || data.days.map(() => 0);
       datasets.push({
         label: category,
-        data: rollingAverage(series, ROLLING_WINDOW_DAYS),
+        data: rollingAverage(series, ROLLING_WINDOW_DAYS).map(roundOrNull),
         borderColor: color,
         backgroundColor: color + "20",
         borderWidth: 2,

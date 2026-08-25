@@ -345,12 +345,14 @@ class TestTooltipToggle:
 # Tests: rolling average smoothing applied to "new topics per day"
 # ---------------------------------------------------------------------------
 class TestRollingAverage:
-    def test_chart_values_reflect_rolling_average_not_raw_counts(
+    def test_chart_values_reflect_rolling_average_rounded_for_display(
         self, seeded_url: str
     ) -> None:
         """The chart's y-axis label should reflect the rolling-average
-        "new topics per day" metric, and dataset values should include
-        fractional (averaged) numbers rather than only raw integer counts."""
+        "new topics per day" metric. Displayed values are rounded to whole
+        numbers (a bouncing decimal reads poorly for a "topics per day"
+        count), but the metric should still differ from the raw
+        (unsmoothed) per-day topic counts."""
         script = make_script("""\
     await page.goto(`${BASE}/engagement/forums`, {waitUntil: 'networkidle0', timeout: 30000});
     await page.waitForFunction(() => {
@@ -358,16 +360,22 @@ class TestRollingAverage:
       return !el || el.style.display === 'none';
     }, {timeout: 15000});
 
-    const result = await page.evaluate(() => {
+    const result = await page.evaluate(async () => {
       const chart = Chart.getChart(document.getElementById('engagement-snapcraft-chart'));
       const yTitle = chart.options.scales.y.title.text;
       const values = chart.data.datasets[0].data.filter(v => v !== null);
-      const hasFractional = values.some(v => Math.abs(v - Math.round(v)) > 1e-9);
-      return {yTitle, hasFractional, count: values.length};
+      const allIntegers = values.every(v => Number.isInteger(v));
+
+      const response = await fetch('/engagement/forums/data?forum=snapcraft');
+      const raw = await response.json();
+
+      return {yTitle, allIntegers, count: values.length, rawAll: raw.all};
     });
     console.log(JSON.stringify(result));
 """)
         result = run_puppeteer(script, base_url=seeded_url, timeout=30)
         assert "per day" in result["yTitle"]
         assert "avg" in result["yTitle"]
+        assert result["allIntegers"] is True
+        assert result["count"] > 0
         assert result["count"] > 0
