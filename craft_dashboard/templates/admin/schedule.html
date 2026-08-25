@@ -23,7 +23,8 @@
           <th>Project</th>
           <th>Source</th>
           <th>Last full refresh</th>
-          <th>Consecutive failures</th>
+          <th>Full-refresh failures</th>
+          <th>Open-poll failures</th>
         </tr>
       </thead>
       <tbody>
@@ -47,7 +48,14 @@
           </td>
           <td>
             {% if entry.consecutive_failures > 0 %}
-            <span style="color:var(--app-caution);">{{ entry.consecutive_failures }}</span>
+            <span style="color:var(--app-caution);" title="{{ entry.last_error or '' }}">{{ entry.consecutive_failures }}</span>
+            {% else %}
+            0
+            {% endif %}
+          </td>
+          <td>
+            {% if entry.open_poll_consecutive_failures > 0 %}
+            <span style="color:var(--app-caution);" title="{{ entry.open_poll_last_error or '' }}">{{ entry.open_poll_consecutive_failures }}</span>
             {% else %}
             0
             {% endif %}

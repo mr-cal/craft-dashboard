@@ -247,14 +247,16 @@ def _comments_from_graphql_node(node: dict[str, Any]) -> list[dict]:
             "created_at": comment["createdAt"],
             "type": "comment",
         }
-        for comment in node["comments"]["nodes"]
+        # `comments`/`nodes` can come back null on a partial GraphQL error for
+        # this field — see the matching guard in _GraphQLIssueAdapter.
+        for comment in (node.get("comments") or {}).get("nodes") or []
     ]
 
 
 def _closing_refs_from_graphql_node(node: dict[str, Any]) -> list[dict]:
     """Convert a GraphQL issue node's timeline items to the REST closing-ref shape."""
     refs = []
-    for item in node["timelineItems"]["nodes"]:
+    for item in (node.get("timelineItems") or {}).get("nodes") or []:
         source = item.get("source")
         if source and source.get("mergedAt") is not None:
             refs.append(
@@ -281,9 +283,12 @@ class _GraphQLIssueAdapter:
         self.state = node["state"].lower()
         author = node["author"]
         self.user = SimpleNamespace(login=author["login"]) if author else None
-        self.labels = [
-            SimpleNamespace(name=label["name"]) for label in node["labels"]["nodes"]
-        ]
+        # `labels` (or its nested `nodes`) can come back null on a partial
+        # GraphQL error for this field (e.g. RESOURCE_LIMITS_EXCEEDED on a
+        # deeply-nested query) — see `classify_pr_ci_checks`'s similar guard
+        # for `checkSuites`. Treat as "no labels" rather than crashing.
+        label_nodes = (node.get("labels") or {}).get("nodes") or []
+        self.labels = [SimpleNamespace(name=label["name"]) for label in label_nodes]
         self.created_at = _parse_graphql_datetime(node["createdAt"])
         self.updated_at = _parse_graphql_datetime(node["updatedAt"])
         self.closed_at = _parse_graphql_datetime(node["closedAt"])
@@ -310,9 +315,9 @@ class _GraphQLPullRequestAdapter:
         self.state = node["state"].lower()
         author = node["author"]
         self.user = SimpleNamespace(login=author["login"]) if author else None
-        self.labels = [
-            SimpleNamespace(name=label["name"]) for label in node["labels"]["nodes"]
-        ]
+        # See the matching comment in _GraphQLIssueAdapter.__init__.
+        label_nodes = (node.get("labels") or {}).get("nodes") or []
+        self.labels = [SimpleNamespace(name=label["name"]) for label in label_nodes]
         self.created_at = _parse_graphql_datetime(node["createdAt"])
         self.updated_at = _parse_graphql_datetime(node["updatedAt"])
         self.closed_at = _parse_graphql_datetime(node["closedAt"])
@@ -328,14 +333,14 @@ class _GraphQLPullRequestAdapter:
     def fetch_pr_details(self) -> dict:
         """Return PR review/CI/diff details already embedded in the GraphQL node."""
         review_status, review_count = classify_pr_review_status(
-            self._node["reviews"]["nodes"]
+            (self._node.get("reviews") or {}).get("nodes") or []
         )
         ci_passing, ci_failing, ci_pending = classify_pr_ci_checks(
-            self._node["commits"]["nodes"]
+            (self._node.get("commits") or {}).get("nodes") or []
         )
         unresolved = sum(
             1
-            for thread in self._node["reviewThreads"]["nodes"]
+            for thread in (self._node.get("reviewThreads") or {}).get("nodes") or []
             if not thread["isResolved"]
         )
         return {

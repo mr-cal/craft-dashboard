@@ -42,6 +42,7 @@ from craft_dashboard.collectors.launchpad import LaunchpadCollector
 from craft_dashboard.collectors.scheduler import (
     get_least_recently_refreshed,
     is_due_for_refresh,
+    record_open_poll_success,
     record_refresh_error,
     update_refresh_schedule,
 )
@@ -632,6 +633,8 @@ async def _collect_github(
                         project_name,
                         _format_duration(time.monotonic() - snapshot_started_at),
                     )
+                    async with session_factory() as ok_session:
+                        await record_open_poll_success(project_id, "github", ok_session)
                 except Exception as exc:
                     logger.exception(
                         "Failed to collect open GitHub issues for %s", project_name
@@ -642,7 +645,11 @@ async def _collect_github(
                     )
                     async with session_factory() as err_session:
                         await record_refresh_error(
-                            project_id, "github", error_summary, err_session
+                            project_id,
+                            "github",
+                            error_summary,
+                            err_session,
+                            kind="open_poll",
                         )
 
                 if mode == "open":

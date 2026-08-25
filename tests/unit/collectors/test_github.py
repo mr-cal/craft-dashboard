@@ -733,6 +733,59 @@ class TestCollectIssuesGraphQLOpenPath:
         assert statements[0].values_kwargs["author_is_maintainer"] is False
         assert statements[0].values_kwargs["author_is_bot"] is False
 
+    async def test_collect_issues_handles_graphql_partial_error_null_nested_fields(
+        self, mocker
+    ) -> None:
+        """A partial GraphQL error can null out `labels`/`comments`/`timelineItems`.
+
+        Regression test: previously ``node["labels"]["nodes"]`` (etc.) crashed
+        with "'NoneType' object is not iterable" whenever GitHub returned a
+        (HTTP 200) partial-error response with one of these nested fields set
+        to null — e.g. `RESOURCE_LIMITS_EXCEEDED` on a heavily-nested query
+        for a large repo. These should degrade to "no labels/comments/refs"
+        instead of aborting collection for the whole batch.
+        """
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        collector.gh = MagicMock()
+        collector.gh.requester = MagicMock()
+        collector.wait_for_rate_limit = MagicMock()
+
+        node = self._make_issue_node() | {
+            "labels": {"nodes": None},
+            "comments": {"nodes": None},
+            "timelineItems": {"nodes": None},
+        }
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_issues",
+            return_value=iter([node]),
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_pull_requests",
+            return_value=iter([]),
+        )
+
+        statements: list[
+            TestCollectIssuesGraphQLOpenPath._RecordingInsertStatement
+        ] = []
+
+        def fake_insert(_table):
+            stmt = TestCollectIssuesGraphQLOpenPath._RecordingInsertStatement()
+            statements.append(stmt)
+            return stmt
+
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=fake_insert,
+        )
+        session = self._make_session_with_no_existing_issue(fetch_count=1)
+
+        count = await collector.collect_issues("repo", 1, session, state="open")
+
+        assert count == 1
+        assert statements[0].values_kwargs is not None
+        assert statements[0].values_kwargs["labels"] == []
+        assert statements[0].values_kwargs["comments"] == []
+
 
 class TestFetchPRDetails:
     """Tests for _fetch_pr_details."""

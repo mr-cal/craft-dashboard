@@ -29,6 +29,16 @@ class RefreshSchedule(Base):
     consecutive_failures: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0
     )
+    # Tracked separately from the full-refresh failure counters above: the
+    # 10-minute open-issue poll hits far more (mostly transient/self-healing)
+    # network and GraphQL errors than the weekly/hourly full refresh, since it
+    # runs ~1000x more often. Recording those against `consecutive_failures`
+    # made large/complex repos (e.g. craft-parts) look like their full refresh
+    # was broken when it was actually the frequent open poll being flaky.
+    open_poll_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    open_poll_consecutive_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
 
     def __repr__(self) -> str:
         """Return a string representation."""

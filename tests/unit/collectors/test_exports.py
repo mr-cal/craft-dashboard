@@ -43,6 +43,7 @@ def test_scheduler_exports() -> None:
     assert scheduler.__all__ == [
         "get_least_recently_refreshed",
         "is_due_for_refresh",
+        "record_open_poll_success",
         "record_refresh_error",
         "update_refresh_schedule",
     ]

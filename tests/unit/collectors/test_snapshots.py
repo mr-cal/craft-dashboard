@@ -121,6 +121,28 @@ class TestComputeSnapshotCounts:
         assert result["open_issues_internal"] == 1
         assert result["open_bugs"] == 1
 
+    def test_null_labels_does_not_crash(self) -> None:
+        """An issue with `labels: None` (e.g. a NULL DB column) is treated as no labels.
+
+        Regression test: ``issue.get("labels", [])`` only falls back to `[]`
+        when the key is *missing*, not when it's explicitly `None` — which
+        previously raised "argument of type 'NoneType' is not iterable" and
+        aborted the whole snapshot for the project.
+        """
+        issues = [
+            {
+                "issue_type": "issue",
+                "state": "open",
+                "author": "external-user",
+                "labels": None,
+            },
+        ]
+
+        result = compute_snapshot_counts(issues=issues, maintainers=set())
+
+        assert result["open_issues"] == 1
+        assert result["open_bugs"] == 0
+
     def test_counts_open_prs(self) -> None:
         """Counts open PRs correctly."""
         issues = [

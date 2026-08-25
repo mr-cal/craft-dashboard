@@ -122,4 +122,7 @@ class TestAdminSystemStatus:
             "evaluation_running": False,
             "last_collection": None,
             "last_evaluation": None,
+            "most_recent_full_refresh": None,
+            "most_overdue_full_refresh": None,
+            "full_refresh_failing_count": 0,
         }

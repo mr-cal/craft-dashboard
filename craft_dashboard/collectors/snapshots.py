@@ -76,7 +76,7 @@ def _record_open_item(
         date_buckets["bots"].append(created_dt)
         date_buckets[f"{type_prefix}_bots"].append(created_dt)
 
-    if type_prefix == "issue" and "bug" in issue.get("labels", []):
+    if type_prefix == "issue" and "bug" in (issue.get("labels") or []):
         counts["open_bugs"] += 1
 
 

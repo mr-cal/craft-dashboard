@@ -42,6 +42,18 @@
         <h4>GraphQL API budget</h4>
         <p>{{ api_budget.graphql_remaining ~ " / " ~ api_budget.graphql_limit ~ " remaining" if api_budget else "Unknown" }}</p>
       </div>
+      <div class="status-card">
+        <h4>Hourly full-project refresh</h4>
+        <p>Newest: {{ system_status.most_recent_full_refresh | local_datetime("Unknown") }}</p>
+        <p class="status-detail">Oldest (up next): {{ system_status.most_overdue_full_refresh | local_datetime("Unknown") }}</p>
+        {% if system_status.full_refresh_failing_count %}
+        <p class="status-detail">
+          <a href="/admin/schedule">{{ system_status.full_refresh_failing_count }} project{{ "s" if system_status.full_refresh_failing_count != 1 else "" }} currently failing &rarr;</a>
+        </p>
+        {% else %}
+        <p class="status-detail">No projects currently failing</p>
+        {% endif %}
+      </div>
     </div>
     {% if collection_runs %}
     <table style="margin-top: 1rem;">

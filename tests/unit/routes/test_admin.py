@@ -51,6 +51,9 @@ class _AdminSession:
     async def scalar(self, _query):
         return 0
 
+    async def scalars(self, _query):
+        return []
+
     async def execute(self, _query):
         return _EmptyResult()
 
@@ -124,6 +127,17 @@ def _stub_admin_page_metrics(
     async def _fake_next_expected_fetch(self):
         return next_expected_fetch
 
+    async def _fake_system_status(self):
+        return {
+            "collection_running": False,
+            "evaluation_running": False,
+            "last_collection": None,
+            "last_evaluation": None,
+            "most_recent_full_refresh": None,
+            "most_overdue_full_refresh": None,
+            "full_refresh_failing_count": 0,
+        }
+
     monkeypatch.setattr(
         "craft_dashboard.routes.admin.AdminService.get_recent_issue_activity",
         _fake_recent_activity,
@@ -135,6 +149,10 @@ def _stub_admin_page_metrics(
     monkeypatch.setattr(
         "craft_dashboard.routes.admin.AdminService.get_next_expected_fetch",
         _fake_next_expected_fetch,
+    )
+    monkeypatch.setattr(
+        "craft_dashboard.routes.admin.AdminService.get_system_status",
+        _fake_system_status,
     )
 
 

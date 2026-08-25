@@ -155,6 +155,7 @@ async def admin_overview_page(
         logger.warning("Admin page: API budget lookup failed: %s", exc)
         api_budget = None
     next_expected_fetch = await admin_service.get_next_expected_fetch()
+    system_status = await admin_service.get_system_status()
 
     return templates.TemplateResponse(
         request,
@@ -167,6 +168,7 @@ async def admin_overview_page(
             "recent_activity_total": recent_activity_total,
             "api_budget": api_budget,
             "next_expected_fetch": next_expected_fetch,
+            "system_status": system_status,
         },
     )
 

@@ -6,6 +6,7 @@ from unittest.mock import patch
 from craft_dashboard.collectors.scheduler import (
     get_least_recently_refreshed,
     is_due_for_refresh,
+    record_open_poll_success,
     record_refresh_error,
 )
 from craft_dashboard.models.project import Project
@@ -169,3 +170,79 @@ class TestRecordRefreshError:
         schedule = result.scalar_one()
         assert schedule.last_error == "test error"
         assert schedule.consecutive_failures == 1
+        assert schedule.open_poll_consecutive_failures == 0
+
+    async def test_open_poll_kind_uses_separate_counter(self, test_db_session) -> None:
+        """kind='open_poll' increments open_poll_* columns, not the full-refresh ones."""
+        with patch("sqlalchemy.dialects.postgresql.insert", side_effect=sqlite_insert):
+            await record_refresh_error(
+                999, "github", "open poll error", test_db_session, kind="open_poll"
+            )
+
+        result = await test_db_session.execute(
+            select(RefreshSchedule).where(
+                RefreshSchedule.project_id == 999,
+                RefreshSchedule.source == "github",
+            )
+        )
+        schedule = result.scalar_one()
+        assert schedule.open_poll_last_error == "open poll error"
+        assert schedule.open_poll_consecutive_failures == 1
+        assert schedule.consecutive_failures == 0
+        assert schedule.last_error is None
+
+    async def test_open_poll_errors_dont_affect_full_refresh_counter(
+        self, test_db_session
+    ) -> None:
+        """Repeated open-poll failures never bump the full-refresh counter."""
+        with patch("sqlalchemy.dialects.postgresql.insert", side_effect=sqlite_insert):
+            for _ in range(5):
+                await record_refresh_error(
+                    999, "github", "flaky poll", test_db_session, kind="open_poll"
+                )
+
+        result = await test_db_session.execute(
+            select(RefreshSchedule).where(
+                RefreshSchedule.project_id == 999,
+                RefreshSchedule.source == "github",
+            )
+        )
+        schedule = result.scalar_one()
+        assert schedule.open_poll_consecutive_failures == 5
+        assert schedule.consecutive_failures == 0
+
+
+class TestRecordOpenPollSuccess:
+    async def test_clears_open_poll_failures(self, test_db_session) -> None:
+        """A successful open poll resets the open-poll counter but not the full one."""
+        test_db_session.add(
+            RefreshSchedule(
+                project_id=5,
+                source="github",
+                consecutive_failures=3,
+                last_error="full refresh broke",
+                open_poll_consecutive_failures=7,
+                open_poll_last_error="poll broke",
+            )
+        )
+        await test_db_session.commit()
+
+        await record_open_poll_success(5, "github", test_db_session)
+
+        result = await test_db_session.execute(
+            select(RefreshSchedule).where(RefreshSchedule.project_id == 5)
+        )
+        schedule = result.scalar_one()
+        assert schedule.open_poll_consecutive_failures == 0
+        assert schedule.open_poll_last_error is None
+        assert schedule.consecutive_failures == 3
+        assert schedule.last_error == "full refresh broke"
+
+    async def test_noop_when_no_schedule_row_exists(self, test_db_session) -> None:
+        """No row to update — should not raise or create one."""
+        await record_open_poll_success(12345, "github", test_db_session)
+
+        result = await test_db_session.execute(
+            select(RefreshSchedule).where(RefreshSchedule.project_id == 12345)
+        )
+        assert result.scalar_one_or_none() is None

@@ -57,6 +57,14 @@ class ProjectRefreshEntry(TypedDict):
     last_refreshed_at: datetime | None
     consecutive_failures: int
     days_since_last: int | None
+    last_error: str | None
+    # Tracked separately from the full-refresh columns above: the frequent
+    # (every 10 minutes) open-issue-only poll fails far more often on large
+    # repos, mostly on transient/self-healing network errors, and shouldn't
+    # be conflated with full-refresh health (see
+    # ``craft_dashboard.collectors.scheduler.record_refresh_error``).
+    open_poll_consecutive_failures: int
+    open_poll_last_error: str | None
 
 
 class CollectionRunSummary(TypedDict):
@@ -80,6 +88,15 @@ class SystemStatus(TypedDict):
     evaluation_running: bool
     last_collection: datetime | None
     last_evaluation: datetime | None
+    # Hourly full-project refresh rotation (see
+    # ``craft_dashboard.collectors.scheduler.get_least_recently_refreshed``):
+    # the most recently completed full refresh, the most overdue one (i.e.
+    # "up next" in the rotation), and how many projects currently have a
+    # failing full refresh, so the Overview tab surfaces rotation health
+    # without needing to open the Refresh Schedule tab.
+    most_recent_full_refresh: datetime | None
+    most_overdue_full_refresh: datetime | None
+    full_refresh_failing_count: int
 
 
 class LLMServiceStatus(TypedDict):
@@ -255,6 +272,9 @@ class AdminService:
                 RefreshSchedule.source,
                 RefreshSchedule.last_refreshed_at,
                 RefreshSchedule.consecutive_failures,
+                RefreshSchedule.last_error,
+                RefreshSchedule.open_poll_consecutive_failures,
+                RefreshSchedule.open_poll_last_error,
             )
             .join(RefreshSchedule, RefreshSchedule.project_id == Project.id)
             .where(Project.category != "aggregate")
@@ -270,6 +290,9 @@ class AdminService:
                 "last_refreshed_at": _ensure_utc(row.last_refreshed_at),
                 "consecutive_failures": row.consecutive_failures,
                 "days_since_last": _days_delta(_ensure_utc(row.last_refreshed_at)),
+                "last_error": row.last_error,
+                "open_poll_consecutive_failures": row.open_poll_consecutive_failures,
+                "open_poll_last_error": row.open_poll_last_error,
             }
             for row in result
         ]
@@ -514,6 +537,17 @@ class AdminService:
         last_evaluation = await self.session.scalar(
             select(func.max(LLMEvaluation.evaluated_at))
         )
+        most_recent_full_refresh = await self.session.scalar(
+            select(func.max(RefreshSchedule.last_refreshed_at))
+        )
+        most_overdue_full_refresh = await self.session.scalar(
+            select(func.min(RefreshSchedule.last_refreshed_at))
+        )
+        full_refresh_failing_count = await self.session.scalar(
+            select(func.count())
+            .select_from(RefreshSchedule)
+            .where(RefreshSchedule.consecutive_failures > 0)
+        )
         return {
             "collection_running": any(
                 source not in _EVALUATION_SOURCES for source in running_sources
@@ -523,6 +557,9 @@ class AdminService:
             ),
             "last_collection": _ensure_utc(last_collection),
             "last_evaluation": _ensure_utc(last_evaluation),
+            "most_recent_full_refresh": _ensure_utc(most_recent_full_refresh),
+            "most_overdue_full_refresh": _ensure_utc(most_overdue_full_refresh),
+            "full_refresh_failing_count": full_refresh_failing_count or 0,
         }
 
     async def get_llm_service_status(self) -> LLMServiceStatus:
