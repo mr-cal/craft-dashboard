@@ -118,10 +118,10 @@ display-name = "snapcraft forums"
 
 [forums.charmcraft]
 base-url = "https://discourse.charmhub.io"
-default-categories = []
+default-categories = ["charmcraft"]
 display-name = "charmhub forums"
 
 [forums.rockcraft]
 base-url = "https://discourse.ubuntu.com"
-default-categories = []
+default-categories = ["rocks"]
 display-name = "discourse forums"
