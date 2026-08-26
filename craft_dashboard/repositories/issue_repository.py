@@ -11,6 +11,7 @@ from sqlalchemy import text as sa_text
 
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.issue_activity import IssueActivity
+from craft_dashboard.models.issue_link import IssueLink
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.views import IssueFilters, IssueQueryResult, IssueView
@@ -186,6 +187,15 @@ def _apply_common_filters(
     return query
 
 
+def _has_related_links_expr() -> ColumnElement[bool]:
+    """Return a correlated boolean for current-evaluation related work."""
+    return (
+        select(IssueLink.id)
+        .where(IssueLink.llm_evaluation_id == LLMEvaluation.id)
+        .exists()
+    )
+
+
 class IssueRepository:
     """Repository for issue-related read queries."""
 
@@ -212,6 +222,7 @@ class IssueRepository:
                     LLMEvaluation.suggested_action,
                     LLMEvaluation.suggested_action_reason,
                     LLMEvaluation.scores,
+                    _has_related_links_expr().label("has_related_links"),
                 )
                 .join(Project, Issue.project_id == Project.id)
                 .outerjoin(
@@ -302,6 +313,7 @@ class IssueRepository:
                 LLMEvaluation.suggested_action,
                 LLMEvaluation.suggested_action_reason,
                 LLMEvaluation.scores,
+                _has_related_links_expr().label("has_related_links"),
             )
             .join(Project, Issue.project_id == Project.id)
             .outerjoin(
@@ -385,6 +397,7 @@ class IssueRepository:
         for row in result:
             issue = row[0]
             scores = row.scores or {}
+            has_related_links = bool(row[6])
             issues.append(
                 IssueView(
                     id=issue.id,
@@ -410,6 +423,7 @@ class IssueRepository:
                     complexity=scores.get("complexity"),
                     support_request=scores.get("support_request"),
                     confidence=scores.get("confidence"),
+                    has_related_links=has_related_links,
                 )
             )
 

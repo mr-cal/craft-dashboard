@@ -119,6 +119,7 @@ class TestIssueExport:
                 "complexity": None,
                 "support_request": None,
                 "confidence": 65.0,
+                "has_related_links": False,
             }
         ]
         assert search.await_args.args[0] == IssueFilters(

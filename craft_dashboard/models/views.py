@@ -31,6 +31,7 @@ class IssueView:
     complexity: float | None = None
     support_request: float | None = None
     confidence: float | None = None
+    has_related_links: bool = False
 
     def as_dict(self) -> dict[str, object]:
         """Return a dict representation for template compatibility."""

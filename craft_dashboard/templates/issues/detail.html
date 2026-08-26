@@ -133,6 +133,26 @@
   {% endif %}
 </section>
 
+{% if related_links %}
+<section class="issue-detail-card">
+  <h3>Related work</h3>
+  <ul>
+    {% for link in related_links %}
+    <li>
+      <strong>{{ link.kind | replace("_", " ") | title }}</strong>:
+      {% if link.to_issue %}
+      <a href="/issues/{{ link.to_issue.project.name | urlencode_path }}/{{ link.to_issue.external_id }}">{{ link.to_ref }}</a>
+      {% else %}
+      {{ link.to_ref }}
+      {% endif %}
+      (confidence {{ link.confidence }}%)
+      {% if link.note %}<p class="u-text--muted">{{ link.note }}</p>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 <section class="issue-detail-card">
   <h3>Related issues</h3>
   {% if related_issues %}

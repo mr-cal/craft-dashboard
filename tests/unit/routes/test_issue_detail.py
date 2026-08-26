@@ -19,9 +19,22 @@ class _IssueSession:
         return _EmptyResult()
 
 
+class _EmptyScalars(list):
+    """A list that also supports the ``.all()`` call SQLAlchemy's real
+    ``ScalarResult`` exposes, so mocked callers can use either
+    ``for x in session.execute(...).scalars()`` or
+    ``session.execute(...).scalars().all()`` (as ``IssueLinkRepository``
+    does) against the same empty result.
+    """
+
+    def all(self) -> list:
+        """Return self, matching ``ScalarResult.all()``."""
+        return self
+
+
 class _EmptyResult:
     def scalars(self):
-        return []
+        return _EmptyScalars()
 
     def first(self):
         return None

@@ -71,6 +71,9 @@
         </td>
         <td data-col="title">
           <a href="/issues/{{ issue.project_name | urlencode_path }}/{{ issue.external_id }}">{{ issue.title|truncate(80) }}</a>
+          {% if issue.has_related_links %}
+          <div class="u-text--muted related-work-indicator">Related work</div>
+          {% endif %}
         </td>
         <td data-col="author">{{ issue.author or "unknown" }}</td>
         <td data-col="age">{{ (issue.age_days ~ "d") if issue.age_days is not none else "?" }}</td>

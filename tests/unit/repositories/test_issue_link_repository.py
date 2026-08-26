@@ -122,3 +122,34 @@ class TestGetLatestLinksForIssue:
 
         assert len(links) == 1
         assert links[0].kind == "likely_fixed_by"
+
+    async def test_related_issue_and_project_are_eager_loaded(
+        self, test_db_session
+    ) -> None:
+        project = make_project(id=1, name="rockcraft")
+        from_issue = make_issue(id=1, project_id=1, external_id="100")
+        to_issue = make_issue(id=2, project_id=1, external_id="200")
+        evaluation = make_evaluation(id=1, issue_id=1, latest=True)
+        await _seed(test_db_session, project, from_issue, to_issue, evaluation)
+
+        test_db_session.add(
+            IssueLink(
+                from_issue_id=1,
+                llm_evaluation_id=1,
+                to_issue_id=2,
+                to_ref="rockcraft#200",
+                kind="likely_fixed_by",
+                confidence=80,
+                source="evaluator",
+            )
+        )
+        await test_db_session.commit()
+
+        repo = IssueLinkRepository(test_db_session)
+
+        links = await repo.get_latest_links_for_issue(1)
+        test_db_session.expunge_all()
+
+        assert links[0].to_issue is not None
+        assert links[0].to_issue.external_id == "200"
+        assert links[0].to_issue.project.name == "rockcraft"

@@ -11,12 +11,15 @@ from craft_dashboard.app import create_app
 from craft_dashboard.config import DashboardConfig
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.issue_link import IssueLink
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from tests.factories import make_evaluation, make_issue, make_project
 
 if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"
@@ -96,6 +99,11 @@ async def _seed_project_with_issues(test_db_session: AsyncSession) -> Project:
     )
     await test_db_session.commit()
     return project
+
+
+async def _seed_entities(test_db_session: AsyncSession, *entities: object) -> None:
+    test_db_session.add_all(list(entities))
+    await test_db_session.commit()
 
 
 class _HTMLCollector(HTMLParser):
@@ -537,3 +545,61 @@ class TestIssueStateFilter:
         response = test_client.get("/issues", params={"state": "open,closed"})
         assert "Open issue" in response.text
         assert "Closed issue" in response.text
+
+
+class TestIssueDetailRelatedWork:
+    @pytest.fixture
+    async def seeded(self, test_db_session: AsyncSession) -> None:
+        project = make_project(id=1, name="rockcraft")
+        from_issue = make_issue(
+            id=1,
+            project_id=1,
+            external_id="1",
+            title="Broken pack after build refresh",
+        )
+        to_issue = make_issue(
+            id=2,
+            project_id=1,
+            external_id="2",
+            title="Fix build refresh regression",
+        )
+        evaluation = make_evaluation(id=1, issue_id=1, latest=True)
+        link = IssueLink(
+            from_issue_id=1,
+            llm_evaluation_id=1,
+            to_issue_id=2,
+            to_ref="rockcraft#2",
+            kind="likely_fixed_by",
+            confidence=80,
+            note="Fixed in the branch refresh change.",
+            source="evaluator",
+        )
+        await _seed_entities(
+            test_db_session,
+            project,
+            from_issue,
+            to_issue,
+            evaluation,
+            link,
+        )
+
+    def test_issue_detail_related_work_panel_renders_linked_issue(
+        self, test_client: TestClient, seeded: None
+    ) -> None:
+        response = test_client.get("/issues/rockcraft/1")
+
+        assert response.status_code == 200
+        assert "Related work" in response.text
+        assert "Likely Fixed By" in response.text
+        assert 'href="/issues/rockcraft/2"' in response.text
+        assert "rockcraft#2" in response.text
+        assert "confidence 80%" in response.text
+        assert "Fixed in the branch refresh change." in response.text
+
+    def test_issue_table_related_work_indicator_is_shown_for_linked_rows(
+        self, test_client: TestClient, seeded: None
+    ) -> None:
+        response = test_client.get("/issues/table", params={"project": "rockcraft"})
+
+        assert response.status_code == 200
+        assert "related-work-indicator" in response.text

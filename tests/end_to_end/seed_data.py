@@ -374,6 +374,7 @@ def generate_seed_sql() -> str:
     stmts: list[str] = []
     stmts.append("DELETE FROM dependencies;")
     stmts.append("DELETE FROM releases;")
+    stmts.append("DELETE FROM issue_links;")
     stmts.append("DELETE FROM llm_evaluations;")
     stmts.append("DELETE FROM issues;")
     stmts.append("DELETE FROM snapshots;")
@@ -468,6 +469,21 @@ def generate_seed_sql() -> str:
                 )
         issue_id_counter += issue_count
 
+    stmts.append(
+        "INSERT INTO issue_links (from_issue_id, llm_evaluation_id, to_issue_id, "
+        "to_ref, kind, confidence, note, source) "
+        "SELECT from_issue.id, evaluation.id, to_issue.id, 'rockcraft#2', "
+        "'likely_fixed_by', 80, 'Fixed in the branch refresh change.', "
+        "'evaluator' "
+        "FROM issues AS from_issue "
+        "JOIN projects AS project ON project.id = from_issue.project_id "
+        "JOIN llm_evaluations AS evaluation "
+        "ON evaluation.issue_id = from_issue.id AND evaluation.latest = true "
+        "JOIN issues AS to_issue "
+        "ON to_issue.project_id = project.id AND to_issue.external_id = '2002' "
+        "WHERE project.name = 'rockcraft' AND from_issue.external_id = '2001';"
+    )
+
     for forum_name in FORUMS:
         for topic in _make_forum_topics(forum_name):
             cols = ", ".join(topic.keys())
@@ -512,6 +528,7 @@ def generate_seed_sql() -> str:
             "releases",
             "dependencies",
             "llm_evaluations",
+            "issue_links",
             "forum_topics",
             "forum_backfill_state",
         )

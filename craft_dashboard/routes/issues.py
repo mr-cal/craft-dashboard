@@ -20,6 +20,7 @@ from craft_dashboard.llm.evaluator import (
     current_version_for_state,
 )
 from craft_dashboard.models.views import IssueFilters, IssueView
+from craft_dashboard.repositories.issue_link_repository import IssueLinkRepository
 from craft_dashboard.repositories.issue_repository import IssueRepository
 from craft_dashboard.routes.eval_api import limiter
 
@@ -431,6 +432,8 @@ async def issue_detail(
     current_evaluation = evaluation_history[0] if evaluation_history else None
 
     activity_history = await repo.get_issue_activity_history(project, number)
+    link_repo = IssueLinkRepository(session)
+    related_links = await link_repo.get_latest_links_for_issue(issue["id"])
 
     has_embedding = bool(current_evaluation and current_evaluation.get("has_embedding"))
 
@@ -474,6 +477,7 @@ async def issue_detail(
             "activity_history": activity_history,
             "original_issue_url": _build_original_issue_url(issue),
             "related_issues": related_issues,
+            "related_links": related_links,
             "has_embedding": has_embedding,
             "is_outdated": is_outdated,
         },

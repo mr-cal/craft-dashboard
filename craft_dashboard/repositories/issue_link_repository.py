@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
+from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.issue_link import IssueLink
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 
@@ -71,6 +73,7 @@ class IssueLinkRepository:
         """
         query = (
             select(IssueLink)
+            .options(selectinload(IssueLink.to_issue).selectinload(Issue.project))
             .join(LLMEvaluation, IssueLink.llm_evaluation_id == LLMEvaluation.id)
             .where(IssueLink.from_issue_id == issue_id)
             .where(LLMEvaluation.latest)
