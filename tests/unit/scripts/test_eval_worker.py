@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any, Self
 from unittest.mock import AsyncMock, MagicMock
 
@@ -306,3 +307,36 @@ async def test_run_evaluate_loop_uses_requested_concurrency(
 
     assert patched_runtime["evaluator"].evaluate.await_count == 2
     assert http_client.post.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_evaluate_loop_posts_serialized_evidence_paths(
+    monkeypatch: pytest.MonkeyPatch, patched_runtime: dict[str, Any]
+) -> None:
+    http_client = _patch_http_client(
+        monkeypatch,
+        get_responses=_with_status(
+            _response(200, json=_make_issue()),
+            _RELATED_RESPONSE,
+        ),
+        post_responses=[httpx.Response(status_code=200)],
+    )
+    patched_runtime["evaluator"].evaluate = AsyncMock(
+        return_value={
+            **SAMPLE_EVALUATE_RESULT,
+            "tool_context": SimpleNamespace(
+                touched_paths={
+                    ("canonical/rockcraft", "README.md"),
+                    ("canonical/rockcraft", "src/parts.py"),
+                }
+            ),
+        }
+    )
+
+    await eval_worker.run_evaluate_loop(**DEFAULT_KWARGS)
+
+    posted = http_client.post.await_args.kwargs["json"]
+    assert posted["evidence_paths"] == [
+        {"repo": "canonical/rockcraft", "path": "README.md"},
+        {"repo": "canonical/rockcraft", "path": "src/parts.py"},
+    ]

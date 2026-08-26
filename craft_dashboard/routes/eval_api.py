@@ -8,11 +8,11 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from scripts.llm.validation import validate_evaluation_result
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
@@ -34,6 +34,7 @@ from craft_dashboard.llm.evaluator import (
     expected_version_sql_expr,
 )
 from craft_dashboard.llm.exceptions import LLMValidationError
+from craft_dashboard.models.commit_scan_evidence_path import CommitScanEvidencePath
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
@@ -264,6 +265,7 @@ class EvalResultSubmission(BaseModel):
     # summary_embedding above — computed unconditionally by the worker
     # alongside the summary embedding.
     search_embedding: list[float]
+    evidence_paths: list[dict[str, str]] = Field(default_factory=list)
 
 
 def _require_eval_auth(request: Request, authorization: str = "") -> None:
@@ -291,6 +293,24 @@ def _current_content_hash(issue: Issue) -> str:
         issue.comments or [],
         pr_details=issue.metadata_ or None,
     )
+
+
+def _normalize_evidence_paths(
+    evidence_paths: list[dict[str, str]],
+) -> list[tuple[str, str]]:
+    """Return distinct ``(project, path)`` pairs for reverse-index storage."""
+    pairs = {
+        (
+            # Task 5 recorded qualified owner/repo strings like
+            # ``canonical/rockcraft`` in ``ctx.touched_paths``, but the
+            # reverse-index table stores the short project name used
+            # throughout commit scanning (for example ``rockcraft``).
+            path["repo"].rsplit("/", 1)[-1],
+            path["path"],
+        )
+        for path in evidence_paths
+    }
+    return sorted(pairs)
 
 
 async def _fetch_issue_and_latest_evaluation(
@@ -554,6 +574,21 @@ async def submit_result(
             eval_locked_until=datetime.now(tz=UTC) + _LOCK_TTL,
             summary_embedding=payload.summary_embedding,
         )
+    )
+    await session.execute(
+        delete(CommitScanEvidencePath).where(
+            CommitScanEvidencePath.issue_id == payload.issue_id
+        )
+    )
+    session.add_all(
+        [
+            CommitScanEvidencePath(
+                issue_id=payload.issue_id,
+                project=project,
+                path=path,
+            )
+            for project, path in _normalize_evidence_paths(payload.evidence_paths)
+        ]
     )
 
     await session.commit()

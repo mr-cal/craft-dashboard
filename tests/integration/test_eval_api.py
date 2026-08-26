@@ -17,6 +17,7 @@ from craft_dashboard.llm.evaluator import (
     CURRENT_SUMMARY_VERSION,
     _compute_content_hash,
 )
+from craft_dashboard.models.commit_scan_evidence_path import CommitScanEvidencePath
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
@@ -54,6 +55,17 @@ async def _all_evaluations(session: AsyncSession) -> list[LLMEvaluation]:
         select(LLMEvaluation).order_by(LLMEvaluation.issue_id, LLMEvaluation.id)
     )
     return list(result.scalars())
+
+
+async def _fetch_evidence_paths(
+    session: AsyncSession, *, issue_id: int
+) -> list[tuple[str, str]]:
+    result = await session.execute(
+        select(CommitScanEvidencePath.project, CommitScanEvidencePath.path)
+        .where(CommitScanEvidencePath.issue_id == issue_id)
+        .order_by(CommitScanEvidencePath.project, CommitScanEvidencePath.path)
+    )
+    return list(result.all())
 
 
 def _create_eval_app(test_db_session: AsyncSession) -> tuple[FastAPI, str]:
@@ -1363,6 +1375,67 @@ class TestEvalResultIntegration:
             test_db_session.get(Issue, 1)
         )
         assert list(refreshed_issue.search_embedding) == search_embedding
+
+    def test_submit_result_replaces_evidence_paths_and_normalizes_repo_names(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="rockcraft")
+        issue = make_issue(id=1, project_id=1, title="Regression in pack step")
+        stale_path = CommitScanEvidencePath(
+            issue_id=1,
+            project="old-project",
+            path="old/path.txt",
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue, stale_path)
+        )
+        app, token = _create_eval_app(test_db_session)
+        current_hash = _compute_content_hash(
+            issue.title,
+            issue.body,
+            issue.state,
+            issue.labels,
+            issue.comments,
+        )
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/result",
+                headers={"Authorization": "Bearer " + token},
+                json={
+                    "issue_id": 1,
+                    "content_hash": current_hash,
+                    "summary": "Maintainers confirmed the regression is still reproducible.",
+                    "scores": {
+                        "staleness": 2,
+                        "complexity": 55,
+                        "support_request": 12,
+                        "confidence": 70,
+                    },
+                    "suggested_action": "keep_open",
+                    "suggested_action_reason": "The issue is actionable.",
+                    "tokens_used": 120,
+                    "prompt_tokens": 80,
+                    "completion_tokens": 40,
+                    "model_used": "haiku",
+                    "llm_backend": "local",
+                    "summary_embedding": [0.1] * 1024,
+                    "search_embedding": [0.2] * 1024,
+                    "evidence_paths": [
+                        {"repo": "canonical/rockcraft", "path": "README.md"},
+                        {"repo": "canonical/rockcraft", "path": "README.md"},
+                        {"repo": "rockcraft", "path": "src/parts.py"},
+                    ],
+                },
+            )
+
+        assert response.status_code == 200
+        assert asyncio.get_event_loop().run_until_complete(
+            _fetch_evidence_paths(test_db_session, issue_id=1)
+        ) == [
+            ("rockcraft", "README.md"),
+            ("rockcraft", "src/parts.py"),
+        ]
 
 
 class TestRelatedIssuesEndpoint:

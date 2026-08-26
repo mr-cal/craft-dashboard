@@ -210,6 +210,12 @@ def _format_error_body(response: httpx.Response) -> str:
     return (text[:_MAX_ERROR_BODY] + "…") if len(text) > _MAX_ERROR_BODY else text
 
 
+def _serialize_evidence_paths(ctx: object | None) -> list[dict[str, str]]:
+    """Return sorted worker-touched repo/path pairs for `/result` payloads."""
+    touched_paths = getattr(ctx, "touched_paths", None) or set()
+    return [{"repo": repo, "path": path} for repo, path in sorted(touched_paths)]
+
+
 def _signal_handler(signum: int, frame: object) -> None:
     del signum, frame
     shutdown_state["requested"] = True
@@ -564,6 +570,9 @@ async def _evaluate_issue(  # noqa: PLR0911
         "cost_usd": result["cost_usd"],
         "summary_embedding": embedding,
         "search_embedding": search_embedding,
+        # Phase 6 will thread a real ToolContext through evaluation; until
+        # then this stays empty, but the worker/server payload shape is live.
+        "evidence_paths": _serialize_evidence_paths(result.get("tool_context")),
     }
 
     runtime.progress.update(
