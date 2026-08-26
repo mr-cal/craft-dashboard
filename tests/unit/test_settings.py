@@ -1,5 +1,6 @@
 """Tests for application settings."""
 
+import pytest
 from craft_dashboard.settings import Settings
 
 _EXPECTED_GITHUB_TOKEN = "ghp_test123"
@@ -137,3 +138,9 @@ class TestEmbeddingSettings:
         assert s.local_llm_embedding_model == "nomic-embed-text"
         assert s.related_issues_top_n == 5
         assert s.related_issues_similarity_threshold == 0.80
+
+
+class TestEvalTranscriptRetentionDays:
+    def test_rejects_negative_retention_days(self) -> None:
+        with pytest.raises(ValueError, match="eval_transcript_retention_days"):
+            Settings(_env_file=None, eval_transcript_retention_days=-1)

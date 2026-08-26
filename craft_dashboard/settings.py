@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -22,6 +23,11 @@ class Settings(BaseSettings):
 
     # Eval API token for /api/eval/* endpoints (pull-based evaluation)
     eval_api_token: str = ""
+
+    # Retention window (days) for evaluation transcripts belonging to
+    # superseded (non-latest) evaluations. latest=True transcripts are kept
+    # indefinitely regardless.
+    eval_transcript_retention_days: int = Field(default=30, ge=0)
 
     # OpenRouter model settings. No default: an unset model must fail loudly
     # rather than silently falling back to some other provider's model (this

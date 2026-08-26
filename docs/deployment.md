@@ -205,6 +205,12 @@ In production (Podman), use `podman exec` instead of `docker compose exec`:
 # recent months every 5 days. See "collect_forum_data.py" in how-to.md.
 */15 * * * * root podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/collect_forum_data.py --mode all
 
+# Superseded evaluation transcript GC — daily at 4 AM UTC
+# Deletes only old transcripts for non-latest evaluations; latest
+# evaluation transcripts are retained indefinitely. Retention window is
+# controlled by EVAL_TRANSCRIPT_RETENTION_DAYS in .env.
+0 4 * * * root podman exec -i vps-infra_craft-dashboard_1 /app/.venv/bin/python /app/scripts/gc_transcripts.py
+
 # Database backup — daily at 3 AM UTC
 0 3 * * * root podman exec -i vps-infra_postgres_1 pg_dump -U craft_dashboard craft_dashboard | gzip > /opt/vps-infra/backups/craft-dashboard-$(date +\%Y\%m\%d).sql.gz
 ```
