@@ -20,6 +20,8 @@ from craft_dashboard.models.project import Project
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from craft_dashboard.llm.embeddings import EmbeddingClient
+
 logger = logging.getLogger(__name__)
 
 
@@ -123,3 +125,29 @@ async def find_issues_by_launchpad_ref(
         )
     )
     return await session.scalar(query)
+
+
+async def find_issues_by_semantic_match(
+    session: AsyncSession,
+    *,
+    commit_text: str,
+    embed_client: EmbeddingClient,
+    top_k: int,
+    similarity_threshold: float,
+) -> set[int]:
+    """Return up to top_k OPEN issue IDs semantically close to commit_text."""
+    embedding = await embed_client.embed(commit_text, dimensions=1024)
+    distance_threshold = 1.0 - similarity_threshold
+    distance = Issue.search_embedding.cosine_distance(embedding)
+
+    query = (
+        select(Issue.id, distance.label("distance"))
+        .where(Issue.state == "open")
+        .where(Issue.search_embedding.is_not(None))
+        .where(distance < distance_threshold)
+        .order_by(distance.asc())
+        .limit(top_k)
+    )
+
+    result = await session.execute(query)
+    return {row.id for row in result}

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 from craft_dashboard.commit_scanner.scanner import (
     find_issues_by_bare_ref,
     find_issues_by_changed_paths,
     find_issues_by_launchpad_ref,
     find_issues_by_qualified_ref,
+    find_issues_by_semantic_match,
 )
 from craft_dashboard.models.commit_scan_evidence_path import CommitScanEvidencePath
 
@@ -254,3 +258,72 @@ class TestFindIssuesByLaunchpadRef:
         )
 
         assert issue_id is None
+
+
+class TestFindIssuesBySemanticMatch:
+    """Semantic candidate generation: cosine search over Issue.search_embedding."""
+
+    async def test_returns_candidates_above_threshold(self) -> None:
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            return_value=iter([SimpleNamespace(id=1), SimpleNamespace(id=2)])
+        )
+        embed_client = AsyncMock()
+        embed_client.embed = AsyncMock(return_value=[0.1] * 1024)
+
+        candidates = await find_issues_by_semantic_match(
+            session,
+            commit_text="Fix crash in the pull step handler",
+            embed_client=embed_client,
+            top_k=5,
+            similarity_threshold=0.5,
+        )
+
+        assert candidates == {1, 2}
+        embed_client.embed.assert_awaited_once_with(
+            "Fix crash in the pull step handler", dimensions=1024
+        )
+
+    async def test_below_threshold_is_excluded(self) -> None:
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=iter([]))
+        embed_client = AsyncMock()
+        embed_client.embed = AsyncMock(return_value=[-0.1] * 512 + [0.1] * 512)
+
+        candidates = await find_issues_by_semantic_match(
+            session,
+            commit_text="Totally unrelated commit about docs typo",
+            embed_client=embed_client,
+            top_k=5,
+            similarity_threshold=0.9,
+        )
+
+        (query,) = session.execute.await_args.args
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+
+        assert candidates == set()
+        assert "issues.state = 'open'" in compiled
+        assert "issues.search_embedding IS NOT NULL" in compiled
+        assert "0.09999999" in compiled or "0.1" in compiled
+
+    async def test_respects_top_k(self) -> None:
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            return_value=iter([SimpleNamespace(id=1), SimpleNamespace(id=2)])
+        )
+        embed_client = AsyncMock()
+        embed_client.embed = AsyncMock(return_value=[0.1] * 1024)
+
+        candidates = await find_issues_by_semantic_match(
+            session,
+            commit_text="Fix crash",
+            embed_client=embed_client,
+            top_k=2,
+            similarity_threshold=0.5,
+        )
+
+        (query,) = session.execute.await_args.args
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+
+        assert candidates == {1, 2}
+        assert "LIMIT 2" in compiled
