@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING
 from craft_dashboard.app import create_app
 from craft_dashboard.config import DashboardConfig
 from craft_dashboard.dependencies import get_db_session
-from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION, _compute_content_hash
+from craft_dashboard.llm.evaluator import (
+    CURRENT_EVAL_VERSION,
+    CURRENT_SUMMARY_VERSION,
+    _compute_content_hash,
+)
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
@@ -1121,6 +1125,55 @@ class TestEvalResultIntegration:
         )
         assert len(evaluations) == 1
         assert evaluations[0].eval_version == CURRENT_EVAL_VERSION
+
+    def test_submit_result_for_closed_issue_uses_summary_version(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(id=1, project_id=1, external_id="1", state="closed")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/result",
+                headers={"Authorization": "Bearer " + token},
+                json={
+                    "issue_id": 1,
+                    "content_hash": _compute_content_hash(
+                        issue.title,
+                        issue.body,
+                        issue.state,
+                        issue.labels,
+                        issue.comments,
+                        pr_details=issue.metadata_ or None,
+                    ),
+                    "summary": "Closed issue summary",
+                    "scores": {},
+                    "tokens_used": 100,
+                    "prompt_tokens": 80,
+                    "completion_tokens": 20,
+                    "model_used": "test-model",
+                    "llm_backend": "openrouter",
+                    "summary_embedding": [0.1] * 1024,
+                    "search_embedding": [0.1] * 1024,
+                },
+            )
+
+        assert response.status_code == 200
+
+        evaluation = (
+            asyncio.get_event_loop()
+            .run_until_complete(
+                test_db_session.execute(
+                    select(LLMEvaluation).where(LLMEvaluation.issue_id == 1)
+                )
+            )
+            .scalar_one()
+        )
+        assert evaluation.eval_version == CURRENT_SUMMARY_VERSION
 
     def test_submit_result_persists_cost_usd(
         self, test_db_session: AsyncSession

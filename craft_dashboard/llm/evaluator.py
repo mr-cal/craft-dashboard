@@ -4,17 +4,53 @@ import json
 import logging
 from typing import Any, TypedDict
 
+from sqlalchemy import case
+from sqlalchemy.sql.elements import ColumnElement
+
 from craft_dashboard.llm.client import LLMClient
 from craft_dashboard.llm.content_hash import compute_content_hash
 from craft_dashboard.llm.prompts import (
     build_closed_evaluate_prompt,
     build_open_evaluate_prompt,
 )
+from craft_dashboard.models.issue import Issue
 
-#: Evaluation version produced by the current prompt set.
-#: Increment this whenever a prompt change is expected to alter LLM output
-#: quality or structure (e.g. new body truncation rules, schema changes).
+#: Evaluation version produced by the current open-issue/PR *scoring*
+#: prompt (build_open_evaluate_prompt). Increment only when a change to
+#: that prompt is expected to alter open-item scores/summaries — this
+#: re-evaluates just the ~2,269 open items, not the closed-item corpus.
 CURRENT_EVAL_VERSION: int = 4
+
+#: Evaluation version produced by the current closed-issue/merged-PR
+#: *summary* prompt (build_closed_evaluate_prompt). Versioned
+#: independently of CURRENT_EVAL_VERSION so a scoring-prompt change never
+#: forces a re-summarization of the much larger (17,206-item) closed
+#: corpus, and vice versa.
+#:
+#: MUST be initialized to 4 — the *same* value CURRENT_EVAL_VERSION
+#: currently holds — NOT a fresh 1 — because pre-split production rows for
+#: closed items already carry ``eval_version = 4`` and a fresh value would
+#: incorrectly re-queue the entire closed corpus on first deploy.
+CURRENT_SUMMARY_VERSION: int = 4
+
+
+def current_version_for_state(state: str) -> int:
+    """Return the eval-version constant that applies to an issue's state.
+
+    Open issues/PRs go through the scoring path (CURRENT_EVAL_VERSION);
+    everything else (closed issues, merged/closed PRs) goes through the
+    summary-only path (CURRENT_SUMMARY_VERSION).
+    """
+    return CURRENT_EVAL_VERSION if state == "open" else CURRENT_SUMMARY_VERSION
+
+
+def expected_version_sql_expr() -> ColumnElement[int]:
+    """Return the SQL expression for the eval version expected per issue state."""
+    return case(
+        (Issue.state == "open", CURRENT_EVAL_VERSION),
+        else_=CURRENT_SUMMARY_VERSION,
+    )
+
 
 logger = logging.getLogger(__name__)
 

@@ -23,7 +23,11 @@ from craft_dashboard.auth import verify_eval_token
 from craft_dashboard.dependencies import get_config, get_db_session
 from craft_dashboard.llm.content_hash import compute_content_hash
 from craft_dashboard.llm.evaluation_queue import build_pending_evaluation_query
-from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION
+from craft_dashboard.llm.evaluator import (
+    CURRENT_EVAL_VERSION,
+    current_version_for_state,
+    expected_version_sql_expr,
+)
 from craft_dashboard.llm.exceptions import LLMValidationError
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
 from craft_dashboard.models.issue import Issue
@@ -475,7 +479,7 @@ async def submit_result(
         LLMEvaluation(
             issue_id=payload.issue_id,
             model_name=payload.model_used,
-            eval_version=CURRENT_EVAL_VERSION,
+            eval_version=current_version_for_state(issue.state),
             summary=payload.summary,
             suggested_action=payload.suggested_action,
             suggested_action_reason=payload.suggested_action_reason,
@@ -622,9 +626,10 @@ async def eval_status(
                 )
             )
         else:
+            expected_version = expected_version_sql_expr()
             old_version = or_(
                 latest_evaluation.eval_version.is_(None),
-                latest_evaluation.eval_version != CURRENT_EVAL_VERSION,
+                latest_evaluation.eval_version != expected_version,
             )
             old_version_unlocked = old_version & or_(
                 latest_evaluation.eval_locked_until.is_(None),

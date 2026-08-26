@@ -12,11 +12,14 @@ This hash is used two ways:
   somehow not updated.
 
 .. warning::
-    Any change to ``compute_content_hash``'s output MUST be accompanied by a
-    ``CURRENT_EVAL_VERSION`` bump (see ``craft_dashboard.llm.evaluator``) in
-    the same commit. Changing the hash without bumping the version causes
-    all existing evaluations to appear stale, triggering mass re-evaluation
-    of issues that haven't actually changed.
+    Any change to ``compute_content_hash``'s output MUST be accompanied in
+    the same commit by the eval-version bump(s) for every path that consumes
+    this hash (see ``craft_dashboard.llm.evaluator``): bump
+    ``CURRENT_EVAL_VERSION`` for open-item scoring, ``CURRENT_SUMMARY_VERSION``
+    for closed-item summaries, and both if the hash change affects both
+    paths. Changing the hash without the matching version bump makes
+    existing evaluations appear stale and can trigger mass re-evaluation of
+    issues that haven't actually changed.
 """
 
 from __future__ import annotations

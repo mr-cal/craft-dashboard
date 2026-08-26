@@ -15,7 +15,9 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import and_, case, or_, select
 from sqlalchemy.orm import aliased, defer
 
-from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION
+from craft_dashboard.llm.evaluator import (
+    expected_version_sql_expr,
+)
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
@@ -71,9 +73,10 @@ def build_pending_evaluation_query(
     now = now or datetime.now(tz=UTC)
     latest_evaluation = aliased(LLMEvaluation)
 
+    expected_version = expected_version_sql_expr()
     old_version = or_(
         latest_evaluation.eval_version.is_(None),
-        latest_evaluation.eval_version != CURRENT_EVAL_VERSION,
+        latest_evaluation.eval_version != expected_version,
     )
     priority = case(
         (latest_evaluation.id.is_(None) & (Issue.state == "open"), 1),
@@ -164,7 +167,7 @@ def build_pending_evaluation_query(
         )
         is_up_to_date = and_(
             has_complete_evaluation,
-            latest_evaluation.eval_version == CURRENT_EVAL_VERSION,
+            latest_evaluation.eval_version == expected_version,
             ~latest_evaluation.issue_data_hash.is_distinct_from(Issue.content_hash),
         )
         query = query.where(~is_up_to_date)

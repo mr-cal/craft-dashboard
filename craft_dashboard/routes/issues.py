@@ -15,7 +15,10 @@ from starlette.exceptions import HTTPException
 from craft_dashboard.dependencies import get_config, get_db_session
 from craft_dashboard.llm.client import OPENROUTER_BASE_URL
 from craft_dashboard.llm.embeddings import EmbeddingClient
-from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION, _compute_content_hash
+from craft_dashboard.llm.evaluator import (
+    _compute_content_hash,
+    current_version_for_state,
+)
 from craft_dashboard.models.views import IssueFilters, IssueView
 from craft_dashboard.repositories.issue_repository import IssueRepository
 from craft_dashboard.routes.eval_api import limiter
@@ -433,7 +436,8 @@ async def issue_detail(
 
     is_outdated = False
     if current_evaluation:
-        if current_evaluation.get("eval_version") != CURRENT_EVAL_VERSION:
+        expected_version = current_version_for_state(issue["state"])
+        if current_evaluation.get("eval_version") != expected_version:
             is_outdated = True
         else:
             stored_hash = current_evaluation.get("issue_data_hash")
