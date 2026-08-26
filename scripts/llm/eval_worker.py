@@ -15,6 +15,10 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from craft_dashboard.cli import _load_project_orgs
+from craft_dashboard.config import load_config
+from craft_dashboard.git_mirrors.paths import clone_url_for, resolve_allowed_projects
+from craft_dashboard.git_mirrors.sync import sync_mirror
 from craft_dashboard.llm.client import (
     OPENROUTER_BASE_URL,
     LocalLLMClient,
@@ -23,6 +27,8 @@ from craft_dashboard.llm.client import (
 from craft_dashboard.llm.embeddings import EmbeddingClient
 from craft_dashboard.llm.evaluator import IssueEvaluator, _compute_content_hash
 from craft_dashboard.llm.exceptions import LLMQuotaError
+from craft_dashboard.llm.preflight import run_preflight
+from craft_dashboard.settings import Settings
 from rich.console import Console
 
 from scripts import backfill_search_embeddings
@@ -31,6 +37,7 @@ from scripts.llm.console import format_elapsed, make_progress, setup_rich_loggin
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
+    from pathlib import Path
 
     from craft_dashboard.llm.client import LLMClient
     from rich.progress import Progress, TaskID
@@ -116,6 +123,8 @@ class _Runtime:
         issue_limit: int,
         model: str,
         llm_backend: str,
+        mirror_dir: Path,
+        allowed_projects: dict[str, str],
     ) -> None:
         self.client = client
         self.evaluator = evaluator
@@ -131,6 +140,8 @@ class _Runtime:
         self.issue_limit = issue_limit
         self.model = model
         self.llm_backend = llm_backend
+        self.mirror_dir = mirror_dir
+        self.allowed_projects = allowed_projects
 
 
 async def _embed_summary(
@@ -606,6 +617,85 @@ async def _evaluate_issue(  # noqa: PLR0911
         shutdown_state["requested"] = True
 
 
+async def _run_issue_preflight(
+    runtime: _Runtime,
+    *,
+    issue_data: dict[str, Any],
+    worker_name: str,
+) -> bool:
+    """Return whether a claimed issue passed preflight."""
+    issue_ref = f"{issue_data['project_name']}#{issue_data['external_id']}"
+    runtime.progress.update(
+        runtime.overall_id,
+        description=f"[dim]{issue_ref} ({worker_name}):[/dim] preflight…",
+    )
+
+    async def _sync_claimed_repo(project: str) -> bool:
+        try:
+            clone_url = clone_url_for(
+                project, allowed_projects=runtime.allowed_projects
+            )
+        except Exception:
+            logger.warning("%s: no clone URL available for %s", issue_ref, project)
+            return False
+
+        result = await sync_mirror(
+            project,
+            clone_url=clone_url,
+            mirror_dir=runtime.mirror_dir,
+        )
+        return result.status != "skipped"
+
+    async def _release_claim(*, issue_id: int, reason: str) -> None:
+        try:
+            response = await runtime.http_client.post(
+                "/api/eval/release",
+                json={"issue_id": issue_id, "reason": reason},
+                headers=runtime.headers,
+            )
+        except httpx.HTTPError:
+            logger.warning("%s: failed to release claim", issue_ref, exc_info=True)
+            return
+
+        if response.status_code != HTTP_OK:
+            logger.warning(
+                "%s: release claim failed %d from %s: %s",
+                issue_ref,
+                response.status_code,
+                response.url,
+                _format_error_body(response),
+            )
+
+    async def _check_related_endpoint() -> bool:
+        query = (issue_data.get("title") or issue_ref)[:1000]
+        response = await runtime.http_client.get(
+            "/api/eval/related",
+            params={"issue_id": issue_data["issue_id"], "query": query},
+            headers=runtime.headers,
+        )
+        return response.status_code == HTTP_OK
+
+    result = await run_preflight(
+        claim=issue_data,
+        mirror_dir=runtime.mirror_dir,
+        llm=runtime.client,
+        sync_mirror=_sync_claimed_repo,
+        release_claim=_release_claim,
+        check_related_endpoint=_check_related_endpoint,
+    )
+    if result.ok:
+        return True
+
+    logger.warning(
+        "%s: preflight blocked (%s); released claim before any LLM call",
+        issue_ref,
+        result.reason,
+    )
+    runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+    await runtime.state.release()
+    return False
+
+
 async def _worker_loop(
     runtime: _Runtime, *, server_url: str, worker_index: int
 ) -> None:
@@ -623,6 +713,12 @@ async def _worker_loop(
         )
         issue_data = await _fetch_next_issue(runtime, server_url=server_url)
         if issue_data is None:
+            continue
+        if not await _run_issue_preflight(
+            runtime,
+            issue_data=issue_data,
+            worker_name=worker_name,
+        ):
             continue
         await _evaluate_issue(runtime, issue_data=issue_data, worker_name=worker_name)
 
@@ -667,7 +763,7 @@ async def run_evaluate_loop(
 
     server_url = server.rstrip("/")
     verify: bool | str = server_ca_cert if server_ca_cert else True
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = {"Authorization": "Bearer " + token}
     params = {
         "project": project,
         "open_only": open_only,
@@ -678,6 +774,21 @@ async def run_evaluate_loop(
     }
     if issue:
         limit = 1
+    settings = Settings()
+    config = load_config(settings.config_path)
+    try:
+        project_orgs = await _load_project_orgs(settings)
+    except Exception as exc:
+        logger.warning(
+            "Could not load project orgs from DB (%s); "
+            "falling back to the 'canonical' org for every project.",
+            exc,
+        )
+        project_orgs = {}
+    allowed_projects = resolve_allowed_projects(
+        craft_projects=config.craft_projects,
+        project_orgs=project_orgs,
+    )
 
     llm_client = create_llm_client_for_backend(
         llm_backend=llm_backend,
@@ -772,6 +883,8 @@ async def run_evaluate_loop(
                     issue_limit=limit,
                     model=model,
                     llm_backend=llm_backend,
+                    mirror_dir=settings.mirror_dir_path,
+                    allowed_projects=allowed_projects,
                 )
                 await asyncio.gather(
                     *(

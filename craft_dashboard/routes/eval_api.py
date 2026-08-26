@@ -81,6 +81,15 @@ _last_queue_snapshot_at: datetime | None = None
 # other worker activity here) rather than assumed from silence, so the
 # admin page can show *why* the worker looks idle instead of just "stalled".
 _quota_paused_until: datetime | None = None
+_RELEASED_MODEL_PREFIX = "released:"
+_PREFLIGHT_RELEASE_PREFIX = "released:preflight"
+
+
+class EvalReleaseRequest(BaseModel):
+    """Request body for releasing a claimed issue without an evaluation."""
+
+    issue_id: int
+    reason: str
 
 
 def _is_local_caller(key: str) -> bool:
@@ -171,6 +180,7 @@ async def _maybe_record_queue_snapshot(
         select(func.count(LLMEvaluation.id)).where(
             LLMEvaluation.evaluated_at >= today_midnight,
             LLMEvaluation.model_name != "pending",
+            ~LLMEvaluation.model_name.like(f"{_RELEASED_MODEL_PREFIX}%"),
         )
     )
 
@@ -551,6 +561,42 @@ async def submit_result(
     return {"status": "stored", "issue_id": payload.issue_id}
 
 
+@router.post("/release")
+async def release_claim(
+    request: Request,
+    payload: EvalReleaseRequest,
+    *,
+    authorization: str = Header(default=""),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Release a claimed issue without recording an LLM evaluation."""
+    _require_eval_auth(request, authorization)
+
+    latest_evaluation = await session.scalar(
+        select(LLMEvaluation).where(
+            LLMEvaluation.issue_id == payload.issue_id,
+            LLMEvaluation.latest,
+        )
+    )
+    if latest_evaluation is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+    latest_evaluation.eval_locked_until = None
+    if latest_evaluation.model_name == "pending":
+        latest_evaluation.latest = False
+
+    session.add(
+        LLMEvaluation(
+            issue_id=payload.issue_id,
+            model_name=f"{_RELEASED_MODEL_PREFIX}{payload.reason}",
+            latest=False,
+            eval_locked_until=None,
+        )
+    )
+    await session.commit()
+    return {"status": "released", "issue_id": payload.issue_id}
+
+
 @router.get("/related")
 async def related_issues(
     request: Request,
@@ -712,6 +758,14 @@ async def eval_status(
     now = datetime.now(tz=UTC)
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     excl = _build_excluded_issues_condition(get_config(request).filtered_issues)
+    latest_eval_ids = (
+        select(
+            LLMEvaluation.issue_id,
+            func.max(LLMEvaluation.id).label("latest_eval_id"),
+        )
+        .group_by(LLMEvaluation.issue_id)
+        .subquery()
+    )
 
     locked = await session.scalar(
         select(func.count(LLMEvaluation.id)).where(
@@ -722,14 +776,34 @@ async def eval_status(
         select(func.count(LLMEvaluation.id)).where(
             LLMEvaluation.evaluated_at >= today_midnight,
             LLMEvaluation.model_name != "pending",
+            ~LLMEvaluation.model_name.like(f"{_RELEASED_MODEL_PREFIX}%"),
         )
     )
     total_evaluated = await session.scalar(
         select(func.count(LLMEvaluation.id)).where(
             LLMEvaluation.latest,
             LLMEvaluation.model_name != "pending",
+            ~LLMEvaluation.model_name.like(f"{_RELEASED_MODEL_PREFIX}%"),
         )
     )
+    preflight_blocked_query = (
+        select(func.count(LLMEvaluation.id))
+        .join(
+            latest_eval_ids,
+            (latest_eval_ids.c.issue_id == LLMEvaluation.issue_id)
+            & (latest_eval_ids.c.latest_eval_id == LLMEvaluation.id),
+        )
+        .join(Issue, LLMEvaluation.issue_id == Issue.id)
+        .join(Project, Issue.project_id == Project.id)
+        .where(LLMEvaluation.model_name.like(f"{_PREFLIGHT_RELEASE_PREFIX}%"))
+    )
+    if open_only:
+        preflight_blocked_query = preflight_blocked_query.where(Issue.state == "open")
+    if project:
+        preflight_blocked_query = preflight_blocked_query.where(Project.name == project)
+    if excl is not None:
+        preflight_blocked_query = preflight_blocked_query.where(excl)
+    preflight_blocked = await session.scalar(preflight_blocked_query)
 
     # Build base issue query (no latest_evaluation join — used for total_open)
     base_query = select(Issue.id).join(Project, Issue.project_id == Project.id)
@@ -818,6 +892,7 @@ async def eval_status(
     return {
         "pending": pending or 0,
         "locked": locked or 0,
+        "preflight_blocked": preflight_blocked or 0,
         "evaluated_today": evaluated_today or 0,
         "total_evaluated": total_evaluated or 0,
         "total_open": total_open or 0,

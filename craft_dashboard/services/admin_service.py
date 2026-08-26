@@ -717,6 +717,7 @@ class AdminService:
             .where(
                 LLMEvaluation.evaluated_at >= since,
                 LLMEvaluation.model_name != "pending",
+                ~LLMEvaluation.model_name.like("released:%"),
             )
             .group_by(day)
             .order_by(day)

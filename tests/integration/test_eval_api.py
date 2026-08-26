@@ -1622,6 +1622,52 @@ class TestIssueDetailEndpoint:
         assert response.status_code == 200
         assert response.json()["candidates"] == []
 
+
+class TestReleaseEndpoint:
+    """POST /api/eval/release drops a claim without recording an evaluation."""
+
+    def test_release_requires_auth(self, test_db_session: AsyncSession) -> None:
+        app, _token = _create_eval_app(test_db_session)
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/release",
+                json={"issue_id": 1, "reason": "preflight"},
+            )
+        assert response.status_code == 401
+
+    def test_release_clears_the_pending_lock_and_marks_preflight_blocked(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="rockcraft")
+        issue = make_issue(id=1, project_id=1, external_id="1")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            claimed = client.get(
+                "/api/eval/next", headers={"Authorization": "Bearer " + token}
+            )
+            assert claimed.status_code == 200
+            issue_id = claimed.json()["issue_id"]
+
+            released = client.post(
+                "/api/eval/release",
+                json={"issue_id": issue_id, "reason": "preflight"},
+                headers={"Authorization": "Bearer " + token},
+            )
+            assert released.status_code == 200
+
+            status = client.get(
+                "/api/eval/status", headers={"Authorization": "Bearer " + token}
+            )
+
+        assert status.status_code == 200
+        assert status.json()["preflight_blocked"] >= 1
+
+
+class TestEvalStatusIntegration:
     """Integration tests for GET /api/eval/status."""
 
     def test_status_reports_queue_counts(self, test_db_session: AsyncSession) -> None:
@@ -1685,6 +1731,7 @@ class TestIssueDetailEndpoint:
         assert response.json() == {
             "pending": 2,
             "locked": 1,
+            "preflight_blocked": 0,
             "evaluated_today": 1,
             "total_evaluated": 1,
             "total_open": 4,

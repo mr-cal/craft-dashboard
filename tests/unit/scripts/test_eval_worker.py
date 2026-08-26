@@ -108,6 +108,7 @@ _STATUS_RESPONSE = httpx.Response(
         "total_open": 15,
     },
 )
+_RELATED_RESPONSE = httpx.Response(status_code=200, json={"results": []})
 
 _DUMMY_REQUEST = httpx.Request("GET", "http://localhost:8000/api/eval/next")
 
@@ -199,7 +200,10 @@ async def test_run_evaluate_loop_posts_required_summary_embedding(
 ) -> None:
     http_client = _patch_http_client(
         monkeypatch,
-        get_responses=_with_status(_response(200, json=_make_issue())),
+        get_responses=_with_status(
+            _response(200, json=_make_issue()),
+            _RELATED_RESPONSE,
+        ),
         post_responses=[httpx.Response(status_code=200)],
     )
 
@@ -241,7 +245,9 @@ async def test_llm_quota_error_pauses_instead_of_crash_looping(
         monkeypatch,
         get_responses=_with_status(
             _response(200, json=_make_issue(external_id="100")),
+            _RELATED_RESPONSE,
             _response(200, json=_make_issue(external_id="100")),
+            _RELATED_RESPONSE,
         ),
         post_responses=[
             httpx.Response(status_code=200),
@@ -284,7 +290,9 @@ async def test_run_evaluate_loop_uses_requested_concurrency(
         monkeypatch,
         get_responses=_with_status(
             _response(200, json=_make_issue(external_id="100")),
+            _RELATED_RESPONSE,
             _response(200, json=_make_issue(issue_id=43, external_id="101")),
+            _RELATED_RESPONSE,
         ),
         post_responses=[
             httpx.Response(status_code=200),
