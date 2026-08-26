@@ -33,3 +33,12 @@ class TestCLI:
         result = runner.invoke(main, ["collect", "--help"])
 
         assert result.exit_code == 0
+
+    def test_mirrors_sync_help(self) -> None:
+        """The 'mirrors sync' subcommand exists."""
+        runner = CliRunner()
+
+        result = runner.invoke(main, ["mirrors", "sync", "--help"])
+
+        assert result.exit_code == 0
+        assert "Clone or fetch" in result.output
