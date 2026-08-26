@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from click.testing import CliRunner
 from craft_dashboard.git_mirrors.exceptions import UnknownProjectError
 from craft_dashboard.llm.client import LLMResponse
 from scripts.llm.bakeoff.common import BakeoffResult
 from scripts.llm.bakeoff.scoring_pilot import (
     _pinned_sha_for_project,
+    cli,
+    run_max_rounds_sweep,
     run_scoring_pilot,
 )
 
@@ -266,8 +270,8 @@ class TestRunScoringPilot:
         await _seed_two_projects(test_db_session)
         sample = tmp_path / "s.json"
         sample.write_text(
-            "[{\"source\":\"github\",\"project\":\"craft-parts\",\"external_id\":\"1\"},"
-            "{\"source\":\"github\",\"project\":\"rockcraft\",\"external_id\":\"2\"}]"
+            '[{"source":"github","project":"craft-parts","external_id":"1"},'
+            '{"source":"github","project":"rockcraft","external_id":"2"}]'
         )
         client = AsyncMock()
         client.complete.return_value = _final()
@@ -316,7 +320,7 @@ class TestRunScoringPilot:
         await _seed(test_db_session)
         sample = tmp_path / "s.json"
         sample.write_text(
-            "[{\"source\": \"github\", \"project\": \"craft-parts\", \"external_id\": \"1\"}]"
+            '[{"source": "github", "project": "craft-parts", "external_id": "1"}]'
         )
         client = AsyncMock()
         client.complete.return_value = _final()
@@ -387,6 +391,168 @@ class TestRunScoringPilot:
             run_one.await_args.kwargs["tool_ctx"].eval_api_token == TEST_EVAL_API_TOKEN
         )
 
+    def test_cli_rejects_sweep_with_multiple_models_before_running(
+        self, monkeypatch
+    ) -> None:
+        runner = CliRunner()
+        run_pilot = AsyncMock()
+        monkeypatch.setattr(
+            "scripts.llm.bakeoff.scoring_pilot.run_scoring_pilot", run_pilot
+        )
+        monkeypatch.setattr(
+            "scripts.llm.bakeoff.scoring_pilot.run_max_rounds_sweep", AsyncMock()
+        )
+
+        result = runner.invoke(
+            cli,
+            [
+                "--model",
+                "m1",
+                "--model",
+                "m2",
+                "--sweep",
+                "--sample",
+                "scripts/llm/bakeoff/scoring_sample.json",
+                "--transcripts-dir",
+                ".bakeoff/tests",
+                "--mirror-dir",
+                ".",
+                "--out",
+                ".bakeoff/tests/report.md",
+                "--eval-server-base-url",
+                "https://eval.example",
+                "--eval-api-token",
+                TEST_EVAL_API_TOKEN,
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "--sweep requires exactly one --model" in result.output
+        run_pilot.assert_not_called()
+
     def test_pinned_sha_rejects_unknown_project(self, tmp_path) -> None:
         with pytest.raises(UnknownProjectError):
             _pinned_sha_for_project("../evil", tmp_path, {"craft-parts": "canonical"})
+
+
+class TestRunMaxRoundsSweep:
+    async def test_reports_score_change_fraction_between_caps(
+        self, test_db_session, tmp_path
+    ) -> None:
+        sample = tmp_path / "s.json"
+        sample.write_text("[]")
+        base = BakeoffResult(
+            issue_ref="craft-parts#1",
+            model="model-a",
+            backend="openrouter",
+            new_output={"scores": {"impact": 70}},
+            cost_usd=0.02,
+            wall_seconds=2.0,
+            completed=True,
+        )
+        changed = BakeoffResult(
+            issue_ref="craft-parts#1",
+            model="model-a",
+            backend="openrouter",
+            new_output={"scores": {"impact": 80}},
+            cost_usd=0.03,
+            wall_seconds=3.0,
+            completed=True,
+        )
+        with patch(
+            "scripts.llm.bakeoff.scoring_pilot.run_scoring_pilot",
+            new=AsyncMock(side_effect=[[base], [base], [changed]]),
+        ):
+            sweep = await run_max_rounds_sweep(
+                session=test_db_session,
+                model="model-a",
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=Path(),
+                mirror_dir=Path(),
+                caps=(3, 4, 6),
+            )
+        assert [row["cap"] for row in sweep] == [3, 4, 6]
+        assert sweep[1]["score_change_fraction"] == 0.0
+        assert sweep[2]["score_change_fraction"] == 1.0
+
+    async def test_applies_cumulative_spend_budget_across_caps(
+        self, test_db_session, tmp_path
+    ) -> None:
+        sample = tmp_path / "s.json"
+        sample.write_text("[]")
+        first = BakeoffResult(
+            issue_ref="craft-parts#1",
+            model="model-a",
+            backend="openrouter",
+            cost_usd=0.02,
+            completed=True,
+        )
+        second = BakeoffResult(
+            issue_ref="craft-parts#1",
+            model="model-a",
+            backend="openrouter",
+            cost_usd=0.03,
+            completed=True,
+        )
+        run_pilot = AsyncMock(side_effect=[[first], [second]])
+        with patch(
+            "scripts.llm.bakeoff.scoring_pilot.run_scoring_pilot",
+            new=run_pilot,
+        ):
+            await run_max_rounds_sweep(
+                session=test_db_session,
+                model="model-a",
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=Path(),
+                mirror_dir=Path(),
+                caps=(3, 4),
+                max_spend_usd=0.10,
+            )
+        assert run_pilot.await_args_list[0].kwargs["max_spend_usd"] == 0.10
+        assert run_pilot.await_args_list[1].kwargs["max_spend_usd"] == 0.08
+
+    async def test_seeds_cumulative_spend_and_skips_a_cap(
+        self, test_db_session, tmp_path
+    ) -> None:
+        """A prior (e.g. base) run's spend and cap are carried into the sweep.
+
+        Regression test: previously the CLI ran the base --max-rounds pilot
+        and the sweep against the *same* max_spend_usd independently (double
+        budget), and the sweep always re-ran cap == max_rounds, duplicating
+        the base run's cost. See scoring_pilot.py cli() for the fix.
+        """
+        sample = tmp_path / "s.json"
+        sample.write_text("[]")
+        only_call = BakeoffResult(
+            issue_ref="craft-parts#1",
+            model="model-a",
+            backend="openrouter",
+            cost_usd=0.03,
+            completed=True,
+        )
+        run_pilot = AsyncMock(return_value=[only_call])
+        with patch(
+            "scripts.llm.bakeoff.scoring_pilot.run_scoring_pilot",
+            new=run_pilot,
+        ):
+            await run_max_rounds_sweep(
+                session=test_db_session,
+                model="model-a",
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=Path(),
+                mirror_dir=Path(),
+                caps=(3, 4, 6),
+                max_spend_usd=0.10,
+                initial_spend_usd=0.05,
+                skip_caps=frozenset({6}),
+            )
+        # cap 6 skipped entirely: only caps 3 and 4 ran.
+        assert run_pilot.await_count == 2
+        # budget carried forward from the base run's spend (0.05), not reset.
+        assert run_pilot.await_args_list[0].kwargs["max_spend_usd"] == 0.05
+        assert run_pilot.await_args_list[1].kwargs["max_spend_usd"] == pytest.approx(
+            0.02
+        )

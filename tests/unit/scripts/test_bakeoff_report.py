@@ -33,13 +33,34 @@ def _r(**kw):
 class TestScoringReport:
     def test_report_has_old_vs_new_and_effort_columns(self, tmp_path) -> None:
         out = tmp_path / "report_scoring.md"
-        write_scoring_report([_r()], out, max_rounds=6)
+        write_scoring_report(
+            [_r()],
+            out,
+            max_rounds=6,
+            sweep_results=[
+                {
+                    "cap": 3,
+                    "completion_rate": 1.0,
+                    "mean_cost_usd": 0.02,
+                    "mean_wall_seconds": 3.0,
+                    "score_change_fraction": 0.20,
+                },
+                {
+                    "cap": 4,
+                    "completion_rate": 1.0,
+                    "mean_cost_usd": 0.03,
+                    "mean_wall_seconds": 4.0,
+                    "score_change_fraction": 0.05,
+                },
+            ],
+        )
         text = out.read_text()
         assert "old" in text.lower()
         assert "new" in text.lower()
         assert "cost_usd" in text or "Cost" in text
         assert "rounds" in text.lower()
         assert "wall" in text.lower()
+        assert "recommended max_tool_rounds" in text.lower()
 
 
 class TestExtrapolation:

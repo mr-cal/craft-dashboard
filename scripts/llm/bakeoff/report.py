@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from scripts.llm.bakeoff.common import BakeoffResult
 
 SUMMARY_MARGIN = 15
+DEFAULT_COMPLETION_TARGET = 0.9
+DEFAULT_SCORE_CHANGE_THRESHOLD = 0.1
 INCUMBENT_MODEL = "qwen/qwen3.6-35b-a3b"
 
 
@@ -100,7 +102,27 @@ def _summary_lines(results: list[BakeoffResult]) -> list[str]:
     return lines
 
 
-def _rounds_section(results: list[BakeoffResult], max_rounds: int) -> list[str]:
+def recommend_max_tool_rounds(
+    sweep_results: list[dict[str, float | int]],
+    *,
+    completion_target: float = DEFAULT_COMPLETION_TARGET,
+    score_change_threshold: float = DEFAULT_SCORE_CHANGE_THRESHOLD,
+) -> int | None:
+    """Return the smallest cap that meets completion and stability targets."""
+    for row in sweep_results:
+        if (
+            float(row["completion_rate"]) >= completion_target
+            and float(row["score_change_fraction"]) < score_change_threshold
+        ):
+            return int(row["cap"])
+    return int(sweep_results[-1]["cap"]) if sweep_results else None
+
+
+def _rounds_section(
+    results: list[BakeoffResult],
+    max_rounds: int,
+    sweep_results: list[dict[str, float | int]] | None = None,
+) -> list[str]:
     counts = defaultdict(int)
     for result in results:
         counts[result.rounds_used] += 1
@@ -114,14 +136,43 @@ def _rounds_section(results: list[BakeoffResult], max_rounds: int) -> list[str]:
     for rounds_used, count in sorted(counts.items()):
         lines.append(f"| {rounds_used} | {count} |")
     lines.append("")
-    lines.append(
-        f"Current recommendation: keep MAX_TOOL_ROUNDS at {max_rounds} until sweep data is available."
-    )
+    if sweep_results:
+        recommendation = recommend_max_tool_rounds(sweep_results)
+        lines.extend(
+            [
+                "### Sweep results",
+                "",
+                "| Cap | Completion rate | Mean cost_usd | Mean wall seconds | Score change vs lower cap |",
+                "| --- | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        lines.extend(
+            f"| {int(row['cap'])} | {float(row['completion_rate']):.0%} | {float(row['mean_cost_usd']):.4f} | {float(row['mean_wall_seconds']):.2f} | {float(row['score_change_fraction']):.0%} |"
+            for row in sweep_results
+        )
+        lines.extend(
+            [
+                "",
+                f"Recommended MAX_TOOL_ROUNDS: {recommendation}",
+                (
+                    "Choose the smallest cap whose completion rate remains high "
+                    "and whose score-change fraction falls below the stability threshold."
+                ),
+            ]
+        )
+    else:
+        lines.append(
+            f"Current recommendation: keep MAX_TOOL_ROUNDS at {max_rounds} until sweep data is available."
+        )
     return lines
 
 
 def write_scoring_report(
-    results: list[BakeoffResult], out_path: Path, *, max_rounds: int
+    results: list[BakeoffResult],
+    out_path: Path,
+    *,
+    max_rounds: int,
+    sweep_results: list[dict[str, float | int]] | None = None,
 ) -> None:
     """Write the scoring bake-off Markdown report."""
     scoring_projection = extrapolate_backfill(results, item_count=2269)
@@ -169,7 +220,7 @@ def write_scoring_report(
             f"- Projected total for 2,269 items: {scoring_projection['projected_total']:.4f}",
             f"- Caveats: {scoring_projection['caveats']}",
             "",
-            *_rounds_section(results, max_rounds),
+            *_rounds_section(results, max_rounds, sweep_results),
             "",
         ]
     )

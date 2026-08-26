@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import statistics
 import subprocess
 import time
 from pathlib import Path
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
 
 DEFAULT_TOKEN_CEILING = 120_000
 DEFAULT_TOOL_TIMEOUT_S = 20.0
+DEFAULT_SWEEP_CAPS = (3, 4, 6, 8)
 
 
 async def _allowed_projects(
@@ -392,6 +394,108 @@ async def run_scoring_pilot(
     return results
 
 
+def _score_map(results: list[BakeoffResult]) -> dict[str, dict[str, Any]]:
+    return {
+        result.issue_ref: result.new_output.get("scores", {})
+        for result in results
+        if result.completed
+    }
+
+
+async def run_max_rounds_sweep(
+    *,
+    session: AsyncSession,
+    model: str,
+    backend: str,
+    sample_path: Path,
+    transcripts_dir: Path,
+    mirror_dir: Path,
+    api_key: str = "",
+    base_url: str = "",
+    ca_cert: str = "",
+    caps: tuple[int, ...] = DEFAULT_SWEEP_CAPS,
+    max_spend_usd: float | None = None,
+    eval_server_base_url: str = "",
+    eval_api_token: str = "",
+    initial_spend_usd: float = 0.0,
+    skip_caps: frozenset[int] = frozenset(),
+) -> list[dict[str, float | int]]:
+    """Run the same sample across several max-round caps.
+
+    When ``max_spend_usd`` is set, the remaining budget is carried forward to
+    each successive cap so the sweep is bounded cumulatively, not per-cap.
+    ``initial_spend_usd`` seeds the cumulative total with cost already spent
+    by a prior run (e.g. the mandatory base run) against the same budget, so
+    ``--max-spend-usd`` bounds the whole CLI invocation, not each call
+    independently. ``skip_caps`` lets the caller omit a cap already covered
+    by that prior run instead of re-running (and re-paying for) it here.
+    """
+    sweep_results: list[dict[str, float | int]] = []
+    previous_scores: dict[str, dict[str, Any]] | None = None
+    cumulative_cost = initial_spend_usd
+    for cap in caps:
+        if cap in skip_caps:
+            continue
+        remaining_budget: float | None = None
+        if max_spend_usd is not None:
+            remaining_budget = max(max_spend_usd - cumulative_cost, 0.0)
+            if remaining_budget <= 0:
+                msg = f"max spend exceeded: {cumulative_cost:.4f} > {max_spend_usd:.4f}"
+                raise RuntimeError(msg)
+        results = await run_scoring_pilot(
+            session=session,
+            models=[model],
+            backend=backend,
+            sample_path=sample_path,
+            transcripts_dir=transcripts_dir / f"max-rounds-{cap}",
+            mirror_dir=mirror_dir,
+            api_key=api_key,
+            base_url=base_url,
+            ca_cert=ca_cert,
+            max_rounds=cap,
+            max_spend_usd=remaining_budget,
+            eval_server_base_url=eval_server_base_url,
+            eval_api_token=eval_api_token,
+        )
+        cumulative_cost += sum(result.cost_usd or 0.0 for result in results)
+        current_scores = _score_map(results)
+        if previous_scores is None:
+            score_change_fraction = 0.0
+        else:
+            compared = 0
+            changed = 0
+            for issue_ref, scores in current_scores.items():
+                if issue_ref not in previous_scores:
+                    continue
+                compared += 1
+                if previous_scores[issue_ref] != scores:
+                    changed += 1
+            score_change_fraction = changed / compared if compared else 0.0
+        sweep_results.append(
+            {
+                "cap": cap,
+                "completion_rate": (
+                    sum(1 for result in results if result.completed) / len(results)
+                    if results
+                    else 0.0
+                ),
+                "mean_cost_usd": statistics.mean(
+                    [result.cost_usd or 0.0 for result in results]
+                )
+                if results
+                else 0.0,
+                "mean_wall_seconds": statistics.mean(
+                    [result.wall_seconds for result in results]
+                )
+                if results
+                else 0.0,
+                "score_change_fraction": score_change_fraction,
+            }
+        )
+        previous_scores = current_scores
+    return sweep_results
+
+
 @click.command()
 @click.option(
     "--model", "models", multiple=True, required=True, help="Candidate model(s)."
@@ -422,8 +526,9 @@ async def run_scoring_pilot(
 @click.option(
     "--eval-api-token",
     required=True,
-    help="****** for the eval helper endpoints used during tool dispatch.",
+    help="Bearer token for the eval helper endpoints used during tool dispatch.",
 )
+@click.option("--sweep/--no-sweep", default=False, show_default=True)
 def cli(
     models: tuple[str, ...],
     backend: str,
@@ -435,13 +540,17 @@ def cli(
     max_spend_usd: float,
     eval_server_base_url: str,
     eval_api_token: str,
+    sweep: bool,
 ) -> None:
     """Run the scoring bake-off and write its Markdown report."""
     from scripts.llm.bakeoff.report import write_scoring_report
 
     settings = Settings()
+    if sweep and len(models) != 1:
+        msg = "--sweep requires exactly one --model"
+        raise click.UsageError(msg)
 
-    async def _main() -> list[BakeoffResult]:
+    async def _main() -> tuple[list[BakeoffResult], list[dict[str, float | int]]]:
         engine = get_engine(
             settings.database_url,
             pool_size=settings.db_pool_size,
@@ -450,7 +559,7 @@ def cli(
         try:
             session_factory = get_session_factory(engine)
             async with session_factory() as session:
-                return await run_scoring_pilot(
+                results = await run_scoring_pilot(
                     session=session,
                     models=list(models),
                     backend=backend,
@@ -464,11 +573,41 @@ def cli(
                     eval_server_base_url=eval_server_base_url,
                     eval_api_token=eval_api_token,
                 )
+                sweep_results: list[dict[str, float | int]] = []
+                if sweep:
+                    # The base run above already covers cap == max_rounds, so
+                    # skip re-running (and re-paying for) it here, and carry
+                    # its spend forward so --max-spend-usd bounds the whole
+                    # invocation rather than the base run and sweep
+                    # independently.
+                    base_spend = sum(result.cost_usd or 0.0 for result in results)
+                    sweep_caps = tuple(sorted({*DEFAULT_SWEEP_CAPS, max_rounds}))
+                    sweep_results = await run_max_rounds_sweep(
+                        session=session,
+                        model=models[0],
+                        backend=backend,
+                        sample_path=sample_path,
+                        transcripts_dir=transcripts_dir,
+                        mirror_dir=mirror_dir,
+                        api_key=settings.openrouter_api_key,
+                        caps=sweep_caps,
+                        max_spend_usd=max_spend_usd,
+                        eval_server_base_url=eval_server_base_url,
+                        eval_api_token=eval_api_token,
+                        initial_spend_usd=base_spend,
+                        skip_caps=frozenset({max_rounds}),
+                    )
+                return results, sweep_results
         finally:
             await engine.dispose()
 
-    results = asyncio.run(_main())
-    write_scoring_report(results, out_path, max_rounds=max_rounds)
+    results, sweep_results = asyncio.run(_main())
+    write_scoring_report(
+        results,
+        out_path,
+        max_rounds=max_rounds,
+        sweep_results=sweep_results,
+    )
 
 
 if __name__ == "__main__":
