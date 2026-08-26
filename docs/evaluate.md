@@ -63,6 +63,12 @@ uv run scripts/run_llm.py evaluate \
 uv run scripts/run_llm.py evaluate --server http://localhost:8000 --token "$EVAL_API_TOKEN" --limit 10
 ```
 
+`--limit N` (aliased as `--max-evaluations N`, the name used in the deep-
+evaluation design) doubles as the "bounded batch" safety rail used for staged
+rollouts (e.g. a deep-evaluation pilot backfill): run `evaluate --limit 20`,
+inspect the results, then re-run without `--limit` (or with a larger one) to
+continue. No separate flag is needed for this.
+
 Use `--issue` with `--project` to force one specific issue, and `--open-only`,
 `--force`, `--incomplete`, or `--stale-days` to filter the HTTP queue.
 

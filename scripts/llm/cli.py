@@ -144,10 +144,12 @@ def clear_evaluations_cmd(project: str, yes: bool) -> None:
 )
 @click.option(
     "--limit",
+    "--max-evaluations",
+    "limit",
     default=0,
     show_default=True,
     type=click.IntRange(min=0),
-    help="Max evaluations before exit (0=unlimited)",
+    help="Max evaluations before exit (0=unlimited). --max-evaluations is an alias.",
 )
 @click.option("--project", default="", help="Only evaluate issues for this project")
 @click.option(
