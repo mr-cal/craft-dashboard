@@ -70,6 +70,26 @@ class TestSettings:
         settings = Settings(_env_file=None)
         assert settings.git_concurrency == 1
 
+    def test_commit_scanner_settings_have_defaults(self, monkeypatch) -> None:
+        monkeypatch.delenv("COMMIT_SCANNER_TOP_K", raising=False)
+        monkeypatch.delenv("COMMIT_SCANNER_SIMILARITY_THRESHOLD", raising=False)
+        monkeypatch.delenv(
+            "COMMIT_SCANNER_DAILY_INVALIDATION_WARN_THRESHOLD", raising=False
+        )
+        settings = Settings(_env_file=None)
+        assert settings.commit_scanner_top_k == 10
+        assert settings.commit_scanner_similarity_threshold == 0.70
+        assert settings.commit_scanner_daily_invalidation_warn_threshold == 200
+
+    def test_commit_scanner_settings_read_from_env(self, monkeypatch) -> None:
+        monkeypatch.setenv("COMMIT_SCANNER_TOP_K", "25")
+        monkeypatch.setenv("COMMIT_SCANNER_SIMILARITY_THRESHOLD", "0.55")
+        monkeypatch.setenv("COMMIT_SCANNER_DAILY_INVALIDATION_WARN_THRESHOLD", "321")
+        settings = Settings(_env_file=None)
+        assert settings.commit_scanner_top_k == 25
+        assert settings.commit_scanner_similarity_threshold == 0.55
+        assert settings.commit_scanner_daily_invalidation_warn_threshold == 321
+
     def test_ignores_removed_local_llm_environment_variables(self, monkeypatch) -> None:
         """Removed local LLM env vars no longer appear in server settings."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")

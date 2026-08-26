@@ -40,6 +40,11 @@ craft-projects = [
 
 refresh-interval-days = 7
 
+# Commit-scanner tuning (env-overridable via Settings):
+# COMMIT_SCANNER_TOP_K = 10
+# COMMIT_SCANNER_SIMILARITY_THRESHOLD = 0.70
+# COMMIT_SCANNER_DAILY_INVALIDATION_WARN_THRESHOLD = 200
+
 launchpad-projects = ["snapcraft"]
 
 maintainers = [

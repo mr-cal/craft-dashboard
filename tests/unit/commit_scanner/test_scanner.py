@@ -15,9 +15,13 @@ from craft_dashboard.commit_scanner.scanner import (
     find_issues_by_launchpad_ref,
     find_issues_by_qualified_ref,
     find_issues_by_semantic_match,
+    scan_all_projects,
     scan_project,
 )
+from craft_dashboard.git_mirrors.sync import MirrorSyncResult
 from craft_dashboard.models.commit_scan_evidence_path import CommitScanEvidencePath
+from craft_dashboard.models.commit_scan_run import CommitScanRun
+from sqlalchemy import select
 
 from tests.factories import make_issue, make_project
 from tests.unit.commit_scanner.conftest import commit
@@ -594,3 +598,290 @@ class TestParseLogOutput:
         _messages, paths = _parse_log_output(raw)
 
         assert paths == ["  path/with-space.py  "]
+
+
+class TestScanAllProjects:
+    """Batch scanning orchestration across projects."""
+
+    async def test_first_scan_baselines_head_and_syncs_with_clone_url(
+        self, test_db_session, tmp_path, monkeypatch
+    ) -> None:
+        project = make_project(id=1, name="craft-parts", last_scanned_sha=None)
+        await _seed(test_db_session, project)
+
+        mirror_dir = tmp_path / "mirrors"
+        expected_head = "a" * 40
+        sync_calls: list[tuple[str, str, pathlib.Path]] = []
+
+        async def fake_sync_mirror(
+            project: str, *, clone_url: str, mirror_dir: pathlib.Path
+        ) -> MirrorSyncResult:
+            sync_calls.append((project, clone_url, mirror_dir))
+            (mirror_dir / f"{project}.git").mkdir(parents=True, exist_ok=True)
+            return MirrorSyncResult(project=project, status="cloned")
+
+        async def fake_run_git(mirror_path: pathlib.Path, *args: str) -> str:
+            assert mirror_path == mirror_dir / "craft-parts.git"
+            assert args == ("rev-parse", "HEAD")
+            return f"{expected_head}\n"
+
+        monkeypatch.setattr(
+            "craft_dashboard.git_mirrors.sync.sync_mirror", fake_sync_mirror
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.commit_scanner.scanner.reader._run_git",
+            fake_run_git,
+        )
+
+        summaries = await scan_all_projects(
+            test_db_session,
+            mirror_dir=mirror_dir,
+            allowed_projects={"craft-parts": "canonical"},
+            embed_client=None,
+            dry_run=False,
+        )
+
+        await test_db_session.refresh(project)
+        assert summaries == []
+        assert project.last_scanned_sha == expected_head
+        assert sync_calls == [
+            (
+                "craft-parts",
+                "https://github.com/canonical/craft-parts.git",
+                mirror_dir,
+            )
+        ]
+
+    async def test_dry_run_returns_summary_but_rolls_back_writes(
+        self, test_db_session, tmp_path, monkeypatch
+    ) -> None:
+        project = make_project(id=1, name="craft-parts", last_scanned_sha="b" * 40)
+        await _seed(test_db_session, project)
+
+        mirror_dir = tmp_path / "mirrors"
+
+        async def fake_sync_mirror(
+            project: str, *, clone_url: str, mirror_dir: pathlib.Path
+        ) -> MirrorSyncResult:
+            (mirror_dir / f"{project}.git").mkdir(parents=True, exist_ok=True)
+            return MirrorSyncResult(project=project, status="fetched")
+
+        async def fake_run_git(_mirror_path: pathlib.Path, *args: str) -> str:
+            assert args == ("rev-parse", "HEAD")
+            return f"{'c' * 40}\n"
+
+        async def fake_scan_project(session, **kwargs):
+            kwargs["session"] = session
+            row = CommitScanRun(
+                project_id=1,
+                scanned_at=project.updated_at,
+                commits_scanned=2,
+                sha_before="b" * 40,
+                sha_after="c" * 40,
+                duration_seconds=0.1,
+                invalidated_qualified_ref=1,
+                invalidated_path=2,
+                invalidated_semantic=3,
+                invalidated_bare_ref=4,
+                invalidated_launchpad=5,
+                dry_run=True,
+            )
+            session.add(row)
+            project.last_scanned_sha = "c" * 40
+            await session.flush()
+            return row
+
+        monkeypatch.setattr(
+            "craft_dashboard.git_mirrors.sync.sync_mirror", fake_sync_mirror
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.commit_scanner.scanner.reader._run_git",
+            fake_run_git,
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.commit_scanner.scanner.scan_project", fake_scan_project
+        )
+
+        summaries = await scan_all_projects(
+            test_db_session,
+            mirror_dir=mirror_dir,
+            allowed_projects={"craft-parts": "canonical"},
+            embed_client=None,
+            dry_run=True,
+        )
+
+        await test_db_session.refresh(project)
+        run_rows = (
+            (
+                await test_db_session.execute(
+                    select(CommitScanRun).where(CommitScanRun.project_id == 1)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        assert summaries == [
+            {
+                "project": "craft-parts",
+                "commits_scanned": 2,
+                "qualified_ref": 1,
+                "path": 2,
+                "semantic": 3,
+                "bare_ref": 4,
+                "launchpad": 5,
+                "dry_run": True,
+            }
+        ]
+        assert project.last_scanned_sha == "b" * 40
+        assert run_rows == []
+
+    async def test_unknown_project_does_not_abort_other_projects(
+        self, test_db_session, tmp_path, monkeypatch
+    ) -> None:
+        skipped = make_project(id=1, name="craft-parts", last_scanned_sha="a" * 40)
+        scanned = make_project(id=2, name="rockcraft", last_scanned_sha="b" * 40)
+        await _seed(test_db_session, skipped, scanned)
+
+        mirror_dir = tmp_path / "mirrors"
+
+        async def fake_sync_mirror(
+            project: str, *, clone_url: str, mirror_dir: pathlib.Path
+        ) -> MirrorSyncResult:
+            assert project == "rockcraft"
+            assert clone_url == "https://github.com/canonical/rockcraft.git"
+            (mirror_dir / "rockcraft.git").mkdir(parents=True, exist_ok=True)
+            return MirrorSyncResult(project=project, status="fetched")
+
+        async def fake_run_git(mirror_path: pathlib.Path, *args: str) -> str:
+            assert mirror_path == mirror_dir / "rockcraft.git"
+            assert args == ("rev-parse", "HEAD")
+            return f"{'c' * 40}\n"
+
+        async def fake_scan_project(*args, **kwargs):
+            return SimpleNamespace(
+                commits_scanned=1,
+                invalidated_qualified_ref=0,
+                invalidated_path=1,
+                invalidated_semantic=0,
+                invalidated_bare_ref=0,
+                invalidated_launchpad=0,
+                dry_run=False,
+            )
+
+        monkeypatch.setattr(
+            "craft_dashboard.git_mirrors.sync.sync_mirror", fake_sync_mirror
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.commit_scanner.scanner.reader._run_git",
+            fake_run_git,
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.commit_scanner.scanner.scan_project", fake_scan_project
+        )
+
+        summaries = await scan_all_projects(
+            test_db_session,
+            mirror_dir=mirror_dir,
+            allowed_projects={"rockcraft": "canonical"},
+            embed_client=None,
+            dry_run=False,
+        )
+
+        assert summaries == [
+            {
+                "project": "rockcraft",
+                "commits_scanned": 1,
+                "qualified_ref": 0,
+                "path": 1,
+                "semantic": 0,
+                "bare_ref": 0,
+                "launchpad": 0,
+                "dry_run": False,
+            }
+        ]
+
+    async def test_fetch_failure_on_existing_mirror_is_skipped_without_stale_scan(
+        self, test_db_session, tmp_path, monkeypatch
+    ) -> None:
+        stale = make_project(id=1, name="craft-parts", last_scanned_sha="a" * 40)
+        scanned = make_project(id=2, name="rockcraft", last_scanned_sha="b" * 40)
+        await _seed(test_db_session, stale, scanned)
+
+        mirror_dir = tmp_path / "mirrors"
+        stale_mirror = mirror_dir / "craft-parts.git"
+        scanned_mirror = mirror_dir / "rockcraft.git"
+        stale_mirror.mkdir(parents=True, exist_ok=True)
+        scanned_mirror.mkdir(parents=True, exist_ok=True)
+
+        scan_calls: list[str] = []
+        run_git_calls: list[pathlib.Path] = []
+
+        async def fake_sync_mirror(
+            project: str, *, clone_url: str, mirror_dir: pathlib.Path
+        ) -> MirrorSyncResult:
+            assert mirror_dir == tmp_path / "mirrors"
+            if project == "craft-parts":
+                assert clone_url == "https://github.com/canonical/craft-parts.git"
+                return MirrorSyncResult(
+                    project=project,
+                    status="skipped",
+                    detail="fetch failed",
+                )
+            assert project == "rockcraft"
+            assert clone_url == "https://github.com/canonical/rockcraft.git"
+            return MirrorSyncResult(project=project, status="fetched")
+
+        async def fake_run_git(mirror_path: pathlib.Path, *args: str) -> str:
+            run_git_calls.append(mirror_path)
+            assert args == ("rev-parse", "HEAD")
+            return f"{'c' * 40}\n"
+
+        async def fake_scan_project(_session, *, project_name: str, **kwargs):
+            scan_calls.append(project_name)
+            return SimpleNamespace(
+                commits_scanned=1,
+                invalidated_qualified_ref=0,
+                invalidated_path=1,
+                invalidated_semantic=0,
+                invalidated_bare_ref=0,
+                invalidated_launchpad=0,
+                dry_run=False,
+            )
+
+        monkeypatch.setattr(
+            "craft_dashboard.git_mirrors.sync.sync_mirror", fake_sync_mirror
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.commit_scanner.scanner.reader._run_git",
+            fake_run_git,
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.commit_scanner.scanner.scan_project", fake_scan_project
+        )
+
+        summaries = await scan_all_projects(
+            test_db_session,
+            mirror_dir=mirror_dir,
+            allowed_projects={
+                "craft-parts": "canonical",
+                "rockcraft": "canonical",
+            },
+            embed_client=None,
+            dry_run=False,
+        )
+
+        assert scan_calls == ["rockcraft"]
+        assert run_git_calls == [scanned_mirror]
+        assert summaries == [
+            {
+                "project": "rockcraft",
+                "commits_scanned": 1,
+                "qualified_ref": 0,
+                "path": 1,
+                "semantic": 0,
+                "bare_ref": 0,
+                "launchpad": 0,
+                "dry_run": False,
+            }
+        ]

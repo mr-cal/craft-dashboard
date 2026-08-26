@@ -8,6 +8,7 @@ therefore biases toward recall and uses no LLM.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import UTC, datetime
@@ -16,7 +17,8 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 
 from craft_dashboard.commit_scanner.parsing import extract_references
-from craft_dashboard.git_mirrors import reader
+from craft_dashboard.git_mirrors import reader, sync
+from craft_dashboard.git_mirrors.paths import clone_url_for
 from craft_dashboard.models.commit_scan_evidence_path import CommitScanEvidencePath
 from craft_dashboard.models.commit_scan_run import CommitScanRun
 from craft_dashboard.models.issue import Issue
@@ -377,3 +379,94 @@ def _parse_log_output(raw: str) -> tuple[list[str], list[str]]:
                 paths.add(path)
 
     return messages, sorted(paths)
+
+
+async def scan_all_projects(
+    session: AsyncSession,
+    *,
+    mirror_dir: pathlib.Path,
+    allowed_projects: dict[str, str],
+    embed_client: EmbeddingClient | None,
+    launchpad_projects: set[str] | None = None,
+    semantic_top_k: int = 10,
+    semantic_similarity_threshold: float = 0.70,
+    dry_run: bool = False,
+) -> list[dict[str, object]]:
+    """Fetch and scan every tracked project with per-project error isolation."""
+    await asyncio.to_thread(mirror_dir.mkdir, parents=True, exist_ok=True)
+
+    launchpad_projects = launchpad_projects or set()
+    projects = (
+        await session.execute(
+            select(Project.id, Project.name, Project.last_scanned_sha).order_by(
+                Project.id
+            )
+        )
+    ).all()
+    summaries: list[dict[str, object]] = []
+
+    for project_id, project_name, last_scanned_sha in projects:
+        try:
+            clone_url = clone_url_for(project_name, allowed_projects=allowed_projects)
+            sync_result = await sync.sync_mirror(
+                project_name,
+                clone_url=clone_url,
+                mirror_dir=mirror_dir,
+            )
+            if sync_result.status == "skipped":
+                detail = f" ({sync_result.detail})" if sync_result.detail else ""
+                logger.warning(
+                    "Skipping %s: mirror sync skipped%s", project_name, detail
+                )
+                continue
+            mirror_path = mirror_dir / f"{project_name}.git"
+            if not mirror_path.exists():
+                logger.warning("Skipping %s: no mirror on disk", project_name)
+                continue
+
+            head_sha = (
+                await reader._run_git(mirror_path, "rev-parse", "HEAD")  # noqa: SLF001
+            ).strip()
+
+            if last_scanned_sha is None:
+                if not dry_run:
+                    project_row = await session.get(Project, project_id)
+                    if project_row is not None:
+                        project_row.last_scanned_sha = head_sha
+                        await session.commit()
+                continue
+
+            run = await scan_project(
+                session,
+                project_name=project_name,
+                mirror_path=mirror_path,
+                last_scanned_sha=last_scanned_sha,
+                new_head_sha=head_sha,
+                embed_client=embed_client,
+                dry_run=dry_run,
+                launchpad_projects=launchpad_projects,
+                semantic_top_k=semantic_top_k,
+                semantic_similarity_threshold=semantic_similarity_threshold,
+            )
+            summaries.append(
+                {
+                    "project": project_name,
+                    "commits_scanned": run.commits_scanned,
+                    "qualified_ref": run.invalidated_qualified_ref,
+                    "path": run.invalidated_path,
+                    "semantic": run.invalidated_semantic,
+                    "bare_ref": run.invalidated_bare_ref,
+                    "launchpad": run.invalidated_launchpad,
+                    "dry_run": run.dry_run,
+                }
+            )
+            if dry_run:
+                await session.rollback()
+            else:
+                await session.commit()
+        except Exception:
+            logger.exception("commit scanner: skipping project %s", project_name)
+            await session.rollback()
+            continue
+
+    return summaries

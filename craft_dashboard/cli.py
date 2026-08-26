@@ -160,3 +160,108 @@ async def _load_project_orgs(settings: "Settings") -> dict[str, str]:
         return {}
     finally:
         await engine.dispose()
+
+
+@main.group(name="commit-scanner")
+def commit_scanner_group() -> None:
+    """Scan new commits for issues they might invalidate."""
+
+
+@commit_scanner_group.command(name="run")
+@click.option(
+    "--config-file",
+    type=click.Path(exists=True),
+    default="craft-dashboard.toml",
+    help="Path to configuration file.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Report what would be invalidated without writing anything.",
+)
+@click.option(
+    "--top-k",
+    type=int,
+    default=None,
+    help="Semantic-match K (candidates per commit). Overrides the configured default.",
+)
+@click.option(
+    "--threshold",
+    type=float,
+    default=None,
+    help=(
+        "Semantic cosine-similarity threshold (0-1). Overrides the configured default."
+    ),
+)
+def commit_scanner_run(
+    *, config_file: str, dry_run: bool, top_k: int | None, threshold: float | None
+) -> None:
+    """Run one commit-scanner pass over every tracked project."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from craft_dashboard.commit_scanner.scanner import scan_all_projects
+    from craft_dashboard.config import load_config
+    from craft_dashboard.git_mirrors import reader
+    from craft_dashboard.git_mirrors.paths import resolve_allowed_projects
+    from craft_dashboard.llm.client import OPENROUTER_BASE_URL
+    from craft_dashboard.llm.embeddings import EmbeddingClient
+    from craft_dashboard.settings import Settings
+
+    async def _run() -> None:
+        settings = Settings()
+        reader.set_git_concurrency(settings.git_concurrency)
+        config = load_config(pathlib.Path(config_file))
+        project_orgs = await _load_project_orgs(settings)
+        allowed_projects = resolve_allowed_projects(
+            craft_projects=config.craft_projects,
+            project_orgs=project_orgs,
+        )
+
+        engine = create_async_engine(settings.database_url)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        embed_client = (
+            EmbeddingClient(
+                base_url=OPENROUTER_BASE_URL,
+                model=settings.semantic_search_embedding_model,
+                api_key=settings.openrouter_api_key,
+                ca_cert="",
+            )
+            if settings.openrouter_api_key
+            else None
+        )
+        try:
+            async with session_factory() as session:
+                summaries = await scan_all_projects(
+                    session,
+                    mirror_dir=settings.mirror_dir_path,
+                    allowed_projects=allowed_projects,
+                    embed_client=embed_client,
+                    launchpad_projects=set(config.launchpad_projects),
+                    semantic_top_k=(
+                        top_k if top_k is not None else settings.commit_scanner_top_k
+                    ),
+                    semantic_similarity_threshold=(
+                        threshold
+                        if threshold is not None
+                        else settings.commit_scanner_similarity_threshold
+                    ),
+                    dry_run=dry_run,
+                )
+        finally:
+            if embed_client is not None:
+                await embed_client.close()
+            await engine.dispose()
+
+        for summary in summaries:
+            click.echo(
+                f"{summary['project']}: {summary['commits_scanned']} commits, "
+                f"invalidated qualified={summary['qualified_ref']} "
+                f"path={summary['path']} semantic={summary['semantic']} "
+                f"bare={summary['bare_ref']} "
+                f"launchpad={summary['launchpad']}" + (" [dry-run]" if dry_run else "")
+            )
+
+    asyncio.run(_run())

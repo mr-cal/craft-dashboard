@@ -42,3 +42,14 @@ class TestCLI:
 
         assert result.exit_code == 0
         assert "Clone or fetch" in result.output
+
+    def test_commit_scanner_run_help(self) -> None:
+        """The 'commit-scanner run' subcommand exists."""
+        runner = CliRunner()
+
+        result = runner.invoke(main, ["commit-scanner", "run", "--help"])
+
+        assert result.exit_code == 0
+        assert "--dry-run" in result.output
+        assert "--top-k" in result.output
+        assert "--threshold" in result.output

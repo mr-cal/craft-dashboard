@@ -85,6 +85,13 @@ class Settings(BaseSettings):
         validation_alias="CRAFT_DASHBOARD_GIT_CONCURRENCY",
     )
 
+    # Commit scanner tuning: semantic candidates per commit, minimum cosine
+    # similarity to invalidate, and the admin-page warning threshold for one
+    # day's total invalidations.
+    commit_scanner_top_k: int = 10
+    commit_scanner_similarity_threshold: float = 0.70
+    commit_scanner_daily_invalidation_warn_threshold: int = 200
+
     @property
     def model(self) -> str:
         """Return the model for server-side evaluation."""
