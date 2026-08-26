@@ -340,6 +340,19 @@ cd /opt/vps-infra && podman-compose -f docker-compose.craft-dashboard.yml up -d
 4. Run data collection to populate the project immediately, or wait for the
    next scheduled run.
 
+### Sync the git mirrors
+
+Run:
+
+```bash
+uv run craft-dashboard mirrors sync
+```
+
+This idempotently clones or fetches every `craft-projects` entry as a bare
+mirror. It is safe to re-run: existing mirrors are refreshed in place, and
+missing ones are cloned. If a configured project has been renamed or archived,
+the command logs it and skips that mirror instead of failing the whole run.
+
 ### Run local LLM evaluation
 
 The server now uses OpenRouter for server-side evaluation.

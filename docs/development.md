@@ -34,6 +34,10 @@ Compose. The database credentials are hardcoded in `docker-compose.yml`
 For non-Docker development (e.g. `make dev` with hot reload), you still need
 a `.env` file — but `DATABASE_URL` is set by Docker Compose and does not need
 to be in `.env`. Copy `.env.example` to `.env` and fill in your API tokens.
+For deep evaluation, a dev worker maintains its own bare mirrors under
+`~/.cache/craft-dashboard/mirrors` by default; populate them with
+`craft-dashboard mirrors sync`, or override the location with
+`CRAFT_DASHBOARD_MIRROR_DIR`.
 
 ## Tests
 

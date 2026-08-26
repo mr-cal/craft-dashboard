@@ -62,6 +62,25 @@ OPENROUTER_API_KEY=<your key>
 
 See `.env.example` for all available settings.
 
+### Bare git mirror storage
+
+Deep evaluation's git tools use a shared bare-mirror directory on the VPS:
+
+| VPS path | Mounted into | Mode |
+|----------|--------------|------|
+| `/opt/vps-infra/mirrors/<project>.git` | `craft-dashboard` | `:rw` |
+| `/opt/vps-infra/mirrors/<project>.git` | `llm-evaluate` | `:ro` |
+
+The required `mr-cal/vps-infra` compose change has already landed in commit
+`68a080f`: it mounts the shared bind-mount into both containers and creates
+`/opt/vps-infra/mirrors` on the VPS.
+
+Peak RSS measurement (2026-08-26): materialized all 18 project mirrors (~205MB total) via `craft-dashboard mirrors sync` and ran a broad `git grep -e 'def '` across each mirror's HEAD, capturing peak RSS via `/usr/bin/time -v`. Observed peak: snapcraft.git at ~22.7MB (23228 KB), the largest repo in the set; all others ranged ~5.5-17MB. Two concurrent worst-case greps (~45MB) fit comfortably within the VPS's ~307MB available RAM alongside postgres/caddy/app, so `git_concurrency` stays at its default of 2 (no change needed to `settings.py`).
+
+Because bare mirrors keep reflogs and Phase 2 sets `gc.auto=0`, git gc must be
+run on an explicit schedule during a quiet window. That is future operational
+work, not part of this phase's scope.
+
 ### Reloading .env in production
 
 pydantic-settings reads `.env` at startup. To apply changes after editing the
