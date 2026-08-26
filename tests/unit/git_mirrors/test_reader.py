@@ -16,6 +16,7 @@ from craft_dashboard.git_mirrors.exceptions import InvalidPathError, InvalidRefE
 from craft_dashboard.git_mirrors.reader import (
     _summarize_layout,
     grep_repo,
+    head_sha,
     read_file,
     repo_layout,
     validate_path,
@@ -62,6 +63,27 @@ class TestValidatePath:
     def test_embedded_dotdot_rejected(self) -> None:
         with pytest.raises(InvalidPathError):
             validate_path("src/../../etc/passwd")
+
+
+class TestHeadSha:
+    """head_sha() wraps `git rev-parse --verify HEAD` for external callers."""
+
+    async def test_returns_full_sha_matching_head(
+        self, bare_mirror: pathlib.Path, sample_repo_shas: list[str]
+    ) -> None:
+        sha = await head_sha(bare_mirror)
+        assert sha == sample_repo_shas[-1]
+        assert len(sha) == 40
+
+    async def test_unborn_head_raises(self, tmp_path: pathlib.Path) -> None:
+        empty_mirror = tmp_path / "empty.git"
+        subprocess.run(  # noqa: ASYNC221 - one-off bare-repo setup, not a hot path
+            ["git", "init", "-q", "--bare", str(empty_mirror)],
+            check=True,
+            capture_output=True,
+        )
+        with pytest.raises(subprocess.CalledProcessError):
+            await head_sha(empty_mirror)
 
 
 class TestReadFile:

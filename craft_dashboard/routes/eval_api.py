@@ -17,10 +17,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.auth import verify_eval_token
 from craft_dashboard.dependencies import get_config, get_db_session
+from craft_dashboard.git_mirrors import reader as mirror_reader
 from craft_dashboard.llm.client import OPENROUTER_BASE_URL
 from craft_dashboard.llm.content_hash import compute_content_hash
 from craft_dashboard.llm.embeddings import EmbeddingClient
@@ -331,6 +334,38 @@ async def _fetch_issue_and_latest_evaluation(
     return issue, project_name, evaluation
 
 
+async def _resolve_repo_shas(
+    *,
+    project_name: str,
+    mirror_dir: Path,
+    craft_applications: list[str],
+    craft_libraries: list[str],
+) -> dict[str, str]:
+    """Return {project: head_sha} for the round-1 baseline's repo set.
+
+    Per the design doc's round-1 scope table: if project_name is one of the
+    craft-applications (or craft-application itself), include its own repo
+    plus every craft-library; otherwise include only its own repo. Silently
+    omits any project with no mirror on disk yet (the worker's preflight
+    step is responsible for deciding whether that's fatal).
+    """
+    repos_needed = {project_name}
+    if project_name in craft_applications or project_name == "craft-application":
+        repos_needed |= set(craft_libraries)
+
+    shas: dict[str, str] = {}
+    for repo in repos_needed:
+        mirror_path = mirror_dir / f"{repo}.git"
+        if not mirror_path.exists():
+            continue
+        try:
+            sha = await mirror_reader.head_sha(mirror_path)
+        except Exception:  # noqa: BLE001 - a corrupt/empty mirror must not break /next
+            continue
+        shas[repo] = sha
+    return shas
+
+
 @router.get("/next", response_model=None)
 @limiter.limit(_eval_next_rate_limit)
 async def next_issue(
@@ -402,6 +437,15 @@ async def next_issue(
         await session.rollback()
         return Response(status_code=204)
 
+    settings = request.app.state.settings
+    dashboard_config = get_config(request)
+    repo_shas = await _resolve_repo_shas(
+        project_name=project_name,
+        mirror_dir=settings.mirror_dir_path,
+        craft_applications=list(dashboard_config.craft_applications),
+        craft_libraries=list(dashboard_config.craft_libraries),
+    )
+
     return {
         "issue_id": issue.id,
         "project_name": project_name,
@@ -427,6 +471,7 @@ async def next_issue(
         # give the LLM review/CI context and keep its local hash check
         # (which also hashes a subset of these fields) in sync with the server.
         "pr_details": issue.metadata_ or {},
+        "repo_shas": repo_shas,
     }
 
 

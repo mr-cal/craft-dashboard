@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -28,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+    from pathlib import Path
 
     from fastapi import FastAPI
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -130,6 +132,7 @@ class TestEvalNextIntegration:
             "maintainers": ["alice", "bob"],
             "closing_references": [],
             "pr_details": {},
+            "repo_shas": {},
         }
 
         evaluations = asyncio.get_event_loop().run_until_complete(
@@ -1754,3 +1757,142 @@ class TestFilteredIssuesIntegration:
 
         assert response.status_code == 200
         assert response.json()["external_id"] == "100"
+
+
+class TestNextIssueShaPinning:
+    """Tests for repo_shas on GET /api/eval/next."""
+
+    @staticmethod
+    def _make_bare_mirror_with_commit(
+        mirror_dir: Path, tmp_path: Path, name: str
+    ) -> None:
+        """Create a bare mirror at mirror_dir/<name>.git with one real commit on main."""
+        mirror = mirror_dir / f"{name}.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(mirror)], check=True)
+        # A bare repo with no commits has no resolvable HEAD; give it one
+        # real commit via a throwaway working clone so `git rev-parse HEAD`
+        # succeeds against the mirror.
+        work = tmp_path / f"work-{name}"
+        subprocess.run(["git", "clone", "-q", str(mirror), str(work)], check=True)
+        subprocess.run(
+            ["git", "-C", str(work), "config", "user.email", "t@t.com"], check=True
+        )
+        subprocess.run(["git", "-C", str(work), "config", "user.name", "T"], check=True)
+        (work / "f.txt").write_text("x")
+        subprocess.run(["git", "-C", str(work), "add", "-A"], check=True)
+        subprocess.run(
+            ["git", "-C", str(work), "commit", "-q", "-m", "init"], check=True
+        )
+        subprocess.run(
+            ["git", "-C", str(work), "push", "-q", "origin", "HEAD:refs/heads/main"],
+            check=True,
+        )
+        # `git init --bare` defaults HEAD to refs/heads/master regardless of
+        # what branch was just pushed; point it at the branch we pushed so
+        # `git rev-parse --verify HEAD` resolves.
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "safe.bareRepository=all",
+                "-C",
+                str(mirror),
+                "symbolic-ref",
+                "HEAD",
+                "refs/heads/main",
+            ],
+            check=True,
+        )
+
+    def test_response_includes_pinned_shas_for_own_project(
+        self, test_db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        project = make_project(id=1, name="craft-parts", category="library")
+        issue = make_issue(id=1, project_id=1, external_id="1", state="open")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+
+        mirror_dir = tmp_path / "mirrors"
+        mirror_dir.mkdir()
+        self._make_bare_mirror_with_commit(mirror_dir, tmp_path, "craft-parts")
+
+        app, token = _create_eval_app(test_db_session)
+        # Inject the mirror dir onto the app's ALREADY-built settings object.
+        # A `monkeypatch.setenv("CRAFT_DASHBOARD_MIRROR_DIR", ...)` does NOT
+        # work: Pydantic Settings binds env at instantiation and
+        # app.state.settings is constructed before the test body runs.
+        app.state.settings.mirror_dir = str(mirror_dir)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/next", headers={"Authorization": "Bearer " + token}
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert "repo_shas" in body
+        assert "craft-parts" in body["repo_shas"]
+        assert len(body["repo_shas"]["craft-parts"]) == 40
+
+    def test_craft_application_project_pins_shas_for_all_craft_libraries(
+        self, test_db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """A craft-application project must also pin every craft-library's HEAD."""
+        project = make_project(id=1, name="snapcraft", category="application")
+        issue = make_issue(id=1, project_id=1, external_id="1", state="open")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+
+        mirror_dir = tmp_path / "mirrors"
+        mirror_dir.mkdir()
+        for name in ("snapcraft", "craft-parts", "craft-cli"):
+            self._make_bare_mirror_with_commit(mirror_dir, tmp_path, name)
+
+        app = create_app()
+        app.router.lifespan_context = _noop_lifespan
+        app.state.config = DashboardConfig(
+            maintainers=["alice", "bob"],
+            craft_applications=["snapcraft"],
+            craft_libraries=["craft-parts", "craft-cli"],
+        )
+        app.state.settings = Settings()
+        app.state.settings.eval_api_token = _TEST_EVAL_TOKEN
+        app.state.settings.mirror_dir = str(mirror_dir)
+
+        async def _override() -> AsyncGenerator[AsyncSession, None]:
+            yield test_db_session
+
+        app.dependency_overrides[get_db_session] = _override
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/next",
+                headers={"Authorization": "Bearer " + _TEST_EVAL_TOKEN},
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body["repo_shas"]) == {"snapcraft", "craft-parts", "craft-cli"}
+        for sha in body["repo_shas"].values():
+            assert len(sha) == 40
+
+    def test_missing_mirror_omits_that_project_from_repo_shas(
+        self, test_db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        project = make_project(id=1, name="craft-parts", category="library")
+        issue = make_issue(id=1, project_id=1, external_id="1", state="open")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+        app.state.settings.mirror_dir = str(tmp_path / "empty-mirrors")
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/next", headers={"Authorization": "Bearer " + token}
+            )
+
+        assert response.status_code == 200
+        assert response.json()["repo_shas"] == {}

@@ -274,6 +274,16 @@ async def _run_git(mirror: pathlib.Path, *args: str) -> str:
     return stdout.decode("utf-8", errors="replace")
 
 
+async def head_sha(mirror: pathlib.Path) -> str:
+    """Return the full 40-char commit SHA that HEAD resolves to in *mirror*.
+
+    Public wrapper over `git rev-parse HEAD`, for callers outside this module
+    (e.g. Phase 4's `/api/eval/next` SHA-pinning) that need a repo's current
+    HEAD without reaching into the private `_run_git` helper.
+    """
+    return (await _run_git(mirror, "rev-parse", "--verify", "HEAD")).strip()
+
+
 async def read_file(mirror: pathlib.Path, *, path: str, ref: str) -> str:
     """Return the content of *path* at *ref* via `git show <ref>:<path>`."""
     validate_ref(ref)
