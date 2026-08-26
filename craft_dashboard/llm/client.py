@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import pathlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import httpx
 from tenacity import (
@@ -87,6 +87,11 @@ class LLMResponse:
     # local LLM server), in which case callers fall back to the static
     # per-token pricing table.
     cost_usd: float | None = None
+    # Native tool_calls from the response, if the model invoked any (see
+    # plans/36-deep-evaluation-design.md section 1). None when the model
+    # returned plain content instead. Each entry is the raw OpenAI-format
+    # dict: {"id": ..., "type": "function", "function": {"name": ..., "arguments": "<json str>"}}.
+    tool_calls: list[dict[str, Any]] | None = None
 
     @classmethod
     def from_api_response(cls, data: dict) -> LLMResponse:
@@ -96,7 +101,8 @@ class LLMResponse:
         # message content instead of an empty string. Coerce to "" so
         # downstream parsing can treat it as an unparsable response instead
         # of crashing on None.
-        content = data["choices"][0]["message"]["content"] or ""
+        message = data["choices"][0]["message"]
+        content = message["content"] or ""
         usage = data.get("usage", {})
         return cls(
             content=content,
@@ -105,6 +111,7 @@ class LLMResponse:
             total_tokens=usage.get("total_tokens", 0),
             model=data.get("model", ""),
             cost_usd=usage.get("cost"),
+            tool_calls=message.get("tool_calls"),
         )
 
 
@@ -116,10 +123,12 @@ class LLMClient(Protocol):
         self,
         *,
         model: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float = 0.3,
         max_tokens: int = 1024,
         response_format: dict | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Return a completion response for the supplied messages."""
 
@@ -184,10 +193,12 @@ class OpenRouterClient:
         self,
         *,
         model: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float = 0.3,
         max_tokens: int = 1024,
         response_format: dict | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Send a completion request to OpenRouter."""
         payload: dict = {
@@ -198,6 +209,10 @@ class OpenRouterClient:
         }
         if response_format:
             payload["response_format"] = response_format
+        if tools:
+            payload["tools"] = tools
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
 
         response = await self.http.post(
             f"{self.base_url}/chat/completions",
@@ -289,10 +304,12 @@ class LocalLLMClient:
         self,
         *,
         model: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float = 0.3,
         max_tokens: int = 1024,
         response_format: dict | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Send a completion request to the local LLM server."""
         payload: dict = {
@@ -303,6 +320,10 @@ class LocalLLMClient:
         }
         if response_format:
             payload["response_format"] = response_format
+        if tools:
+            payload["tools"] = tools
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
 
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if self.api_key:

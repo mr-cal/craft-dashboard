@@ -1,5 +1,7 @@
 """Prompt templates for LLM evaluation of issues and PRs."""
 
+from typing import Any
+
 _BODY_HEAD = 12_000
 _BODY_TAIL = 6_000
 _BODY_SEPARATOR = "\n\n[... truncated ...]\n\n"
@@ -311,7 +313,7 @@ def build_open_evaluate_prompt(
     is_maintainer: bool = False,
     comments: list[dict] | None = None,
     pr_details: dict | None = None,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Build a combined summary+evaluation prompt for an open issue or PR."""
     type_label = "Pull Request" if issue_type == "pull_request" else "Issue"
     label_str = ", ".join(labels) if labels else "none"
@@ -357,7 +359,7 @@ def build_closed_evaluate_prompt(
     comments: list[dict] | None = None,
     closing_references: list[dict] | None = None,
     pr_details: dict | None = None,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Build a combined summary prompt for a closed issue or merged PR."""
     user_content = _build_summary_user_content(
         title=title,
@@ -422,7 +424,7 @@ def build_duplicate_check_prompt(
     issue_b_summary: str,
     issue_b_project: str,
     issue_b_external_id: str,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Build a prompt to check if two issues are duplicates.
 
     Accepts cross-project issue pairs; includes project names for context.
@@ -448,7 +450,7 @@ def build_duplicate_summary_rewrite_prompt(
     *,
     original_summary: str,
     duplicate_refs: list[str],
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Build a prompt to rewrite a summary noting the detected duplicate(s).
 
     Args:
