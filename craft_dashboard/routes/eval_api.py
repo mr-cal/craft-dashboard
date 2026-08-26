@@ -21,7 +21,9 @@ if TYPE_CHECKING:
 
 from craft_dashboard.auth import verify_eval_token
 from craft_dashboard.dependencies import get_config, get_db_session
+from craft_dashboard.llm.client import OPENROUTER_BASE_URL
 from craft_dashboard.llm.content_hash import compute_content_hash
+from craft_dashboard.llm.embeddings import EmbeddingClient
 from craft_dashboard.llm.evaluation_queue import build_pending_evaluation_query
 from craft_dashboard.llm.evaluator import (
     CURRENT_EVAL_VERSION,
@@ -34,6 +36,7 @@ from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.repositories.issue_repository import (
+    IssueRepository,
     _build_excluded_issues_condition,
 )
 
@@ -501,6 +504,119 @@ async def submit_result(
     await session.commit()
     _last_result_submitted_at = datetime.now(tz=UTC)
     return {"status": "stored", "issue_id": payload.issue_id}
+
+
+@router.get("/related")
+async def related_issues(
+    request: Request,
+    *,
+    authorization: str = Header(default=""),
+    issue_id: int = Query(...),
+    query: str = Query(..., max_length=1000),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Return issues whose latest summary embeddings are closest to query."""
+    _require_eval_auth(request, authorization)
+    settings = request.app.state.settings
+    if not settings.openrouter_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Embedding service unavailable",
+        )
+    embed_client = EmbeddingClient(
+        base_url=OPENROUTER_BASE_URL,
+        model=settings.semantic_search_embedding_model,
+        api_key=settings.openrouter_api_key,
+        ca_cert="",
+    )
+    try:
+        try:
+            query_embedding = await embed_client.embed(query, dimensions=1024)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Related-issues embedding failed for query",
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Embedding service unavailable",
+            ) from None
+    finally:
+        await embed_client.close()
+
+    repo = IssueRepository(session, filtered_issues=get_config(request).filtered_issues)
+    results = await repo.find_related_by_summary_embedding(
+        query_embedding=query_embedding,
+        exclude_issue_id=issue_id,
+        top_n=settings.related_issues_top_n,
+        similarity_threshold=settings.related_issues_similarity_threshold,
+    )
+    return {"results": results}
+
+
+@router.get("/issue")
+async def issue_detail_lookup(
+    request: Request,
+    *,
+    authorization: str = Header(default=""),
+    ref: str = Query(..., max_length=200),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Resolve a repo issue reference for the eval issue-detail tool."""
+    _require_eval_auth(request, authorization)
+    project_name, external_id = _parse_issue_ref(ref)
+
+    query_stmt = (
+        select(
+            Issue.external_id,
+            Issue.title,
+            Issue.state,
+            Issue.url,
+            Project.name.label("project_name"),
+            LLMEvaluation.summary,
+        )
+        .join(Project, Issue.project_id == Project.id)
+        .outerjoin(
+            LLMEvaluation,
+            (LLMEvaluation.issue_id == Issue.id) & LLMEvaluation.latest,
+        )
+        .where(Issue.external_id == external_id)
+    )
+    excl = _build_excluded_issues_condition(get_config(request).filtered_issues)
+    if excl is not None:
+        query_stmt = query_stmt.where(excl)
+    if project_name:
+        query_stmt = query_stmt.where(Project.name == project_name)
+
+    result = await session.execute(
+        query_stmt.order_by(Project.name.asc(), Issue.id.asc())
+    )
+    candidates = [
+        {
+            "project_name": row.project_name,
+            "external_id": row.external_id,
+            "title": row.title,
+            "summary": row.summary,
+            "state": row.state,
+            "url": row.url,
+        }
+        for row in result.all()
+    ]
+    return {"candidates": candidates}
+
+
+def _parse_issue_ref(ref: str) -> tuple[str | None, str]:
+    """Split an issue ref into (project_name_or_none, external_id)."""
+    stripped = ref.strip()
+    if stripped.startswith("#"):
+        return None, stripped.lstrip("#")
+    if "#" not in stripped:
+        return None, stripped
+
+    prefix, external_id = stripped.rsplit("#", 1)
+    if "/" in prefix:
+        prefix = prefix.rsplit("/", 1)[-1]
+    return (prefix or None), external_id
 
 
 class QuotaPauseReport(BaseModel):

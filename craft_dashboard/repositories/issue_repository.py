@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Integer as SAInteger
-from sqlalchemy import cast, func, or_, select
+from sqlalchemy import bindparam, cast, func, or_, select
 from sqlalchemy import text as sa_text
 
 from craft_dashboard.models.issue import Issue
@@ -476,6 +476,80 @@ class IssueRepository:
             },
         )
 
+        return [
+            {
+                "id": row.id,
+                "external_id": row.external_id,
+                "title": row.title,
+                "url": row.url,
+                "state": row.state,
+                "project_name": row.project_name,
+                "summary": row.summary,
+                "similarity": round(1.0 - row.distance, 3),
+            }
+            for row in result
+        ]
+
+    async def find_related_by_summary_embedding(
+        self,
+        *,
+        query_embedding: list[float],
+        exclude_issue_id: int | None = None,
+        top_n: int = 10,
+        similarity_threshold: float = 0.70,
+    ) -> list[dict[str, Any]]:
+        """Return issues whose latest summary embedding is closest to a query."""
+        distance_threshold = 1.0 - similarity_threshold
+        sql_text = """
+            SELECT
+                i.id          AS id,
+                i.external_id AS external_id,
+                i.title       AS title,
+                i.url         AS url,
+                i.state       AS state,
+                p.name        AS project_name,
+                e.summary     AS summary,
+                (e.summary_embedding <=> CAST(:embedding AS vector)) AS distance
+            FROM llm_evaluations e
+            JOIN issues i ON i.id = e.issue_id
+            JOIN projects p ON p.id = i.project_id
+            WHERE e.latest = true
+              AND e.summary_embedding IS NOT NULL
+              AND (:exclude_id IS NULL OR e.issue_id != :exclude_id)
+              AND (e.summary_embedding <=> CAST(:embedding AS vector)) < :distance_threshold
+        """
+        params: dict[str, Any] = {
+            "embedding": str(list(query_embedding)),
+            "exclude_id": exclude_issue_id,
+            "distance_threshold": distance_threshold,
+            "limit": top_n,
+        }
+        bind_params = []
+        filtered_clauses: list[str] = []
+        for index, (project_name, ids) in enumerate(self.filtered_issues.items()):
+            if not ids:
+                continue
+            project_param = f"filtered_project_{index}"
+            ids_param = f"filtered_ids_{index}"
+            filtered_clauses.append(
+                f"(p.name = :{project_param} AND i.external_id IN :{ids_param})"
+            )
+            params[project_param] = project_name
+            params[ids_param] = ids
+            bind_params.append(bindparam(ids_param, expanding=True))
+        if filtered_clauses:
+            sql_text += (
+                "\n              AND NOT (" + " OR ".join(filtered_clauses) + ")"
+            )
+        sql_text += (
+            "\n            ORDER BY distance\n            LIMIT :limit\n        "
+        )
+
+        sql = sa_text(sql_text)
+        if bind_params:
+            sql = sql.bindparams(*bind_params)
+
+        result = await self.session.execute(sql, params)
         return [
             {
                 "id": row.id,

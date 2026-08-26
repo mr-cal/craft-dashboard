@@ -1186,6 +1186,72 @@ class TestFindSimilarIssues:
         assert result == []
 
 
+class TestFindRelatedBySummaryEmbedding:
+    """Tests for IssueRepository.find_related_by_summary_embedding."""
+
+    async def test_passes_expected_sql_and_params(self) -> None:
+        row = type(
+            "Row",
+            (),
+            {
+                "id": 2,
+                "external_id": "20",
+                "title": "Similar issue",
+                "url": "https://example.com/20",
+                "state": "open",
+                "project_name": "snapcraft",
+                "summary": "Similar summary",
+                "distance": 0.09,
+            },
+        )()
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=iter([row]))
+
+        result = await IssueRepository(session).find_related_by_summary_embedding(
+            query_embedding=[0.1] * 3,
+            exclude_issue_id=1,
+            top_n=5,
+            similarity_threshold=0.8,
+        )
+
+        sql, params = session.execute.await_args.args
+        assert "e.summary_embedding <=> CAST(:embedding AS vector)" in sql.text
+        assert ":exclude_id IS NULL OR e.issue_id != :exclude_id" in sql.text
+        assert params == {
+            "embedding": str([0.1] * 3),
+            "exclude_id": 1,
+            "distance_threshold": 0.19999999999999996,
+            "limit": 5,
+        }
+        assert result == [
+            {
+                "id": 2,
+                "external_id": "20",
+                "title": "Similar issue",
+                "url": "https://example.com/20",
+                "state": "open",
+                "project_name": "snapcraft",
+                "summary": "Similar summary",
+                "similarity": 0.91,
+            }
+        ]
+
+    async def test_adds_filtered_issues_exclusion_clauses(self) -> None:
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=iter([]))
+
+        await IssueRepository(
+            session, filtered_issues={"snapcraft": ["4472"], "rockcraft": ["42"]}
+        ).find_related_by_summary_embedding(query_embedding=[0.1] * 3)
+
+        (sql, _params) = session.execute.await_args.args
+        assert "NOT (" in sql.text
+        assert "p.name = :filtered_project_0" in sql.text
+        assert "i.external_id IN :filtered_ids_0" in sql.text
+        assert "p.name = :filtered_project_1" in sql.text
+        assert "i.external_id IN :filtered_ids_1" in sql.text
+
+
 class _SemanticSearchRow:
     def __init__(self, **kwargs) -> None:
         self.issue = _FakeIssue(**{k: v for k, v in kwargs.items() if k != "distance"})

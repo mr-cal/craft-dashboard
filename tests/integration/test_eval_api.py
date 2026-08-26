@@ -6,6 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock, patch
 
 from craft_dashboard.app import create_app
 from craft_dashboard.config import DashboardConfig
@@ -18,6 +19,7 @@ from craft_dashboard.llm.evaluator import (
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
+from craft_dashboard.repositories.issue_repository import IssueRepository
 from craft_dashboard.routes import eval_api
 from craft_dashboard.settings import Settings
 from fastapi.testclient import TestClient
@@ -1358,6 +1360,264 @@ class TestEvalResultIntegration:
             test_db_session.get(Issue, 1)
         )
         assert list(refreshed_issue.search_embedding) == search_embedding
+
+
+class TestRelatedIssuesEndpoint:
+    """Integration tests for GET /api/eval/related."""
+
+    def _create_app_with_openrouter_key(
+        self, test_db_session: AsyncSession
+    ) -> tuple[FastAPI, str]:
+        app, token = _create_eval_app(test_db_session)
+        app.state.settings.openrouter_api_key = "test-openrouter-key"
+        return app, token
+
+    def _create_app_with_missing_openrouter_key(
+        self, test_db_session: AsyncSession
+    ) -> tuple[FastAPI, str]:
+        app, token = _create_eval_app(test_db_session)
+        app.state.settings.openrouter_api_key = ""
+        return app, token
+
+    def test_returns_similar_issues(self, test_db_session: AsyncSession) -> None:
+        project = make_project(id=1, name="rockcraft")
+        source_issue = make_issue(id=1, project_id=1, external_id="1")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, source_issue)
+        )
+        app, token = self._create_app_with_openrouter_key(test_db_session)
+        canned = [
+            {
+                "id": 2,
+                "project_name": "rockcraft",
+                "external_id": "2",
+                "title": "Similar crash report",
+                "summary": "Similar crash report",
+                "url": "https://example/2",
+                "state": "open",
+                "similarity": 0.91,
+            }
+        ]
+
+        with (
+            patch(
+                "craft_dashboard.routes.eval_api.EmbeddingClient.embed",
+                new=AsyncMock(return_value=[0.1] * 1024),
+            ),
+            patch.object(
+                IssueRepository,
+                "find_related_by_summary_embedding",
+                new=AsyncMock(return_value=canned),
+            ),
+            TestClient(app) as client,
+        ):
+            response = client.get(
+                "/api/eval/related",
+                params={"issue_id": 1, "query": "crash in the pull step handler"},
+                headers={"Authorization": "Bearer " + token},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["results"][0]["external_id"] == "2"
+
+    def test_returns_json_error_when_embedding_lookup_fails(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="rockcraft")
+        source_issue = make_issue(id=1, project_id=1, external_id="1")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, source_issue)
+        )
+        app, token = self._create_app_with_openrouter_key(test_db_session)
+
+        with (
+            patch(
+                "craft_dashboard.routes.eval_api.EmbeddingClient.embed",
+                new=AsyncMock(side_effect=RuntimeError("embedding unavailable")),
+            ),
+            TestClient(app) as client,
+        ):
+            response = client.get(
+                "/api/eval/related",
+                params={"issue_id": 1, "query": "crash in the pull step handler"},
+                headers={"Authorization": "Bearer " + token},
+            )
+
+        assert response.status_code == 503
+        assert response.headers["content-type"].startswith("application/json")
+        assert response.json() == {"detail": "Embedding service unavailable"}
+
+    def test_returns_json_error_when_openrouter_key_is_unset(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="rockcraft")
+        source_issue = make_issue(id=1, project_id=1, external_id="1")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, source_issue)
+        )
+        app, token = self._create_app_with_missing_openrouter_key(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/related",
+                params={"issue_id": 1, "query": "crash in the pull step handler"},
+                headers={"Authorization": "Bearer " + token},
+            )
+
+        assert response.status_code == 503
+        assert response.headers["content-type"].startswith("application/json")
+        assert response.json() == {"detail": "Embedding service unavailable"}
+
+    def test_requires_auth(self, test_db_session: AsyncSession) -> None:
+        app, _token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/related", params={"issue_id": 1, "query": "x"}
+            )
+
+        assert response.status_code == 401
+
+
+class TestIssueDetailEndpoint:
+    """Integration tests for GET /api/eval/issue."""
+
+    def _create_app_with_filter(
+        self,
+        test_db_session: AsyncSession,
+        filtered_issues: dict[str, list[str]],
+    ) -> tuple[FastAPI, str]:
+        app = create_app()
+        app.router.lifespan_context = _noop_lifespan
+        app.state.config = DashboardConfig(
+            maintainers=["alice"], filtered_issues=filtered_issues
+        )
+        app.state.settings = Settings()
+        app.state.settings.eval_api_token = _TEST_EVAL_TOKEN
+
+        async def _override() -> AsyncGenerator[AsyncSession, None]:
+            yield test_db_session
+
+        app.dependency_overrides[get_db_session] = _override
+        return app, _TEST_EVAL_TOKEN
+
+    def test_qualified_ref_resolves_to_one_issue(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="craft-parts")
+        issue = make_issue(
+            id=1,
+            project_id=1,
+            external_id="567",
+            title="Pull step crash",
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/issue",
+                params={"ref": "canonical/craft-parts#567"},
+                headers={"Authorization": "Bearer " + token},
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["candidates"]) == 1
+        assert body["candidates"][0]["title"] == "Pull step crash"
+        assert body["candidates"][0]["summary"] is None
+
+    def test_qualified_ref_includes_launchpad_issue(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        launchpad_issue = make_issue(
+            id=1,
+            project_id=1,
+            source="launchpad",
+            external_id="4472",
+            title="Launchpad-only bug",
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, launchpad_issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/issue",
+                params={"ref": "snapcraft#4472"},
+                headers={"Authorization": "Bearer " + token},
+            )
+
+        assert response.status_code == 200
+        assert [candidate["title"] for candidate in response.json()["candidates"]] == [
+            "Launchpad-only bug"
+        ]
+
+    def test_bare_ref_returns_all_matching_projects(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project_a = make_project(id=1, name="craft-parts")
+        project_b = make_project(id=2, name="rockcraft")
+        issue_a = make_issue(
+            id=1, project_id=1, external_id="42", title="In craft-parts"
+        )
+        issue_b = make_issue(id=2, project_id=2, external_id="42", title="In rockcraft")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project_a, project_b, issue_a, issue_b)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/issue",
+                params={"ref": "#42"},
+                headers={"Authorization": "Bearer " + token},
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["candidates"]) == 2
+        titles = {candidate["title"] for candidate in body["candidates"]}
+        assert titles == {"In craft-parts", "In rockcraft"}
+
+    def test_unresolvable_ref_returns_empty_candidates(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/issue",
+                params={"ref": "canonical/craft-parts#99999"},
+                headers={"Authorization": "Bearer " + token},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["candidates"] == []
+
+    def test_filtered_issue_is_excluded(self, test_db_session: AsyncSession) -> None:
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(id=1, project_id=1, external_id="4472", title="Filtered")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+        app, token = self._create_app_with_filter(
+            test_db_session, {"snapcraft": ["4472"]}
+        )
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/issue",
+                params={"ref": "snapcraft#4472"},
+                headers={"Authorization": "Bearer " + token},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["candidates"] == []
 
     """Integration tests for GET /api/eval/status."""
 
