@@ -231,6 +231,9 @@ class EvalResultSubmission(BaseModel):
     completion_tokens: int = 0
     model_used: str = ""
     llm_backend: str = "local"
+    # Actual billed USD cost reported by the backend, if any. None for
+    # backends that don't report cost (e.g. the local LLM server).
+    cost_usd: float | None = None
     # Every evaluation includes an embedding — there is no more deferred
     # embedding step, so this is required, not optional.
     summary_embedding: list[float]
@@ -481,6 +484,7 @@ async def submit_result(
             prompt_tokens=payload.prompt_tokens,
             completion_tokens=payload.completion_tokens,
             llm_backend=payload.llm_backend,
+            cost_usd=payload.cost_usd,
             evaluated_at=datetime.now(tz=UTC),
             issue_data_hash=current_hash,
             latest=True,

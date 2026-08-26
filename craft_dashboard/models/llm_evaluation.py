@@ -7,6 +7,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -73,6 +74,10 @@ class LLMEvaluation(Base):
     tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Actual billed USD cost for this evaluation call, as reported by
+    # OpenRouter (LLMResponse.cost_usd, sourced from usage.cost). None for
+    # backends that don't report cost (e.g. the local LLM server).
+    cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     llm_backend: Mapped[str | None] = mapped_column(String(50), nullable=True)
     evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -42,6 +42,7 @@ SAMPLE_EVALUATE_RESULT = {
     "tokens_used": 500,
     "prompt_tokens": 300,
     "completion_tokens": 200,
+    "cost_usd": 0.0042,
     "issue_data_hash": "unit_test_eval_hash",
 }
 
@@ -222,6 +223,7 @@ async def test_run_evaluate_loop_posts_required_summary_embedding(
     assert posted["summary_embedding"] == [0.1, 0.2, 0.3]
     assert posted["search_embedding"] == [0.1, 0.2, 0.3]
     assert posted["llm_backend"] == "local"
+    assert posted["cost_usd"] == SAMPLE_EVALUATE_RESULT["cost_usd"]
 
 
 @pytest.mark.asyncio

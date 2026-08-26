@@ -550,6 +550,7 @@ async def _evaluate_issue(  # noqa: PLR0911
         "completion_tokens": result["completion_tokens"],
         "model_used": runtime.model,
         "llm_backend": runtime.llm_backend,
+        "cost_usd": result["cost_usd"],
         "summary_embedding": embedding,
         "search_embedding": search_embedding,
     }
