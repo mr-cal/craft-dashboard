@@ -65,6 +65,26 @@ class Settings(BaseSettings):
     # How many days before re-fetching an issue from GitHub
     refresh_age_days: int = 7
 
+    # Bare git mirror storage for deep-evaluation git tools (Phase 2+).
+    # Named with the CRAFT_DASHBOARD_ prefix (unlike this file's other env
+    # vars) because it must remain stable across both the VPS mount path
+    # and a developer's default cache directory, and is referenced by name
+    # in mr-cal/vps-infra's compose files.
+    mirror_dir: str = Field(
+        default="~/.cache/craft-dashboard/mirrors",
+        validation_alias="CRAFT_DASHBOARD_MIRROR_DIR",
+    )
+
+    # Max concurrent git subprocesses, independent of eval concurrency. The
+    # default of 2 is provisional; Task 7 measures actual peak RSS of a
+    # `git grep` across the full mirror set and this default is set from that
+    # measurement (design "Open risks / 1 vCPU": Phase 2 measures peak RSS
+    # before Phase 6). A dev machine can raise it; the VPS stays at 1-2.
+    git_concurrency: int = Field(
+        default=2,
+        validation_alias="CRAFT_DASHBOARD_GIT_CONCURRENCY",
+    )
+
     @property
     def model(self) -> str:
         """Return the model for server-side evaluation."""
@@ -77,6 +97,17 @@ class Settings(BaseSettings):
         if not config_path.exists():
             raise ValueError(f"config_file does not exist: {self.config_file}")
         return config_path
+
+    @property
+    def mirror_dir_path(self) -> Path:
+        """Return mirror_dir as an expanded, absolute Path.
+
+        `.resolve()` follows `.expanduser()` so a relative override (e.g.
+        CRAFT_DASHBOARD_MIRROR_DIR=mirrors during local testing) becomes
+        absolute — the git mirror layer and its `git -C <mirror>` calls must
+        never depend on the process's current working directory.
+        """
+        return Path(self.mirror_dir).expanduser().resolve()
 
     @classmethod
     def validate_config(cls, settings: Settings) -> None:

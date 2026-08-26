@@ -1,5 +1,7 @@
 """Tests for application settings."""
 
+from pathlib import Path
+
 import pytest
 from craft_dashboard.settings import Settings
 
@@ -46,6 +48,27 @@ class TestSettings:
         )
 
         assert settings.model == "google/gemini-2.5-flash"
+
+    def test_mirror_dir_defaults_to_cache_dir(self, monkeypatch) -> None:
+        monkeypatch.delenv("CRAFT_DASHBOARD_MIRROR_DIR", raising=False)
+        settings = Settings(_env_file=None)
+        assert settings.mirror_dir == "~/.cache/craft-dashboard/mirrors"
+
+    def test_mirror_dir_reads_prefixed_env_var(self, monkeypatch) -> None:
+        monkeypatch.setenv("CRAFT_DASHBOARD_MIRROR_DIR", "/opt/vps-infra/mirrors")
+        settings = Settings(_env_file=None)
+        assert settings.mirror_dir == "/opt/vps-infra/mirrors"
+        assert settings.mirror_dir_path == Path("/opt/vps-infra/mirrors")
+
+    def test_git_concurrency_defaults_to_two(self, monkeypatch) -> None:
+        monkeypatch.delenv("CRAFT_DASHBOARD_GIT_CONCURRENCY", raising=False)
+        settings = Settings(_env_file=None)
+        assert settings.git_concurrency == 2
+
+    def test_git_concurrency_reads_prefixed_env_var(self, monkeypatch) -> None:
+        monkeypatch.setenv("CRAFT_DASHBOARD_GIT_CONCURRENCY", "1")
+        settings = Settings(_env_file=None)
+        assert settings.git_concurrency == 1
 
     def test_ignores_removed_local_llm_environment_variables(self, monkeypatch) -> None:
         """Removed local LLM env vars no longer appear in server settings."""
