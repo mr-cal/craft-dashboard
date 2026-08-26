@@ -8,6 +8,7 @@ from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
 from craft_dashboard.models.forum import ForumBackfillState, ForumTopic
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.issue_activity import IssueActivity
+from craft_dashboard.models.issue_link import IssueLink
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.refresh_schedule import RefreshSchedule
@@ -25,6 +26,7 @@ __all__ = [
     "ForumTopic",
     "Issue",
     "IssueActivity",
+    "IssueLink",
     "LLMEvaluation",
     "Project",
     "RefreshSchedule",

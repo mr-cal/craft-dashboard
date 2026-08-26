@@ -7,6 +7,9 @@ import pathlib
 # Must happen before any SQLAlchemy metadata.create_all() call.
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 
+if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
+    SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"
+
 if not hasattr(SQLiteTypeCompiler, "visit_VECTOR"):
     SQLiteTypeCompiler.visit_VECTOR = lambda self, type_, **kw: "TEXT"
 
