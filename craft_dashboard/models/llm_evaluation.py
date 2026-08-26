@@ -85,6 +85,12 @@ class LLMEvaluation(Base):
         nullable=False,
     )
     issue_data_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The Issue.evidence_generation value at the time this evaluation ran.
+    # A mismatch against the current Issue.evidence_generation means a
+    # commit landed that implicates this issue since it was last evaluated.
+    evidence_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     eval_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     eval_locked_until: Mapped[datetime | None] = mapped_column(

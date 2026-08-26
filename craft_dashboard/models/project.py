@@ -25,6 +25,10 @@ class Project(TimestampMixin, Base):
     category: Mapped[str] = mapped_column(String(50), nullable=False)
     github_org: Mapped[str] = mapped_column(String(255), default="canonical")
     launchpad_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # The HEAD SHA the commit scanner last scanned for this project. None
+    # until the first scan. The scanner's next pass runs
+    # `git log --name-only <last_scanned_sha>..<new_head>`.
+    last_scanned_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
     display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # Relationships

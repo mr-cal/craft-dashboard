@@ -72,6 +72,15 @@ class Issue(Base):
     # re-evaluation" is detected without recomputing a hash for every issue
     # on every poll.
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Incremented by the commit scanner whenever a new commit implicates
+    # this issue (qualified ref, path intersection, semantic match, or bare
+    # ref — see craft_dashboard.commit_scanner). Compared against
+    # LLMEvaluation.evidence_generation the same way content_hash is
+    # compared against LLMEvaluation.issue_data_hash: a cheap integer
+    # column comparison, never a per-row recomputation.
+    evidence_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     # OpenRouter embedding (openai/text-embedding-3-small, 1024 dims) of
     # f"{title}\n\n{body}", used for semantic search over issue titles and
     # descriptions. Shares the same vector space as
