@@ -21,7 +21,7 @@ RUN uv venv /app/.venv \
 # ---- Runtime stage ----
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends libpq5 postgresql-client \
+RUN apt-get update && apt-get install -y --no-install-recommends libpq5 postgresql-client git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/.venv /app/.venv
