@@ -284,6 +284,24 @@ async def head_sha(mirror: pathlib.Path) -> str:
     return (await _run_git(mirror, "rev-parse", "--verify", "HEAD")).strip()
 
 
+async def has_commit(mirror: pathlib.Path, sha: str) -> bool:
+    """Return whether *mirror* already has *sha* as a reachable commit object.
+
+    Uses `git cat-file -e <sha>^{commit}` (existence check, no output) so
+    Phase 4's worker preflight can tell "I already hold this pinned SHA"
+    from "I need to fetch first" without a throwaway git-log/show call. A
+    malformed (non-40-hex) sha is rejected up front via validate_ref rather
+    than shelled out to git, consistent with every other public entry point
+    in this module.
+    """
+    validate_ref(sha)
+    try:
+        await _run_git(mirror, "cat-file", "-e", f"{sha}^{{commit}}")
+    except subprocess.CalledProcessError:
+        return False
+    return True
+
+
 async def read_file(mirror: pathlib.Path, *, path: str, ref: str) -> str:
     """Return the content of *path* at *ref* via `git show <ref>:<path>`."""
     validate_ref(ref)

@@ -16,6 +16,7 @@ from craft_dashboard.git_mirrors.exceptions import InvalidPathError, InvalidRefE
 from craft_dashboard.git_mirrors.reader import (
     _summarize_layout,
     grep_repo,
+    has_commit,
     head_sha,
     read_file,
     repo_layout,
@@ -84,6 +85,24 @@ class TestHeadSha:
         )
         with pytest.raises(subprocess.CalledProcessError):
             await head_sha(empty_mirror)
+
+
+class TestHasCommit:
+    """has_commit() wraps `git cat-file -e <sha>^{commit}` existence check."""
+
+    async def test_returns_true_for_a_commit_present_in_the_mirror(
+        self, bare_mirror: pathlib.Path, sample_repo_shas: list[str]
+    ) -> None:
+        assert await has_commit(bare_mirror, sample_repo_shas[-1]) is True
+
+    async def test_returns_false_for_a_sha_not_present_in_the_mirror(
+        self, bare_mirror: pathlib.Path
+    ) -> None:
+        assert await has_commit(bare_mirror, "f" * 40) is False
+
+    async def test_malformed_sha_rejected(self, bare_mirror: pathlib.Path) -> None:
+        with pytest.raises(InvalidRefError):
+            await has_commit(bare_mirror, "main")
 
 
 class TestReadFile:
