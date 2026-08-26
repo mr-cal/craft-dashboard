@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -13,6 +14,24 @@ if TYPE_CHECKING:
 
 def _run_git(*args: str, cwd: pathlib.Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+@pytest.fixture(autouse=True)
+def allow_bare_git_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Allow plain `git -C <bare>` commands in tests on hardened Git builds."""
+    count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+    for index in range(count):
+        value = os.environ.get(f"GIT_CONFIG_VALUE_{index}")
+        monkeypatch.setenv(
+            f"GIT_CONFIG_KEY_{index}", os.environ[f"GIT_CONFIG_KEY_{index}"]
+        )
+        monkeypatch.setenv(
+            f"GIT_CONFIG_VALUE_{index}",
+            "" if value is None else value,
+        )
+    monkeypatch.setenv("GIT_CONFIG_COUNT", str(count + 1))
+    monkeypatch.setenv(f"GIT_CONFIG_KEY_{count}", "safe.bareRepository")
+    monkeypatch.setenv(f"GIT_CONFIG_VALUE_{count}", "all")
 
 
 @pytest.fixture
