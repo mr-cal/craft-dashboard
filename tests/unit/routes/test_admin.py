@@ -1,5 +1,6 @@
 """Tests for admin routes."""
 
+import asyncio
 import logging
 import sys
 from collections.abc import AsyncGenerator
@@ -88,6 +89,7 @@ def _create_admin_app(session_override=_override_admin_db_session):
     app.state.settings = SimpleNamespace(
         admin_token=_ADMIN_TOKEN,
         refresh_age_days=7,
+        commit_scanner_daily_invalidation_warn_threshold=200,
     )
     app.dependency_overrides[get_db_session] = session_override
     return app
@@ -471,3 +473,90 @@ class TestAdminPage:
         assert "GraphQL API budget" in response.text
         assert response.text.count("Unknown") >= 2
         assert "Admin page: API budget lookup failed" in caplog.text
+
+    def test_admin_evaluations_page_calls_admin_service_sequentially(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GET /admin/evaluations does not overlap AsyncSession-backed calls."""
+        app = _create_admin_app()
+        state = {"active": 0, "max_active": 0}
+
+        def _guard(result):
+            async def _inner(self, *args, **kwargs):
+                state["active"] += 1
+                state["max_active"] = max(state["max_active"], state["active"])
+                await asyncio.sleep(0)
+                state["active"] -= 1
+                return result
+
+            return _inner
+
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_lifetime_token_stats",
+            _guard(
+                {
+                    "evaluations": 0,
+                    "tokens": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                }
+            ),
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_seven_day_token_stats",
+            _guard(
+                {
+                    "evaluations": 0,
+                    "tokens": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                }
+            ),
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_llm_service_status",
+            _guard(
+                {
+                    "status": "unknown",
+                    "last_poll_at": None,
+                    "last_result_at": None,
+                    "quota_resume_at": None,
+                }
+            ),
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_recent_evaluations",
+            _guard(([], 0)),
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_daily_evaluation_stats",
+            _guard([]),
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_queue_depth_history",
+            _guard([]),
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_outdated_evaluation_counts",
+            _guard(
+                {
+                    "never_evaluated": 0,
+                    "version_outdated": 0,
+                    "content_changed": 0,
+                }
+            ),
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_commit_scan_history",
+            _guard([]),
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_commit_scan_summary",
+            _guard({"rolling_total": 0, "warn_threshold": 200, "warn": False}),
+        )
+
+        with TestClient(app) as client:
+            response = client.get("/admin/evaluations")
+
+        assert response.status_code == 200
+        assert state["max_active"] == 1

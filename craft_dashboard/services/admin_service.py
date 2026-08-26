@@ -7,12 +7,13 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, TypedDict
 from typing import cast as typing_cast
 
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, cast, func, literal, or_, select
 from sqlalchemy.orm import aliased
 
 from craft_dashboard.collectors.github import GitHubCollector, RateLimitStatus
 from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION
 from craft_dashboard.models.collection_run import CollectionRun
+from craft_dashboard.models.commit_scan_run import CommitScanRun
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.issue_activity import IssueActivity
@@ -169,6 +170,25 @@ class QueueDepthPoint(TypedDict):
     evaluated_today: int
 
 
+class CommitScanHistoryPoint(TypedDict):
+    """Daily commit-scan invalidation totals by signal."""
+
+    day: str
+    qualified_ref: int
+    path: int
+    semantic: int
+    bare_ref: int
+    launchpad: int
+
+
+class CommitScanSummary(TypedDict):
+    """Rolling invalidation headline and warning state."""
+
+    rolling_total: int
+    warn_threshold: int | None
+    warn: bool
+
+
 class ActivityEntry(TypedDict):
     """A single issue/PR event.
 
@@ -222,6 +242,14 @@ def _build_excluded_activity_condition(
 
 class AdminService:
     """Service for admin dashboard data access."""
+
+    _SIGNAL_COLUMNS = (
+        CommitScanRun.invalidated_qualified_ref,
+        CommitScanRun.invalidated_path,
+        CommitScanRun.invalidated_semantic,
+        CommitScanRun.invalidated_bare_ref,
+        CommitScanRun.invalidated_launchpad,
+    )
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -720,6 +748,63 @@ class AdminService:
             }
             for row in result.scalars()
         ]
+
+    async def get_commit_scan_history(
+        self, days: int = 14
+    ) -> list[CommitScanHistoryPoint]:
+        """Return daily commit-scanner invalidation totals, broken out by signal."""
+        since = datetime.now(UTC) - timedelta(days=days)
+        day = func.date(CommitScanRun.scanned_at).label("day")
+        query = (
+            select(
+                day,
+                func.sum(CommitScanRun.invalidated_qualified_ref).label(
+                    "qualified_ref"
+                ),
+                func.sum(CommitScanRun.invalidated_path).label("path"),
+                func.sum(CommitScanRun.invalidated_semantic).label("semantic"),
+                func.sum(CommitScanRun.invalidated_bare_ref).label("bare_ref"),
+                func.sum(CommitScanRun.invalidated_launchpad).label("launchpad"),
+            )
+            .where(
+                CommitScanRun.scanned_at >= since,
+                CommitScanRun.dry_run.is_(False),
+            )
+            .group_by(day)
+            .order_by(day)
+        )
+        result = await self.session.execute(query)
+        return [
+            {
+                "day": str(row.day),
+                "qualified_ref": row.qualified_ref or 0,
+                "path": row.path or 0,
+                "semantic": row.semantic or 0,
+                "bare_ref": row.bare_ref or 0,
+                "launchpad": row.launchpad or 0,
+            }
+            for row in result
+        ]
+
+    async def get_commit_scan_summary(
+        self, days: int = 7, warn_threshold: int | None = None
+    ) -> CommitScanSummary:
+        """Return rolling invalidation totals and warning state."""
+        since = datetime.now(UTC) - timedelta(days=days)
+        total_expr = sum(
+            (func.coalesce(func.sum(column), 0) for column in self._SIGNAL_COLUMNS),
+            literal(0),
+        )
+        query = select(total_expr.label("rolling_total")).where(
+            CommitScanRun.scanned_at >= since,
+            CommitScanRun.dry_run.is_(False),
+        )
+        rolling_total = (await self.session.execute(query)).scalar_one()
+        return {
+            "rolling_total": rolling_total,
+            "warn_threshold": warn_threshold,
+            "warn": warn_threshold is not None and rolling_total > warn_threshold,
+        }
 
     async def get_outdated_evaluation_counts(
         self, filtered_issues: dict[str, list[str]] | None = None

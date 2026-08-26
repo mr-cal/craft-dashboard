@@ -180,6 +180,7 @@ async def admin_evaluations_page(
 ) -> HTMLResponse:
     """Render the admin LLM Evaluations tab."""
     templates: Jinja2Templates = request.app.state.templates
+    settings = request.app.state.settings
 
     admin_service = AdminService(session)
     lifetime_stats = await admin_service.get_lifetime_token_stats()
@@ -193,6 +194,11 @@ async def admin_evaluations_page(
     llm_queue_depth_history = await admin_service.get_queue_depth_history()
     outdated_evaluation_counts = await admin_service.get_outdated_evaluation_counts(
         filtered_issues=get_config(request).filtered_issues
+    )
+    commit_scan_history = await admin_service.get_commit_scan_history()
+    commit_scan_summary = await admin_service.get_commit_scan_summary(
+        days=7,
+        warn_threshold=settings.commit_scanner_daily_invalidation_warn_threshold,
     )
 
     return templates.TemplateResponse(
@@ -214,6 +220,8 @@ async def admin_evaluations_page(
             "llm_recent_evaluations_total": llm_recent_evaluations_total,
             "llm_daily_stats": llm_daily_stats,
             "llm_queue_depth_history": llm_queue_depth_history,
+            "commit_scan_history": commit_scan_history,
+            "commit_scan_summary": commit_scan_summary,
             "outdated_evaluation_counts": outdated_evaluation_counts,
         },
     )

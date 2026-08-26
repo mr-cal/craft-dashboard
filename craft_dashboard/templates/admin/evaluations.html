@@ -195,4 +195,93 @@
     {% endif %}
   </div>
 </div>
+
+<hr class="p-rule" />
+
+<div class="row">
+  <div class="col">
+    <h3>Daily invalidations by signal</h3>
+    {% if commit_scan_summary %}
+    {% if commit_scan_summary.warn %}
+    <div class="p-notification--caution">
+      <div class="p-notification__content">
+        <p class="p-notification__message">
+          Commit scanner invalidated
+          <strong>{{ commit_scan_summary.rolling_total }}</strong> issues in the
+          last 7 days, above the configured warning threshold of
+          {{ commit_scan_summary.warn_threshold }}. Review the signal mix below
+          and consider lowering K / raising the similarity threshold.
+        </p>
+      </div>
+    </div>
+    {% else %}
+    <p>
+      Rolling 7-day total:
+      <strong>{{ commit_scan_summary.rolling_total }}</strong> invalidations.
+    </p>
+    {% endif %}
+    {% endif %}
+    <p>
+      Issues invalidated (evidence_generation bumped) per day by the commit
+      scanner, broken out by which signal fired: an exact cross-repo
+      reference, a changed evidence path, a semantic commit match, a
+      same-repo bare <code>#N</code> reference, or a cross-source
+      <code>LP: #N</code> Launchpad reference. Note: an issue matched by two
+      signals in one pass is counted in both buckets but bumped once, so the
+      stacked total overstates unique invalidations — the rolling total above
+      is the honest headline.
+    </p>
+    {% if commit_scan_history %}
+    <canvas id="invalidations-chart" height="80"></canvas>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script>
+      (function () {
+        const labels = {{ commit_scan_history | map(attribute="day") | list | tojson }};
+        new Chart(document.getElementById("invalidations-chart"), {
+          type: "bar",
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                label: "Qualified ref",
+                data: {{ commit_scan_history | map(attribute="qualified_ref") | list | tojson }},
+                backgroundColor: "#0e8420",
+              },
+              {
+                label: "Path",
+                data: {{ commit_scan_history | map(attribute="path") | list | tojson }},
+                backgroundColor: "#c7162b",
+              },
+              {
+                label: "Semantic",
+                data: {{ commit_scan_history | map(attribute="semantic") | list | tojson }},
+                backgroundColor: "#0072d9",
+              },
+              {
+                label: "Bare ref",
+                data: {{ commit_scan_history | map(attribute="bare_ref") | list | tojson }},
+                backgroundColor: "#7c4dff",
+              },
+              {
+                label: "Launchpad",
+                data: {{ commit_scan_history | map(attribute="launchpad") | list | tojson }},
+                backgroundColor: "#e95420",
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            scales: {
+              x: { stacked: true, ticks: { maxTicksLimit: 14 } },
+              y: { stacked: true, beginAtZero: true },
+            },
+          },
+        });
+      })();
+    </script>
+    {% else %}
+    <p>No commit scan runs recorded yet.</p>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

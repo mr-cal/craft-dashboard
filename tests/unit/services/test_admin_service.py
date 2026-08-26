@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 from craft_dashboard.models.collection_run import CollectionRun
+from craft_dashboard.models.commit_scan_run import CommitScanRun
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.issue_activity import IssueActivity
@@ -16,6 +17,8 @@ from craft_dashboard.services import admin_service as admin_service_module
 from craft_dashboard.services.admin_service import AdminService
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
+
+from tests.factories import make_project
 
 if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"
@@ -163,6 +166,12 @@ async def _seed_admin_data(session) -> None:
             ),
         ]
     )
+    await session.commit()
+
+
+async def _seed(session, *entities) -> None:
+    """Persist one or more entities for a test."""
+    session.add_all(entities)
     await session.commit()
 
 
@@ -1157,6 +1166,96 @@ class TestQueueDepthHistory:
         history = await AdminService(test_db_session).get_queue_depth_history()
 
         assert history == []
+
+
+class TestGetCommitScanHistory:
+    """Tests for AdminService commit scan invalidation stats."""
+
+    async def test_get_commit_scan_history_returns_daily_totals_by_signal(
+        self, test_db_session
+    ) -> None:
+        project = make_project(id=1, name="craft-parts")
+        await _seed(test_db_session, project)
+        run = CommitScanRun(
+            project_id=1,
+            scanned_at=datetime.now(tz=UTC),
+            commits_scanned=5,
+            sha_before="a" * 40,
+            sha_after="b" * 40,
+            duration_seconds=1.0,
+            invalidated_qualified_ref=2,
+            invalidated_path=3,
+            invalidated_semantic=1,
+            invalidated_bare_ref=0,
+            invalidated_launchpad=4,
+        )
+        await _seed(test_db_session, run)
+
+        service = AdminService(test_db_session)
+        history = await service.get_commit_scan_history(days=7)
+
+        assert len(history) >= 1
+        assert history[0]["qualified_ref"] == 2
+        assert history[0]["path"] == 3
+        assert history[0]["launchpad"] == 4
+
+    async def test_get_commit_scan_history_rolling_total_and_threshold_warning(
+        self, test_db_session
+    ) -> None:
+        project = make_project(id=1, name="craft-parts")
+        await _seed(test_db_session, project)
+        run = CommitScanRun(
+            project_id=1,
+            scanned_at=datetime.now(tz=UTC),
+            commits_scanned=5,
+            sha_before="a" * 40,
+            sha_after="b" * 40,
+            duration_seconds=1.0,
+            invalidated_qualified_ref=2,
+            invalidated_path=3,
+            invalidated_semantic=1,
+            invalidated_bare_ref=0,
+            invalidated_launchpad=4,
+        )
+        await _seed(test_db_session, run)
+
+        service = AdminService(test_db_session)
+        summary = await service.get_commit_scan_summary(days=7, warn_threshold=5)
+
+        assert summary["rolling_total"] == 10
+        assert summary["warn_threshold"] == 5
+        assert summary["warn"] is True
+
+    async def test_get_commit_scan_history_dry_run_rows_excluded(
+        self, test_db_session
+    ) -> None:
+        project = make_project(id=1, name="craft-parts")
+        await _seed(test_db_session, project)
+        await _seed(
+            test_db_session,
+            CommitScanRun(
+                project_id=1,
+                scanned_at=datetime.now(tz=UTC),
+                commits_scanned=5,
+                sha_before="a" * 40,
+                sha_after="b" * 40,
+                duration_seconds=1.0,
+                invalidated_qualified_ref=99,
+                invalidated_path=0,
+                invalidated_semantic=0,
+                invalidated_bare_ref=0,
+                invalidated_launchpad=0,
+                dry_run=True,
+            ),
+        )
+
+        service = AdminService(test_db_session)
+        history = await service.get_commit_scan_history(days=7)
+        summary = await service.get_commit_scan_summary(days=7, warn_threshold=5)
+
+        assert history == []
+        assert summary["rolling_total"] == 0
+        assert summary["warn"] is False
 
 
 class TestOutdatedEvaluationCounts:
