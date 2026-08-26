@@ -181,6 +181,59 @@ continuous service only processes newly changed issues.
 For **local LLM evaluation** (pull-based, runs on your machine), use the eval
 HTTP evaluate worker instead. See [`docs/evaluate.md`](evaluate.md).
 
+### Phase 5 bake-off scripts
+
+Phase 5 adds standalone, human-run bake-off tooling under
+`scripts/llm/bakeoff/` plus `scripts/grade_transcripts.py`. These are not
+services and do not change production behavior by themselves.
+
+1. Sync mirrors first so the tool-calling pilot can inspect local bare repos:
+
+   ```bash
+   uv run craft-dashboard mirrors sync --config-file craft-dashboard.toml
+   ```
+
+2. Refresh the frozen samples against the real production database before any
+   real bake-off run. The committed JSON fixtures are placeholders only:
+
+   ```bash
+   python -m scripts.llm.bakeoff.select_sample --state open --count 20 --seed 41 --out scripts/llm/bakeoff/scoring_sample.json
+   python -m scripts.llm.bakeoff.select_sample --state closed --state merged --count 24 --seed 41 --out scripts/llm/bakeoff/summary_sample.json
+   ```
+
+3. Run the scoring bake-off / pilot:
+
+   ```bash
+   python -m scripts.llm.bakeoff.scoring_pilot \
+     --model z-ai/glm-5.2 \
+     --sample scripts/llm/bakeoff/scoring_sample.json \
+     --transcripts-dir ./.bakeoff/transcripts \
+     --mirror-dir "$CRAFT_DASHBOARD_MIRROR_DIR" \
+     --eval-server-base-url https://craft-dashboard.name \
+     --eval-api-token "$EVAL_API_TOKEN" \
+     --out ./.bakeoff/report_scoring.md
+   ```
+
+4. Run the closed-item summary bake-off:
+
+   ```bash
+   python -m scripts.llm.bakeoff.summary_bakeoff \
+     --out ./.bakeoff/report_summary.md
+   ```
+
+5. Grade the stored transcripts with a judge model:
+
+   ```bash
+   python -m scripts.grade_transcripts \
+     --transcripts-dir ./.bakeoff/transcripts \
+     --judge-model z-ai/glm-5.2 \
+     --out ./.bakeoff/report_grading.md
+   ```
+
+6. Review `report_scoring.md`, `report_summary.md`, and `report_grading.md`.
+   Phase 6 must not start until a human signs off on all three. See
+   [`docs/evaluate.md`](evaluate.md#phase-5-bake-off-hard-gate).
+
 ### backfill_snapshots.py
 
 One-time script that computes historical daily snapshots by replaying issue

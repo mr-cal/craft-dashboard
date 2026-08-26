@@ -91,3 +91,18 @@ Evaluation is pull-based:
 
 This keeps local and home-lab setups simple: you can point the worker at the
 public craft-dashboard API without exposing your developer machine.
+
+## Phase 5 bake-off hard gate
+
+Phase 5's standalone bake-off tooling is a hard gate before any Phase 6
+deep-evaluation backfill. A human must review and sign off on:
+
+- `report_scoring.md`
+- `report_summary.md`
+- `report_grading.md`
+
+The Phase 6 backfill must not start until those three reports have been
+generated, reviewed, and explicitly approved.
+
+See [`docs/how-to.md`](how-to.md) for the operator workflow that produces the
+reports.
