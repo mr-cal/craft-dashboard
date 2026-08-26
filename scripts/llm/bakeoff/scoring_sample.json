@@ -1,0 +1,22 @@
+[
+  {"source": "github", "project": "charmcraft", "external_id": "9001"},
+  {"source": "github", "project": "imagecraft", "external_id": "9002"},
+  {"source": "github", "project": "rockcraft", "external_id": "9003"},
+  {"source": "github", "project": "snapcraft", "external_id": "9004"},
+  {"source": "launchpad", "project": "snapcraft", "external_id": "9005"},
+  {"source": "github", "project": "debcraft", "external_id": "9006"},
+  {"source": "github", "project": "craft-application", "external_id": "9007"},
+  {"source": "github", "project": "craft-archives", "external_id": "9008"},
+  {"source": "github", "project": "craft-cli", "external_id": "9009"},
+  {"source": "github", "project": "craft-grammar", "external_id": "9010"},
+  {"source": "github", "project": "craft-parts", "external_id": "9011"},
+  {"source": "github", "project": "craft-platforms", "external_id": "9012"},
+  {"source": "github", "project": "craft-providers", "external_id": "9013"},
+  {"source": "github", "project": "craft-store", "external_id": "9014"},
+  {"source": "github", "project": "craft-actions", "external_id": "9015"},
+  {"source": "github", "project": "craft-artifacts", "external_id": "9016"},
+  {"source": "github", "project": "snapcraft-rocks", "external_id": "9017"},
+  {"source": "github", "project": "starbase", "external_id": "9018"},
+  {"source": "github", "project": "starflow", "external_id": "9019"},
+  {"source": "github", "project": "craft-parts", "external_id": "9020"}
+]
