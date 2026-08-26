@@ -652,6 +652,52 @@ class TestScanAllProjects:
             )
         ]
 
+    async def test_skips_projects_not_in_allowed_projects_without_raising(
+        self, test_db_session, tmp_path, monkeypatch
+    ) -> None:
+        """Non-git pseudo-projects (UI aggregates, per-source duplicates) are
+        skipped up front, not passed to ``clone_url_for``/``sync_mirror``.
+        """
+        aggregate = make_project(id=1, name="all-projects", last_scanned_sha=None)
+        real_project = make_project(id=2, name="craft-parts", last_scanned_sha=None)
+        await _seed(test_db_session, aggregate, real_project)
+
+        mirror_dir = tmp_path / "mirrors"
+        sync_calls: list[str] = []
+
+        async def fake_sync_mirror(
+            project: str, *, clone_url: str, mirror_dir: pathlib.Path
+        ) -> MirrorSyncResult:
+            sync_calls.append(project)
+            (mirror_dir / f"{project}.git").mkdir(parents=True, exist_ok=True)
+            return MirrorSyncResult(project=project, status="cloned")
+
+        async def fake_run_git(mirror_path: pathlib.Path, *args: str) -> str:
+            return f"{'a' * 40}\n"
+
+        monkeypatch.setattr(
+            "craft_dashboard.git_mirrors.sync.sync_mirror", fake_sync_mirror
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.commit_scanner.scanner.reader._run_git",
+            fake_run_git,
+        )
+
+        summaries = await scan_all_projects(
+            test_db_session,
+            mirror_dir=mirror_dir,
+            allowed_projects={
+                "craft-parts": "https://github.com/canonical/craft-parts.git"
+            },
+            embed_client=None,
+            dry_run=False,
+        )
+
+        # Only the real, allowed project was ever synced; the aggregate
+        # pseudo-project was skipped silently, no exception raised/logged.
+        assert sync_calls == ["craft-parts"]
+        assert summaries == []
+
     async def test_dry_run_returns_summary_but_rolls_back_writes(
         self, test_db_session, tmp_path, monkeypatch
     ) -> None:

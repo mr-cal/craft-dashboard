@@ -406,6 +406,17 @@ async def scan_all_projects(
     summaries: list[dict[str, object]] = []
 
     for project_id, project_name, last_scanned_sha in projects:
+        if project_name not in allowed_projects:
+            # Not every row in the ``projects`` table is a git-clone-able
+            # craft project: some are UI-only aggregates/filters (e.g.
+            # "all-projects") or duplicate per-source views (e.g. "snapcraft
+            # (launchpad)"). These have no clone URL and will never be
+            # scannable, so skip them quietly up front rather than raising
+            # ``UnknownProjectError`` and relying on the catch-all below,
+            # which would otherwise log a full traceback for these rows on
+            # every single scheduled run, forever.
+            logger.debug("Skipping %s: not a git-clone-able project", project_name)
+            continue
         try:
             clone_url = clone_url_for(project_name, allowed_projects=allowed_projects)
             sync_result = await sync.sync_mirror(
