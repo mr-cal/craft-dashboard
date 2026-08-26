@@ -1070,6 +1070,66 @@ class TestEvalResultIntegration:
         assert evaluations[1].eval_version == CURRENT_EVAL_VERSION
         assert evaluations[1].eval_locked_until is not None
 
+    def test_submit_result_stamps_evidence_generation(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        """A written evaluation records the issue's current evidence_generation.
+
+        This is the write-side of the Phase 6 staleness check: the evaluation
+        must capture the counter it was generated against, so a later scanner
+        bump (evidence_generation += 1) makes exactly this evaluation stale —
+        not every evaluation in the table at once.
+        """
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(
+            id=1,
+            project_id=1,
+            title="Regression in pack step",
+            evidence_generation=7,
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+        current_hash = _compute_content_hash(
+            issue.title,
+            issue.body,
+            issue.state,
+            issue.labels,
+            issue.comments,
+        )
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/result",
+                headers={"Authorization": "Bearer " + token},
+                json={
+                    "issue_id": 1,
+                    "content_hash": current_hash,
+                    "summary": "This summary is definitely long enough to pass.",
+                    "scores": {
+                        "staleness": 2,
+                        "complexity": 55,
+                        "support_request": 12,
+                        "confidence": 70,
+                    },
+                    "suggested_action": "keep_open",
+                    "suggested_action_reason": "The issue is actionable and still affects current builds.",
+                    "model_used": "haiku",
+                    "llm_backend": "local",
+                    "summary_embedding": [0.1] * 1024,
+                    "search_embedding": [0.1] * 1024,
+                },
+            )
+
+        assert response.status_code == 200
+
+        evaluations = asyncio.get_event_loop().run_until_complete(
+            _all_evaluations(test_db_session)
+        )
+        assert len(evaluations) == 1
+        assert evaluations[0].evidence_generation == 7
+
     def test_submit_result_stores_current_eval_version(
         self, test_db_session: AsyncSession
     ) -> None:

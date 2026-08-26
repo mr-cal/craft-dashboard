@@ -491,6 +491,7 @@ async def submit_result(
             cost_usd=payload.cost_usd,
             evaluated_at=datetime.now(tz=UTC),
             issue_data_hash=current_hash,
+            evidence_generation=issue.evidence_generation,
             latest=True,
             eval_locked_until=datetime.now(tz=UTC) + _LOCK_TTL,
             summary_embedding=payload.summary_embedding,
