@@ -262,6 +262,44 @@ class TestLLMResponse:
 
         assert response.reasoning is None
 
+    def test_from_api_response_captures_finish_reason_and_reasoning_tokens(
+        self,
+    ) -> None:
+        """finish_reason and reasoning-token usage must be captured so
+        callers can tell a deliberate final answer apart from one the model
+        was cut off mid-thought while producing (e.g. finish_reason ==
+        "length"), which otherwise looks identical to a normal completion.
+        """
+        api_data = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {"content": "{}", "reasoning": "still thinking..."},
+                }
+            ],
+            "usage": {
+                "completion_tokens_details": {"reasoning_tokens": 4096},
+            },
+        }
+
+        response = LLMResponse.from_api_response(api_data)
+
+        assert response.finish_reason == "length"
+        assert response.reasoning_tokens == 4096
+
+    def test_from_api_response_defaults_finish_reason_and_reasoning_tokens_to_none(
+        self,
+    ) -> None:
+        """Providers that omit these fields leave them unset rather than
+        crashing.
+        """
+        api_data = {"choices": [{"message": {"content": "hello"}}]}
+
+        response = LLMResponse.from_api_response(api_data)
+
+        assert response.finish_reason is None
+        assert response.reasoning_tokens is None
+
 
 class TestOpenRouterClientRetryLogging:
     """Tests for the client-level retry (429/transport errors)."""

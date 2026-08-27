@@ -99,6 +99,19 @@ class LLMResponse:
     # bake-off transcripts had no visibility into *why* a model reached a
     # given score even for models that were actually reasoning internally.
     reasoning: str | None = None
+    # Why the model stopped generating this turn ("stop", "length",
+    # "tool_calls", "content_filter", etc; provider-normalized by
+    # OpenRouter). Critical for diagnosing degenerate/placeholder final
+    # answers: a "length" finish means the model was cut off mid-thought by
+    # max_tokens (or its internal reasoning budget) rather than choosing to
+    # answer, which looks identical to a deliberate answer if this field is
+    # discarded.
+    finish_reason: str | None = None
+    # Reasoning tokens actually consumed this turn, when the provider
+    # reports usage.completion_tokens_details.reasoning_tokens. Lets callers
+    # tell whether a truncated/placeholder answer coincided with the model
+    # exhausting its reasoning budget.
+    reasoning_tokens: int | None = None
 
     @classmethod
     def from_api_response(cls, data: dict) -> LLMResponse:
@@ -108,9 +121,11 @@ class LLMResponse:
         # message content instead of an empty string. Coerce to "" so
         # downstream parsing can treat it as an unparsable response instead
         # of crashing on None.
-        message = data["choices"][0]["message"]
+        choice = data["choices"][0]
+        message = choice["message"]
         content = message["content"] or ""
         usage = data.get("usage", {})
+        completion_details = usage.get("completion_tokens_details") or {}
         return cls(
             content=content,
             prompt_tokens=usage.get("prompt_tokens", 0),
@@ -120,6 +135,8 @@ class LLMResponse:
             cost_usd=usage.get("cost"),
             tool_calls=message.get("tool_calls"),
             reasoning=message.get("reasoning") or None,
+            finish_reason=choice.get("finish_reason"),
+            reasoning_tokens=completion_details.get("reasoning_tokens"),
         )
 
 

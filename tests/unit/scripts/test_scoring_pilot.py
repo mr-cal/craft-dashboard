@@ -164,6 +164,8 @@ class TestRunScoringPilot:
             cost_usd=0.002,
             tool_calls=None,
             reasoning="Considered the issue title and decided impact=70.",
+            finish_reason="stop",
+            reasoning_tokens=12,
         )
         transcripts_dir = tmp_path / "t"
         with (
@@ -198,6 +200,8 @@ class TestRunScoringPilot:
         assert data["transcript"][0]["reasoning"] == (
             "Considered the issue title and decided impact=70."
         )
+        assert data["transcript"][0]["finish_reason"] == "stop"
+        assert data["transcript"][0]["reasoning_tokens"] == 12
 
     async def test_dispatches_tools_and_continues(
         self, test_db_session, tmp_path

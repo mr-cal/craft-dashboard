@@ -219,6 +219,10 @@ async def _run_one(
                     "reasoning": response.reasoning,
                     "tool_calls": response.tool_calls,
                     "cost_usd": call_cost,
+                    "finish_reason": response.finish_reason,
+                    "prompt_tokens": response.prompt_tokens,
+                    "completion_tokens": response.completion_tokens,
+                    "reasoning_tokens": response.reasoning_tokens,
                 }
             )
 
