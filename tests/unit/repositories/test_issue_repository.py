@@ -1216,7 +1216,12 @@ class TestFindRelatedBySummaryEmbedding:
 
         sql, params = session.execute.await_args.args
         assert "e.summary_embedding <=> CAST(:embedding AS vector)" in sql.text
-        assert ":exclude_id IS NULL OR e.issue_id != :exclude_id" in sql.text
+        # exclude_id must be explicitly cast so asyncpg can determine its type;
+        # without the cast, asyncpg raises AmbiguousParameterError because the
+        # parameter only ever appears in an "IS NULL" comparison and a
+        # not-equals comparison, neither of which pins a concrete type.
+        assert "CAST(:exclude_id AS INTEGER) IS NULL" in sql.text
+        assert "e.issue_id != CAST(:exclude_id AS INTEGER)" in sql.text
         assert params == {
             "embedding": str([0.1] * 3),
             "exclude_id": 1,

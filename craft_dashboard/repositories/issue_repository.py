@@ -529,7 +529,10 @@ class IssueRepository:
             JOIN projects p ON p.id = i.project_id
             WHERE e.latest = true
               AND e.summary_embedding IS NOT NULL
-              AND (:exclude_id IS NULL OR e.issue_id != :exclude_id)
+              AND (
+                CAST(:exclude_id AS INTEGER) IS NULL
+                OR e.issue_id != CAST(:exclude_id AS INTEGER)
+              )
               AND (e.summary_embedding <=> CAST(:embedding AS vector)) < :distance_threshold
         """
         params: dict[str, Any] = {
