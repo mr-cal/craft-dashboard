@@ -205,7 +205,40 @@ async def _run_one(
             # 1 only (subsequent rounds stay "auto" so the model can still
             # choose to finalize once it has enough evidence) is a minimal,
             # low-risk way to stop that degenerate no-evidence path.
-            tool_choice = "required" if round_num == 1 else "auto"
+            rounds_remaining = max_rounds - round_num
+            is_final_round = round_num == max_rounds
+            if round_num == 1:
+                tool_choice = "required"
+            elif is_final_round:
+                # Last round: no more tool calls are dispatched after this,
+                # so don't offer the model a choice that can't be honored.
+                # Force it to finalize on whatever evidence it has gathered
+                # so far instead of requesting yet more tools it won't get
+                # to use (previously observed: 0% completion because the
+                # model kept investigating past MAX_TOOL_ROUNDS and never
+                # got a chance to answer).
+                tool_choice = "none"
+            else:
+                tool_choice = "auto"
+            # Nudge the model with its round budget so it can pace its own
+            # investigation and finalize early once it has enough evidence
+            # (tool_choice="auto" already permits finalizing before the cap
+            # is reached; this just makes the remaining budget explicit).
+            if is_final_round:
+                nudge = (
+                    f"This is the final round ({round_num} of {max_rounds}). "
+                    "No further tool calls are available. You must return "
+                    "your final scores now, based only on the information "
+                    "already gathered."
+                )
+            else:
+                nudge = (
+                    f"Round {round_num} of {max_rounds} "
+                    f"({rounds_remaining} round(s) remaining after this one). "
+                    "If you already have sufficient evidence, finalize your "
+                    "scores now instead of using more rounds."
+                )
+            messages.append({"role": "user", "content": nudge})
             # response_format={"type": "json_object"} is deliberately NOT
             # sent here. Confirmed via direct reproduction against
             # OpenRouter (same message history, same model): asking for
@@ -350,7 +383,7 @@ async def run_scoring_pilot(
     api_key: str = "",
     base_url: str = "",
     ca_cert: str = "",
-    max_rounds: int = 6,
+    max_rounds: int = 8,
     token_ceiling: int = DEFAULT_TOKEN_CEILING,
     max_spend_usd: float | None = None,
     eval_server_base_url: str = "",
@@ -598,7 +631,7 @@ async def run_max_rounds_sweep(
 @click.option("--transcripts-dir", type=click.Path(path_type=Path), required=True)
 @click.option("--mirror-dir", type=click.Path(path_type=Path), required=True)
 @click.option("--out", "out_path", type=click.Path(path_type=Path), required=True)
-@click.option("--max-rounds", default=6, show_default=True, type=int)
+@click.option("--max-rounds", default=8, show_default=True, type=int)
 @click.option("--max-spend-usd", default=5.0, show_default=True, type=float)
 @click.option(
     "--eval-server-base-url",

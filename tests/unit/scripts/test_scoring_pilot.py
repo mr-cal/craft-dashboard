@@ -296,6 +296,118 @@ class TestRunScoringPilot:
         assert first_call.kwargs["tool_choice"] == "required"
         assert second_call.kwargs["tool_choice"] == "auto"
 
+    async def test_final_round_forces_tool_choice_none_and_finalizes(
+        self, test_db_session, tmp_path
+    ) -> None:
+        """Regression test: previously the model could keep requesting
+        tools past MAX_TOOL_ROUNDS, which meant it never got a chance to
+        answer and every run hit "max rounds reached" with 0% completion.
+        On the final round the harness must not offer a tool choice that
+        can't be honored (no more rounds exist to dispatch tools in), and
+        must instruct the model to finalize on the evidence gathered so
+        far."""
+        await _seed(test_db_session)
+        sample = tmp_path / "s.json"
+        sample.write_text(
+            '[{"source": "github", "project": "craft-parts", "external_id": "1"}]'
+        )
+        client = AsyncMock()
+        client.complete.side_effect = [_tool_call(), _final()]
+        with (
+            patch("scripts.llm.bakeoff.scoring_pilot.make_client", return_value=client),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.build_round1_baseline",
+                return_value="B",
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.dispatch_tool_call",
+                new=AsyncMock(return_value="src/\t3 files"),
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._pinned_sha_for_project",
+                return_value="a" * 40,
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._allowed_projects",
+                new=AsyncMock(return_value={"craft-parts": "canonical"}),
+            ),
+        ):
+            results = await run_scoring_pilot(
+                session=test_db_session,
+                models=["model-a"],
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=tmp_path / "t",
+                mirror_dir=tmp_path / "m",
+                api_key="k",
+                max_rounds=2,
+            )
+        assert client.complete.call_count == 2
+        first_call, second_call = client.complete.call_args_list
+        assert first_call.kwargs["tool_choice"] == "required"
+        assert second_call.kwargs["tool_choice"] == "none"
+        final_round_messages = second_call.kwargs["messages"]
+        last_message = final_round_messages[-1]
+        assert last_message["role"] == "user"
+        assert "final round" in last_message["content"].lower()
+        assert "no further tool calls" in last_message["content"].lower()
+        assert results[0].completed is True
+
+    async def test_non_final_rounds_get_a_rounds_remaining_nudge(
+        self, test_db_session, tmp_path
+    ) -> None:
+        """The model should be told its round budget so it can pace its
+        own investigation and finalize early once it has enough evidence,
+        rather than mechanically using every available round."""
+        await _seed(test_db_session)
+        sample = tmp_path / "s.json"
+        sample.write_text(
+            '[{"source": "github", "project": "craft-parts", "external_id": "1"}]'
+        )
+        responses = [_tool_call(), _final()]
+        seen_nudges: list[str] = []
+
+        async def _capture_and_respond(*, messages, **_kwargs):
+            seen_nudges.append(messages[-1]["content"])
+            return responses.pop(0)
+
+        client = AsyncMock()
+        client.complete.side_effect = _capture_and_respond
+        with (
+            patch("scripts.llm.bakeoff.scoring_pilot.make_client", return_value=client),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.build_round1_baseline",
+                return_value="B",
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.dispatch_tool_call",
+                new=AsyncMock(return_value="src/\t3 files"),
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._pinned_sha_for_project",
+                return_value="a" * 40,
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._allowed_projects",
+                new=AsyncMock(return_value={"craft-parts": "canonical"}),
+            ),
+        ):
+            await run_scoring_pilot(
+                session=test_db_session,
+                models=["model-a"],
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=tmp_path / "t",
+                mirror_dir=tmp_path / "m",
+                api_key="k",
+                max_rounds=8,
+            )
+        first_nudge, second_nudge = seen_nudges
+        assert "round 1 of 8" in first_nudge.lower()
+        assert "7 round(s) remaining" in first_nudge.lower()
+        assert "round 2 of 8" in second_nudge.lower()
+        assert "6 round(s) remaining" in second_nudge.lower()
+
     async def test_does_not_request_json_object_response_format(
         self, test_db_session, tmp_path
     ) -> None:
