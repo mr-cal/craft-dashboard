@@ -123,3 +123,22 @@ class TestSummaryReport:
         assert "qwen" in text
         assert "deepseek" in text
         assert "Recommendation: switch to z-ai/glm-5.2" in text
+
+    def test_writes_report_without_crashing_when_no_grades_supplied(
+        self, tmp_path
+    ) -> None:
+        """summary_bakeoff.py always calls this with grades=[] since grading
+        is a separate script (grade_transcripts.py); it must not crash."""
+        out = tmp_path / "report_summary.md"
+        results = [
+            _r(model="qwen/qwen3.6-35b-a3b", new_output={"summary": "incumbent"}),
+            _r(model="z-ai/glm-5.2", new_output={"summary": "glm"}),
+        ]
+
+        write_summary_report(results, [], out)
+
+        text = out.read_text()
+        assert "craft-parts#1" in text
+        assert "incumbent" in text
+        assert "glm" in text
+        assert "no grades supplied" in text.lower()

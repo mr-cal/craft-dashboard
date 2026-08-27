@@ -238,21 +238,24 @@ def write_summary_report(
     for grade in grades:
         model_grade_map[str(grade.get("model"))].append(grade)
 
+    incumbent_grades = model_grade_map.get(INCUMBENT_MODEL, [])
     incumbent_mean = (
         statistics.mean(
-            [
-                float(grade.get("faithfulness", 0.0))
-                for grade in model_grade_map[INCUMBENT_MODEL]
-            ]
+            [float(grade.get("faithfulness", 0.0)) for grade in incumbent_grades]
         )
-        if model_grade_map[INCUMBENT_MODEL]
+        if incumbent_grades
         else 0.0
     )
     recommendation = f"keep incumbent ({INCUMBENT_MODEL})"
+    if not grades:
+        recommendation = (
+            "no recommendation: no grades supplied "
+            "(run scripts/grade_transcripts.py first)"
+        )
     best_model = INCUMBENT_MODEL
     best_mean = incumbent_mean
     for model, model_grades in model_grade_map.items():
-        if model == INCUMBENT_MODEL:
+        if model == INCUMBENT_MODEL or not model_grades:
             continue
         challenger_mean = statistics.mean(
             [float(grade.get("faithfulness", 0.0)) for grade in model_grades]
@@ -289,10 +292,14 @@ def write_summary_report(
         "| --- | ---: |",
     ]
     for model, model_grades in sorted(model_grade_map.items()):
+        if not model_grades:
+            continue
         mean_faithfulness = statistics.mean(
             [float(grade.get("faithfulness", 0.0)) for grade in model_grades]
         )
         lines.append(f"| {model} | {mean_faithfulness:.2f} |")
+    if not any(model_grade_map.values()):
+        lines.append("| _(no grades supplied)_ | - |")
     lines.extend(
         [
             "",
