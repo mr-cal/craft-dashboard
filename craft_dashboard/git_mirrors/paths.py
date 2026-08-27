@@ -21,6 +21,25 @@ if TYPE_CHECKING:
 #: (e.g. mirrors bootstrap running before the first collection pass).
 _DEFAULT_GITHUB_ORG = "canonical"
 
+#: Suffix used by non-git-clonable "view" rows in the ``projects`` table that
+#: track Launchpad-sourced issues for a project that is *also* git-mirrored
+#: under a different (unsuffixed) name, e.g. "snapcraft (launchpad)" tracks
+#: Launchpad bugs for the same codebase mirrored as "snapcraft". See
+#: ``craft_dashboard.routes.issues._build_original_issue_url`` for the
+#: existing, matching convention.
+_LAUNCHPAD_SUFFIX = " (launchpad)"
+
+
+def canonical_git_project_name(project: str) -> str:
+    """Map a possibly Launchpad-view project name to its git-mirror name.
+
+    Some ``projects`` rows (e.g. "snapcraft (launchpad)") are per-source
+    views onto a project that is git-mirrored under a different, unsuffixed
+    name. Any caller resolving a mirror/clone-URL for such a project should
+    use the returned canonical name instead of the raw one.
+    """
+    return project.removesuffix(_LAUNCHPAD_SUFFIX)
+
 
 def resolve_allowed_projects(
     *,
@@ -60,22 +79,28 @@ def mirror_path_for(
         allowed_projects: The allowlist from resolve_allowed_projects().
 
     Raises:
-        UnknownProjectError: if project is not in allowed_projects.
+        UnknownProjectError: if neither *project* nor its canonical
+            git-mirror name (see ``canonical_git_project_name``) is in
+            allowed_projects.
 
     """
-    if project not in allowed_projects:
+    canonical = canonical_git_project_name(project)
+    if canonical not in allowed_projects:
         raise UnknownProjectError(f"Unknown project: {project!r}")
-    return mirror_dir / f"{project}.git"
+    return mirror_dir / f"{canonical}.git"
 
 
 def clone_url_for(project: str, *, allowed_projects: dict[str, str]) -> str:
     """Return the HTTPS clone URL for *project*.
 
     Raises:
-        UnknownProjectError: if project is not in allowed_projects.
+        UnknownProjectError: if neither *project* nor its canonical
+            git-mirror name (see ``canonical_git_project_name``) is in
+            allowed_projects.
 
     """
-    if project not in allowed_projects:
+    canonical = canonical_git_project_name(project)
+    if canonical not in allowed_projects:
         raise UnknownProjectError(f"Unknown project: {project!r}")
-    org = allowed_projects[project]
-    return f"https://github.com/{org}/{project}.git"
+    org = allowed_projects[canonical]
+    return f"https://github.com/{org}/{canonical}.git"

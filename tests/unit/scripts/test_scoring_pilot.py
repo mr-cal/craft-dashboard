@@ -12,6 +12,7 @@ from craft_dashboard.llm.client import LLMResponse
 from scripts.llm.bakeoff.common import BakeoffResult
 from scripts.llm.bakeoff.scoring_pilot import (
     _pinned_sha_for_project,
+    _raise_pin_error,
     cli,
     run_max_rounds_sweep,
     run_scoring_pilot,
@@ -182,6 +183,55 @@ class TestRunScoringPilot:
         assert results[0].rounds_used == 2
         assert results[0].tools_called == ["repo_layout"]
         assert results[0].cost_usd == pytest.approx(0.003)
+
+    async def test_round_one_requires_a_tool_call_later_rounds_are_auto(
+        self, test_db_session, tmp_path
+    ) -> None:
+        """Regression test: the real bake-off found challenger models
+        overwhelmingly skipped tool calls under tool_choice="auto" alone,
+        producing all-zero/fabricated-looking scores with no gathered
+        evidence (judge-graded ~0% pass rate). Round 1 must force a tool
+        call; later rounds may still let the model choose to finalize."""
+        await _seed(test_db_session)
+        sample = tmp_path / "s.json"
+        sample.write_text(
+            '[{"source": "github", "project": "craft-parts", "external_id": "1"}]'
+        )
+        client = AsyncMock()
+        client.complete.side_effect = [_tool_call(), _final()]
+        with (
+            patch("scripts.llm.bakeoff.scoring_pilot.make_client", return_value=client),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.build_round1_baseline",
+                return_value="B",
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.dispatch_tool_call",
+                new=AsyncMock(return_value="src/\t3 files"),
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._pinned_sha_for_project",
+                return_value="a" * 40,
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._allowed_projects",
+                new=AsyncMock(return_value={"craft-parts": "canonical"}),
+            ),
+        ):
+            await run_scoring_pilot(
+                session=test_db_session,
+                models=["model-a"],
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=tmp_path / "t",
+                mirror_dir=tmp_path / "m",
+                api_key="k",
+                max_rounds=6,
+            )
+        assert client.complete.call_count == 2
+        first_call, second_call = client.complete.call_args_list
+        assert first_call.kwargs["tool_choice"] == "required"
+        assert second_call.kwargs["tool_choice"] == "auto"
 
     async def test_hits_max_rounds_and_records_incomplete(
         self, test_db_session, tmp_path
@@ -433,6 +483,29 @@ class TestRunScoringPilot:
     def test_pinned_sha_rejects_unknown_project(self, tmp_path) -> None:
         with pytest.raises(UnknownProjectError):
             _pinned_sha_for_project("../evil", tmp_path, {"craft-parts": "canonical"})
+
+
+class TestRaisePinError:
+    """Regression tests for the "snapcraft (launchpad)" pin-error lookup.
+
+    ``pin_errors`` is keyed by real git-mirror project names (built from
+    ``allowed_projects``, which never contains Launchpad-view rows like
+    "snapcraft (launchpad)"), so a raw non-canonical lookup would silently
+    miss a real pin failure for the underlying "snapcraft" mirror.
+    """
+
+    def test_finds_pin_error_via_canonical_launchpad_name(self) -> None:
+        with pytest.raises(RuntimeError, match="mirror unavailable"):
+            _raise_pin_error(
+                "snapcraft (launchpad)", {"snapcraft": "mirror unavailable"}
+            )
+
+    def test_no_error_when_canonical_name_has_no_pin_error(self) -> None:
+        _raise_pin_error("snapcraft (launchpad)", {})  # must not raise
+
+    def test_finds_pin_error_for_plain_project_name(self) -> None:
+        with pytest.raises(RuntimeError, match="boom"):
+            _raise_pin_error("craft-parts", {"craft-parts": "boom"})
 
 
 class TestRunMaxRoundsSweep:

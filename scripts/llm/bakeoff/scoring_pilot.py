@@ -14,7 +14,11 @@ from typing import TYPE_CHECKING, Any
 import click
 from craft_dashboard.config import load_config
 from craft_dashboard.database import get_engine, get_session_factory
-from craft_dashboard.git_mirrors.paths import mirror_path_for, resolve_allowed_projects
+from craft_dashboard.git_mirrors.paths import (
+    canonical_git_project_name,
+    mirror_path_for,
+    resolve_allowed_projects,
+)
 from craft_dashboard.llm.tool_dispatch import ToolContext, dispatch_tool_call
 from craft_dashboard.llm.tools import TOOL_SCHEMAS
 from craft_dashboard.models.project import Project
@@ -111,8 +115,9 @@ async def _load_related_baseline(
 
 
 def _raise_pin_error(project: str, pin_errors: dict[str, str]) -> None:
-    if project in pin_errors:
-        raise RuntimeError(pin_errors[project])
+    canonical = canonical_git_project_name(project)
+    if canonical in pin_errors:
+        raise RuntimeError(pin_errors[canonical])
 
 
 async def _maybe_close(client: LLMClient) -> None:
@@ -176,11 +181,21 @@ async def _run_one(
     start = time.monotonic()
     try:
         for round_num in range(1, max_rounds + 1):
+            # Force at least one grounding tool call before the model may
+            # finalize: with tool_choice="auto" alone, budget/challenger
+            # models observed in the real bake-off overwhelmingly skipped
+            # tools entirely and answered directly from the baseline bundle,
+            # producing scores/related_work with no verifiable evidence
+            # (judge-graded ~0% pass rate). Requiring one tool call in round
+            # 1 only (subsequent rounds stay "auto" so the model can still
+            # choose to finalize once it has enough evidence) is a minimal,
+            # low-risk way to stop that degenerate no-evidence path.
+            tool_choice = "required" if round_num == 1 else "auto"
             response = await client.complete(
                 model=model,
                 messages=messages,
                 tools=TOOL_SCHEMAS,
-                tool_choice="auto",
+                tool_choice=tool_choice,
                 max_tokens=4096,
                 response_format={"type": "json_object"},
             )
