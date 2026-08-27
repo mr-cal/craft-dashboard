@@ -17,6 +17,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _GREP_HIT_MIN_FIELDS = 3
+#: Cap on how many matches grep_repo/git_log_search will return in a single
+#: call, across however many repos were searched. Both tools can otherwise
+#: return an unbounded number of hits (bounded only by the 200KB per-repo
+#: byte ceiling in git_mirrors.reader) -- a broad pattern searched across
+#: many repos was a major driver of ballooning prompt-token growth in the
+#: qwen debug-evals runs. Once the cap is hit, a truncation notice tells the
+#: model to narrow its pattern/query or the `repos` list instead of paying
+#: for (and reading) hundreds of matches it likely doesn't need.
+_MAX_MATCHES_PER_CALL = 50
 
 
 @dataclass
@@ -82,6 +91,26 @@ def _is_pickaxe_enabled(value: object) -> bool:
     return value is True or value == "true"
 
 
+def _optional_int(value: object) -> int | None:
+    """Coerce an optional tool argument to an int, or None if unset."""
+    if value is None:
+        return None
+    if isinstance(value, int | str):
+        return int(value)
+    msg = f"expected an int-like value, got {type(value).__name__}"
+    raise TypeError(msg)
+
+
+def _append_truncation_notice(text: str, *, truncated: bool, noun: str) -> str:
+    """Append a note when a match list was cut off at _MAX_MATCHES_PER_CALL."""
+    if not truncated:
+        return text
+    return (
+        f"{text}\n... truncated at {_MAX_MATCHES_PER_CALL} {noun}; refine "
+        "your pattern/query or narrow `repos` for more precise results."
+    )
+
+
 async def dispatch_tool_call(
     ctx: ToolContext, *, name: str, arguments: dict[str, object]
 ) -> str:
@@ -106,7 +135,13 @@ async def _handle_read_file(ctx: ToolContext, arguments: dict[str, object]) -> s
     mirror = mirror_path_for(
         project, mirror_dir=ctx.mirror_dir, allowed_projects=ctx.allowed_projects
     )
-    result = await reader.read_file(mirror, path=path, ref=ref)
+    result = await reader.read_file(
+        mirror,
+        path=path,
+        ref=ref,
+        start_line=_optional_int(arguments.get("start_line")),
+        end_line=_optional_int(arguments.get("end_line")),
+    )
     ctx.record_path(project, path)
     return result
 
@@ -115,7 +150,10 @@ async def _handle_grep_repo(ctx: ToolContext, arguments: dict[str, object]) -> s
     pattern = str(arguments["pattern"])
     ref_arg = arguments.get("ref")
     lines: list[str] = []
+    truncated = False
     for project in _resolve_projects(ctx, arguments.get("repos")):
+        if truncated:
+            break
         ref = _resolve_ref(ctx, project=project, requested_ref=ref_arg)
         mirror = mirror_path_for(
             project,
@@ -124,11 +162,18 @@ async def _handle_grep_repo(ctx: ToolContext, arguments: dict[str, object]) -> s
         )
         hits = await reader.grep_repo(mirror, pattern=pattern, ref=ref)
         for hit in hits:
+            if len(lines) >= _MAX_MATCHES_PER_CALL:
+                truncated = True
+                break
             path = _grep_hit_path(hit)
             if path:
                 ctx.record_path(project, path)
             lines.append(f"{project}: {hit}")
-    return _render_lines(lines, empty="(no matches)")
+    return _append_truncation_notice(
+        _render_lines(lines, empty="(no matches)"),
+        truncated=truncated,
+        noun="matches",
+    )
 
 
 async def _handle_repo_layout(ctx: ToolContext, arguments: dict[str, object]) -> str:
@@ -161,7 +206,10 @@ async def _handle_git_log_search(ctx: ToolContext, arguments: dict[str, object])
     pickaxe = _is_pickaxe_enabled(arguments.get("pickaxe", False))
     ref_arg = arguments.get("ref")
     lines: list[str] = []
+    truncated = False
     for project in _resolve_projects(ctx, arguments.get("repos")):
+        if truncated:
+            break
         ref = _resolve_ref(ctx, project=project, requested_ref=ref_arg)
         mirror = mirror_path_for(
             project,
@@ -173,8 +221,16 @@ async def _handle_git_log_search(ctx: ToolContext, arguments: dict[str, object])
             if pickaxe
             else await reader.log_search(mirror, query=query, ref=ref)
         )
-        lines.extend(f"{project}: {commit}" for commit in commits)
-    return _render_lines(lines, empty="(no matching commits)")
+        for commit in commits:
+            if len(lines) >= _MAX_MATCHES_PER_CALL:
+                truncated = True
+                break
+            lines.append(f"{project}: {commit}")
+    return _append_truncation_notice(
+        _render_lines(lines, empty="(no matching commits)"),
+        truncated=truncated,
+        noun="commits",
+    )
 
 
 async def _dispatch_http_tool(

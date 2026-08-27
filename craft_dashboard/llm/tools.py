@@ -32,7 +32,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "description": (
                 "Search commit messages and diff content for a query string "
                 "across one or more projects. Two modes: --grep (message text) "
-                "is default; use pickaxe=true for -S (diff content) search."
+                "is default; use pickaxe=true for -S (diff content) search. "
+                "Capped at 50 matching commits per call -- if truncated, narrow "
+                "your query or the `repos` list for more precise results."
             ),
             "parameters": {
                 "type": "object",
@@ -74,7 +76,13 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read the full content of a file at a specific commit in a project.",
+            "description": (
+                "Read the content of a file at a specific commit in a "
+                "project. Returns the whole file by default; pass "
+                "start_line/end_line (1-indexed, inclusive) to read only a "
+                "slice of a large file instead of paying for its entire "
+                "content."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -87,6 +95,20 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "description": "Relative file path within the repo.",
                     },
                     "ref": _REF_PROPERTY,
+                    "start_line": {
+                        "type": "integer",
+                        "description": (
+                            "1-indexed inclusive first line to return. "
+                            "Omit to read from the beginning of the file."
+                        ),
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": (
+                            "1-indexed inclusive last line to return. "
+                            "Omit to read to the end of the file."
+                        ),
+                    },
                 },
                 "required": ["project", "path"],
             },
@@ -98,7 +120,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "name": "grep_repo",
             "description": (
                 "Search for a literal pattern across one or more projects' source "
-                "at a specific commit. Returns matching lines with file:line prefixes."
+                "at a specific commit. Returns matching lines with file:line "
+                "prefixes, capped at 50 matches per call -- if truncated, narrow "
+                "your pattern or the `repos` list for more precise results."
             ),
             "parameters": {
                 "type": "object",

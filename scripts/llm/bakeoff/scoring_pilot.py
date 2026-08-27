@@ -42,7 +42,23 @@ if TYPE_CHECKING:
     from craft_dashboard.models.issue import Issue
     from sqlalchemy.ext.asyncio import AsyncSession
 
-DEFAULT_TOKEN_CEILING = 120_000
+#: Per-issue dollar budget for the tool-calling round loop. Replaces a
+#: previous raw prompt+completion token_ceiling: v3 debug-evals showed that
+#: check tripping on issues whose token count was dominated by cheap prompt
+#: tokens (re-sent tool-output history) rather than expensive completion
+#: tokens -- e.g. debcraft#41 hit 120k raw tokens (155k prompt / 696
+#: completion) while costing only ~$0.066, nowhere near a real budget
+#: concern. A cost-weighted budget (reusing the same per-model pricing as
+#: estimate_cost_usd) tracks what actually matters and isn't penalized by
+#: cheap prompt-token growth.
+DEFAULT_MAX_SPEND_PER_ISSUE_USD = 0.15
+#: Slice of the per-issue budget reserved for a guaranteed finalize round:
+#: once the remaining per-issue budget drops to this amount or below, the
+#: harness forces a finalize-now round (tool_choice="none" + a "return your
+#: scores now" nudge) exactly as it already does on the final round of
+#: MAX_TOOL_ROUNDS, so the model always gets a chance to answer with
+#: whatever evidence it has instead of being cut off mid-investigation.
+RESERVED_FINALIZE_BUDGET_USD = 0.02
 DEFAULT_TOOL_TIMEOUT_S = 20.0
 DEFAULT_SWEEP_CAPS = (3, 4, 6, 8)
 #: Well-behaved rounds observed in the real bake-off call 1-4 tools; a
@@ -181,7 +197,7 @@ async def _run_one(
     tool_ctx: ToolContext,
     baseline: str,
     max_rounds: int,
-    token_ceiling: int,
+    max_spend_per_issue_usd: float,
 ) -> tuple[BakeoffResult, list[dict[str, object]]]:
     result = BakeoffResult(issue_ref=issue_ref, model=model, backend=backend)
     messages: list[dict[str, Any]] = build_scoring_messages(
@@ -207,29 +223,46 @@ async def _run_one(
             # low-risk way to stop that degenerate no-evidence path.
             rounds_remaining = max_rounds - round_num
             is_final_round = round_num == max_rounds
+            budget_remaining = max_spend_per_issue_usd - (result.cost_usd or 0.0)
+            # Force finalize-now not just on the last round but also once
+            # the per-issue budget is nearly spent, so a slow-converging
+            # (but not yet round-capped) issue still gets a guaranteed
+            # chance to answer instead of being killed mid-investigation by
+            # the hard spend ceiling below.
+            must_finalize_now = (
+                is_final_round or budget_remaining <= RESERVED_FINALIZE_BUDGET_USD
+            )
             if round_num == 1:
                 tool_choice = "required"
-            elif is_final_round:
-                # Last round: no more tool calls are dispatched after this,
-                # so don't offer the model a choice that can't be honored.
-                # Force it to finalize on whatever evidence it has gathered
-                # so far instead of requesting yet more tools it won't get
-                # to use (previously observed: 0% completion because the
-                # model kept investigating past MAX_TOOL_ROUNDS and never
-                # got a chance to answer).
+            elif must_finalize_now:
+                # No more tool calls are dispatched after this round anyway
+                # (either it's the last round, or the budget is nearly
+                # gone), so don't offer the model a choice that can't be
+                # honored. Force it to finalize on whatever evidence it has
+                # gathered so far instead of requesting yet more tools it
+                # won't get to use (previously observed: 0% completion
+                # because the model kept investigating past
+                # MAX_TOOL_ROUNDS and never got a chance to answer).
                 tool_choice = "none"
             else:
                 tool_choice = "auto"
-            # Nudge the model with its round budget so it can pace its own
-            # investigation and finalize early once it has enough evidence
-            # (tool_choice="auto" already permits finalizing before the cap
-            # is reached; this just makes the remaining budget explicit).
-            if is_final_round:
+            # Nudge the model with its round/budget status so it can pace
+            # its own investigation and finalize early once it has enough
+            # evidence (tool_choice="auto" already permits finalizing before
+            # the cap is reached; this just makes the remaining budget
+            # explicit).
+            if must_finalize_now:
+                if is_final_round:
+                    reason = f"This is the final round ({round_num} of {max_rounds})."
+                else:
+                    reason = (
+                        f"The per-issue budget (${max_spend_per_issue_usd:.2f}) "
+                        "is nearly spent."
+                    )
                 nudge = (
-                    f"This is the final round ({round_num} of {max_rounds}). "
-                    "No further tool calls are available. You must return "
-                    "your final scores now, based only on the information "
-                    "already gathered."
+                    f"{reason} No further tool calls are available. You must "
+                    "return your final scores now, based only on the "
+                    "information already gathered."
                 )
             else:
                 nudge = (
@@ -315,8 +348,16 @@ async def _run_one(
                     result.completed = True
                 break
 
-            if result.prompt_tokens + result.completion_tokens > token_ceiling:
-                result.error = f"token ceiling exceeded ({token_ceiling})"
+            # Hard fallback: normally must_finalize_now forces
+            # tool_choice="none" before the budget is exhausted, so the
+            # model shouldn't come back with more tool_calls once the
+            # budget is nearly spent. But if it does anyway (e.g. a backend
+            # ignores tool_choice="none"), stop here rather than let cost
+            # grow unbounded.
+            if (result.cost_usd or 0.0) > max_spend_per_issue_usd:
+                result.error = (
+                    f"per-issue spend ceiling exceeded (${max_spend_per_issue_usd:.2f})"
+                )
                 break
 
             if len(response.tool_calls) > MAX_TOOL_CALLS_PER_ROUND:
@@ -384,7 +425,7 @@ async def run_scoring_pilot(
     base_url: str = "",
     ca_cert: str = "",
     max_rounds: int = 8,
-    token_ceiling: int = DEFAULT_TOKEN_CEILING,
+    max_spend_per_issue_usd: float = DEFAULT_MAX_SPEND_PER_ISSUE_USD,
     max_spend_usd: float | None = None,
     eval_server_base_url: str = "",
     eval_api_token: str = "",
@@ -462,7 +503,7 @@ async def run_scoring_pilot(
                             tool_ctx=tool_ctx,
                             baseline=baseline,
                             max_rounds=max_rounds,
-                            token_ceiling=token_ceiling,
+                            max_spend_per_issue_usd=max_spend_per_issue_usd,
                         )
                     except Exception as exc:
                         result = BakeoffResult(
@@ -634,6 +675,13 @@ async def run_max_rounds_sweep(
 @click.option("--max-rounds", default=8, show_default=True, type=int)
 @click.option("--max-spend-usd", default=5.0, show_default=True, type=float)
 @click.option(
+    "--max-spend-per-issue-usd",
+    default=DEFAULT_MAX_SPEND_PER_ISSUE_USD,
+    show_default=True,
+    type=float,
+    help="Per-issue dollar budget for the tool-calling round loop.",
+)
+@click.option(
     "--eval-server-base-url",
     required=True,
     help="Base URL for /api/eval/* helper endpoints used by related_issues and issue_detail tools.",
@@ -653,6 +701,7 @@ def cli(
     out_path: Path,
     max_rounds: int,
     max_spend_usd: float,
+    max_spend_per_issue_usd: float,
     eval_server_base_url: str,
     eval_api_token: str,
     sweep: bool,
@@ -684,6 +733,7 @@ def cli(
                     api_key=settings.openrouter_api_key,
                     base_url="",
                     max_rounds=max_rounds,
+                    max_spend_per_issue_usd=max_spend_per_issue_usd,
                     max_spend_usd=max_spend_usd,
                     eval_server_base_url=eval_server_base_url,
                     eval_api_token=eval_api_token,

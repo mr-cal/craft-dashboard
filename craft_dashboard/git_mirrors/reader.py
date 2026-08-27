@@ -302,11 +302,38 @@ async def has_commit(mirror: pathlib.Path, sha: str) -> bool:
     return True
 
 
-async def read_file(mirror: pathlib.Path, *, path: str, ref: str) -> str:
-    """Return the content of *path* at *ref* via `git show <ref>:<path>`."""
+async def read_file(
+    mirror: pathlib.Path,
+    *,
+    path: str,
+    ref: str,
+    start_line: int | None = None,
+    end_line: int | None = None,
+) -> str:
+    """Return the content of *path* at *ref* via `git show <ref>:<path>`.
+
+    ``start_line``/``end_line`` (both 1-indexed and inclusive) let a caller
+    read a slice of a large file instead of paying for its entire content
+    every time -- the model doesn't need a whole multi-thousand-line file
+    just to inspect one function. Omit both to get the full file (unchanged
+    behavior). The full blob is still fetched from git (git has no partial
+    read for a blob), but only the requested lines are returned, so token
+    cost scales with the slice, not the file.
+    """
     validate_ref(ref)
     validate_path(path)
-    return await _run_git(mirror, "--no-pager", "show", f"{ref}:{path}", "--")
+    content = await _run_git(mirror, "--no-pager", "show", f"{ref}:{path}", "--")
+    if start_line is None and end_line is None:
+        return content
+    lines = content.splitlines()
+    total = len(lines)
+    start = max(start_line or 1, 1)
+    end = min(end_line if end_line is not None else total, total)
+    if start > total or start > end:
+        return f"(no lines in range {start}-{end}; file has {total} lines)"
+    selected = lines[start - 1 : end]
+    header = f"(showing lines {start}-{end} of {total})"
+    return f"{header}\n" + "\n".join(selected)
 
 
 async def grep_repo(mirror: pathlib.Path, *, pattern: str, ref: str) -> list[str]:

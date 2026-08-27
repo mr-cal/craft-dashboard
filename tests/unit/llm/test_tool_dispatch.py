@@ -254,6 +254,59 @@ class TestDispatchToolCall:
         mock_log_search.assert_awaited_once()
         mock_log_pickaxe.assert_not_awaited()
 
+    async def test_read_file_passes_start_and_end_line_to_reader(
+        self, tool_context: ToolContext
+    ) -> None:
+        result = await dispatch_tool_call(
+            tool_context,
+            name="read_file",
+            arguments={
+                "project": "sample-project",
+                "path": "src/parts.py",
+                "start_line": 2,
+                "end_line": 2,
+            },
+        )
+        assert "if not name" in result
+        assert "raise ValueError" not in result
+
+    async def test_grep_repo_truncates_at_max_matches_and_notes_it(
+        self, tool_context: ToolContext
+    ) -> None:
+        many_hits = [f"src/file.py:{i}:match" for i in range(60)]
+        with patch(
+            "craft_dashboard.llm.tool_dispatch.reader.grep_repo",
+            new_callable=AsyncMock,
+            return_value=many_hits,
+        ):
+            result = await dispatch_tool_call(
+                tool_context,
+                name="grep_repo",
+                arguments={"pattern": "match"},
+            )
+
+        assert result.count("src/file.py:") == 50
+        assert "truncated at 50 matches" in result
+
+    async def test_git_log_search_truncates_at_max_matches_and_notes_it(
+        self, tool_context: ToolContext
+    ) -> None:
+        many_commits = [f"abc{i:04d} commit message" for i in range(60)]
+        with patch(
+            "craft_dashboard.llm.tool_dispatch.reader.log_search",
+            new_callable=AsyncMock,
+            return_value=many_commits,
+        ):
+            result = await dispatch_tool_call(
+                tool_context,
+                name="git_log_search",
+                arguments={"query": "commit"},
+            )
+
+        assert "abc0049 commit message" in result
+        assert "abc0050 commit message" not in result
+        assert "truncated at 50 commits" in result
+
     async def test_related_issues_sends_bearer_auth_header(
         self, tool_context: ToolContext
     ) -> None:

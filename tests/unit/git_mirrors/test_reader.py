@@ -134,6 +134,58 @@ class TestReadFile:
         with pytest.raises(InvalidRefError):
             await read_file(bare_mirror, path="src/parts.py", ref="main")
 
+    async def test_line_range_returns_only_requested_slice(
+        self, bare_mirror: pathlib.Path, sample_repo_shas: list[str]
+    ) -> None:
+        content = await read_file(
+            bare_mirror,
+            path="src/parts.py",
+            ref=sample_repo_shas[-1],
+            start_line=2,
+            end_line=2,
+        )
+        assert "showing lines 2-2 of 3" in content
+        assert "if not name:" in content
+        assert "def validate_part_name" not in content
+        assert "raise ValueError" not in content
+
+    async def test_line_range_omitting_end_reads_to_end_of_file(
+        self, bare_mirror: pathlib.Path, sample_repo_shas: list[str]
+    ) -> None:
+        content = await read_file(
+            bare_mirror,
+            path="src/parts.py",
+            ref=sample_repo_shas[-1],
+            start_line=2,
+            end_line=None,
+        )
+        assert "showing lines 2-3 of 3" in content
+        assert "if not name:" in content
+        assert "raise ValueError" in content
+        assert "def validate_part_name" not in content
+
+    async def test_line_range_out_of_bounds_reports_file_length(
+        self, bare_mirror: pathlib.Path, sample_repo_shas: list[str]
+    ) -> None:
+        content = await read_file(
+            bare_mirror,
+            path="src/parts.py",
+            ref=sample_repo_shas[-1],
+            start_line=100,
+            end_line=200,
+        )
+        assert "file has 3 lines" in content
+
+    async def test_no_line_range_returns_full_file_unchanged(
+        self, bare_mirror: pathlib.Path, sample_repo_shas: list[str]
+    ) -> None:
+        content = await read_file(
+            bare_mirror, path="src/parts.py", ref=sample_repo_shas[-1]
+        )
+        assert "showing lines" not in content
+        assert "def validate_part_name" in content
+        assert "raise ValueError" in content
+
 
 class TestGrepRepo:
     """grep_repo() runs `git grep -e <pattern> <ref>`."""

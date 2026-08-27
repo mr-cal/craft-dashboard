@@ -353,6 +353,125 @@ class TestRunScoringPilot:
         assert "no further tool calls" in last_message["content"].lower()
         assert results[0].completed is True
 
+    async def test_low_remaining_budget_forces_finalize_before_last_round(
+        self, test_db_session, tmp_path
+    ) -> None:
+        """Regression test: a per-issue dollar budget replaced the old raw
+        prompt+completion token_ceiling (which was penalizing cheap prompt
+        tokens as heavily as expensive completion tokens -- see
+        debug-evals v3, where debcraft#41 hit the raw ceiling while costing
+        only ~$0.066). Once the remaining per-issue budget drops to
+        RESERVED_FINALIZE_BUDGET_USD or below, the harness must force a
+        finalize-now round (tool_choice="none" + a budget-specific nudge)
+        even if the round cap hasn't been reached yet, exactly like it
+        already does on the literal last round."""
+        await _seed(test_db_session)
+        sample = tmp_path / "s.json"
+        sample.write_text(
+            '[{"source": "github", "project": "craft-parts", "external_id": "1"}]'
+        )
+        client = AsyncMock()
+        client.complete.side_effect = [_tool_call(), _final()]
+        with (
+            patch("scripts.llm.bakeoff.scoring_pilot.make_client", return_value=client),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.build_round1_baseline",
+                return_value="B",
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.dispatch_tool_call",
+                new=AsyncMock(return_value="src/\t3 files"),
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._pinned_sha_for_project",
+                return_value="a" * 40,
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._allowed_projects",
+                new=AsyncMock(return_value={"craft-parts": "canonical"}),
+            ),
+            # Round 1 spends $0.04 of a $0.05 budget, leaving $0.01
+            # remaining -- at or below RESERVED_FINALIZE_BUDGET_USD
+            # ($0.02), so round 2 (not the last of 8 max_rounds) must
+            # still be forced to finalize.
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.estimate_cost_usd",
+                return_value=0.04,
+            ),
+        ):
+            results = await run_scoring_pilot(
+                session=test_db_session,
+                models=["model-a"],
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=tmp_path / "t",
+                mirror_dir=tmp_path / "m",
+                api_key="k",
+                max_rounds=8,
+                max_spend_per_issue_usd=0.05,
+            )
+        assert client.complete.call_count == 2
+        first_call, second_call = client.complete.call_args_list
+        assert first_call.kwargs["tool_choice"] == "required"
+        assert second_call.kwargs["tool_choice"] == "none"
+        last_message = second_call.kwargs["messages"][-1]
+        assert last_message["role"] == "user"
+        assert "budget" in last_message["content"].lower()
+        assert "no further tool calls" in last_message["content"].lower()
+        assert results[0].completed is True
+
+    async def test_hard_spend_ceiling_stops_run_if_still_over_budget(
+        self, test_db_session, tmp_path
+    ) -> None:
+        """Safety-net regression test: if a round still comes back with
+        tool_calls after the per-issue budget is exhausted (e.g. a backend
+        that doesn't honor tool_choice="none"), the harness must stop and
+        record an explicit spend-ceiling error instead of letting cost grow
+        unbounded."""
+        await _seed(test_db_session)
+        sample = tmp_path / "s.json"
+        sample.write_text(
+            '[{"source": "github", "project": "craft-parts", "external_id": "1"}]'
+        )
+        client = AsyncMock()
+        client.complete.return_value = _tool_call()
+        dispatch = AsyncMock(return_value="x")
+        with (
+            patch("scripts.llm.bakeoff.scoring_pilot.make_client", return_value=client),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.build_round1_baseline",
+                return_value="B",
+            ),
+            patch("scripts.llm.bakeoff.scoring_pilot.dispatch_tool_call", new=dispatch),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._pinned_sha_for_project",
+                return_value="a" * 40,
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._allowed_projects",
+                new=AsyncMock(return_value={"craft-parts": "canonical"}),
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.estimate_cost_usd",
+                return_value=0.02,
+            ),
+        ):
+            results = await run_scoring_pilot(
+                session=test_db_session,
+                models=["model-a"],
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=tmp_path / "t",
+                mirror_dir=tmp_path / "m",
+                api_key="k",
+                max_rounds=8,
+                max_spend_per_issue_usd=0.01,
+            )
+        assert client.complete.call_count == 1
+        assert results[0].completed is False
+        assert "per-issue spend ceiling exceeded" in (results[0].error or "")
+        dispatch.assert_not_awaited()
+
     async def test_non_final_rounds_get_a_rounds_remaining_nudge(
         self, test_db_session, tmp_path
     ) -> None:
