@@ -135,6 +135,26 @@ class TestParseEvaluationResponse:
 
         assert result is None
 
+    def test_bare_json_string_returns_none_not_the_string(self) -> None:
+        """A response that is valid JSON but not an object (e.g. a bare
+        quoted string) must not be returned as-is: callers assume a dict
+        and calling .get()/dict() on a str raises (this crashed the real
+        Phase 5 bake-off with "dictionary update sequence element #0 has
+        length 1; 2 is required" from ``dict(parsed)`` on a str)."""
+        result = _parse_evaluation_response('"just a string, not an object"')
+
+        assert result is None
+
+    def test_bare_json_array_returns_none_not_the_list(self) -> None:
+        result = _parse_evaluation_response("[1, 2, 3]")
+
+        assert result is None
+
+    def test_bare_json_number_returns_none(self) -> None:
+        result = _parse_evaluation_response("42")
+
+        assert result is None
+
 
 class TestIssueEvaluator:
     """Tests for IssueEvaluator."""

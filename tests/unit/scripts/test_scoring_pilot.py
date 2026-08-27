@@ -233,6 +233,73 @@ class TestRunScoringPilot:
         assert first_call.kwargs["tool_choice"] == "required"
         assert second_call.kwargs["tool_choice"] == "auto"
 
+    async def test_rejects_degenerate_response_with_excessive_tool_calls(
+        self, test_db_session, tmp_path
+    ) -> None:
+        """Regression test: the real bake-off hit a response with 209
+        near-identical tool calls in a single turn (a degenerate/looping
+        model output), which blew the token budget and then crashed the
+        follow-up request. Such responses must fail fast instead of being
+        dispatched."""
+        await _seed(test_db_session)
+        sample = tmp_path / "s.json"
+        sample.write_text(
+            '[{"source": "github", "project": "craft-parts", "external_id": "1"}]'
+        )
+        runaway = LLMResponse(
+            content="",
+            prompt_tokens=200,
+            completion_tokens=20,
+            total_tokens=220,
+            model="model-a",
+            cost_usd=0.001,
+            tool_calls=[
+                {
+                    "id": f"c{i}",
+                    "type": "function",
+                    "function": {
+                        "name": "grep_repo",
+                        "arguments": '{"project": "craft-parts", "pattern": "x"}',
+                    },
+                }
+                for i in range(50)
+            ],
+        )
+        client = AsyncMock()
+        client.complete.return_value = runaway
+        dispatch = AsyncMock(return_value="x")
+        with (
+            patch("scripts.llm.bakeoff.scoring_pilot.make_client", return_value=client),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.build_round1_baseline",
+                return_value="B",
+            ),
+            patch("scripts.llm.bakeoff.scoring_pilot.dispatch_tool_call", new=dispatch),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._pinned_sha_for_project",
+                return_value="a" * 40,
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._allowed_projects",
+                new=AsyncMock(return_value={"craft-parts": "canonical"}),
+            ),
+        ):
+            results = await run_scoring_pilot(
+                session=test_db_session,
+                models=["model-a"],
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=tmp_path / "t",
+                mirror_dir=tmp_path / "m",
+                api_key="k",
+                max_rounds=6,
+            )
+        assert client.complete.call_count == 1
+        assert results[0].completed is False
+        assert "degenerate response" in (results[0].error or "")
+        assert "50" in (results[0].error or "")
+        dispatch.assert_not_awaited()
+
     async def test_hits_max_rounds_and_records_incomplete(
         self, test_db_session, tmp_path
     ) -> None:

@@ -45,6 +45,13 @@ if TYPE_CHECKING:
 DEFAULT_TOKEN_CEILING = 120_000
 DEFAULT_TOOL_TIMEOUT_S = 20.0
 DEFAULT_SWEEP_CAPS = (3, 4, 6, 8)
+#: Well-behaved rounds observed in the real bake-off call 1-4 tools; a
+#: single response requesting far more than this is a degenerate/looping
+#: model output (observed: 209 near-identical grep_repo calls in one turn,
+#: which then blew the token budget and produced a malformed follow-up
+#: request). Refuse to dispatch past this cap rather than burning tool
+#: execution time and cost on a run that's already failed.
+MAX_TOOL_CALLS_PER_ROUND = 12
 
 
 async def _allowed_projects(
@@ -228,6 +235,17 @@ async def _run_one(
 
             if result.prompt_tokens + result.completion_tokens > token_ceiling:
                 result.error = f"token ceiling exceeded ({token_ceiling})"
+                break
+
+            if len(response.tool_calls) > MAX_TOOL_CALLS_PER_ROUND:
+                result.error = (
+                    f"degenerate response: {len(response.tool_calls)} tool "
+                    f"calls in a single round (cap {MAX_TOOL_CALLS_PER_ROUND})"
+                )
+                result.tools_called.extend(
+                    str((call.get("function") or {}).get("name", ""))
+                    for call in response.tool_calls
+                )
                 break
 
             messages.append(

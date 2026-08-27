@@ -229,14 +229,22 @@ def _parse_evaluation_response(content: str) -> ParsedEvaluation | None:
 
     for candidate in candidates:
         try:
-            return json.loads(candidate)
+            parsed = json.loads(candidate)
         except json.JSONDecodeError:
-            pass
-        # Retry after escaping stray unescaped quotes inside string values.
-        try:
-            return json.loads(_fix_unescaped_quotes(candidate))
-        except json.JSONDecodeError:
-            pass
+            parsed = None
+        if parsed is None or not isinstance(parsed, dict):
+            # Retry after escaping stray unescaped quotes inside string
+            # values. Also reached when json.loads() above succeeded but
+            # produced a non-dict (e.g. a bare JSON string or array) —
+            # valid JSON but not a usable evaluation payload, so treat it
+            # the same as a parse failure rather than returning it and
+            # crashing every downstream ``.get()``/``dict()`` call.
+            try:
+                parsed = json.loads(_fix_unescaped_quotes(candidate))
+            except json.JSONDecodeError:
+                parsed = None
+        if isinstance(parsed, dict):
+            return parsed
 
     # Last resort: salvage a summary even from truncated/unparsable JSON.
     fallback = _extract_summary_fallback(cleaned)
