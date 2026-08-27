@@ -11,7 +11,11 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from scripts.llm.bakeoff.common import make_client, parse_scoring_output
+from scripts.llm.bakeoff.common import (
+    estimate_cost_usd,
+    make_client,
+    parse_scoring_output,
+)
 
 if TYPE_CHECKING:
     from craft_dashboard.llm.client import LLMClient
@@ -61,8 +65,14 @@ async def grade_transcripts(
     api_key: str,
     base_url: str = "",
     ca_cert: str = "",
+    max_spend_usd: float | None = None,
 ) -> list[dict[str, Any]]:
-    """Grade each transcript with a judge model."""
+    """Grade each transcript with a judge model.
+
+    ``max_spend_usd`` bounds the cumulative estimated cost of this run; once
+    exceeded, grading stops and a ``RuntimeError`` is raised so a real-money
+    run cannot silently run past its budget.
+    """
     transcripts = await asyncio.to_thread(load_transcripts, transcripts_dir)
     client = make_client(
         backend=backend,
@@ -71,6 +81,7 @@ async def grade_transcripts(
         ca_cert=ca_cert,
     )
     grades: list[dict[str, Any]] = []
+    cumulative_cost = 0.0
     try:
         for transcript in transcripts:
             response = await client.complete(
@@ -88,6 +99,15 @@ async def grade_transcripts(
                     **parsed,
                 }
             )
+            call_cost = estimate_cost_usd(response, judge_model)
+            if call_cost is not None:
+                cumulative_cost += call_cost
+                if max_spend_usd is not None and cumulative_cost > max_spend_usd:
+                    msg = (
+                        f"max spend exceeded: {cumulative_cost:.4f} > "
+                        f"{max_spend_usd:.4f}"
+                    )
+                    raise RuntimeError(msg)
     finally:
         await _maybe_close(client)
     return grades
@@ -155,6 +175,7 @@ def write_grading_report(grades: list[dict[str, Any]], out_path: Path) -> None:
 @click.option("--out", "out_path", type=click.Path(path_type=Path), required=True)
 @click.option("--api-key", default="", show_default=True)
 @click.option("--base-url", default="", show_default=True)
+@click.option("--max-spend-usd", default=5.0, show_default=True, type=float)
 def cli(
     transcripts_dir: Path,
     judge_model: str,
@@ -162,6 +183,7 @@ def cli(
     out_path: Path,
     api_key: str,
     base_url: str,
+    max_spend_usd: float,
 ) -> None:
     """Grade transcript files and write a Markdown report."""
 
@@ -172,6 +194,7 @@ def cli(
             backend=backend,
             api_key=api_key,
             base_url=base_url,
+            max_spend_usd=max_spend_usd,
         )
 
     grades = asyncio.run(_main())

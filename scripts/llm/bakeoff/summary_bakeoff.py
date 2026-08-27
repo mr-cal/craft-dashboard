@@ -51,10 +51,17 @@ async def run_summary_bakeoff(
     api_key: str = "",
     base_url: str = "",
     ca_cert: str = "",
+    max_spend_usd: float | None = None,
 ) -> list[BakeoffResult]:
-    """Run the closed-item summary bake-off across the frozen sample."""
+    """Run the closed-item summary bake-off across the frozen sample.
+
+    ``max_spend_usd`` bounds the cumulative estimated cost across every
+    (model, issue) call in this run; once exceeded, the run stops and raises
+    a ``RuntimeError`` rather than continuing to spend past budget.
+    """
     sample = await asyncio.to_thread(load_sample, sample_path)
     results: list[BakeoffResult] = []
+    cumulative_cost = 0.0
 
     for model in models:
         client = make_client(
@@ -105,6 +112,14 @@ async def run_summary_bakeoff(
                 except Exception as exc:
                     result.error = str(exc)
                 results.append(result)
+                if result.cost_usd is not None:
+                    cumulative_cost += result.cost_usd
+                    if max_spend_usd is not None and cumulative_cost > max_spend_usd:
+                        msg = (
+                            f"max spend exceeded: {cumulative_cost:.4f} > "
+                            f"{max_spend_usd:.4f}"
+                        )
+                        raise RuntimeError(msg)
         finally:
             await _maybe_close(client)
     return results
@@ -126,8 +141,13 @@ async def run_summary_bakeoff(
     show_default=True,
 )
 @click.option("--out", "out_path", type=click.Path(path_type=Path), required=True)
+@click.option("--max-spend-usd", default=5.0, show_default=True, type=float)
 def cli(
-    models: tuple[str, ...], backend: str, sample_path: Path, out_path: Path
+    models: tuple[str, ...],
+    backend: str,
+    sample_path: Path,
+    out_path: Path,
+    max_spend_usd: float,
 ) -> None:
     """Run the summary bake-off and write its Markdown report."""
     from scripts.llm.bakeoff.report import write_summary_report
@@ -149,6 +169,7 @@ def cli(
                     backend=backend,
                     sample_path=sample_path,
                     api_key=settings.openrouter_api_key,
+                    max_spend_usd=max_spend_usd,
                 )
         finally:
             await engine.dispose()
