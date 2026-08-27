@@ -1,0 +1,414 @@
+{
+  "issue_ref": "snapcraft-rocks#111",
+  "model": "qwen/qwen3.8-27b",
+  "backend": "openrouter",
+  "rounds_used": 6,
+  "completed": false,
+  "tools_called": [
+    "repo_layout",
+    "grep_repo",
+    "git_log_search",
+    "related_issues",
+    "git_log_search",
+    "read_file",
+    "issue_detail",
+    "git_log_search",
+    "git_log_search",
+    "related_issues",
+    "git_log_search",
+    "git_log_search",
+    "git_log_search",
+    "read_file",
+    "read_file",
+    "git_log_search"
+  ],
+  "final_output": {},
+  "transcript": [
+    {
+      "round": 1,
+      "attempt": 1,
+      "content": "",
+      "reasoning": "Let me analyze this issue. This is an issue in the snapcraft-rocks project (probably a repository for rockcraft-related rocks, or a \"rocks\" repository). The issue is about a rock build failure: `craft_parts.errors.OverlayStageConflict: Failed to stage: parts list the same file or directory with different contents or permissions.` \u2014 specifically, part 'snapcraft' and the overlay of part 'snapcraft' are listing the same files (Python 3.10 standard library files) with different contents/permissions.\n\nThe traceback points to craft_parts' collision detection code. The error occurs when a part has an overlay (chrootable overlay) and the part's own files collide with the overlay's files.\n\nLet me investigate the repository. The repository layout of snapcraft-rocks is minimal: .github, LICENSE, README.rst, renovate.json. Hmm, this looks like a small repository. Wait \u2014 the layout only shows top-level files. Let me check the repo layout more carefully \u2014 it's a depth-2 listing. The layout shows:\n- .github/.jira_sync_config.yaml\n- .github/CODEOWNERS\n- .github/workflows\n- .gitignore\n- LICENSE\n- README.rst\n- renovate.json\n\nSo the snapcraft-rocks repository is a small repository, probably containing rock definitions? Actually, \"snapcraft-rocks\" might be a repository for building rocks of snapcraft itself (rocks for snapcraft CI). The issue is about building a rock from the core22-8 branch.\n\nLet me use the tools:\n1. repo_layout for snapcraft-rocks (already provided in the baseline, but I should verify with a live call).\n2. grep for \"overlay\" or \"core22\" within the repository.\n3. git_log_search for \"OverlayStageConflict\" or \"overlay\" in snapcraft-rocks and related projects (rockcraft, craft-parts).\n4. related_issues for overlay stage conflict.\n5. issue_detail for rockcraft#1262.\n\nLet me start with parallel calls: repo_layout(snapcraft-rocks), grep_repo(pattern=\"overlay\", repos=[\"snapcraft-rocks\"]), git_log_search(query=\"overlay\", repos=[\"snapcraft-rocks\"]), related_issues(query=\"OverlayStageConflict overlay stage collision python pyc files\").\n\nThen follow up based on the results.\n\nThe key question for scoring: impact, staleness, complexity, support_request, confidence.\n\nThis issue is a build failure when building a rock from the core22-8 branch. The root cause is probably: the rockcraft part \"snapcraft\" has an overlay that includes python3.10, and the part's build (e.g., pip install or python compilation) generates .pyc files that differ from the overlay's. In fact, the collision is between \"part 'snapcraft'\" and \"the overlay of part 'snapcraft'\". This suggests that the rockcraft.yaml has a part named snapcraft with an overlay (chrootable: true) that includes python3.10, and the part's build step (e.g., running python) generates __pycache__ .pyc files that collide with the overlay's files.\n\nActually, in rockcraft, the \"snapcraft\" part is probably built from source with an overlay that includes python3.10. The .pyc files in the overlay come from the overlay's base image, and the part's build generates new .pyc files (e.g., via compileall or by running python). The contents differ (timestamps embedded in pyc? Actually, pyc files embed source mtime, so they differ).\n\nPossible fix: add `--invalidation-mode unchecked-hash`? No. The typical fix is to clean __pycache__ in the part's build, or to use `overlay` with `chrootable: true` and avoid running python inside the part, or to set `python3.10 -m compileall`? Hmm.\n\nActually, a known rockcraft issue: \"Failed to stage: parts list the same file or directory with different contents or permissions\" when using an overlay that includes python and the part runs python. The fix in rockcraft is to skip collision detection for overlay files? Let me search the git history of rockcraft and craft-parts.\n\nLet me run the tools.\n\nPlan:\nRound 1 (parallel):\n- repo_layout(project=\"snapcraft-rocks\")\n- grep_repo(pattern=\"overlay\", repos=[\"snapcraft-rocks\"])\n- git_log_search(query=\"overlay\", repos=[\"snapcraft-rocks\"])\n- related_issues(query=\"OverlayStageConflict overlay stage collision python pyc files\")\n\nRound 2 (parallel):\n- issue_detail(ref=\"rockcraft#1262\")\n- git_log_search(query=\"OverlayStageConflict\")\n- grep_repo(pattern=\"OverlayStageConflict\", repos=[\"craft-parts\"])\n- git_log_path for the rockcraft.yaml file if it exists.\n\nLet's get started.\n",
+      "tool_calls": [
+        {
+          "type": "function",
+          "index": 0,
+          "id": "chatcmpl-tool-b580663547f0529d",
+          "function": {
+            "name": "repo_layout",
+            "arguments": "{\"project\": \"snapcraft-rocks\"}"
+          }
+        },
+        {
+          "type": "function",
+          "index": 1,
+          "id": "chatcmpl-tool-a557f1f7f9d63062",
+          "function": {
+            "name": "grep_repo",
+            "arguments": "{\"pattern\": \"overlay\", \"repos\": [\"snapcraft-rocks\"]}"
+          }
+        },
+        {
+          "type": "function",
+          "index": 2,
+          "id": "chatcmpl-tool-b95855ad612aae1e",
+          "function": {
+            "name": "git_log_search",
+            "arguments": "{\"query\": \"overlay\", \"repos\": [\"snapcraft-rocks\"]}"
+          }
+        },
+        {
+          "type": "function",
+          "index": 3,
+          "id": "chatcmpl-tool-a6ad90b27b4014ad",
+          "function": {
+            "name": "related_issues",
+            "arguments": "{\"query\": \"OverlayStageConflict failed to stage overlay part lists same file different contents python pyc\"}"
+          }
+        }
+      ],
+      "cost_usd": 0.00852345,
+      "finish_reason": "tool_calls",
+      "prompt_tokens": 14986,
+      "completion_tokens": 1207,
+      "reasoning_tokens": 1099,
+      "retried_truncation": false
+    },
+    {
+      "round": 1,
+      "tool_name": "repo_layout",
+      "tool_arguments": {
+        "project": "snapcraft-rocks"
+      },
+      "tool_output": "./\t4 files\n.github/\t2 files\n.github/workflows/\t1 files"
+    },
+    {
+      "round": 1,
+      "tool_name": "grep_repo",
+      "tool_arguments": {
+        "pattern": "overlay",
+        "repos": [
+          "snapcraft-rocks"
+        ]
+      },
+      "tool_output": "(no matches)"
+    },
+    {
+      "round": 1,
+      "tool_name": "git_log_search",
+      "tool_arguments": {
+        "query": "overlay",
+        "repos": [
+          "snapcraft-rocks"
+        ]
+      },
+      "tool_output": "(no matching commits)"
+    },
+    {
+      "round": 1,
+      "tool_name": "related_issues",
+      "tool_arguments": {
+        "query": "OverlayStageConflict failed to stage overlay part lists same file different contents python pyc"
+      },
+      "tool_output": "{\"results\": []}"
+    },
+    {
+      "round": 2,
+      "attempt": 1,
+      "content": "",
+      "reasoning": "The snapcraft-rocks repository is essentially a stub (4 files at the root, .github, workflows). Let's check the actual files and git history to understand what this project is.\n",
+      "tool_calls": [
+        {
+          "type": "function",
+          "index": 0,
+          "id": "chatcmpl-tool-93e8bf3373ca6628",
+          "function": {
+            "name": "git_log_search",
+            "arguments": "{\"query\": \"rock\", \"repos\": [\"snapcraft-rocks\"]}"
+          }
+        },
+        {
+          "type": "function",
+          "index": 1,
+          "id": "chatcmpl-tool-880812b9baf1b35e",
+          "function": {
+            "name": "read_file",
+            "arguments": "{\"project\": \"snapcraft-rocks\", \"path\": \"README.rst\"}"
+          }
+        },
+        {
+          "type": "function",
+          "index": 2,
+          "id": "chatcmpl-tool-abc32ff5bd91cdb9",
+          "function": {
+            "name": "issue_detail",
+            "arguments": "{\"ref\": \"rockcraft#1262\"}"
+          }
+        }
+      ],
+      "cost_usd": 0.0064908,
+      "finish_reason": "tool_calls",
+      "prompt_tokens": 15207,
+      "completion_tokens": 160,
+      "reasoning_tokens": 45,
+      "retried_truncation": false
+    },
+    {
+      "round": 2,
+      "tool_name": "git_log_search",
+      "tool_arguments": {
+        "query": "rock",
+        "repos": [
+          "snapcraft-rocks"
+        ]
+      },
+      "tool_output": "snapcraft-rocks: 4538525 docs: update repo location, branch links and verbosity (#61)\nsnapcraft-rocks: 3611248 Merge pull request #32 from canonical/CRAFT-2526-update-docs-gcr\nsnapcraft-rocks: 5d5769e docs: update README for published rocks\nsnapcraft-rocks: a2a198d chore(ci): add a workflow to build the rock (#2)"
+    },
+    {
+      "round": 2,
+      "tool_name": "read_file",
+      "tool_arguments": {
+        "project": "snapcraft-rocks",
+        "path": "README.rst"
+      },
+      "tool_output": "Snapcraft rocks\n===============\n\n`Snapcraft`_ `rocks`_ are OCI-compliant container images with different\nversions of Snapcraft to create snaps.\n\nEach rock in this repository bundles a specific version of Snapcraft, targeting\nsnaps for a specific core. The currently supported versions and cores have the\nfollowing tags:\n\n- ``7_core22``, bundling the latest Snapcraft 7 capable of building ``core22``\n  snaps.\n- ``8_core22``, bundling the latest Snapcraft 8 capable of building ``core22``\n  snaps.\n- ``8_core24``, bundling the latest Snapcraft 8 capable of building ``core24``\n  snaps.\n\nThis repository contains sources for generating images.\n\n* `core22-7 <https://github.com/canonical/snapcraft-rocks/tree/core22-7>`_\n* `core22-8 <https://github.com/canonical/snapcraft-rocks/tree/core22-8>`_\n* `core24-8 <https://github.com/canonical/snapcraft-rocks/tree/core24-8>`_\n\nAnd repository of built container images.\n\n* https://github.com/canonical/snapcraft-rocks/pkgs/container/snapcraft\n\n\nUsage\n-----\n\nThe contained Snapcraft needs access to the directory containing the project\nthat you want to snap (the directory containing the ``snap`` folder with a\n``snapcraft.yaml`` file), and this directory needs to be exposed to the\nrunning container as ``/project``. For example, the following command will\nmount the current directory into a new container and run ``pack`` on the\nlatest version of Snapcraft 8 for core24 snaps::\n\n  docker run -it -v `pwd`:/project ghcr.io/canonical/snapcraft:8_core24 pack\n\nOther commands, like ``clean`` or ``build``, can be called simply by replacing\n``pack`` in the example above. Every argument provided after the image name is\nforwarded to Snapcraft.\n\nTo see `snapcraft` output, add flags::\n\n  docker run -it -v `pwd`:/project ghcr.io/canonical/snapcraft:8_core24 \\; -v\n\n\nReporting bugs\n--------------\n\nPlease report all issues, improvements and feature requests at\nhttps://github.com/canonical/snapcraft-rocks.\n\n\nDevelopment\n-----------\n\nThe sources in this repository are capable of building different versions of\nSnapcraft, targeting snaps for different cores. The sources are separated\ninto Git branches in the form ``coreX-Y``, where ``X`` is a core number (like\n``22`` or ``24``), and ``Y`` is a major version of Snapcraft (like ``7`` or\n``8``).\n\nFor example, branch ``core22-7`` contains the Rockcraft project to create\na rock containing the latest stable version of Snapcraft 7 and can be used\nto create snaps targetting ``core22``.\n\nSupported versions\n~~~~~~~~~~~~~~~~~~\n\nThese are the currently supported combinations of Snapcraft versions and cores:\n\n- Branch ``core22-7``, for rocks with latest Snapcraft 7 to build ``core22``\n  snaps.\n- Branch ``core22-8``, for rocks with latest Snapcraft 8 to build ``core22``\n  snaps.\n- Branch ``core24-8``, for rocks with latest Snapcraft 8 to build ``core24``\n  snaps.\n\n\nRequirements\n~~~~~~~~~~~~\n\n- `Rockcraft`_ is needed to generate the rocks (minimum version ``1.1.0``).\n- `Docker`_ or some other engine is needed to create containers from the images.\n  **Note**: Docker can sometimes make ``iptables`` changes that break LXD\n  instances used by Rockcraft. See `this page`_ for details.\n\nInstructions\n~~~~~~~~~~~~\n\n- First, choose a target Snapcraft version and core and checkout the appropriate\n  branch. As an example, let's use branch ``core22-7``.\n- Run ``rockcraft pack`` to create a rock whose name starts with\n  ``snapcraft-core22_7``. The remainder of the name depends on the actual full\n  version of Snapcraft and the host architecture. For example, running this\n  command on an ``amd64`` machine when ``7.5.4`` is the latest stable Snapcraft\n  7 version will yield a rock called ``snapcraft-core22_7.5.4_amd64.rock``.\n- Use a tool like `Skopeo`_ to convert and load the rock into Docker's local\n  registry. You can use the ``skopeo`` binary included in Rockcraft's snap for\n  this (see the `instructions`_ on Rockcraft's docs).\n- Finally, use Docker to create containers to run Snapcraft as described in the\n  `Usage`_ section above.\n\n.. _rocks: https://canonical-rockcraft.readthedocs-hosted.com/en/latest/explanation/rocks/#rocks-explanation\n.. _Snapcraft: https://www.snapcraft.io\n.. _Rockcraft: https://github.com/canonical/rockcraft\n.. _Docker: https://www.docker.com/\n.. _Skopeo: https://github.com/containers/skopeo\n.. _instructions: https://canonical-rockcraft.readthedocs-hosted.com/en/latest/tutorials/hello-world/#run-the-rock-in-docker\n.. _this page: https://canonical-craft-providers.readthedocs-hosted.com/en/latest/explanation/#failure-to-properly-execute-commands-that-depend-on-network-access\n"
+    },
+    {
+      "round": 2,
+      "tool_name": "issue_detail",
+      "tool_arguments": {
+        "ref": "rockcraft#1262"
+      },
+      "tool_output": "{\"candidates\": [{\"project_name\": \"rockcraft\", \"external_id\": \"1262\", \"title\": \"Rockcraft is unable to build rock with \\\"devel\\\" build-bases\", \"summary\": \"Rockcraft fails to build rocks using build-base: devel due to a ValueError when parsing Ubuntu version 26.10 as a BuilddBaseAlias. Unlabelled, no maintainer response, open for 34 days.\", \"state\": \"open\", \"url\": \"https://github.com/canonical/rockcraft/issues/1262\"}]}"
+    },
+    {
+      "round": 3,
+      "attempt": 1,
+      "content": "",
+      "reasoning": "The snapcraft-rocks repository is a documentation-only repository (4 files: README, LICENSE, .gitignore, renovate.json, plus .github files). The actual rockcraft project files (rockcraft.yaml) are on branches like core22-8. The pinned HEAD is probably the main branch, which only contains documentation.\n\nThe issue is about building a rock from the core22-8 branch failing with an OverlayStageConflict error. The error is that part 'snapcraft' and the overlay of part 'snapcraft' list the same files with different contents or permissions \u2014 specifically Python 3.10 files (usr/lib/python3.10/...).\n\nThis is a rockcraft/craft-parts issue: when a part uses an overlay (chroot/overlay) and the part's own build also produces files, a collision occurs. The overlay part's files collide with the part's own files. This is probably a known issue in rockcraft where the overlay part installs python3.10 and the part's build also touches python files.\n\nLet me check the git history of the core22-8 branch... but the tools only allow pinning to a 40-character SHA. The baseline HEAD is pinned to the main branch. I can't easily check out the core22-8 branch. Let me search the git log for related commits.\n\nLet me search the git log for \"stage\" or \"collision\" or \"pycache\", and also search for related issues in the rockcraft project.\n",
+      "tool_calls": [
+        {
+          "type": "function",
+          "index": 0,
+          "id": "chatcmpl-tool-8acca78ee0770919",
+          "function": {
+            "name": "git_log_search",
+            "arguments": "{\"query\": \"stage\", \"repos\": [\"snapcraft-rocks\"]}"
+          }
+        },
+        {
+          "type": "function",
+          "index": 1,
+          "id": "chatcmpl-tool-a12ddf462cddddd4",
+          "function": {
+            "name": "git_log_search",
+            "arguments": "{\"query\": \"core22-8\", \"repos\": [\"snapcraft-rocks\"]}"
+          }
+        },
+        {
+          "type": "function",
+          "index": 2,
+          "id": "chatcmpl-tool-a9e2960d2ee8618f",
+          "function": {
+            "name": "related_issues",
+            "arguments": "{\"query\": \"snapcraft rock build fails overlay stage conflict python3.10 pycache files different contents\"}"
+          }
+        }
+      ],
+      "cost_usd": 0.0026638,
+      "finish_reason": "tool_calls",
+      "prompt_tokens": 16812,
+      "completion_tokens": 452,
+      "reasoning_tokens": 335,
+      "retried_truncation": false
+    },
+    {
+      "round": 3,
+      "tool_name": "git_log_search",
+      "tool_arguments": {
+        "query": "stage",
+        "repos": [
+          "snapcraft-rocks"
+        ]
+      },
+      "tool_output": "(no matching commits)"
+    },
+    {
+      "round": 3,
+      "tool_name": "git_log_search",
+      "tool_arguments": {
+        "query": "core22-8",
+        "repos": [
+          "snapcraft-rocks"
+        ]
+      },
+      "tool_output": "snapcraft-rocks: af4a382 chore(docs): update readme (#24)"
+    },
+    {
+      "round": 3,
+      "tool_name": "related_issues",
+      "tool_arguments": {
+        "query": "snapcraft rock build fails overlay stage conflict python3.10 pycache files different contents"
+      },
+      "tool_output": "{\"results\": []}"
+    },
+    {
+      "round": 4,
+      "attempt": 1,
+      "content": "",
+      "reasoning": "The repository layout at the pinned HEAD only shows 4 files at the root and .github. The rockcraft.yaml file is probably on a branch (core22-8), not on the pinned HEAD. The pinned HEAD is probably the default branch (main), which only has documentation. The issue is about building a rock from the core22-8 branch.\n\nLet me check the git history a bit more and see if there are any commits related to this issue. Also, let me search for \"rockcraft.yaml\" in the git history.\n",
+      "tool_calls": [
+        {
+          "type": "function",
+          "index": 0,
+          "id": "chatcmpl-tool-b802b2b317c9de97",
+          "function": {
+            "name": "git_log_search",
+            "arguments": "{\"query\": \"rockcraft.yaml\", \"repos\": [\"snapcraft-rocks\"]}"
+          }
+        },
+        {
+          "type": "function",
+          "index": 1,
+          "id": "chatcmpl-tool-9d4f9a1727e07f94",
+          "function": {
+            "name": "git_log_search",
+            "arguments": "{\"query\": \"snapcraft\", \"repos\": [\"snapcraft-rocks\"]}"
+          }
+        }
+      ],
+      "cost_usd": 0.0073269,
+      "finish_reason": "tool_calls",
+      "prompt_tokens": 17004,
+      "completion_tokens": 206,
+      "reasoning_tokens": 120,
+      "retried_truncation": false
+    },
+    {
+      "round": 4,
+      "tool_name": "git_log_search",
+      "tool_arguments": {
+        "query": "rockcraft.yaml",
+        "repos": [
+          "snapcraft-rocks"
+        ]
+      },
+      "tool_output": "(no matching commits)"
+    },
+    {
+      "round": 4,
+      "tool_name": "git_log_search",
+      "tool_arguments": {
+        "query": "snapcraft",
+        "repos": [
+          "snapcraft-rocks"
+        ]
+      },
+      "tool_output": "snapcraft-rocks: 4538525 docs: update repo location, branch links and verbosity (#61)\nsnapcraft-rocks: e1a4987 chore(ci): have renovate update snapcraft (#19)"
+    },
+    {
+      "round": 5,
+      "attempt": 1,
+      "content": "",
+      "reasoning": "The repository is a documentation-centric repository, and the actual rockcraft.yaml file is on a branch (core22-8) that isn't included in the pinned baseline. The baseline HEAD is probably the main branch, which only contains documentation.\n\nLet me check the git log for the entire repository to understand the structure, and try reading the files on the main branch. I'll check the git log for the README to see the recent activity, and also check the .github/workflows files.\n\nActually, let me try reading the workflow files and checking the git log more broadly.\n",
+      "tool_calls": [
+        {
+          "type": "function",
+          "index": 0,
+          "id": "chatcmpl-tool-8bac4b534ebe2340",
+          "function": {
+            "name": "git_log_search",
+            "arguments": "{\"query\": \"build\", \"repos\": [\"snapcraft-rocks\"]}"
+          }
+        },
+        {
+          "type": "function",
+          "index": 1,
+          "id": "chatcmpl-tool-8c4abb906943e05d",
+          "function": {
+            "name": "read_file",
+            "arguments": "{\"project\": \"snapcraft-rocks\", \"path\": \".github/workflows\"}"
+          }
+        }
+      ],
+      "cost_usd": 0.00739745,
+      "finish_reason": "tool_calls",
+      "prompt_tokens": 17174,
+      "completion_tokens": 207,
+      "reasoning_tokens": 144,
+      "retried_truncation": false
+    },
+    {
+      "round": 5,
+      "tool_name": "git_log_search",
+      "tool_arguments": {
+        "query": "build",
+        "repos": [
+          "snapcraft-rocks"
+        ]
+      },
+      "tool_output": "snapcraft-rocks: 5d5769e docs: update README for published rocks\nsnapcraft-rocks: a2a198d chore(ci): add a workflow to build the rock (#2)"
+    },
+    {
+      "round": 5,
+      "tool_name": "read_file",
+      "tool_arguments": {
+        "project": "snapcraft-rocks",
+        "path": ".github/workflows"
+      },
+      "tool_output": "tree da3d3e83d78451608c0bca3af7da45225703d7d4:.github/workflows\n\nbuild-rock.yaml\n"
+    },
+    {
+      "round": 6,
+      "attempt": 1,
+      "content": "",
+      "reasoning": "The repository layout is minimal \u2014 the default branch (main) only contains documentation and CI workflows. The actual rockcraft project files (rockcraft.yaml) are on the branch (core22-8). The pinned HEAD is probably the main branch. Let me check the build-rock.yaml workflow and the git log of the main branch to understand the situation.\n\nLet me read the workflow file and check the git log of the main branch.\n",
+      "tool_calls": [
+        {
+          "type": "function",
+          "index": 0,
+          "id": "chatcmpl-tool-a183aa4ddb76bc89",
+          "function": {
+            "name": "read_file",
+            "arguments": "{\"project\": \"snapcraft-rocks\", \"path\": \".github/workflows/build-rock.yaml\"}"
+          }
+        },
+        {
+          "type": "function",
+          "index": 1,
+          "id": "chatcmpl-tool-8df767a60d180409",
+          "function": {
+            "name": "git_log_search",
+            "arguments": "{\"query\": \"snapcraft 8\", \"repos\": [\"snapcraft-rocks\"]}"
+          }
+        }
+      ],
+      "cost_usd": 0.00741585,
+      "finish_reason": "tool_calls",
+      "prompt_tokens": 17373,
+      "completion_tokens": 183,
+      "reasoning_tokens": 106,
+      "retried_truncation": false
+    },
+    {
+      "round": 6,
+      "tool_name": "read_file",
+      "tool_arguments": {
+        "project": "snapcraft-rocks",
+        "path": ".github/workflows/build-rock.yaml"
+      },
+      "tool_output": "name: Build rock\n\non:\n  pull_request:\n    branches:\n      - 'core2[24]-[78]'\n  push:\n    branches:\n      - 'core2[24]-[78]'\n\njobs:\n  build-rock:\n    runs-on: ubuntu-22.04\n    steps:\n      - name: Checkout repository\n        uses: actions/checkout@v4\n    \n      - name: Build rock\n        uses: canonical/craft-actions/rockcraft-pack@main\n        with:\n          rockcraft-channel: candidate\n"
+    },
+    {
+      "round": 6,
+      "tool_name": "git_log_search",
+      "tool_arguments": {
+        "query": "snapcraft 8",
+        "repos": [
+          "snapcraft-rocks"
+        ]
+      },
+      "tool_output": "(no matching commits)"
+    }
+  ]
+}

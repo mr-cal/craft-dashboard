@@ -8,13 +8,14 @@ host or in ad-hoc local backups), the contents here are committed to the repo
 so they can be reviewed, diffed, and iterated on over time.
 
 Each subdirectory/run should contain:
-- `sample.json` — the exact issue set evaluated (fixed, not randomly sampled).
-- `report_scoring.md` — the scoring bake-off roll-up produced by
-  `scripts/llm/bakeoff/scoring_pilot.py`.
-- `transcripts/*.json` — one file per (model, issue) pair, containing every
-  round's raw model output, **including `reasoning`** (the model's
-  thinking/reasoning trace, when the provider returns one), all tool calls
-  made, and the tool outputs returned.
+- `sample.json` — the exact issue set evaluated (fixed, not randomly sampled;
+  shared across v1/v2 runs below since they evaluate the same 5 issues).
+- `report_scoring_vN.md` — the scoring bake-off roll-up produced by
+  `scripts/llm/bakeoff/scoring_pilot.py` for run N.
+- `transcripts_vN/*.json` — one file per (model, issue) pair for run N,
+  containing every round's raw model output, **including `reasoning`** (the
+  model's thinking/reasoning trace, when the provider returns one), all tool
+  calls made, and the tool outputs returned.
 
 ## 2026-08-27: qwen/qwen3.8-27b on 5 hand-picked issues
 
@@ -80,3 +81,83 @@ snapcraft and rockcraft). That change **has no effect on this bake-off run**:
 the full `craft-projects` allowlist regardless of app/library/consumer
 distinctions — that restriction is only enforced by the live `/next` HTTP
 endpoint, which this script never calls.
+
+> **CORRECTION (see the 2026-08-27 v2 entry below): the "genuine
+> model-quality finding" conclusion above was wrong.** It was a real harness
+> bug after all, as suspected. Kept here unedited for the record, plus the
+> correction, so the debugging trail is honest about the mistake rather than
+> quietly rewritten.
+
+## 2026-08-27 (v2): root cause found — `response_format` was suppressing tool calls
+
+**Why this run exists:** after presenting the v1 findings above, the user
+pushed back: *"I think this is a harness problem... could it be that the LLM
+is failing when trying to dispatch something and exits before it got a
+chance to finish thinking?"* That was the right call. Two prior gaps made
+this invisible: (1) `related_issues` returning `{"results": []}` for 4/5
+issues looked suspicious but turned out to be legitimate — embedding
+coverage is 100% for every project including the small ones, and the
+`exclude_issue_id` self-match filter correctly excludes the issue's own
+(highly similar) embedding, which was often the *only* real nearest
+neighbor; (2) the harness never captured the API's `finish_reason` or
+per-round token/reasoning-token usage, so a model that was cut off
+mid-generation was indistinguishable from one that had deliberately
+finished. Both gaps are now closed (`craft_dashboard/llm/client.py` +
+`scripts/llm/bakeoff/scoring_pilot.py`, commit `bdc1d812`).
+
+**Root cause, confirmed by direct reproduction:** with `finish_reason`
+visible, every "all-zero final answer" transcript showed `finish_reason ==
+"stop"` (not `"length"`) — ruling out simple token-budget truncation — while
+the model's own `reasoning` for that same turn explicitly described wanting
+to call more tools (e.g. *"Let me run a few more tools: Read filesets.py...
+git_log_path... git_log_search... related_issues... Let me run these in
+parallel"* for craft-parts#766). Replaying the exact same conversation state
+directly against OpenRouter with and without
+`response_format={"type": "json_object"}` reproduced the bug on demand:
+
+- **With** `response_format={"type": "json_object"}` (what the harness sent
+  every round): `finish_reason: stop`, `has tool_calls: False`, and a
+  nonsensical JSON-shaped stub in `content`.
+- **Without** it (same messages, same model, nothing else changed):
+  `finish_reason: tool_calls`, `has tool_calls: True`, and the model
+  continues investigating exactly as its own reasoning said it would.
+
+So forcing JSON response mode on every round — including rounds where tools
+were still being offered with `tool_choice="auto"` — was silently disabling
+this model's ability to keep calling tools via OpenRouter. The production
+single-shot evaluator (`craft_dashboard/llm/evaluator.py`) never hit this
+because it never offers `tools` at all; the conflict is specific to this
+tool-calling bake-off harness.
+
+**Fix (commit `f16a13b5`):** stop sending `response_format` whenever `tools`
+are also offered. The system prompt already instructs JSON-shaped output,
+and the existing production parser (`_parse_evaluation_response`, reused via
+`parse_scoring_output`) already tolerates markdown fences, `<think>` blocks,
+and surrounding prose, so `response_format` wasn't needed for correct
+parsing. Also added a genuine safety net for the failure mode this
+investigation could have hidden: if a round returns no tool calls *and*
+`finish_reason == "length"` (an actual mid-generation cutoff), the harness
+now retries (up to `MAX_TRUNCATION_RETRIES = 2`) instead of silently
+accepting truncated content as a real final answer.
+
+**Re-ran the same 5-issue sample after the fix** (`report_scoring_v2.md`,
+`transcripts_v2/`): the fix works exactly as hoped — every transcript now
+shows the model doing sustained, genuine multi-round investigation (reading
+real source files, checking git history, cross-referencing related PRs)
+instead of bailing out with a placeholder. But it surfaced a **new, real
+calibration problem**: all 5 runs now hit the `MAX_TOOL_ROUNDS = 6` cap (or
+the 120k token ceiling) without ever producing a final answer — completion
+rate dropped to 0% for a different reason than v1 (never finalizes, instead
+of finalizing with garbage). Looking at the reasoning per round (e.g.
+craft-parts#766), the model is doing real analysis each round but doesn't
+converge — it re-derives the same code path understanding several times
+without visibly building toward a stop condition.
+
+**Not yet resolved, needs a decision:** either raise `MAX_TOOL_ROUNDS`
+(cost/time will scale accordingly — this run averaged ~$0.042/issue and
+~70s/issue at 6 rounds, versus ~$0.006/issue at ~2 rounds in v1), add an
+explicit "you have N of M rounds left, finalize now if you have enough
+evidence" nudge to the prompt as the round budget runs low, or both. Holding
+off on a third re-run until this is decided together, per the user's request
+to iterate on the eval process rather than have it done unilaterally.
+
