@@ -1998,6 +1998,59 @@ class TestNextIssueShaPinning:
         for sha in body["repo_shas"].values():
             assert len(sha) == 40
 
+    def test_craft_consumer_project_pins_shas_for_apps_and_libraries(
+        self, test_db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """A craft-consumer project (e.g. snapcraft-rocks, which builds rock
+        images packaging multiple craft-applications) must pin its own repo
+        plus every craft-application and every craft-library's HEAD.
+        """
+        eval_api.limiter.reset()
+        project = make_project(id=1, name="snapcraft-rocks", category="other")
+        issue = make_issue(id=1, project_id=1, external_id="1", state="open")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+
+        mirror_dir = tmp_path / "mirrors"
+        mirror_dir.mkdir()
+        for name in ("snapcraft-rocks", "snapcraft", "rockcraft", "craft-parts"):
+            self._make_bare_mirror_with_commit(mirror_dir, tmp_path, name)
+
+        app = create_app()
+        app.router.lifespan_context = _noop_lifespan
+        app.state.config = DashboardConfig(
+            maintainers=["alice", "bob"],
+            craft_applications=["snapcraft", "rockcraft"],
+            craft_libraries=["craft-parts"],
+            craft_consumers=["snapcraft-rocks"],
+        )
+        app.state.settings = Settings()
+        app.state.settings.eval_api_token = _TEST_EVAL_TOKEN
+        app.state.settings.mirror_dir = str(mirror_dir)
+
+        async def _override() -> AsyncGenerator[AsyncSession, None]:
+            yield test_db_session
+
+        app.dependency_overrides[get_db_session] = _override
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/next",
+                headers={"Authorization": "Bearer " + _TEST_EVAL_TOKEN},
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body["repo_shas"]) == {
+            "snapcraft-rocks",
+            "snapcraft",
+            "rockcraft",
+            "craft-parts",
+        }
+        for sha in body["repo_shas"].values():
+            assert len(sha) == 40
+
     def test_missing_mirror_omits_that_project_from_repo_shas(
         self, test_db_session: AsyncSession, tmp_path: Path
     ) -> None:

@@ -32,6 +32,29 @@ class TestOpenRouterClient:
 
         assert client.base_url == "https://custom.api/v1"
 
+    @pytest.mark.asyncio
+    async def test_complete_requests_reasoning_tokens(self) -> None:
+        """Every request opts into OpenRouter's unified reasoning field so
+        supporting models surface their thinking trace instead of it being
+        silently discarded.
+        """
+        mock_response = httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "hi"}}]},
+            request=httpx.Request("POST", "http://x"),
+        )
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+            client = OpenRouterClient(api_key="test")
+
+            await client.complete(
+                model="test/model", messages=[{"role": "user", "content": "hi"}]
+            )
+
+        _args, kwargs = mock_post.call_args
+        assert kwargs["json"]["reasoning"] == {"enabled": True}
+
 
 class TestQuotaError:
     """Tests for quota error detection."""
@@ -209,6 +232,35 @@ class TestLLMResponse:
 
         assert response.content == ""
         assert response.total_tokens == 10
+
+    def test_from_api_response_captures_reasoning(self) -> None:
+        """OpenRouter surfaces a model's thinking trace in
+        ``message.reasoning`` by default when the model supports it -- this
+        must be captured, not silently dropped, or bake-off/debug transcripts
+        have no visibility into why a model reached a given answer.
+        """
+        api_data = {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"summary": "done"}',
+                        "reasoning": "Step 1: read the issue. Step 2: ...",
+                    }
+                }
+            ],
+        }
+
+        response = LLMResponse.from_api_response(api_data)
+
+        assert response.reasoning == "Step 1: read the issue. Step 2: ..."
+
+    def test_from_api_response_defaults_reasoning_to_none(self) -> None:
+        """Models/providers that don't return reasoning leave it unset."""
+        api_data = {"choices": [{"message": {"content": "hello"}}]}
+
+        response = LLMResponse.from_api_response(api_data)
+
+        assert response.reasoning is None
 
 
 class TestOpenRouterClientRetryLogging:

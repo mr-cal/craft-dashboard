@@ -38,6 +38,13 @@ craft-projects = [
     "starflow",
 ]
 
+# snapcraft-rocks builds rock images that package multiple craft
+# applications (notably snapcraft and rockcraft), so its round-1
+# evaluation baseline should include every craft-application's repo, not
+# just its own -- in addition to the craft-libraries every app already
+# gets. See routes.eval_api._resolve_repo_shas.
+craft-consumers = ["snapcraft-rocks"]
+
 refresh-interval-days = 7
 
 # Commit-scanner tuning (env-overridable via Settings):

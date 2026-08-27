@@ -216,6 +216,7 @@ async def _run_one(
                 {
                     "round": round_num,
                     "content": response.content,
+                    "reasoning": response.reasoning,
                     "tool_calls": response.tool_calls,
                     "cost_usd": call_cost,
                 }

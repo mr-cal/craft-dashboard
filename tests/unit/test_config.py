@@ -19,6 +19,7 @@ class TestDashboardConfig:
                 craft-applications = ["snapcraft", "charmcraft"]
                 craft-libraries = ["craft-cli"]
                 craft-projects = ["snapcraft", "charmcraft", "craft-cli"]
+                craft-consumers = ["snapcraft-rocks"]
                 refresh-interval-days = 7
                 launchpad-projects = ["snapcraft"]
                 maintainers = ["mr-cal"]
@@ -33,6 +34,7 @@ class TestDashboardConfig:
         assert config.craft_applications == ["snapcraft", "charmcraft"]
         assert config.craft_libraries == ["craft-cli"]
         assert config.craft_projects == ["snapcraft", "charmcraft", "craft-cli"]
+        assert config.craft_consumers == ["snapcraft-rocks"]
         assert config.refresh_interval_days == 7
         assert config.launchpad_projects == ["snapcraft"]
         assert config.maintainers == ["mr-cal"]

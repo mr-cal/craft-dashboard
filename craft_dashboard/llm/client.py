@@ -92,6 +92,13 @@ class LLMResponse:
     # returned plain content instead. Each entry is the raw OpenAI-format
     # dict: {"id": ..., "type": "function", "function": {"name": ..., "arguments": "<json str>"}}.
     tool_calls: list[dict[str, Any]] | None = None
+    # The model's reasoning/thinking trace, if the provider returned one.
+    # OpenRouter normalizes this across providers into ``message.reasoning``
+    # and includes it by default whenever a supporting model decides to
+    # output it -- previously this was silently dropped, which is why
+    # bake-off transcripts had no visibility into *why* a model reached a
+    # given score even for models that were actually reasoning internally.
+    reasoning: str | None = None
 
     @classmethod
     def from_api_response(cls, data: dict) -> LLMResponse:
@@ -112,6 +119,7 @@ class LLMResponse:
             model=data.get("model", ""),
             cost_usd=usage.get("cost"),
             tool_calls=message.get("tool_calls"),
+            reasoning=message.get("reasoning") or None,
         )
 
 
@@ -206,6 +214,13 @@ class OpenRouterClient:
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            # Explicitly request reasoning tokens (OpenRouter's unified
+            # ``reasoning`` field across providers) so that models which
+            # support a visible thinking trace surface it in
+            # ``message.reasoning`` instead of silently reasoning
+            # internally with nothing for us to inspect. Harmless no-op for
+            # models that don't support reasoning.
+            "reasoning": {"enabled": True},
         }
         if response_format:
             payload["response_format"] = response_format

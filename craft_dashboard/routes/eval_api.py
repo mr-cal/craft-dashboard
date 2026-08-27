@@ -370,18 +370,24 @@ async def _resolve_repo_shas(
     mirror_dir: Path,
     craft_applications: list[str],
     craft_libraries: list[str],
+    craft_consumers: list[str],
 ) -> dict[str, str]:
     """Return {project: head_sha} for the round-1 baseline's repo set.
 
     Per the design doc's round-1 scope table: if project_name is one of the
     craft-applications (or craft-application itself), include its own repo
-    plus every craft-library; otherwise include only its own repo. Silently
-    omits any project with no mirror on disk yet (the worker's preflight
-    step is responsible for deciding whether that's fatal).
+    plus every craft-library; otherwise include only its own repo. A
+    project listed in craft-consumers (e.g. "snapcraft-rocks", which builds
+    rock images packaging multiple craft-applications) additionally gets
+    every craft-application's repo, on top of the libraries every app gets.
+    Silently omits any project with no mirror on disk yet (the worker's
+    preflight step is responsible for deciding whether that's fatal).
     """
     repos_needed = {project_name}
     if project_name in craft_applications or project_name == "craft-application":
         repos_needed |= set(craft_libraries)
+    if project_name in craft_consumers:
+        repos_needed |= set(craft_libraries) | set(craft_applications)
 
     shas: dict[str, str] = {}
     for repo in repos_needed:
@@ -474,6 +480,7 @@ async def next_issue(
         mirror_dir=settings.mirror_dir_path,
         craft_applications=list(dashboard_config.craft_applications),
         craft_libraries=list(dashboard_config.craft_libraries),
+        craft_consumers=list(dashboard_config.craft_consumers),
     )
 
     return {

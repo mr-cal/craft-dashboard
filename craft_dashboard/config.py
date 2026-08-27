@@ -46,6 +46,13 @@ class DashboardConfig(BaseModel):
     craft_applications: list[str] = Field(default_factory=list)
     craft_libraries: list[str] = Field(default_factory=list)
     craft_projects: list[str] = Field(default_factory=list)
+    #: Projects that aren't themselves a craft-application, but consume/wrap
+    #: several of them (e.g. "snapcraft-rocks" builds rock images that
+    #: package multiple craft-applications) and therefore need those apps'
+    #: repos available as round-1 evaluation context too, in addition to the
+    #: craft-libraries every app already gets. See
+    #: ``routes.eval_api._resolve_repo_shas``.
+    craft_consumers: list[str] = Field(default_factory=list)
     refresh_interval_days: int = 7
     schedule_days: list[int] = Field(default_factory=list)
     launchpad_projects: list[str] = Field(default_factory=list)

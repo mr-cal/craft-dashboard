@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -139,6 +140,64 @@ class TestRunScoringPilot:
         assert results[0].rounds_used == 1
         assert results[0].completed is True
         assert results[0].new_output["scores"]["impact"] == 70
+
+    async def test_transcript_captures_model_reasoning(
+        self, test_db_session, tmp_path
+    ) -> None:
+        """The model's reasoning trace (when the provider returns one) must
+        be written into the per-round transcript entry, not discarded --
+        otherwise debug transcripts have no visibility into *why* a model
+        reached a given score.
+        """
+        await _seed(test_db_session)
+        sample = tmp_path / "s.json"
+        sample.write_text(
+            '[{"source": "github", "project": "craft-parts", "external_id": "1"}]'
+        )
+        client = AsyncMock()
+        client.complete.return_value = LLMResponse(
+            content='{"scores": {"impact": 70}, "related_work": []}',
+            prompt_tokens=200,
+            completion_tokens=40,
+            total_tokens=240,
+            model="model-a",
+            cost_usd=0.002,
+            tool_calls=None,
+            reasoning="Considered the issue title and decided impact=70.",
+        )
+        transcripts_dir = tmp_path / "t"
+        with (
+            patch("scripts.llm.bakeoff.scoring_pilot.make_client", return_value=client),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.build_round1_baseline",
+                return_value="B",
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._pinned_sha_for_project",
+                return_value="a" * 40,
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._allowed_projects",
+                new=AsyncMock(return_value={"craft-parts": "canonical"}),
+            ),
+        ):
+            await run_scoring_pilot(
+                session=test_db_session,
+                models=["model-a"],
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=transcripts_dir,
+                mirror_dir=tmp_path / "m",
+                api_key="k",
+                max_rounds=6,
+            )
+
+        transcript_files = list(transcripts_dir.glob("*.json"))
+        assert len(transcript_files) == 1
+        data = json.loads(transcript_files[0].read_text())
+        assert data["transcript"][0]["reasoning"] == (
+            "Considered the issue title and decided impact=70."
+        )
 
     async def test_dispatches_tools_and_continues(
         self, test_db_session, tmp_path
