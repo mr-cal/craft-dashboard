@@ -9,7 +9,7 @@ so they can be reviewed, diffed, and iterated on over time.
 
 Each subdirectory/run should contain:
 - `sample.json` — the exact issue set evaluated (fixed, not randomly sampled;
-  shared across v1/v2 runs below since they evaluate the same 5 issues).
+  shared across v1/v2/v3 runs below since they evaluate the same 5 issues).
 - `report_scoring_vN.md` — the scoring bake-off roll-up produced by
   `scripts/llm/bakeoff/scoring_pilot.py` for run N.
 - `transcripts_vN/*.json` — one file per (model, issue) pair for run N,
@@ -160,4 +160,47 @@ explicit "you have N of M rounds left, finalize now if you have enough
 evidence" nudge to the prompt as the round budget runs low, or both. Holding
 off on a third re-run until this is decided together, per the user's request
 to iterate on the eval process rather than have it done unilaterally.
+
+### 2026-08-27 (v3): round-cap calibration fix
+
+Decision from the user: raise the cap to 8, add an explicit
+"round N of M (K remaining)" nudge every round so the model can pace itself
+and finalize early once it has enough evidence, and force the model to
+answer on the final round instead of letting it request tools it will never
+get to use.
+
+**Fix (`scripts/llm/bakeoff/scoring_pilot.py`, commit `6bc1a554`):**
+- `MAX_TOOL_ROUNDS` (via `--max-rounds`) default raised from 6 to 8.
+- Every round, a `user`-role message is appended stating the current round
+  number, the total, and rounds remaining, and encouraging the model to
+  finalize early if it already has enough evidence (`tool_choice="auto"`
+  already permitted this; the nudge just makes the budget explicit instead
+  of implicit).
+- On the final round, `tool_choice` is forced to `"none"` (no further tool
+  calls will be dispatched after this round regardless of what the model
+  asks for) and the nudge instead instructs the model that this is the
+  final round and it must return its scores now, based on the evidence
+  already gathered.
+
+Added regression tests: `test_final_round_forces_tool_choice_none_and_finalizes`,
+`test_non_final_rounds_get_a_rounds_remaining_nudge` (red-green verified).
+
+**Re-ran the same 5-issue sample a fourth time** (`report_scoring_v3.md`,
+`transcripts_v3/`): **completion rate rose from 0% to 80% (4/5)**, with
+real, evidence-grounded scores and `related_work` citations for
+snapcraft#6381, snapcraft (launchpad)#1861614, snapcraft-rocks#111, and
+craft-parts#766 — all finalizing within 5-7 rounds (below the 8-round cap),
+confirming the early-finalize nudge is working, not just the raised cap.
+The one remaining failure, debcraft#41, did *not* hit the round cap either —
+it hit the separate `token ceiling exceeded (120000)` guard at round 5 after
+several `grep_repo`/`read_file` calls returned unusually large tool output
+for that repo. This is a distinct, narrower problem (per-issue token budget
+sizing for verbose tool output) from the round-convergence issue this
+session set out to fix, and is a reasonable next thing to look at, but is
+not blocking review of the 4 real, trustworthy results now available.
+
+Mean cost/time per issue: ~$0.045, ~117s — similar to the v2 (broken
+convergence) run's ~$0.042/~70s, but now actually producing final answers
+instead of silently failing every time.
+
 
