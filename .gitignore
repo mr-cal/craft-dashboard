@@ -44,3 +44,6 @@ logs.txt
 
 # plans
 plans/
+
+# LLM debug-eval scratch artifacts (local-only, not versioned)
+debug-evals/
