@@ -296,6 +296,170 @@ class TestRunScoringPilot:
         assert first_call.kwargs["tool_choice"] == "required"
         assert second_call.kwargs["tool_choice"] == "auto"
 
+    async def test_does_not_request_json_object_response_format(
+        self, test_db_session, tmp_path
+    ) -> None:
+        """Regression test: sending response_format={"type": "json_object"}
+        alongside tools + tool_choice="auto" was confirmed (via direct
+        reproduction against OpenRouter with an identical message history)
+        to suppress the model's ability to keep calling tools, even when its
+        own reasoning explicitly stated it wanted to. It gets boxed into
+        emitting placeholder JSON content instead of a real tool_call or a
+        real final answer. The harness must not request json_object mode
+        while tools are being offered."""
+        await _seed(test_db_session)
+        sample = tmp_path / "s.json"
+        sample.write_text(
+            '[{"source": "github", "project": "craft-parts", "external_id": "1"}]'
+        )
+        client = AsyncMock()
+        client.complete.side_effect = [_tool_call(), _final()]
+        with (
+            patch("scripts.llm.bakeoff.scoring_pilot.make_client", return_value=client),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.build_round1_baseline",
+                return_value="B",
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.dispatch_tool_call",
+                new=AsyncMock(return_value="src/\t3 files"),
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._pinned_sha_for_project",
+                return_value="a" * 40,
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._allowed_projects",
+                new=AsyncMock(return_value={"craft-parts": "canonical"}),
+            ),
+        ):
+            await run_scoring_pilot(
+                session=test_db_session,
+                models=["model-a"],
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=tmp_path / "t",
+                mirror_dir=tmp_path / "m",
+                api_key="k",
+                max_rounds=6,
+            )
+        for call in client.complete.call_args_list:
+            assert "response_format" not in call.kwargs
+
+    async def test_retries_after_truncated_no_tool_call_response(
+        self, test_db_session, tmp_path
+    ) -> None:
+        """Regression test: a response with no tool_calls and
+        finish_reason == "length" means the model was cut off mid-generation
+        by its token/reasoning budget, not that it deliberately finished --
+        this must be retried rather than silently accepted as the model's
+        real final answer."""
+        await _seed(test_db_session)
+        sample = tmp_path / "s.json"
+        sample.write_text(
+            '[{"source": "github", "project": "craft-parts", "external_id": "1"}]'
+        )
+        truncated = LLMResponse(
+            content='{"scores": {',
+            prompt_tokens=200,
+            completion_tokens=4096,
+            total_tokens=4296,
+            model="model-a",
+            cost_usd=0.01,
+            tool_calls=None,
+            finish_reason="length",
+        )
+        client = AsyncMock()
+        client.complete.side_effect = [_tool_call(), truncated, _final()]
+        with (
+            patch("scripts.llm.bakeoff.scoring_pilot.make_client", return_value=client),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.build_round1_baseline",
+                return_value="B",
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.dispatch_tool_call",
+                new=AsyncMock(return_value="src/\t3 files"),
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._pinned_sha_for_project",
+                return_value="a" * 40,
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._allowed_projects",
+                new=AsyncMock(return_value={"craft-parts": "canonical"}),
+            ),
+        ):
+            results = await run_scoring_pilot(
+                session=test_db_session,
+                models=["model-a"],
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=tmp_path / "t",
+                mirror_dir=tmp_path / "m",
+                api_key="k",
+                max_rounds=6,
+            )
+        assert client.complete.call_count == 3
+        assert results[0].completed is True
+        assert results[0].error is None
+
+    async def test_gives_up_after_repeated_truncation(
+        self, test_db_session, tmp_path
+    ) -> None:
+        """After MAX_TRUNCATION_RETRIES consecutive truncated responses, the
+        harness must give up and record an error rather than retrying
+        forever or accepting the truncated content as a real answer."""
+        await _seed(test_db_session)
+        sample = tmp_path / "s.json"
+        sample.write_text(
+            '[{"source": "github", "project": "craft-parts", "external_id": "1"}]'
+        )
+        truncated = LLMResponse(
+            content='{"scores": {',
+            prompt_tokens=200,
+            completion_tokens=4096,
+            total_tokens=4296,
+            model="model-a",
+            cost_usd=0.01,
+            tool_calls=None,
+            finish_reason="length",
+        )
+        client = AsyncMock()
+        client.complete.side_effect = [_tool_call(), truncated, truncated, truncated]
+        with (
+            patch("scripts.llm.bakeoff.scoring_pilot.make_client", return_value=client),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.build_round1_baseline",
+                return_value="B",
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.dispatch_tool_call",
+                new=AsyncMock(return_value="src/\t3 files"),
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._pinned_sha_for_project",
+                return_value="a" * 40,
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._allowed_projects",
+                new=AsyncMock(return_value={"craft-parts": "canonical"}),
+            ),
+        ):
+            results = await run_scoring_pilot(
+                session=test_db_session,
+                models=["model-a"],
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=tmp_path / "t",
+                mirror_dir=tmp_path / "m",
+                api_key="k",
+                max_rounds=6,
+            )
+        assert client.complete.call_count == 4
+        assert results[0].completed is False
+        assert "truncated" in (results[0].error or "")
+
     async def test_rejects_degenerate_response_with_excessive_tool_calls(
         self, test_db_session, tmp_path
     ) -> None:

@@ -52,6 +52,14 @@ DEFAULT_SWEEP_CAPS = (3, 4, 6, 8)
 #: request). Refuse to dispatch past this cap rather than burning tool
 #: execution time and cost on a run that's already failed.
 MAX_TOOL_CALLS_PER_ROUND = 12
+#: If a round returns no tool_calls AND finish_reason == "length" (the
+#: model was cut off by the token/reasoning budget mid-generation, not a
+#: deliberate stop), retry that same round instead of silently accepting
+#: whatever partial content came back as a finished answer. Observed in the
+#: qwen debug-evals run: truncated-looking placeholder outputs need to be
+#: distinguished from genuine final answers, since both otherwise look
+#: identical once finish_reason is discarded.
+MAX_TRUNCATION_RETRIES = 2
 
 
 async def _allowed_projects(
@@ -198,35 +206,71 @@ async def _run_one(
             # choose to finalize once it has enough evidence) is a minimal,
             # low-risk way to stop that degenerate no-evidence path.
             tool_choice = "required" if round_num == 1 else "auto"
-            response = await client.complete(
-                model=model,
-                messages=messages,
-                tools=TOOL_SCHEMAS,
-                tool_choice=tool_choice,
-                max_tokens=4096,
-                response_format={"type": "json_object"},
-            )
+            # response_format={"type": "json_object"} is deliberately NOT
+            # sent here. Confirmed via direct reproduction against
+            # OpenRouter (same message history, same model): asking for
+            # json_object mode while *also* offering tools with
+            # tool_choice="auto" suppresses the model's ability to emit
+            # further tool_calls, even when its own reasoning trace states
+            # it wants to keep investigating -- it gets boxed into emitting
+            # some JSON-shaped content instead (observed as an all-zero
+            # score stub across multiple debug-evals transcripts, with
+            # finish_reason == "stop", i.e. not a token-budget truncation).
+            # The system prompt already instructs JSON-shaped output, and
+            # the production parser (_parse_evaluation_response, used here
+            # via parse_scoring_output) already strips markdown fences,
+            # <think> blocks, and surrounding prose, so json_object mode
+            # isn't needed for correct parsing once no tool_calls come back.
+            #
+            # Separately: a response can also come back with no tool_calls
+            # because the model was cut off mid-generation by the
+            # token/reasoning budget (finish_reason == "length"), not
+            # because it deliberately finished. That looks identical to a
+            # genuine final answer unless finish_reason is checked, so
+            # retry a bounded number of times rather than silently treating
+            # a truncated response as the model's real answer.
+            for attempt in range(MAX_TRUNCATION_RETRIES + 1):
+                response = await client.complete(
+                    model=model,
+                    messages=messages,
+                    tools=TOOL_SCHEMAS,
+                    tool_choice=tool_choice,
+                    max_tokens=4096,
+                )
+                truncated_without_tools = (
+                    not response.tool_calls and response.finish_reason == "length"
+                )
+                result.prompt_tokens += response.prompt_tokens
+                result.completion_tokens += response.completion_tokens
+                call_cost = estimate_cost_usd(response, model)
+                if call_cost is not None:
+                    result.cost_usd = (result.cost_usd or 0.0) + call_cost
+                transcript.append(
+                    {
+                        "round": round_num,
+                        "attempt": attempt + 1,
+                        "content": response.content,
+                        "reasoning": response.reasoning,
+                        "tool_calls": response.tool_calls,
+                        "cost_usd": call_cost,
+                        "finish_reason": response.finish_reason,
+                        "prompt_tokens": response.prompt_tokens,
+                        "completion_tokens": response.completion_tokens,
+                        "reasoning_tokens": response.reasoning_tokens,
+                        "retried_truncation": truncated_without_tools,
+                    }
+                )
+                if not truncated_without_tools:
+                    break
             result.rounds_used = round_num
-            result.prompt_tokens += response.prompt_tokens
-            result.completion_tokens += response.completion_tokens
-            call_cost = estimate_cost_usd(response, model)
-            if call_cost is not None:
-                result.cost_usd = (result.cost_usd or 0.0) + call_cost
-            transcript.append(
-                {
-                    "round": round_num,
-                    "content": response.content,
-                    "reasoning": response.reasoning,
-                    "tool_calls": response.tool_calls,
-                    "cost_usd": call_cost,
-                    "finish_reason": response.finish_reason,
-                    "prompt_tokens": response.prompt_tokens,
-                    "completion_tokens": response.completion_tokens,
-                    "reasoning_tokens": response.reasoning_tokens,
-                }
-            )
 
             if not response.tool_calls:
+                if response.finish_reason == "length":
+                    result.error = (
+                        f"truncated final output (finish_reason=length) after "
+                        f"{MAX_TRUNCATION_RETRIES + 1} attempts"
+                    )
+                    break
                 parsed = parse_scoring_output(response.content)
                 if parsed is None:
                     result.error = "unparsable final output"
