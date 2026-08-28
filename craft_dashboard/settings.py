@@ -29,11 +29,12 @@ class Settings(BaseSettings):
     # indefinitely regardless.
     eval_transcript_retention_days: int = Field(default=30, ge=0)
 
-    # OpenRouter model settings. No default: an unset model must fail loudly
-    # rather than silently falling back to some other provider's model (this
-    # is exactly how production once ran on Gemini instead of the intended
-    # qwen model without anyone noticing).
-    openrouter_model: str = ""
+    # OpenRouter model settings, split per Phase 5's bake-off results: the
+    # closed-item summary path and the open-item scoring path can choose
+    # different models. No default: an unset model must fail loudly rather
+    # than silently falling back to some other provider's model.
+    openrouter_model_summary: str = ""
+    openrouter_model_scoring: str = ""
 
     # Legacy local embedding model setting. The continuous `evaluate`
     # worker now always uses OpenRouter embeddings instead.
@@ -93,11 +94,6 @@ class Settings(BaseSettings):
     commit_scanner_daily_invalidation_warn_threshold: int = 200
 
     @property
-    def model(self) -> str:
-        """Return the model for server-side evaluation."""
-        return self.openrouter_model
-
-    @property
     def config_path(self) -> Path:
         """Return the validated path to the dashboard config file."""
         config_path = Path(self.config_file)
@@ -123,8 +119,14 @@ class Settings(BaseSettings):
             raise ValueError(
                 "OPENROUTER_API_KEY is required for server-side evaluation"
             )
-        if not settings.openrouter_model:
-            raise ValueError("OPENROUTER_MODEL is required for server-side evaluation")
+        if not settings.openrouter_model_summary:
+            raise ValueError(
+                "OPENROUTER_MODEL_SUMMARY is required for server-side evaluation"
+            )
+        if not settings.openrouter_model_scoring:
+            raise ValueError(
+                "OPENROUTER_MODEL_SCORING is required for server-side evaluation"
+            )
         _ = settings.config_path
 
     def validate_required_secrets(self) -> list[str]:

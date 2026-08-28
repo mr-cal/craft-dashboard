@@ -250,20 +250,30 @@ def evaluate_cmd(
                 f"Missing required environment variable(s): {', '.join(missing)}. Set them in your .env file."
             )
         llm_api_key = os.environ.get("LOCAL_LLM_API_KEY", "")
+        model_summary = model_scoring = model
     else:
-        model = settings.model
-        if not model:
+        model_summary = settings.openrouter_model_summary
+        model_scoring = settings.openrouter_model_scoring
+        missing = [
+            name
+            for name, value in (
+                ("OPENROUTER_MODEL_SUMMARY", model_summary),
+                ("OPENROUTER_MODEL_SCORING", model_scoring),
+            )
+            if not value
+        ]
+        if missing:
             raise click.UsageError(
-                "OPENROUTER_MODEL is required when --llm-backend=openrouter. "
-                "Set it explicitly (e.g. OPENROUTER_MODEL=qwen/qwen3.6-35b-a3b) "
-                "in the worker's env file."
+                f"Missing required setting(s): {', '.join(missing)}. "
+                "Set them in your .env file."
             )
 
     asyncio.run(
         run_evaluate_loop(
             server=server,
             token=token,
-            model=model,
+            model_summary=model_summary,
+            model_scoring=model_scoring,
             llm_backend=llm_backend,
             llm_url=llm_url,
             llm_api_key=llm_api_key,

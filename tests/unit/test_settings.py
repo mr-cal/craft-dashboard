@@ -39,15 +39,17 @@ class TestSettings:
         assert settings.admin_token == _EXPECTED_ADMIN_TOKEN
         assert settings.debug is True
 
-    def test_model_uses_openrouter_setting(self, monkeypatch) -> None:
-        """Derived model property follows the OpenRouter setting."""
+    def test_openrouter_models_are_loaded_from_fields(self, monkeypatch) -> None:
+        """Summary and scoring model fields are stored independently."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
 
         settings = Settings(
-            openrouter_model="google/gemini-2.5-flash",
+            openrouter_model_summary="google/gemini-2.5-flash",
+            openrouter_model_scoring="qwen/qwen3.6-35b-a3b",
         )
 
-        assert settings.model == "google/gemini-2.5-flash"
+        assert settings.openrouter_model_summary == "google/gemini-2.5-flash"
+        assert settings.openrouter_model_scoring == "qwen/qwen3.6-35b-a3b"
 
     def test_mirror_dir_defaults_to_cache_dir(self, monkeypatch) -> None:
         monkeypatch.delenv("CRAFT_DASHBOARD_MIRROR_DIR", raising=False)

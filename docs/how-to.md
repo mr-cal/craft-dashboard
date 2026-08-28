@@ -144,7 +144,7 @@ at `/opt/vps-infra/.env` on the VPS (see "Reloading .env in production" in
 [`docs/deployment.md`](deployment.md) for how to edit it and apply changes)
 — **after editing it you must restart the app container**
 (`podman restart vps-infra_craft-dashboard_1`) for changes like
-`OPENROUTER_MODEL` to take effect; pydantic-settings only reads `.env` at
+`OPENROUTER_MODEL_SUMMARY` / `OPENROUTER_MODEL_SCORING` to take effect; pydantic-settings only reads `.env` at
 process startup, so re-running `run_llm.py` against a container that hasn't
 been restarted will still see the old values.
 
@@ -153,11 +153,13 @@ Docker image at build time and only exists at `/app/scripts` inside the
 `vps-infra_craft-dashboard_1` container. Always run it via `podman exec`
 (see the production example below), not as a host path.
 
-The model is set via the `OPENROUTER_MODEL` env var (default
-`google/gemini-2.5-flash-lite`) — there is no `--model` CLI flag. Pick any
-model slug from [openrouter.ai/models](https://openrouter.ai/models) (the
-site lists per-token pricing and context length for each); if you change it
-to something without pricing metadata, the cost estimate may be unavailable
+The models are set via the `OPENROUTER_MODEL_SUMMARY` and
+`OPENROUTER_MODEL_SCORING` env vars — there is no `--model` CLI flag. The
+current recommended Phase 5 bake-off winner for both is
+`qwen/qwen3.8-27b`. Pick any model slug from
+[openrouter.ai/models](https://openrouter.ai/models) (the site lists
+per-token pricing and context length for each); if you change it to
+something without pricing metadata, the cost estimate may be unavailable
 rather than silently showing $0.
 
 ```

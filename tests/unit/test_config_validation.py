@@ -18,22 +18,29 @@ class TestSettingsValidation:
         with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
             Settings.validate_config(settings)
 
-    def test_openrouter_backend_requires_model(self, monkeypatch) -> None:
-        """OpenRouter settings require an explicit model; no silent default."""
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-        settings = Settings(openrouter_api_key="sk-test", openrouter_model="")
-
-        with pytest.raises(ValueError, match="OPENROUTER_MODEL"):
-            Settings.validate_config(settings)
-
-    def test_openrouter_model_drives_derived_model_property(self, monkeypatch) -> None:
-        """Derived model property follows the OpenRouter setting."""
+    def test_openrouter_backend_requires_scoring_model(self, monkeypatch) -> None:
+        """OpenRouter settings require an explicit scoring model; no silent default."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         settings = Settings(
-            openrouter_model="google/gemini-2.5-flash",
+            openrouter_api_key="sk-test",
+            openrouter_model_summary="qwen/qwen3.6-35b-a3b",
+            openrouter_model_scoring="",
         )
 
-        assert settings.model == "google/gemini-2.5-flash"
+        with pytest.raises(ValueError, match="OPENROUTER_MODEL_SCORING"):
+            Settings.validate_config(settings)
+
+    def test_openrouter_backend_requires_summary_model(self, monkeypatch) -> None:
+        """OpenRouter settings require an explicit summary model; no silent default."""
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
+        settings = Settings(
+            openrouter_api_key="sk-test",
+            openrouter_model_summary="",
+            openrouter_model_scoring="qwen/qwen3.6-35b-a3b",
+        )
+
+        with pytest.raises(ValueError, match="OPENROUTER_MODEL_SUMMARY"):
+            Settings.validate_config(settings)
 
     def test_validate_config_rejects_missing_config_file(self, monkeypatch) -> None:
         """Validation rejects config paths that do not exist."""
@@ -41,7 +48,8 @@ class TestSettingsValidation:
         settings = Settings(
             config_file="missing-config.toml",
             openrouter_api_key="sk-test",
-            openrouter_model="qwen/qwen3.6-35b-a3b",
+            openrouter_model_summary="qwen/qwen3.6-35b-a3b",
+            openrouter_model_scoring="qwen/qwen3.6-35b-a3b",
         )
 
         with pytest.raises(ValueError, match="config_file"):
@@ -53,7 +61,8 @@ class TestSettingsValidation:
         settings = Settings(
             config_file="craft-dashboard.toml",
             openrouter_api_key="sk-test",
-            openrouter_model="qwen/qwen3.6-35b-a3b",
+            openrouter_model_summary="qwen/qwen3.6-35b-a3b",
+            openrouter_model_scoring="qwen/qwen3.6-35b-a3b",
         )
 
         Settings.validate_config(settings)

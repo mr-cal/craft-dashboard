@@ -91,13 +91,14 @@ def test_evaluate_requires_openrouter_api_key_even_for_local_backend(
     assert "OPENROUTER_API_KEY" in result.output
 
 
-def test_evaluate_requires_openrouter_model_for_openrouter_backend(
+def test_evaluate_requires_openrouter_summary_model_for_openrouter_backend(
     monkeypatch,
 ) -> None:
-    """OPENROUTER_MODEL must be set explicitly; no silent fallback model."""
+    """OPENROUTER_MODEL_SUMMARY must be set explicitly; no silent fallback."""
     runner = CliRunner()
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+    monkeypatch.delenv("OPENROUTER_MODEL_SUMMARY", raising=False)
+    monkeypatch.setenv("OPENROUTER_MODEL_SCORING", "qwen/qwen3.8-27b")
     monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", AsyncMock())
 
     def _capture_run(coro):
@@ -119,13 +120,14 @@ def test_evaluate_requires_openrouter_model_for_openrouter_backend(
     )
 
     assert result.exit_code != 0
-    assert "OPENROUTER_MODEL" in result.output
+    assert "OPENROUTER_MODEL_SUMMARY" in result.output
 
 
 def test_evaluate_uses_configured_openrouter_model(monkeypatch) -> None:
     runner = CliRunner()
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    monkeypatch.setenv("OPENROUTER_MODEL", "qwen/qwen3.6-35b-a3b")
+    monkeypatch.setenv("OPENROUTER_MODEL_SUMMARY", "qwen/qwen3.8-27b")
+    monkeypatch.setenv("OPENROUTER_MODEL_SCORING", "qwen/qwen3.8-27b")
     run_loop = AsyncMock()
     monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
 
@@ -149,14 +151,16 @@ def test_evaluate_uses_configured_openrouter_model(monkeypatch) -> None:
 
     assert result.exit_code == 0
     run_loop.assert_called_once()
-    assert run_loop.call_args.kwargs["model"] == "qwen/qwen3.6-35b-a3b"
+    assert run_loop.call_args.kwargs["model_summary"] == "qwen/qwen3.8-27b"
+    assert run_loop.call_args.kwargs["model_scoring"] == "qwen/qwen3.8-27b"
 
 
 @pytest.mark.parametrize("option_name", ["--limit", "--max-evaluations"])
 def test_evaluate_accepts_limit_option_spellings(monkeypatch, option_name: str) -> None:
     runner = CliRunner()
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    monkeypatch.setenv("OPENROUTER_MODEL", "qwen/qwen3.6-35b-a3b")
+    monkeypatch.setenv("OPENROUTER_MODEL_SUMMARY", "qwen/qwen3.8-27b")
+    monkeypatch.setenv("OPENROUTER_MODEL_SCORING", "qwen/qwen3.8-27b")
     run_loop = AsyncMock()
     monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
 
