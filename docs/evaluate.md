@@ -13,7 +13,14 @@ The worker is HTTP-only: it never connects to PostgreSQL directly.
 
 - Runs continuously until stopped.
 - Polls every 30 seconds by default (`--interval`).
-- Runs 10 concurrent worker coroutines by default (`--concurrency`).
+- Runs 10 concurrent worker coroutines by default (`--concurrency`). **The
+  production VPS deployment pins this to `--concurrency 6`** once the Phase 6
+  tool-calling loop is live: each concurrent evaluation now also runs git
+  subprocesses against the local mirrors (`git grep`, `git log`, `git show`),
+  and the VPS has only ~307MB RAM available alongside postgres, caddy, and the
+  app itself. A separate semaphore (1-2 permits) bounds simultaneous git
+  subprocesses independently of eval concurrency, and the VPS sets
+  `git grep --threads=1` to cap per-process RAM.
 - Uses `--llm-backend openrouter|local` for evaluation text generation.
 - Always computes embeddings through OpenRouter, even when `--llm-backend local`
   is selected.
