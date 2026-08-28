@@ -1,6 +1,8 @@
 """Tests for LLM prompt templates."""
 
 from craft_dashboard.llm.prompts import (
+    _OPEN_ISSUE_EVAL_SYSTEM,
+    _OPEN_PR_EVAL_SYSTEM,
     _format_comments,
     _truncate_body,
     build_closed_evaluate_prompt,
@@ -218,7 +220,34 @@ class TestBuildOpenEvaluatePrompt:
         content = msgs[0]["content"]
         assert "cite specific evidence" in content.lower()
         assert "comment" in content.lower()
-        assert "label" in content.lower()
+
+
+class TestOpenPromptSchemaFields:
+    """Both open-issue and open-PR system prompts must request impact/related_work."""
+
+    def test_issue_prompt_mentions_impact_score(self) -> None:
+        assert '"impact"' in _OPEN_ISSUE_EVAL_SYSTEM
+
+    def test_issue_prompt_mentions_related_work(self) -> None:
+        assert '"related_work"' in _OPEN_ISSUE_EVAL_SYSTEM
+
+    def test_pr_prompt_mentions_impact_score(self) -> None:
+        assert '"impact"' in _OPEN_PR_EVAL_SYSTEM
+
+    def test_pr_prompt_mentions_related_work(self) -> None:
+        assert '"related_work"' in _OPEN_PR_EVAL_SYSTEM
+
+    def test_confidence_description_covers_all_scores(self) -> None:
+        assert "all scores collectively" in _OPEN_ISSUE_EVAL_SYSTEM
+        assert "all scores collectively" in _OPEN_PR_EVAL_SYSTEM
+
+    def test_build_open_evaluate_prompt_still_returns_two_messages(self) -> None:
+        messages = build_open_evaluate_prompt(
+            title="t", body="b", issue_type="issue", labels=[]
+        )
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
 
     def test_issue_system_requires_reason_to_explain_low_confidence(self) -> None:
         msgs = build_open_evaluate_prompt(
