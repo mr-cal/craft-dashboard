@@ -32,6 +32,16 @@ async def _override_issue_db_session():
 EMPTY_QUERY_RESULT = IssueQueryResult(issues=[], total_count=0, total_pages=1, page=1)
 
 
+def test_impact_and_quick_win_are_in_all_scores() -> None:
+    assert "impact" in ALL_SCORES
+    assert "quick_win" in ALL_SCORES
+
+
+def test_impact_and_quick_win_are_inverted() -> None:
+    assert "impact" in INVERTED_SCORES
+    assert "quick_win" in INVERTED_SCORES
+
+
 class TestIssueContext:
     """Tests for the shared issue template context builder."""
 

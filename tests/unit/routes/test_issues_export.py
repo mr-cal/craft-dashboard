@@ -77,6 +77,8 @@ class TestIssueExport:
             complexity=None,
             support_request=None,
             confidence=65.0,
+            impact=None,
+            quick_win=None,
         )
         export_result = IssueQueryResult(
             issues=[issue], total_count=1, total_pages=1, page=1
@@ -119,6 +121,8 @@ class TestIssueExport:
                 "complexity": None,
                 "support_request": None,
                 "confidence": 65.0,
+                "impact": None,
+                "quick_win": None,
                 "has_related_links": False,
             }
         ]

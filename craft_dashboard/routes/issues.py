@@ -73,10 +73,12 @@ ALL_SCORES = {
     "staleness": "Staleness",
     "complexity": "Complexity",
     "support_request": "Support Request",
+    "impact": "Impact",
+    "quick_win": "Quick Win",
     "confidence": "Confidence",
 }
 # Scores where a higher value is better (green) rather than worse (red)
-INVERTED_SCORES: frozenset[str] = frozenset()
+INVERTED_SCORES: frozenset[str] = frozenset({"impact", "quick_win"})
 DEFAULT_SCORES = "staleness,confidence"
 
 

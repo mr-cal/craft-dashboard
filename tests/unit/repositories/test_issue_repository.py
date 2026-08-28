@@ -267,6 +267,8 @@ async def _seed_issues_with_scores(session) -> None:
                 "staleness": 0.95,
                 "complexity": 0.3,
                 "support_request": 0.2,
+                "impact": 0.8,
+                "quick_win": 0.56,
                 "confidence": 70.0,
             },
         )
@@ -294,6 +296,8 @@ async def _seed_issues_with_scores(session) -> None:
                 "staleness": 0.1,
                 "complexity": 0.2,
                 "support_request": 0.05,
+                "impact": 0.9,
+                "quick_win": 0.72,
                 "confidence": 85.0,
             },
         )
@@ -321,6 +325,8 @@ async def _seed_issues_with_scores(session) -> None:
                 "staleness": 0.4,
                 "complexity": 0.95,
                 "support_request": 0.1,
+                "impact": 0.4,
+                "quick_win": 0.02,
                 "confidence": 60.0,
             },
         )
@@ -912,6 +918,8 @@ async def _seed_issues_with_scores(session) -> None:
                 "staleness": 0.95,
                 "complexity": 0.3,
                 "support_request": 0.2,
+                "impact": 0.8,
+                "quick_win": 0.56,
                 "confidence": 70.0,
             },
         )
@@ -939,6 +947,8 @@ async def _seed_issues_with_scores(session) -> None:
                 "staleness": 0.1,
                 "complexity": 0.2,
                 "support_request": 0.05,
+                "impact": 0.9,
+                "quick_win": 0.72,
                 "confidence": 85.0,
             },
         )
@@ -966,6 +976,8 @@ async def _seed_issues_with_scores(session) -> None:
                 "staleness": 0.4,
                 "complexity": 0.95,
                 "support_request": 0.1,
+                "impact": 0.4,
+                "quick_win": 0.02,
                 "confidence": 60.0,
             },
         )
@@ -990,6 +1002,17 @@ async def _seed_issues_with_scores(session) -> None:
 class TestQueryIssuesLLMScores:
     """Test that _query_issues properly returns all LLM score fields."""
 
+    def test_impact_and_quick_win_are_sortable_score_fields(self) -> None:
+        from craft_dashboard.repositories.issue_repository import (
+            _SCORE_SORT_FIELDS,
+            _VALID_SORT_FIELDS,
+        )
+
+        assert "impact" in _SCORE_SORT_FIELDS
+        assert "quick_win" in _SCORE_SORT_FIELDS
+        assert "impact" in _VALID_SORT_FIELDS
+        assert "quick_win" in _VALID_SORT_FIELDS
+
     async def test_query_returns_all_score_fields(self, test_db_session) -> None:
         """_query_issues should return all LLM score fields for issues."""
         await _seed_issues_with_scores(test_db_session)
@@ -1006,6 +1029,8 @@ class TestQueryIssuesLLMScores:
         assert "staleness" in scored_issue
         assert "complexity" in scored_issue
         assert "support_request" in scored_issue
+        assert "impact" in scored_issue
+        assert "quick_win" in scored_issue
         assert "confidence" in scored_issue
         assert "suggested_action" in scored_issue
         assert "suggested_action_reason" in scored_issue
@@ -1014,6 +1039,9 @@ class TestQueryIssuesLLMScores:
         assert scored_issue.staleness == 0.95
         assert scored_issue.complexity == 0.3
         assert scored_issue.support_request == 0.2
+        assert scored_issue.impact == 0.8
+        assert scored_issue.quick_win == 0.56
+        assert scored_issue.get("impact") == 0.8
         assert scored_issue.confidence == 70.0
         assert scored_issue.suggested_action == "close"
         assert (
@@ -1037,6 +1065,8 @@ class TestQueryIssuesLLMScores:
         assert unscored_issue.staleness is None
         assert unscored_issue.complexity is None
         assert unscored_issue.support_request is None
+        assert unscored_issue.impact is None
+        assert unscored_issue.quick_win is None
         assert unscored_issue.confidence is None
         assert unscored_issue.suggested_action is None
         assert unscored_issue.suggested_action_reason is None
@@ -1080,6 +1110,24 @@ class TestQueryIssuesLLMScores:
         # First issue should be the one with highest confidence
         assert issues[0]["external_id"] == "101"
         assert issues[0]["confidence"] == 85.0
+
+    async def test_sort_by_impact_score(self, test_db_session) -> None:
+        """Sort by impact should order by impact score descending."""
+        await _seed_issues_with_scores(test_db_session)
+
+        issues, *_ = await _query(test_db_session, sort_by="impact")
+
+        assert issues[0]["external_id"] == "101"
+        assert issues[0]["impact"] == 0.9
+
+    async def test_sort_by_quick_win_score(self, test_db_session) -> None:
+        """Sort by quick_win should order by quick_win score descending."""
+        await _seed_issues_with_scores(test_db_session)
+
+        issues, *_ = await _query(test_db_session, sort_by="quick_win")
+
+        assert issues[0]["external_id"] == "101"
+        assert issues[0]["quick_win"] == 0.72
 
 
 class TestLLMStatusFilter:

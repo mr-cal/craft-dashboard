@@ -31,6 +31,8 @@ class IssueView:
     complexity: float | None = None
     support_request: float | None = None
     confidence: float | None = None
+    impact: float | None = None
+    quick_win: float | None = None
     has_related_links: bool = False
 
     def as_dict(self) -> dict[str, object]:

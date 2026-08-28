@@ -25,6 +25,8 @@ _SCORE_SORT_FIELDS = {
     "staleness",
     "complexity",
     "support_request",
+    "impact",
+    "quick_win",
     "confidence",
 }
 _VALID_SORT_FIELDS = _SCORE_SORT_FIELDS | {
@@ -423,6 +425,8 @@ class IssueRepository:
                     complexity=scores.get("complexity"),
                     support_request=scores.get("support_request"),
                     confidence=scores.get("confidence"),
+                    impact=scores.get("impact"),
+                    quick_win=scores.get("quick_win"),
                     has_related_links=has_related_links,
                 )
             )
@@ -667,6 +671,8 @@ class IssueRepository:
                     complexity=scores.get("complexity"),
                     support_request=scores.get("support_request"),
                     confidence=scores.get("confidence"),
+                    impact=scores.get("impact"),
+                    quick_win=scores.get("quick_win"),
                 )
             )
         return issues
