@@ -131,6 +131,7 @@ class _Runtime:
         mirror_dir: Path,
         allowed_projects: dict[str, str],
         eval_server_base_url: str,
+        single_issue: bool = False,
     ) -> None:
         self.client = client
         self.evaluator = evaluator
@@ -149,6 +150,29 @@ class _Runtime:
         self.mirror_dir = mirror_dir
         self.allowed_projects = allowed_projects
         self.eval_server_base_url = eval_server_base_url
+        #: True for a single-target ``--issue ... --force`` run (e.g. the
+        #: canary script). In that mode there is only ever one issue to
+        #: evaluate, and a claimed-then-discarded/failed/skipped issue is
+        #: never re-offered by ``/next`` (the server sees it as already
+        #: attempted), so any terminal outcome — not just success — must
+        #: end the run. Otherwise the worker polls "no work available"
+        #: forever, bounded only by an external timeout.
+        self.single_issue = single_issue
+
+
+async def _release_and_maybe_stop(runtime: _Runtime) -> None:
+    """Release a reserved slot after a terminal (non-retryable) outcome.
+
+    In single-issue mode (see ``_Runtime.single_issue``) this also requests
+    shutdown, since there is nothing else left to poll for: a
+    claimed-then-discarded/failed/skipped issue is never re-offered by
+    ``/next`` in a single-issue ``--force`` run, so without this the worker
+    would poll "no work available" forever, bounded only by an external
+    timeout.
+    """
+    await runtime.state.release()
+    if runtime.single_issue:
+        shutdown_state["requested"] = True
 
 
 async def _embed_summary(
@@ -521,7 +545,7 @@ async def _evaluate_issue(  # noqa: PLR0911
             issue_ref,
             exc,
         )
-        await runtime.state.release()
+        await _release_and_maybe_stop(runtime)
         return
     except LLMQuotaError:
         runtime.progress.update(runtime.overall_id, description="Evaluating issues")
@@ -535,12 +559,12 @@ async def _evaluate_issue(  # noqa: PLR0911
             issue_ref,
             _format_elapsed(time.monotonic() - started_at),
         )
-        await runtime.state.release()
+        await _release_and_maybe_stop(runtime)
         return
 
     if result is None:
         logger.warning("%s: content unchanged, skipping", issue_ref)
-        await runtime.state.release()
+        await _release_and_maybe_stop(runtime)
         return
 
     runtime.progress.update(
@@ -563,7 +587,7 @@ async def _evaluate_issue(  # noqa: PLR0911
     except Exception:
         runtime.progress.update(runtime.overall_id, description="Evaluating issues")
         logger.exception("%s: embedding failed", issue_ref)
-        await runtime.state.release()
+        await _release_and_maybe_stop(runtime)
         return
 
     try:
@@ -580,7 +604,7 @@ async def _evaluate_issue(  # noqa: PLR0911
     except Exception:
         runtime.progress.update(runtime.overall_id, description="Evaluating issues")
         logger.exception("%s: search embedding failed", issue_ref)
-        await runtime.state.release()
+        await _release_and_maybe_stop(runtime)
         return
 
     submission: dict[str, Any] = {
@@ -613,12 +637,12 @@ async def _evaluate_issue(  # noqa: PLR0911
         submission=submission,
     )
     if submit_response is None:
-        await runtime.state.release()
+        await _release_and_maybe_stop(runtime)
         return
 
     if submit_response.status_code == HTTP_CONFLICT:
         logger.warning("%s: content changed during evaluation, skipped", issue_ref)
-        await runtime.state.release()
+        await _release_and_maybe_stop(runtime)
         return
 
     if submit_response.status_code != HTTP_OK:
@@ -629,7 +653,7 @@ async def _evaluate_issue(  # noqa: PLR0911
             submit_response.url,
             _format_error_body(submit_response),
         )
-        await runtime.state.release()
+        await _release_and_maybe_stop(runtime)
         return
 
     completed = await runtime.state.complete(
@@ -729,7 +753,7 @@ async def _run_issue_preflight(
         result.reason,
     )
     runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-    await runtime.state.release()
+    await _release_and_maybe_stop(runtime)
     return False
 
 

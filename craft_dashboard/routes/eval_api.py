@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 from craft_dashboard.auth import verify_eval_token
 from craft_dashboard.dependencies import get_config, get_db_session
 from craft_dashboard.git_mirrors import reader as mirror_reader
+from craft_dashboard.git_mirrors.paths import canonical_git_project_name
 from craft_dashboard.llm.client import OPENROUTER_BASE_URL
 from craft_dashboard.llm.content_hash import compute_content_hash
 from craft_dashboard.llm.embeddings import EmbeddingClient
@@ -413,16 +414,25 @@ async def _resolve_repo_shas(
     every craft-application's repo, on top of the libraries every app gets.
     Silently omits any project with no mirror on disk yet (the worker's
     preflight step is responsible for deciding whether that's fatal).
+
+    A "<name> (launchpad)" view project (see
+    ``canonical_git_project_name``) has no git mirror of its own — it
+    tracks Launchpad bugs for a project git-mirrored under the unsuffixed
+    name. Membership checks and mirror-directory resolution use the
+    canonical (unsuffixed) name, but the returned dict is still keyed by
+    the raw ``project_name`` for its own entry, since that's the exact key
+    the evaluator's ``ToolContext.pinned_shas`` is looked up with.
     """
+    canonical_name = canonical_git_project_name(project_name)
     repos_needed = {project_name}
-    if project_name in craft_applications or project_name == "craft-application":
+    if canonical_name in craft_applications or canonical_name == "craft-application":
         repos_needed |= set(craft_libraries)
-    if project_name in craft_consumers:
+    if canonical_name in craft_consumers:
         repos_needed |= set(craft_libraries) | set(craft_applications)
 
     shas: dict[str, str] = {}
     for repo in repos_needed:
-        mirror_path = mirror_dir / f"{repo}.git"
+        mirror_path = mirror_dir / f"{canonical_git_project_name(repo)}.git"
         if not mirror_path.exists():
             continue
         try:

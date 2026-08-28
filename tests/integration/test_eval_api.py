@@ -2260,3 +2260,40 @@ class TestNextIssueShaPinning:
 
         assert response.status_code == 200
         assert response.json()["repo_shas"] == {}
+
+    def test_launchpad_view_project_pins_sha_under_its_own_git_mirror(
+        self, test_db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        """A "<name> (launchpad)" view project has no git mirror of its own —
+        it tracks Launchpad bugs for a project git-mirrored under the
+        unsuffixed name. repo_shas must still be populated (keyed by the raw,
+        suffixed project name, since that's what the evaluator receives as
+        `project` and looks up pinned_shas with), by resolving the mirror
+        directory via the unsuffixed name.
+        """
+        project = make_project(
+            id=1, name="snapcraft (launchpad)", category="application"
+        )
+        issue = make_issue(id=1, project_id=1, external_id="1", state="open")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+
+        mirror_dir = tmp_path / "mirrors"
+        mirror_dir.mkdir()
+        # Only the unsuffixed mirror exists on disk; there is no
+        # "snapcraft (launchpad).git".
+        self._make_bare_mirror_with_commit(mirror_dir, tmp_path, "snapcraft")
+
+        app, token = _create_eval_app(test_db_session)
+        app.state.settings.mirror_dir = str(mirror_dir)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/next", headers={"Authorization": "Bearer " + token}
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert "snapcraft (launchpad)" in body["repo_shas"]
+        assert len(body["repo_shas"]["snapcraft (launchpad)"]) == 40

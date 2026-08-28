@@ -130,6 +130,7 @@ def base_runtime() -> SimpleNamespace:
         mirror_dir=pathlib.Path("/mirrors"),
         allowed_projects={"snapcraft": "canonical/snapcraft"},
         eval_server_base_url="http://localhost:8000",
+        single_issue=False,
     )
 
 
