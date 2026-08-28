@@ -736,7 +736,8 @@ async def run_evaluate_loop(
     *,
     server: str,
     token: str,
-    model: str,
+    model_summary: str,
+    model_scoring: str,
     llm_backend: str,
     llm_url: str,
     llm_api_key: str,
@@ -806,7 +807,11 @@ async def run_evaluate_loop(
         llm_api_key=llm_api_key,
         ca_cert=ca_cert,
     )
-    evaluator = IssueEvaluator(client=llm_client, model=model)
+    evaluator = IssueEvaluator(
+        client=llm_client,
+        model_summary=model_summary,
+        model_scoring=model_scoring,
+    )
     embed_client = EmbeddingClient(
         base_url=OPENROUTER_BASE_URL,
         model=embed_model,
@@ -848,7 +853,7 @@ async def run_evaluate_loop(
                         already_pct,
                         server_pending,
                         llm_backend,
-                        model,
+                        model_scoring,
                         concurrency,
                     )
             except httpx.HTTPError:
@@ -857,7 +862,7 @@ async def run_evaluate_loop(
                     server_url,
                     filter_desc,
                     llm_backend,
-                    model,
+                    model_scoring,
                     concurrency,
                 )
 
@@ -890,7 +895,7 @@ async def run_evaluate_loop(
                     state=state,
                     poll_interval=poll_interval,
                     issue_limit=limit,
-                    model=model,
+                    model=model_scoring,
                     llm_backend=llm_backend,
                     mirror_dir=settings.mirror_dir_path,
                     allowed_projects=allowed_projects,

@@ -51,7 +51,8 @@ SAMPLE_EVALUATE_RESULT = {
 DEFAULT_KWARGS = {
     "server": "http://localhost:8000",
     "token": "test-token",
-    "model": "test-model",
+    "model_summary": "summary-model",
+    "model_scoring": "scoring-model",
     "llm_backend": "local",
     "llm_url": "http://localhost:11434/v1",
     "llm_api_key": "",
