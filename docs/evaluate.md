@@ -166,3 +166,69 @@ Full staged rollout, from smallest to largest blast radius:
 
 If any stage surfaces a problem, stop and roll back (see Task 12's rollback
 procedure) rather than proceeding to the next stage.
+
+## Backfilling after a CURRENT_EVAL_VERSION bump
+
+Bumping `CURRENT_EVAL_VERSION` (in `craft_dashboard/llm/evaluator.py`) makes
+every open issue/PR's current evaluation "outdated" — the next
+`/api/eval/next` poll will naturally re-surface all of them, since
+`build_pending_evaluation_query()`'s steady-state check compares each issue's
+latest `eval_version` against the current constant. No manual database write
+is required to mark rows stale.
+
+As of the Phase 6 rewrite (`CURRENT_EVAL_VERSION` 4 -> 5), this affects
+approximately 2,269 open issues/PRs across all 18 tracked projects. The
+scoring and summary paths both use `deepseek/deepseek-v4-pro-0813`. Running
+the worker unthrottled against the full backlog risks exhausting the day's
+OpenRouter quota in one run and produces an unreviewable wall of new
+`impact`/`related_work` data all at once. Roll it out in stages instead:
+
+1. **Smallest project first.** Run with `--project <smallest-project>
+   --limit 20` and manually review a sample of the resulting evaluations
+   (via the issue detail page's evaluation provenance panel) before
+   proceeding further.
+2. **One project at a time, capped.** For each remaining project, run
+   `--project <name> --limit 100` per invocation, checking the admin
+   page's queue depth and quota-pause status between runs before starting
+   the next project.
+3. **Full backlog, capped rate.** Once staged runs look correct, run the
+   continuous worker (`--concurrency 6`, no `--project` filter) and let it
+   drain the full ~2,269-item backlog over its normal polling cadence —
+   do not raise `--concurrency` above the VPS-pinned value of 6 (Task 11)
+   to "speed up" the backfill; this is a one-time cost that trades wall
+   time for RAM/API-quota safety.
+4. **Monitor cost.** Each evaluation's `cost_usd` is stored per-row (Phase
+   1); check the admin page's cost dashboard partway through the backfill
+   to catch a runaway cost trend (e.g. an unexpectedly expensive tool-call
+   loop) before it consumes the full backlog's budget. The daily spend cap
+   (`EVAL_DAILY_SPEND_CAP_USD`) auto-pauses evaluation if the day's total
+   exceeds the configured limit.
+
+If a backfill run must be aborted partway through, it is always safe to
+resume later with the same flags — `/api/eval/next`'s `latest=False` flip
+convention means no partial evaluation is ever left half-applied, and
+re-running the same command simply continues from wherever the queue
+naturally resumes.
+
+## Rolling back the version bump
+
+If the v5 rollout produces bad evaluations, roll back **before** letting the
+backfill drain further:
+
+1. `git revert` the `CURRENT_EVAL_VERSION` bump commit and redeploy, so the
+   constant returns to 4 and the queue stops treating v4 rows as stale.
+2. For any issue that already got a v5 `latest` row, restore the prior v4
+   row as current (this is the exact drill exercised in Task 12, Step 2):
+
+   ```sql
+   -- Demote the v5 row, promote the previously-current v4 row.
+   UPDATE llm_evaluations SET latest = false WHERE id = <v5_row_id>;
+   UPDATE llm_evaluations SET latest = true  WHERE id = <prev_v4_row_id>;
+   ```
+
+   (The v5 rows can be left in place with `latest=false` for audit, or
+   deleted; they are hidden from all views once demoted.)
+
+Rollback was proven reversible on a sample before the backfill started
+(Task 12, Step 2) — this section is the copy-paste of that proven procedure,
+not an untested improvisation.
