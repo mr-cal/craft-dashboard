@@ -15,7 +15,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from craft_dashboard.git_mirrors.paths import clone_url_for
+from craft_dashboard.git_mirrors.paths import canonical_git_project_name, clone_url_for
 
 if TYPE_CHECKING:
     import pathlib
@@ -146,7 +146,7 @@ async def sync_mirror(
     unreachable upstream) is logged and reported as "skipped" rather than
     raising, so one bad project never aborts a bulk sync of the other 17.
     """
-    mirror_path = mirror_dir / f"{project}.git"
+    mirror_path = mirror_dir / f"{canonical_git_project_name(project)}.git"
 
     if mirror_path.exists():
         try:

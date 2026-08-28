@@ -160,3 +160,50 @@ class TestRunPreflight:
         assert result.reason is None
         release.assert_not_awaited()
         assert llm.calls == 0
+
+    async def test_launchpad_view_project_resolves_canonical_mirror(
+        self, tmp_path: Path
+    ) -> None:
+        """A "<name> (launchpad)" repo_sha key must resolve to the unsuffixed
+        mirror directory, not a literal "snapcraft (launchpad).git".
+        """
+        mirror_dir = tmp_path / "mirrors"
+        mirror_dir.mkdir()
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        mirror = mirror_dir / "snapcraft.git"
+
+        _run_git("init", "-q", "--initial-branch=main", cwd=worktree)
+        _run_git("config", "user.email", "test@example.com", cwd=worktree)
+        _run_git("config", "user.name", "Test User", cwd=worktree)
+        (worktree / "README.md").write_text("# snapcraft\n")
+        _run_git("add", "-A", cwd=worktree)
+        _run_git("commit", "-q", "-m", "Initial commit", cwd=worktree)
+        sha = _run_git("rev-parse", "HEAD", cwd=worktree)
+        subprocess.run(
+            ["git", "clone", "--mirror", "-q", str(worktree), str(mirror)],
+            check=True,
+            capture_output=True,
+        )
+
+        llm = _SpyLLM()
+        release = AsyncMock()
+        sync_mirror = AsyncMock(return_value=True)
+
+        result = await run_preflight(
+            claim={
+                "issue_id": 1,
+                "project_name": "snapcraft (launchpad)",
+                "repo_shas": {"snapcraft (launchpad)": sha},
+            },
+            mirror_dir=mirror_dir,
+            llm=llm,
+            sync_mirror=sync_mirror,
+            release_claim=release,
+            check_related_endpoint=AsyncMock(return_value=True),
+        )
+
+        assert result.ok is True
+        release.assert_not_awaited()
+        sync_mirror.assert_not_awaited()
+        assert llm.calls == 0

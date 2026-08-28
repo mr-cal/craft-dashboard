@@ -164,6 +164,24 @@ class TestSyncMirror:
         assert first.status == "cloned"
         assert second.status == "fetched"  # no new commits, but no error either
 
+    async def test_launchpad_view_project_uses_canonical_mirror_dir(
+        self, tmp_path: pathlib.Path, sample_repo: pathlib.Path
+    ) -> None:
+        """A "<name> (launchpad)" view project has no mirror of its own — it
+        must clone/fetch the unsuffixed project's mirror, not a directory
+        literally named "snapcraft (launchpad).git".
+        """
+        mirror_dir = tmp_path / "mirrors"
+        mirror_dir.mkdir()
+        result = await sync_mirror(
+            "snapcraft (launchpad)",
+            clone_url=str(sample_repo),
+            mirror_dir=mirror_dir,
+        )
+        assert result.status == "cloned"
+        assert (mirror_dir / "snapcraft.git").exists()
+        assert not (mirror_dir / "snapcraft (launchpad).git").exists()
+
     @pytest.mark.skipif(
         __import__("os").environ.get("CRAFT_DASHBOARD_OFFLINE_TESTS") == "1",
         reason="requires network access to attempt a real (failing) clone",

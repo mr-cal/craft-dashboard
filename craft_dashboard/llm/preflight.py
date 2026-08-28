@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from craft_dashboard.git_mirrors import reader
+from craft_dashboard.git_mirrors.paths import canonical_git_project_name
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -38,7 +39,7 @@ async def run_preflight(
         return PreflightResult(ok=False, reason=reason)
 
     for repo, sha in repo_shas.items():
-        mirror_path = mirror_dir / f"{repo}.git"
+        mirror_path = mirror_dir / f"{canonical_git_project_name(repo)}.git"
         if not await reader.has_commit(mirror_path, sha):
             await sync_mirror(repo)
             if not await reader.has_commit(mirror_path, sha):
