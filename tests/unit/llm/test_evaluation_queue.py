@@ -242,3 +242,65 @@ class TestBuildPendingEvaluationQuery:
         row = (await test_db_session.execute(query)).first()
 
         assert row is None
+
+    async def test_open_issue_with_stale_evidence_generation_is_requeued(
+        self, test_db_session
+    ) -> None:
+        project = make_project(name="craft-parts")
+        test_db_session.add(project)
+        await test_db_session.flush()
+        issue = make_issue(
+            project_id=project.id,
+            state="open",
+            content_hash="same-hash",
+            evidence_generation=2,
+        )
+        test_db_session.add(issue)
+        await test_db_session.flush()
+        evaluation = make_evaluation(
+            issue_id=issue.id,
+            eval_version=CURRENT_EVAL_VERSION,
+            issue_data_hash="same-hash",
+            evidence_generation=1,
+            scores={"confidence": 50},
+            suggested_action="keep_open",
+            latest=True,
+        )
+        test_db_session.add(evaluation)
+        await test_db_session.commit()
+
+        result = await test_db_session.execute(build_pending_evaluation_query())
+        pending_issue_ids = {row[0].id for row in result.all()}
+
+        assert issue.id in pending_issue_ids
+
+    async def test_closed_issue_evidence_generation_mismatch_is_ignored(
+        self, test_db_session
+    ) -> None:
+        project = make_project(name="craft-parts")
+        test_db_session.add(project)
+        await test_db_session.flush()
+        issue = make_issue(
+            project_id=project.id,
+            state="closed",
+            content_hash="same-hash",
+            evidence_generation=2,
+        )
+        test_db_session.add(issue)
+        await test_db_session.flush()
+        evaluation = make_evaluation(
+            issue_id=issue.id,
+            eval_version=CURRENT_SUMMARY_VERSION,
+            issue_data_hash="same-hash",
+            evidence_generation=1,
+            scores={},
+            suggested_action=None,
+            latest=True,
+        )
+        test_db_session.add(evaluation)
+        await test_db_session.commit()
+
+        result = await test_db_session.execute(build_pending_evaluation_query())
+        pending_issue_ids = {row[0].id for row in result.all()}
+
+        assert issue.id not in pending_issue_ids

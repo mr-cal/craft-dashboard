@@ -169,6 +169,12 @@ def build_pending_evaluation_query(
             has_complete_evaluation,
             latest_evaluation.eval_version == expected_version,
             ~latest_evaluation.issue_data_hash.is_distinct_from(Issue.content_hash),
+            or_(
+                Issue.state != "open",
+                ~latest_evaluation.evidence_generation.is_distinct_from(
+                    Issue.evidence_generation
+                ),
+            ),
         )
         query = query.where(~is_up_to_date)
 
