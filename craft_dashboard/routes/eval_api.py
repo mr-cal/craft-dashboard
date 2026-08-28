@@ -36,9 +36,11 @@ from craft_dashboard.llm.evaluator import (
 from craft_dashboard.llm.exceptions import LLMValidationError
 from craft_dashboard.models.commit_scan_evidence_path import CommitScanEvidencePath
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
+from craft_dashboard.models.evaluation_transcript import EvaluationTranscript
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
+from craft_dashboard.repositories.issue_link_repository import IssueLinkRepository
 from craft_dashboard.repositories.issue_repository import (
     IssueRepository,
     _build_excluded_issues_condition,
@@ -255,6 +257,8 @@ class EvalResultSubmission(BaseModel):
     # Actual billed USD cost reported by the backend, if any. None for
     # backends that don't report cost (e.g. the local LLM server).
     cost_usd: float | None = None
+    related_work: list[dict[str, Any]] = Field(default_factory=list)
+    transcript: dict[str, Any] | None = None
     # Every evaluation includes an embedding — there is no more deferred
     # embedding step, so this is required, not optional.
     summary_embedding: list[float]
@@ -551,6 +555,10 @@ async def submit_result(
     except LLMValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    scores = dict(payload.scores)
+    if issue.state == "open" and "impact" in scores and "complexity" in scores:
+        scores["quick_win"] = scores["impact"] * (100 - scores["complexity"]) / 100
+
     await session.execute(
         update(LLMEvaluation)
         .where(
@@ -560,28 +568,44 @@ async def submit_result(
         .values(latest=False, eval_locked_until=None)
     )
     issue.search_embedding = payload.search_embedding
-    session.add(
-        LLMEvaluation(
-            issue_id=payload.issue_id,
-            model_name=payload.model_used,
-            eval_version=current_version_for_state(issue.state),
-            summary=payload.summary,
-            suggested_action=payload.suggested_action,
-            suggested_action_reason=payload.suggested_action_reason,
-            scores=payload.scores,
-            tokens_used=payload.tokens_used,
-            prompt_tokens=payload.prompt_tokens,
-            completion_tokens=payload.completion_tokens,
-            llm_backend=payload.llm_backend,
-            cost_usd=payload.cost_usd,
-            evaluated_at=datetime.now(tz=UTC),
-            issue_data_hash=current_hash,
-            evidence_generation=issue.evidence_generation,
-            latest=True,
-            eval_locked_until=datetime.now(tz=UTC) + _LOCK_TTL,
-            summary_embedding=payload.summary_embedding,
-        )
+    evaluation = LLMEvaluation(
+        issue_id=payload.issue_id,
+        model_name=payload.model_used,
+        eval_version=current_version_for_state(issue.state),
+        summary=payload.summary,
+        suggested_action=payload.suggested_action,
+        suggested_action_reason=payload.suggested_action_reason,
+        scores=scores,
+        tokens_used=payload.tokens_used,
+        prompt_tokens=payload.prompt_tokens,
+        completion_tokens=payload.completion_tokens,
+        llm_backend=payload.llm_backend,
+        cost_usd=payload.cost_usd,
+        evaluated_at=datetime.now(tz=UTC),
+        issue_data_hash=current_hash,
+        evidence_generation=issue.evidence_generation,
+        latest=True,
+        eval_locked_until=datetime.now(tz=UTC) + _LOCK_TTL,
+        summary_embedding=payload.summary_embedding,
     )
+    session.add(evaluation)
+    await session.flush()
+    if payload.related_work:
+        await IssueLinkRepository(session).create_from_related_work(
+            from_issue_id=payload.issue_id,
+            llm_evaluation_id=evaluation.id,
+            related_work=payload.related_work,
+        )
+    if payload.transcript is not None:
+        session.add(
+            EvaluationTranscript(
+                llm_evaluation_id=evaluation.id,
+                rounds=payload.transcript.get("rounds", []),
+                full_capture=payload.transcript.get("full_capture", False),
+                model_name=payload.transcript.get("model_name", payload.model_used),
+                rounds_used=payload.transcript.get("rounds_used", 0),
+            )
+        )
     await session.execute(
         delete(CommitScanEvidencePath).where(
             CommitScanEvidencePath.issue_id == payload.issue_id

@@ -19,7 +19,9 @@ from craft_dashboard.llm.evaluator import (
 )
 from craft_dashboard.models.commit_scan_evidence_path import CommitScanEvidencePath
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
+from craft_dashboard.models.evaluation_transcript import EvaluationTranscript
 from craft_dashboard.models.issue import Issue
+from craft_dashboard.models.issue_link import IssueLink
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.repositories.issue_repository import IssueRepository
 from craft_dashboard.routes import eval_api
@@ -66,6 +68,26 @@ async def _fetch_evidence_paths(
         .order_by(CommitScanEvidencePath.project, CommitScanEvidencePath.path)
     )
     return list(result.all())
+
+
+async def _seed_open_issue(
+    session: AsyncSession,
+    *,
+    issue_id: int = 1,
+    project_id: int = 1,
+    project_name: str = "snapcraft",
+    external_id: str = "1",
+    evidence_generation: int = 0,
+) -> Issue:
+    project = make_project(id=project_id, name=project_name)
+    issue = make_issue(
+        id=issue_id,
+        project_id=project_id,
+        external_id=external_id,
+        evidence_generation=evidence_generation,
+    )
+    await _seed_entities(session, project, issue)
+    return issue
 
 
 def _create_eval_app(test_db_session: AsyncSession) -> tuple[FastAPI, str]:
@@ -1444,6 +1466,165 @@ class TestEvalResultIntegration:
             ("rockcraft", "README.md"),
             ("rockcraft", "src/parts.py"),
         ]
+
+    def test_submit_result_computes_quick_win_from_impact_and_complexity(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        issue = asyncio.get_event_loop().run_until_complete(
+            _seed_open_issue(test_db_session, external_id="500")
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/result",
+                json={
+                    "issue_id": issue.id,
+                    "content_hash": issue.content_hash,
+                    "summary": "A sufficiently long summary describing the issue state.",
+                    "scores": {
+                        "staleness": 10,
+                        "complexity": 20,
+                        "support_request": 0,
+                        "impact": 80,
+                        "confidence": 90,
+                    },
+                    "suggested_action": "keep_open",
+                    "suggested_action_reason": "reason",
+                    "related_work": [],
+                    "summary_embedding": [0.0] * 1024,
+                    "search_embedding": [0.0] * 1024,
+                },
+                headers={"Authorization": "Bearer " + token},
+            )
+
+        assert response.status_code == 200
+
+        evaluations = asyncio.get_event_loop().run_until_complete(
+            _all_evaluations(test_db_session)
+        )
+        assert evaluations[0].scores["quick_win"] == 64
+
+    def test_submit_result_persists_related_work_as_issue_links(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        from_issue = asyncio.get_event_loop().run_until_complete(
+            _seed_open_issue(test_db_session, issue_id=1, external_id="501")
+        )
+        to_issue = make_issue(id=2, project_id=1, external_id="502")
+        asyncio.get_event_loop().run_until_complete(_seed_entities(test_db_session, to_issue))
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/result",
+                json={
+                    "issue_id": from_issue.id,
+                    "content_hash": from_issue.content_hash,
+                    "summary": "A sufficiently long summary describing the issue state.",
+                    "scores": {
+                        "staleness": 10,
+                        "complexity": 20,
+                        "support_request": 0,
+                        "impact": 30,
+                        "confidence": 90,
+                    },
+                    "suggested_action": "keep_open",
+                    "suggested_action_reason": "reason",
+                    "related_work": [
+                        {
+                            "kind": "duplicate_of",
+                            "ref": f"snapcraft#{to_issue.external_id}",
+                            "confidence": 85,
+                            "note": "same traceback",
+                        }
+                    ],
+                    "summary_embedding": [0.0] * 1024,
+                    "search_embedding": [0.0] * 1024,
+                },
+                headers={"Authorization": "Bearer " + token},
+            )
+
+        assert response.status_code == 200
+
+        links = (
+            asyncio.get_event_loop().run_until_complete(
+                test_db_session.execute(
+                    select(IssueLink).where(IssueLink.from_issue_id == from_issue.id)
+                )
+            )
+        ).scalars()
+        stored_links = list(links.all())
+        assert len(stored_links) == 1
+        assert stored_links[0].to_issue_id == to_issue.id
+        assert stored_links[0].kind == "duplicate_of"
+
+    def test_submit_result_persists_transcript_and_stamps_evidence_generation(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        issue = asyncio.get_event_loop().run_until_complete(
+            _seed_open_issue(
+                test_db_session,
+                external_id="503",
+                evidence_generation=3,
+            )
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/result",
+                json={
+                    "issue_id": issue.id,
+                    "content_hash": issue.content_hash,
+                    "summary": "A sufficiently long summary describing the issue state.",
+                    "scores": {
+                        "staleness": 10,
+                        "complexity": 20,
+                        "support_request": 0,
+                        "impact": 40,
+                        "confidence": 70,
+                    },
+                    "suggested_action": "keep_open",
+                    "suggested_action_reason": "reason",
+                    "related_work": [],
+                    "transcript": {
+                        "rounds": [
+                            {
+                                "tool": "repo_layout",
+                                "arguments": {},
+                                "result_sha256": "x",
+                                "result_bytes": 3,
+                                "result_preview": "abc",
+                            }
+                        ],
+                        "full_capture": False,
+                        "model_name": "scoring-model",
+                        "rounds_used": 1,
+                    },
+                    "summary_embedding": [0.0] * 1024,
+                    "search_embedding": [0.0] * 1024,
+                },
+                headers={"Authorization": "Bearer " + token},
+            )
+
+        assert response.status_code == 200
+
+        evaluations = asyncio.get_event_loop().run_until_complete(
+            _all_evaluations(test_db_session)
+        )
+        assert evaluations[0].evidence_generation == 3
+        transcript = (
+            asyncio.get_event_loop().run_until_complete(
+                test_db_session.execute(
+                    select(EvaluationTranscript).where(
+                        EvaluationTranscript.llm_evaluation_id == evaluations[0].id
+                    )
+                )
+            )
+        ).scalar_one()
+        assert transcript.rounds_used == 1
+        assert transcript.model_name == "scoring-model"
 
 
 class TestRelatedIssuesEndpoint:
