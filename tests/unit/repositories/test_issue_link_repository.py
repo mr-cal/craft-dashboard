@@ -153,3 +153,89 @@ class TestGetLatestLinksForIssue:
         assert links[0].to_issue is not None
         assert links[0].to_issue.external_id == "200"
         assert links[0].to_issue.project.name == "rockcraft"
+
+
+class TestCreateFromRelatedWork:
+    """Tests for IssueLinkRepository.create_from_related_work."""
+
+    async def test_creates_one_link_per_entry(self, test_db_session) -> None:
+        project = make_project(name="craft-parts")
+        test_db_session.add(project)
+        await test_db_session.flush()
+        from_issue = make_issue(project_id=project.id, external_id="1")
+        to_issue = make_issue(project_id=project.id, external_id="42")
+        test_db_session.add_all([from_issue, to_issue])
+        await test_db_session.flush()
+        evaluation = make_evaluation(issue_id=from_issue.id)
+        test_db_session.add(evaluation)
+        await test_db_session.flush()
+
+        repo = IssueLinkRepository(test_db_session)
+        links = await repo.create_from_related_work(
+            from_issue_id=from_issue.id,
+            llm_evaluation_id=evaluation.id,
+            related_work=[
+                {
+                    "kind": "duplicate_of",
+                    "ref": "craft-parts#42",
+                    "confidence": 85,
+                    "note": "same traceback",
+                }
+            ],
+        )
+
+        assert len(links) == 1
+        assert links[0].to_issue_id == to_issue.id
+        assert links[0].to_ref == "craft-parts#42"
+        assert links[0].kind == "duplicate_of"
+        assert links[0].confidence == 85
+        assert links[0].source == "evaluator"
+
+    async def test_unresolvable_ref_still_writes_to_ref(self, test_db_session) -> None:
+        project = make_project(name="craft-parts")
+        test_db_session.add(project)
+        await test_db_session.flush()
+        from_issue = make_issue(project_id=project.id, external_id="1")
+        test_db_session.add(from_issue)
+        await test_db_session.flush()
+        evaluation = make_evaluation(issue_id=from_issue.id)
+        test_db_session.add(evaluation)
+        await test_db_session.flush()
+
+        repo = IssueLinkRepository(test_db_session)
+        links = await repo.create_from_related_work(
+            from_issue_id=from_issue.id,
+            llm_evaluation_id=evaluation.id,
+            related_work=[
+                {
+                    "kind": "related_to",
+                    "ref": "craft-parts#999",
+                    "confidence": 40,
+                    "note": "unresolved",
+                }
+            ],
+        )
+
+        assert len(links) == 1
+        assert links[0].to_issue_id is None
+        assert links[0].to_ref == "craft-parts#999"
+
+    async def test_empty_related_work_creates_nothing(self, test_db_session) -> None:
+        project = make_project(name="craft-parts")
+        test_db_session.add(project)
+        await test_db_session.flush()
+        from_issue = make_issue(project_id=project.id, external_id="1")
+        test_db_session.add(from_issue)
+        await test_db_session.flush()
+        evaluation = make_evaluation(issue_id=from_issue.id)
+        test_db_session.add(evaluation)
+        await test_db_session.flush()
+
+        repo = IssueLinkRepository(test_db_session)
+        links = await repo.create_from_related_work(
+            from_issue_id=from_issue.id,
+            llm_evaluation_id=evaluation.id,
+            related_work=[],
+        )
+
+        assert links == []

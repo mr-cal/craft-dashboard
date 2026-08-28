@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.issue_link import IssueLink
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
+from craft_dashboard.models.project import Project
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,6 +64,50 @@ class IssueLinkRepository:
         self.session.add(link)
         await self.session.flush()
         return link
+
+    async def create_from_related_work(
+        self,
+        *,
+        from_issue_id: int,
+        llm_evaluation_id: int,
+        related_work: list[dict[str, Any]],
+    ) -> list[IssueLink]:
+        """Persist an evaluator's related_work findings as IssueLink rows."""
+        links: list[IssueLink] = []
+        for entry in related_work:
+            ref = str(entry.get("ref", "")).strip()
+            link = IssueLink(
+                from_issue_id=from_issue_id,
+                llm_evaluation_id=llm_evaluation_id,
+                to_issue_id=await self._resolve_ref_to_issue_id(ref),
+                to_ref=ref,
+                kind=entry.get("kind", "related_to"),
+                confidence=entry.get("confidence", 0),
+                note=entry.get("note") or None,
+                source="evaluator",
+            )
+            self.session.add(link)
+            links.append(link)
+
+        if links:
+            await self.session.flush()
+        return links
+
+    async def _resolve_ref_to_issue_id(self, ref: str) -> int | None:
+        """Resolve a project-qualified issue ref to an existing DB issue id."""
+        if "#" not in ref:
+            return None
+        prefix, _, external_id = ref.rpartition("#")
+        if not prefix or not external_id:
+            return None
+        project_name = prefix.rsplit("/", 1)[-1]
+        query = (
+            select(Issue.id)
+            .join(Project, Issue.project_id == Project.id)
+            .where(Project.name == project_name, Issue.external_id == external_id)
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
 
     async def get_latest_links_for_issue(self, issue_id: int) -> list[IssueLink]:
         """Return links produced by *issue_id*'s current (latest) evaluation only.
