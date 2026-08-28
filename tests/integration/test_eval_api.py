@@ -869,7 +869,7 @@ class TestEvalNextPriorityOrdering:
             suggested_action="close",
             suggested_action_reason="This issue changed after the last evaluation.",
             scores={},
-            eval_version=CURRENT_EVAL_VERSION,
+            eval_version=CURRENT_SUMMARY_VERSION,
             issue_data_hash="stale-closed-hash",
         )
         open_evaluation = make_evaluation(
