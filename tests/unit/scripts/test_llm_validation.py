@@ -14,6 +14,7 @@ def _valid_result() -> dict:
             "staleness": 10,
             "complexity": 40,
             "support_request": 15,
+            "impact": 30,
             "confidence": 85,
         },
         "tokens_used": 42,
@@ -40,6 +41,7 @@ def test_accepts_valid_pull_request_results() -> None:
     result["scores"] = {
         "staleness": 10,
         "complexity": 40,
+        "impact": 30,
         "confidence": 85,
     }
 
@@ -120,6 +122,7 @@ def test_accepts_close_not_mergeable_for_pr() -> None:
     result["scores"] = {
         "staleness": 30,
         "complexity": 60,
+        "impact": 30,
         "confidence": 75,
     }
     result["suggested_action"] = "close_not_mergeable"
@@ -145,8 +148,55 @@ def test_accepts_close_not_a_bug_for_pr() -> None:
     result["scores"] = {
         "staleness": 30,
         "complexity": 60,
+        "impact": 30,
         "confidence": 75,
     }
     result["suggested_action"] = "close_not_a_bug"
     result["suggested_action_reason"] = "The reported behaviour is working as intended."
     validate_evaluation_result(result, issue_type="pull_request")
+
+
+class TestImpactScoreRequired:
+    """impact joins the required score keys for both issues and PRs."""
+
+    def test_issue_missing_impact_raises(self) -> None:
+        result = {
+            "summary": "Issue remains actionable because the reproducer and scope are clear.",
+            "scores": {
+                "staleness": 10,
+                "complexity": 10,
+                "support_request": 10,
+                "confidence": 50,
+            },
+            "suggested_action": "keep_open",
+            "suggested_action_reason": "r",
+        }
+        with pytest.raises(LLMValidationError, match="impact"):
+            validate_evaluation_result(result, issue_type="issue", state="open")
+
+    def test_pr_missing_impact_raises(self) -> None:
+        result = {
+            "summary": "PR remains actionable because the reproducer and scope are clear.",
+            "scores": {"staleness": 10, "complexity": 10, "confidence": 50},
+            "suggested_action": "keep_open",
+            "suggested_action_reason": "r",
+        }
+        with pytest.raises(LLMValidationError, match="impact"):
+            validate_evaluation_result(
+                result, issue_type="pull_request", state="open"
+            )
+
+    def test_issue_with_impact_passes(self) -> None:
+        result = {
+            "summary": "Issue remains actionable because the reproducer and scope are clear.",
+            "scores": {
+                "staleness": 10,
+                "complexity": 10,
+                "support_request": 10,
+                "impact": 40,
+                "confidence": 50,
+            },
+            "suggested_action": "keep_open",
+            "suggested_action_reason": "reason long enough for validation",
+        }
+        validate_evaluation_result(result, issue_type="issue", state="open")

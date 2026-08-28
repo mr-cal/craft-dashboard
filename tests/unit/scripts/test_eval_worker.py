@@ -35,6 +35,7 @@ SAMPLE_EVALUATE_RESULT = {
         "staleness": 10,
         "complexity": 30,
         "support_request": 0,
+        "impact": 40,
         "readiness": 50,
         "confidence": 80,
     },

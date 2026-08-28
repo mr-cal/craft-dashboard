@@ -42,10 +42,10 @@ _PR_ACTIONS: Final[frozenset[str]] = frozenset(
 )
 
 _ISSUE_REQUIRED_SCORE_KEYS: Final[frozenset[str]] = frozenset(
-    {"staleness", "complexity", "support_request", "confidence"}
+    {"staleness", "complexity", "support_request", "impact", "confidence"}
 )
 _PR_REQUIRED_SCORE_KEYS: Final[frozenset[str]] = frozenset(
-    {"staleness", "complexity", "confidence"}
+    {"staleness", "complexity", "impact", "confidence"}
 )
 
 # Backward-compatible exports.
