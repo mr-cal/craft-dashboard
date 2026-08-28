@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pathlib
 from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any, Self
@@ -46,6 +47,8 @@ SAMPLE_EVALUATE_RESULT = {
     "completion_tokens": 200,
     "cost_usd": 0.0042,
     "issue_data_hash": "unit_test_eval_hash",
+    "related_work": [],
+    "transcript": None,
 }
 
 DEFAULT_KWARGS = {
@@ -93,6 +96,41 @@ def _make_issue(**updates: Any) -> dict[str, Any]:
     issue = deepcopy(SAMPLE_ISSUE)
     issue.update(updates)
     return issue
+
+
+@pytest.fixture
+def base_runtime() -> SimpleNamespace:
+    return SimpleNamespace(
+        client=SimpleNamespace(retry_callback=None),
+        evaluator=SimpleNamespace(
+            evaluate=AsyncMock(
+                return_value={
+                    **SAMPLE_EVALUATE_RESULT,
+                    "related_work": [],
+                    "transcript": None,
+                    "tool_context": SimpleNamespace(touched_paths=set()),
+                }
+            )
+        ),
+        embed_client=MagicMock(),
+        http_client=MagicMock(),
+        headers={"Authorization": "Bearer test-token"},
+        params={},
+        progress=MagicMock(update=MagicMock(), console=MagicMock(print=MagicMock())),
+        overall_id=0,
+        timing=MagicMock(add=MagicMock()),
+        state=SimpleNamespace(
+            release=AsyncMock(),
+            complete=AsyncMock(return_value=1),
+        ),
+        poll_interval=1,
+        issue_limit=1,
+        model="scoring-model",
+        llm_backend="local",
+        mirror_dir=pathlib.Path("/mirrors"),
+        allowed_projects={"snapcraft": "canonical/snapcraft"},
+        eval_server_base_url="http://localhost:8000",
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -342,3 +380,76 @@ async def test_run_evaluate_loop_posts_serialized_evidence_paths(
         {"repo": "canonical/rockcraft", "path": "README.md"},
         {"repo": "canonical/rockcraft", "path": "src/parts.py"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_evaluate_issue_passes_project_and_tool_ctx(
+    monkeypatch: pytest.MonkeyPatch, base_runtime: SimpleNamespace
+) -> None:
+    monkeypatch.setattr(eval_worker, "_embed_summary", AsyncMock(return_value=[0.1]))
+    monkeypatch.setattr(eval_worker, "_embed_search_text", AsyncMock(return_value=[0.2]))
+    post_submission = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(eval_worker, "_post_submission", post_submission)
+
+    issue_data = _make_issue(
+        project_name="snapcraft",
+        repo_shas={"snapcraft": "a" * 40},
+        issue_id=7,
+    )
+    await eval_worker._evaluate_issue(
+        base_runtime, issue_data=issue_data, worker_name="worker-1"
+    )
+
+    call_kwargs = base_runtime.evaluator.evaluate.call_args.kwargs
+    assert call_kwargs["project"] == "snapcraft"
+    tool_ctx = call_kwargs["tool_ctx"]
+    assert tool_ctx.mirror_dir == pathlib.Path("/mirrors")
+    assert tool_ctx.allowed_projects == {"snapcraft": "canonical/snapcraft"}
+    assert tool_ctx.pinned_shas == {"snapcraft": "a" * 40}
+    assert tool_ctx.eval_server_base_url == "http://localhost:8000"
+    assert tool_ctx.eval_api_token == "test-token"
+    assert tool_ctx.issue_id == 7
+    submission = post_submission.await_args.kwargs["submission"]
+    assert submission["related_work"] == []
+    assert submission["transcript"] is None
+
+
+@pytest.mark.asyncio
+async def test_evaluate_issue_discards_on_tool_failure(
+    monkeypatch: pytest.MonkeyPatch, base_runtime: SimpleNamespace
+) -> None:
+    base_runtime.evaluator.evaluate = AsyncMock(
+        side_effect=eval_worker.EvaluationDiscarded("tool failure")
+    )
+    post_submission = AsyncMock()
+    monkeypatch.setattr(eval_worker, "_post_submission", post_submission)
+
+    await eval_worker._evaluate_issue(
+        base_runtime,
+        issue_data=_make_issue(repo_shas={"snapcraft": "a" * 40}),
+        worker_name="worker-1",
+    )
+
+    base_runtime.state.release.assert_awaited_once()
+    post_submission.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_worker_loop_skips_evaluate_when_preflight_blocks(
+    monkeypatch: pytest.MonkeyPatch, base_runtime: SimpleNamespace
+) -> None:
+    base_runtime.state.reserve = AsyncMock(side_effect=[True, False])
+    monkeypatch.setattr(
+        eval_worker,
+        "_fetch_next_issue",
+        AsyncMock(return_value=_make_issue(repo_shas={"snapcraft": "b" * 40})),
+    )
+    monkeypatch.setattr(eval_worker, "_run_issue_preflight", AsyncMock(return_value=False))
+    evaluate_issue = AsyncMock()
+    monkeypatch.setattr(eval_worker, "_evaluate_issue", evaluate_issue)
+
+    await eval_worker._worker_loop(
+        base_runtime, server_url="http://localhost:8000", worker_index=1
+    )
+
+    evaluate_issue.assert_not_called()

@@ -25,9 +25,14 @@ from craft_dashboard.llm.client import (
     OpenRouterClient,
 )
 from craft_dashboard.llm.embeddings import EmbeddingClient
-from craft_dashboard.llm.evaluator import IssueEvaluator, _compute_content_hash
+from craft_dashboard.llm.evaluator import (
+    EvaluationDiscarded,
+    IssueEvaluator,
+    _compute_content_hash,
+)
 from craft_dashboard.llm.exceptions import LLMQuotaError
 from craft_dashboard.llm.preflight import run_preflight
+from craft_dashboard.llm.tool_dispatch import ToolContext
 from craft_dashboard.settings import Settings
 from rich.console import Console
 
@@ -125,6 +130,7 @@ class _Runtime:
         llm_backend: str,
         mirror_dir: Path,
         allowed_projects: dict[str, str],
+        eval_server_base_url: str,
     ) -> None:
         self.client = client
         self.evaluator = evaluator
@@ -142,6 +148,7 @@ class _Runtime:
         self.llm_backend = llm_backend
         self.mirror_dir = mirror_dir
         self.allowed_projects = allowed_projects
+        self.eval_server_base_url = eval_server_base_url
 
 
 async def _embed_summary(
@@ -475,6 +482,15 @@ async def _evaluate_issue(  # noqa: PLR0911
 
     runtime.client.retry_callback = _on_eval_attempt
     started_at = time.monotonic()
+    project_name = issue_data["project_name"]
+    tool_ctx = ToolContext(
+        mirror_dir=runtime.mirror_dir,
+        allowed_projects=runtime.allowed_projects,
+        pinned_shas=issue_data.get("repo_shas", {}),
+        eval_server_base_url=runtime.eval_server_base_url,
+        eval_api_token=runtime.headers.get("Authorization", "").removeprefix("Bearer "),
+        issue_id=issue_data["issue_id"],
+    )
 
     try:
         result, evaluate_elapsed = await _timed(
@@ -493,8 +509,20 @@ async def _evaluate_issue(  # noqa: PLR0911
                 comments=issue_data.get("comments"),
                 closing_references=issue_data.get("closing_references"),
                 pr_details=issue_data.get("pr_details"),
+                project=project_name,
+                tool_ctx=tool_ctx,
             )
         )
+    except EvaluationDiscarded as exc:
+        runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+        logger.warning(
+            "%s: evaluation discarded (post-preflight tool failure): %s; "
+            "releasing claim, submitting nothing",
+            issue_ref,
+            exc,
+        )
+        await runtime.state.release()
+        return
     except LLMQuotaError:
         runtime.progress.update(runtime.overall_id, description="Evaluating issues")
         await runtime.state.release()
@@ -570,8 +598,8 @@ async def _evaluate_issue(  # noqa: PLR0911
         "cost_usd": result["cost_usd"],
         "summary_embedding": embedding,
         "search_embedding": search_embedding,
-        # Phase 6 will thread a real ToolContext through evaluation; until
-        # then this stays empty, but the worker/server payload shape is live.
+        "related_work": result.get("related_work", []),
+        "transcript": result.get("transcript"),
         "evidence_paths": _serialize_evidence_paths(result.get("tool_context")),
     }
 
@@ -899,6 +927,7 @@ async def run_evaluate_loop(
                     llm_backend=llm_backend,
                     mirror_dir=settings.mirror_dir_path,
                     allowed_projects=allowed_projects,
+                    eval_server_base_url=server_url,
                 )
                 await asyncio.gather(
                     *(
