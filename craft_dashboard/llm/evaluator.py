@@ -23,7 +23,7 @@ from craft_dashboard.models.issue import Issue
 #: prompt (build_open_evaluate_prompt). Increment only when a change to
 #: that prompt is expected to alter open-item scores/summaries — this
 #: re-evaluates just the ~2,269 open items, not the closed-item corpus.
-CURRENT_EVAL_VERSION: int = 4
+CURRENT_EVAL_VERSION: int = 5
 
 #: Evaluation version produced by the current closed-issue/merged-PR
 #: *summary* prompt (build_closed_evaluate_prompt). Versioned
