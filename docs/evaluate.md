@@ -106,3 +106,56 @@ generated, reviewed, and explicitly approved.
 
 See [`docs/how-to.md`](how-to.md) for the operator workflow that produces the
 reports.
+
+## Canary rollout
+
+Bumping `CURRENT_EVAL_VERSION` (see `craft_dashboard/llm/evaluator.py`) makes
+every currently-`latest` open issue/PR evaluation "outdated" and the
+continuous worker's `/api/eval/next` polling naturally re-surfaces all of
+them — there is no way to make a version bump affect only a handful of items.
+To avoid a bug in a new evaluator/prompt version silently wasting time and
+money re-evaluating the entire backlog before anyone notices, use
+`scripts/llm/canary.py` to hand-pick a small number of real issues and
+evaluate them one at a time, **before** touching `CURRENT_EVAL_VERSION`:
+
+```bash
+uv run scripts/llm/canary.py \
+  --server https://craft-dashboard.name \
+  --token "$EVAL_API_TOKEN" \
+  --issue snapcraft:6381 \
+  --issue debcraft:41 \
+  --issue "snapcraft (launchpad):1861614" \
+  --issue snapcraft-rocks:111 \
+  --issue craft-parts:766
+```
+
+Each `--issue PROJECT:NUMBER` target is evaluated with `--force`/`--issue`
+semantics (bypassing version/hash eligibility entirely — this never depends
+on or requires a `CURRENT_EVAL_VERSION` bump) and persists its result to the
+live database exactly like a normal evaluation, so the resulting
+`suggested_action`/`suggested_action_reason`/`impact`/`related_work` can be
+reviewed on the real issue detail page. Each target also gets its own hard
+`--timeout-seconds` (default 300s); the batch stops at the first timeout or
+error instead of continuing through the rest of the list, so a hang or bug
+affects at most one issue.
+
+Full staged rollout, from smallest to largest blast radius:
+
+1. **Canary (5 issues).** Run `canary.py` against 5 hand-picked real issues
+   (as above). A human reviews the resulting evaluations on the live issue
+   detail pages before proceeding.
+2. **`CURRENT_EVAL_VERSION` bump.** Only after the canary is reviewed and
+   approved, bump `CURRENT_EVAL_VERSION` (see
+   `plans/42-deep-evaluation-phase6-prompt-rewrite-and-backfill.md`'s Task 12
+   runbook for the exact gate/rollback procedure). This re-queues the full
+   ~2,269-item backlog, but nothing evaluates yet until the worker actually
+   claims work.
+3. **Safety-margin batch (50 issues).** Run `evaluate --limit 50` (see
+   `--limit`/`--max-evaluations` above) and review a sample of the results
+   and the admin page's cost/error dashboard before continuing.
+4. **Full backfill.** Let the continuous worker (pinned to
+   `--concurrency 6` in production) drain the remaining backlog at its
+   normal polling cadence, checking the cost dashboard periodically.
+
+If any stage surfaces a problem, stop and roll back (see Task 12's rollback
+procedure) rather than proceeding to the next stage.
