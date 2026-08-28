@@ -1512,7 +1512,9 @@ class TestEvalResultIntegration:
             _seed_open_issue(test_db_session, issue_id=1, external_id="501")
         )
         to_issue = make_issue(id=2, project_id=1, external_id="502")
-        asyncio.get_event_loop().run_until_complete(_seed_entities(test_db_session, to_issue))
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, to_issue)
+        )
         app, token = _create_eval_app(test_db_session)
 
         with TestClient(app) as client:

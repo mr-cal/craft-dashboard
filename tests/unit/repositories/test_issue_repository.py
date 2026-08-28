@@ -8,6 +8,8 @@ from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.views import IssueFilters, IssueQueryResult, IssueView
 from craft_dashboard.repositories.issue_repository import (
+    _SCORE_SORT_FIELDS,
+    _VALID_SORT_FIELDS,
     IssueRepository,
     _apply_author_role_filter,
     _compute_age_days,
@@ -1003,11 +1005,6 @@ class TestQueryIssuesLLMScores:
     """Test that _query_issues properly returns all LLM score fields."""
 
     def test_impact_and_quick_win_are_sortable_score_fields(self) -> None:
-        from craft_dashboard.repositories.issue_repository import (
-            _SCORE_SORT_FIELDS,
-            _VALID_SORT_FIELDS,
-        )
-
         assert "impact" in _SCORE_SORT_FIELDS
         assert "quick_win" in _SCORE_SORT_FIELDS
         assert "impact" in _VALID_SORT_FIELDS

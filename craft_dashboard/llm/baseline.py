@@ -31,8 +31,7 @@ def _extract_candidate_patterns(text: str) -> list[str]:
         candidate = match.group(1).strip().rstrip("()")
         if candidate:
             candidates.append(candidate)
-    for match in _IDENTIFIER_RE.finditer(text):
-        candidates.append(match.group(1))
+    candidates.extend(match.group(1) for match in _IDENTIFIER_RE.finditer(text))
 
     seen: set[str] = set()
     patterns: list[str] = []
@@ -60,7 +59,7 @@ async def build_round1_baseline(
 
     try:
         layout = await reader.repo_layout(mirror, ref=ref)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise BaselineError(
             f"repo_layout failed for {project}@{ref[:12]} after preflight"
         ) from exc
@@ -89,16 +88,20 @@ async def build_round1_baseline(
         if _MIN_USEFUL_HITS <= hit_count <= _MAX_USEFUL_HITS:
             grep_lines.append(f"{pattern!r}: {hit_count} hit(s)")
     if patterns and grep_errors == len(patterns):
-        raise BaselineError(f"grep_repo failed for every pattern on {project}@{ref[:12]}")
+        raise BaselineError(
+            f"grep_repo failed for every pattern on {project}@{ref[:12]}"
+        )
     if grep_lines:
-        sections.append("## Candidate identifiers found in this repo\n" + "\n".join(grep_lines))
+        sections.append(
+            "## Candidate identifiers found in this repo\n" + "\n".join(grep_lines)
+        )
 
     try:
         raw = await _dispatch_http_tool(
             ctx, name="related_issues", arguments={"query": title}
         )
         related = json.loads(raw).get("results", [])
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise BaselineError("related_issues endpoint failed after preflight") from exc
 
     if related:

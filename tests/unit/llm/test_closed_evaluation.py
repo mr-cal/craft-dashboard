@@ -19,7 +19,11 @@ async def test_closed_issue_uses_summary_only_evaluation() -> None:
     )
     mock_client = MagicMock()
     mock_client.complete = AsyncMock(return_value=mock_response)
-    evaluator = IssueEvaluator(client=mock_client, model="test-model")
+    evaluator = IssueEvaluator(
+        client=mock_client,
+        model_summary="test-model",
+        model_scoring="test-model",
+    )
 
     with patch(
         "craft_dashboard.llm.evaluator.build_closed_evaluate_prompt"
@@ -67,14 +71,18 @@ async def test_state_change_triggers_reevaluation_with_new_hash() -> None:
     mock_client = MagicMock()
     mock_client.complete = AsyncMock(
         return_value=LLMResponse(
-            content='{"summary": "Summary text.", "scores": {"staleness": 10, "complexity": 20, "support_request": 5, "confidence": 80}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
+            content='{"summary": "Summary text.", "scores": {"staleness": 10, "complexity": 20, "support_request": 5, "impact": 40, "confidence": 80}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
             total_tokens=10,
             prompt_tokens=7,
             completion_tokens=3,
             model="test-model",
         )
     )
-    evaluator = IssueEvaluator(client=mock_client, model="test-model")
+    evaluator = IssueEvaluator(
+        client=mock_client,
+        model_summary="test-model",
+        model_scoring="test-model",
+    )
 
     open_hash = await evaluator.evaluate(
         title="Add support for core24 base",

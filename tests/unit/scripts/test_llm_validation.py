@@ -182,9 +182,7 @@ class TestImpactScoreRequired:
             "suggested_action_reason": "r",
         }
         with pytest.raises(LLMValidationError, match="impact"):
-            validate_evaluation_result(
-                result, issue_type="pull_request", state="open"
-            )
+            validate_evaluation_result(result, issue_type="pull_request", state="open")
 
     def test_issue_with_impact_passes(self) -> None:
         result = {

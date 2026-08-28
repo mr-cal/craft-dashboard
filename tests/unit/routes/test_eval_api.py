@@ -3,8 +3,8 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from craft_dashboard.routes import eval_api
+
 from tests.factories import make_evaluation, make_issue, make_project
 
 

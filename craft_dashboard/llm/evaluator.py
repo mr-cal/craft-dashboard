@@ -73,8 +73,11 @@ def _wrap_untrusted_tool_output(text: str) -> str:
     return f"{_UNTRUSTED_OPEN}\n{text}\n{_UNTRUSTED_CLOSE}"
 
 
-class EvaluationDiscarded(RuntimeError):
+class EvaluationDiscardError(RuntimeError):
     """A tool failed after preflight, so the evaluation must be discarded."""
+
+
+EvaluationDiscarded = EvaluationDiscardError
 
 
 class ParsedEvaluation(TypedDict, total=False):
@@ -504,7 +507,7 @@ class IssueEvaluator:
                     result = await dispatch_tool_call(
                         self._tool_ctx, name=name, arguments=arguments
                     )
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     raise EvaluationDiscarded(
                         f"tool {name!r} failed after preflight: {exc}"
                     ) from exc

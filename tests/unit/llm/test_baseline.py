@@ -7,8 +7,14 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
+from craft_dashboard.llm.baseline import (
+    BaselineError,
+    _extract_candidate_patterns,
+    build_round1_baseline,
+)
 from craft_dashboard.llm.tool_dispatch import ToolContext
+
+TEST_EVAL_API_TOKEN = "test-token"
 
 
 @contextmanager
@@ -45,7 +51,7 @@ def _tool_ctx() -> ToolContext:
         allowed_projects={"craft-parts": "canonical"},
         pinned_shas={"craft-parts": "a" * 40},
         eval_server_base_url="http://testserver",
-        eval_api_token="token",
+        eval_api_token=TEST_EVAL_API_TOKEN,
         issue_id=1,
     )
 
@@ -54,31 +60,23 @@ class TestExtractCandidatePatterns:
     """Tests for _extract_candidate_patterns."""
 
     def test_extracts_backtick_identifiers(self) -> None:
-        from craft_dashboard.llm.baseline import _extract_candidate_patterns
-
         text = "Calling `parse_manifest()` raises `KeyError` unexpectedly."
         patterns = _extract_candidate_patterns(text)
         assert "parse_manifest" in patterns
         assert "KeyError" in patterns
 
     def test_extracts_snake_case_and_camel_case_words(self) -> None:
-        from craft_dashboard.llm.baseline import _extract_candidate_patterns
-
         text = "The buildEnvironment step fails inside collect_lifecycle_steps."
         patterns = _extract_candidate_patterns(text)
         assert "buildEnvironment" in patterns
         assert "collect_lifecycle_steps" in patterns
 
     def test_ignores_short_common_words(self) -> None:
-        from craft_dashboard.llm.baseline import _extract_candidate_patterns
-
         text = "This is a bug in the app when it runs."
         patterns = _extract_candidate_patterns(text)
         assert patterns == []
 
     def test_caps_at_ten_patterns(self) -> None:
-        from craft_dashboard.llm.baseline import _extract_candidate_patterns
-
         text = " ".join(f"identifier_number_{i}" for i in range(20))
         patterns = _extract_candidate_patterns(text)
         assert len(patterns) <= 10
@@ -89,8 +87,6 @@ class TestBuildRound1Baseline:
 
     @pytest.mark.asyncio
     async def test_includes_repo_layout(self) -> None:
-        from craft_dashboard.llm.baseline import build_round1_baseline
-
         with (
             patch_repo_layout({"craft_parts": 12}),
             patch_grep_repo([]),
@@ -106,8 +102,6 @@ class TestBuildRound1Baseline:
 
     @pytest.mark.asyncio
     async def test_discards_zero_hit_patterns(self) -> None:
-        from craft_dashboard.llm.baseline import build_round1_baseline
-
         with (
             patch_repo_layout({}),
             patch_grep_repo([]),
@@ -123,8 +117,6 @@ class TestBuildRound1Baseline:
 
     @pytest.mark.asyncio
     async def test_discards_over_100_hit_patterns(self) -> None:
-        from craft_dashboard.llm.baseline import build_round1_baseline
-
         with (
             patch_repo_layout({}),
             patch_grep_repo([f"craft-parts: hit {i}" for i in range(150)]),
@@ -140,8 +132,6 @@ class TestBuildRound1Baseline:
 
     @pytest.mark.asyncio
     async def test_layout_failure_after_preflight_raises(self) -> None:
-        from craft_dashboard.llm.baseline import BaselineError, build_round1_baseline
-
         with (
             patch(
                 "craft_dashboard.llm.baseline.reader.repo_layout",

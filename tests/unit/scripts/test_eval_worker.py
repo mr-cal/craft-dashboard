@@ -387,7 +387,9 @@ async def test_evaluate_issue_passes_project_and_tool_ctx(
     monkeypatch: pytest.MonkeyPatch, base_runtime: SimpleNamespace
 ) -> None:
     monkeypatch.setattr(eval_worker, "_embed_summary", AsyncMock(return_value=[0.1]))
-    monkeypatch.setattr(eval_worker, "_embed_search_text", AsyncMock(return_value=[0.2]))
+    monkeypatch.setattr(
+        eval_worker, "_embed_search_text", AsyncMock(return_value=[0.2])
+    )
     post_submission = AsyncMock(return_value=_response(200))
     monkeypatch.setattr(eval_worker, "_post_submission", post_submission)
 
@@ -444,7 +446,9 @@ async def test_worker_loop_skips_evaluate_when_preflight_blocks(
         "_fetch_next_issue",
         AsyncMock(return_value=_make_issue(repo_shas={"snapcraft": "b" * 40})),
     )
-    monkeypatch.setattr(eval_worker, "_run_issue_preflight", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        eval_worker, "_run_issue_preflight", AsyncMock(return_value=False)
+    )
     evaluate_issue = AsyncMock()
     monkeypatch.setattr(eval_worker, "_evaluate_issue", evaluate_issue)
 
