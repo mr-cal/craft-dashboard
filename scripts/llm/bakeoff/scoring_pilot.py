@@ -424,7 +424,7 @@ async def run_scoring_pilot(
     api_key: str = "",
     base_url: str = "",
     ca_cert: str = "",
-    max_rounds: int = 8,
+    max_rounds: int = 10,
     max_spend_per_issue_usd: float = DEFAULT_MAX_SPEND_PER_ISSUE_USD,
     max_spend_usd: float | None = None,
     eval_server_base_url: str = "",
@@ -672,7 +672,7 @@ async def run_max_rounds_sweep(
 @click.option("--transcripts-dir", type=click.Path(path_type=Path), required=True)
 @click.option("--mirror-dir", type=click.Path(path_type=Path), required=True)
 @click.option("--out", "out_path", type=click.Path(path_type=Path), required=True)
-@click.option("--max-rounds", default=8, show_default=True, type=int)
+@click.option("--max-rounds", default=10, show_default=True, type=int)
 @click.option("--max-spend-usd", default=5.0, show_default=True, type=float)
 @click.option(
     "--max-spend-per-issue-usd",
