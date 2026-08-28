@@ -62,6 +62,24 @@ class TestScoringReport:
         assert "wall" in text.lower()
         assert "recommended max_tool_rounds" in text.lower()
 
+    def test_report_includes_rationale_column_and_text(self, tmp_path) -> None:
+        out = tmp_path / "report_scoring.md"
+        write_scoring_report(
+            [
+                _r(
+                    new_output={
+                        "scores": {"impact": 70},
+                        "rationale": "Cites craft_parts/executor/step_handler.py directly.",
+                    }
+                )
+            ],
+            out,
+            max_rounds=6,
+        )
+        text = out.read_text()
+        assert "rationale" in text.lower()
+        assert "Cites craft_parts/executor/step_handler.py directly." in text
+
 
 class TestExtrapolation:
     def test_projects_backfill_with_mean_and_stdev(self) -> None:

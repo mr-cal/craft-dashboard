@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import TYPE_CHECKING
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from craft_dashboard.llm.tool_dispatch import ToolContext, dispatch_tool_call
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from craft_dashboard.llm.tool_dispatch import (
+    ToolContext,
+    _resolve_projects,
+    dispatch_tool_call,
+)
 
 
 def _run_git(*args: str, cwd: Path) -> None:
@@ -100,6 +101,52 @@ def tool_context(bare_mirror: Path, sample_repo_shas: list[str]) -> ToolContext:
         eval_api_token="test-token",  # noqa: S106
         issue_id=1,
     )
+
+
+def _multi_project_ctx() -> ToolContext:
+    """Build a ToolContext spanning multiple allowed projects (no mirrors needed)."""
+    return ToolContext(
+        mirror_dir=Path("/unused"),
+        allowed_projects={
+            "craft-parts": "canonical",
+            "snapcraft": "canonical",
+            "snapcraft-rocks": "canonical",
+        },
+        pinned_shas={},
+        eval_server_base_url="http://testserver",
+        eval_api_token="test-token",  # noqa: S106
+        issue_id=1,
+        default_project="snapcraft",
+    )
+
+
+class TestResolveProjects:
+    def test_defaults_to_the_issue_own_project_when_repos_omitted(self) -> None:
+        ctx = _multi_project_ctx()
+
+        assert _resolve_projects(ctx, None) == ["snapcraft"]
+
+    def test_explicit_repos_still_overrides_the_default(self) -> None:
+        ctx = _multi_project_ctx()
+
+        assert _resolve_projects(ctx, ["craft-parts", "snapcraft-rocks"]) == [
+            "craft-parts",
+            "snapcraft-rocks",
+        ]
+
+    def test_falls_back_to_all_allowed_projects_when_no_default_project_set(
+        self,
+    ) -> None:
+        ctx = ToolContext(
+            mirror_dir=Path("/unused"),
+            allowed_projects={"craft-parts": "canonical", "snapcraft": "canonical"},
+            pinned_shas={},
+            eval_server_base_url="http://testserver",
+            eval_api_token="test-token",  # noqa: S106
+            issue_id=1,
+        )
+
+        assert _resolve_projects(ctx, None) == ["craft-parts", "snapcraft"]
 
 
 class TestDispatchToolCall:

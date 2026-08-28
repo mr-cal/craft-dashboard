@@ -141,6 +141,96 @@ class TestRunScoringPilot:
         assert results[0].completed is True
         assert results[0].new_output["scores"]["impact"] == 70
 
+    async def test_all_zero_scores_without_rationale_is_rejected(
+        self, test_db_session, tmp_path
+    ) -> None:
+        await _seed(test_db_session)
+        sample = tmp_path / "s.json"
+        sample.write_text(
+            '[{"source": "github", "project": "craft-parts", "external_id": "1"}]'
+        )
+        all_zero_no_rationale = _final(
+            content=(
+                '{"scores": {"impact": 0, "staleness": 0, "complexity": 0, '
+                '"support_request": 0, "confidence": 0}, "related_work": []}'
+            )
+        )
+        client = AsyncMock()
+        client.complete.return_value = all_zero_no_rationale
+        with (
+            patch("scripts.llm.bakeoff.scoring_pilot.make_client", return_value=client),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.build_round1_baseline",
+                return_value="B",
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._pinned_sha_for_project",
+                return_value="a" * 40,
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._allowed_projects",
+                new=AsyncMock(return_value={"craft-parts": "canonical"}),
+            ),
+        ):
+            results = await run_scoring_pilot(
+                session=test_db_session,
+                models=["model-a"],
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=tmp_path / "t",
+                mirror_dir=tmp_path / "m",
+                api_key="k",
+                max_rounds=6,
+            )
+        assert results[0].completed is False
+        assert "rationale" in (results[0].error or "").lower()
+
+    async def test_all_zero_scores_with_rationale_is_accepted(
+        self, test_db_session, tmp_path
+    ) -> None:
+        await _seed(test_db_session)
+        sample = tmp_path / "s.json"
+        sample.write_text(
+            '[{"source": "github", "project": "craft-parts", "external_id": "1"}]'
+        )
+        all_zero_with_rationale = _final(
+            content=(
+                '{"scores": {"impact": 0, "staleness": 0, "complexity": 0, '
+                '"support_request": 0, "confidence": 0}, "related_work": [], '
+                '"rationale": "No relevant evidence found after searching the repo '
+                'and related issues; this appears to be a genuinely trivial report."}'
+            )
+        )
+        client = AsyncMock()
+        client.complete.return_value = all_zero_with_rationale
+        with (
+            patch("scripts.llm.bakeoff.scoring_pilot.make_client", return_value=client),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot.build_round1_baseline",
+                return_value="B",
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._pinned_sha_for_project",
+                return_value="a" * 40,
+            ),
+            patch(
+                "scripts.llm.bakeoff.scoring_pilot._allowed_projects",
+                new=AsyncMock(return_value={"craft-parts": "canonical"}),
+            ),
+        ):
+            results = await run_scoring_pilot(
+                session=test_db_session,
+                models=["model-a"],
+                backend="openrouter",
+                sample_path=sample,
+                transcripts_dir=tmp_path / "t",
+                mirror_dir=tmp_path / "m",
+                api_key="k",
+                max_rounds=6,
+            )
+        assert results[0].completed is True
+        assert results[0].error is None
+
     async def test_transcript_captures_model_reasoning(
         self, test_db_session, tmp_path
     ) -> None:

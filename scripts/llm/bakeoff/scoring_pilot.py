@@ -174,6 +174,35 @@ def _transcript_path(transcripts_dir: Path, *, model: str, issue_ref: str) -> Pa
     return transcripts_dir / f"{safe_model}__{safe_issue}.json"
 
 
+def _is_all_zero_without_rationale(parsed: dict[str, Any]) -> bool:
+    """Detect an unjustified all-zero/no-evidence scoring stub.
+
+    A model that emits every score as zero, no related_work, and no
+    rationale explaining why is indistinguishable from a degenerate
+    "give up and emit a JSON-shaped placeholder" response (the same
+    all-zero-stub failure mode debug-evals uncovered previously). If the
+    scores are genuinely all zero, the model must say so explicitly via
+    rationale instead of leaving it blank/vague.
+    """
+    scores = parsed.get("scores")
+    if not isinstance(scores, dict) or not scores:
+        return False
+    if any(_as_number(value) != 0 for value in scores.values()):
+        return False
+    related = parsed.get("related_work")
+    if isinstance(related, list) and related:
+        return False
+    rationale = parsed.get("rationale")
+    return not (isinstance(rationale, str) and rationale.strip())
+
+
+def _as_number(value: object) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return float("nan")
+
+
 async def _dispatch_with_timeout(
     tool_ctx: ToolContext, *, name: str, arguments: dict[str, object]
 ) -> str:
@@ -345,7 +374,13 @@ async def _run_one(
                     related = parsed.get("related_work")
                     if isinstance(related, list):
                         result.related_work = related
-                    result.completed = True
+                    if _is_all_zero_without_rationale(parsed):
+                        result.error = (
+                            "all-zero scores with no related_work and no "
+                            "rationale explaining the lack of findings"
+                        )
+                    else:
+                        result.completed = True
                 break
 
             # Hard fallback: normally must_finalize_now forces
@@ -492,6 +527,7 @@ async def run_scoring_pilot(
                             eval_server_base_url=eval_server_base_url,
                             eval_api_token=eval_api_token,
                             issue_id=issue.id,
+                            default_project=entry["project"],
                         )
                         result, transcript = await _run_one(
                             client=client,

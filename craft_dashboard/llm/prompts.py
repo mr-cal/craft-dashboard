@@ -152,7 +152,7 @@ Evaluate the following GitHub issue and respond with valid JSON matching this sc
     "confidence": <0-100, how confident you are in the suggested action>
   },
   "suggested_action": "<one of: close_stale, close_not_a_bug, needs_triage, keep_open>",
-  "suggested_action_reason": "<1-3 sentences justifying the suggested action and scores>"
+  "suggested_action_reason": "<1-3 sentences citing specific evidence that justifies the suggested action and scores>"
 }
 
 Summary guidelines: at most 256 characters of plain text. Focus on what the issue is about \
@@ -185,6 +185,14 @@ the action is the correct action. High confidence means the issue is clearly one
 the allowed actions based on the evidence. Low confidence means the issue is \
 ambiguous, mixed signals, or would benefit from human review before deciding. You \
 should be skeptical and considerate, not overly confident without concrete evidence.
+
+Reason guidelines: suggested_action_reason must cite specific evidence you were \
+actually given — quote or paraphrase a comment, reference a specific label, cite a \
+closing PR/issue reference, or point to a specific detail in the body or comments — \
+rather than restating the action in generic terms (e.g. avoid "this issue is stale \
+so it should be closed" with no specifics backing it up). If confidence is low, \
+explicitly state what's missing, ambiguous, or contradictory that's driving the \
+uncertainty, rather than asserting a confident-sounding reason on thin evidence.
 
 Action guidelines — choose the MOST appropriate action:
 
@@ -228,7 +236,7 @@ Evaluate the following GitHub pull request and respond with valid JSON matching 
     "confidence": <0-100, how confident you are in the suggested action>
   },
   "suggested_action": "<one of: close_stale, close_not_mergeable, needs_review, keep_open>",
-  "suggested_action_reason": "<1-3 sentences justifying the suggested action and scores>"
+  "suggested_action_reason": "<1-3 sentences citing specific evidence that justifies the suggested action and scores>"
 }
 
 Summary guidelines: at most 256 characters of plain text. Focus on what the PR changes \
@@ -258,6 +266,15 @@ the action is the correct action. High confidence means the issue is clearly one
 the allowed actions based on the evidence. Low confidence means the PR is ambiguous, \
 mixed signals, or would benefit from human review before deciding. You should be \
 skeptical and considerate, not overly confident without concrete evidence.
+
+Reason guidelines: suggested_action_reason must cite specific evidence you were \
+actually given — quote or paraphrase a comment, reference a specific label, cite a \
+closing PR/issue reference, or point to a specific detail from the diff/review \
+status/CI state — rather than restating the action in generic terms (e.g. avoid \
+"this PR is stale so it should be closed" with no specifics backing it up). If \
+confidence is low, explicitly state what's missing, ambiguous, or contradictory \
+that's driving the uncertainty, rather than asserting a confident-sounding reason \
+on thin evidence.
 
 Action guidelines — choose the MOST appropriate action:
 

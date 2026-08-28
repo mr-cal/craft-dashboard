@@ -203,6 +203,68 @@ class TestBuildOpenEvaluatePrompt:
         )
         assert "should_not_appear" not in msgs[1]["content"]
 
+    def test_issue_system_requires_reason_to_cite_specific_evidence(self) -> None:
+        msgs = build_open_evaluate_prompt(
+            title="T",
+            body=None,
+            issue_type="issue",
+            labels=[],
+            age_days=0,
+            last_activity_days=0,
+            author="x",
+            is_maintainer=False,
+            comment_count=0,
+        )
+        content = msgs[0]["content"]
+        assert "cite specific evidence" in content.lower()
+        assert "comment" in content.lower()
+        assert "label" in content.lower()
+
+    def test_issue_system_requires_reason_to_explain_low_confidence(self) -> None:
+        msgs = build_open_evaluate_prompt(
+            title="T",
+            body=None,
+            issue_type="issue",
+            labels=[],
+            age_days=0,
+            last_activity_days=0,
+            author="x",
+            is_maintainer=False,
+            comment_count=0,
+        )
+        content = msgs[0]["content"]
+        assert "confidence is low" in content.lower()
+
+    def test_pr_system_requires_reason_to_cite_specific_evidence(self) -> None:
+        msgs = build_open_evaluate_prompt(
+            title="Fix auth bug",
+            body=None,
+            issue_type="pull_request",
+            labels=[],
+            age_days=10,
+            last_activity_days=1,
+            author="bob",
+            is_maintainer=True,
+            comment_count=0,
+        )
+        content = msgs[0]["content"]
+        assert "cite specific evidence" in content.lower()
+
+    def test_pr_system_requires_reason_to_explain_low_confidence(self) -> None:
+        msgs = build_open_evaluate_prompt(
+            title="Fix auth bug",
+            body=None,
+            issue_type="pull_request",
+            labels=[],
+            age_days=10,
+            last_activity_days=1,
+            author="bob",
+            is_maintainer=True,
+            comment_count=0,
+        )
+        content = msgs[0]["content"]
+        assert "confidence is low" in content.lower()
+
 
 class TestBuildClosedEvaluatePrompt:
     """Tests for build_closed_evaluate_prompt."""

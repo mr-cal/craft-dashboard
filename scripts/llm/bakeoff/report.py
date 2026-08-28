@@ -184,19 +184,20 @@ def write_scoring_report(
         "",
         "## Per-issue comparisons",
         "",
-        "| Issue | Model | Old scores | New scores | Related work | Rounds | Tools | Prompt tokens | Completion tokens | Cost_usd | Wall seconds | Status |",
-        "| --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | --- |",
+        "| Issue | Model | Old scores | New scores | Rationale | Related work | Rounds | Tools | Prompt tokens | Completion tokens | Cost_usd | Wall seconds | Status |",
+        "| --- | --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | --- |",
     ]
     for result in results:
         status = (
             "completed" if result.completed else f"error: {result.error or 'unknown'}"
         )
         lines.append(
-            "| {issue} | {model} | {old} | {new} | {related} | {rounds} | {tools} | {prompt} | {completion} | {cost:.4f} | {wall:.2f} | {status} |".format(
+            "| {issue} | {model} | {old} | {new} | {rationale} | {related} | {rounds} | {tools} | {prompt} | {completion} | {cost:.4f} | {wall:.2f} | {status} |".format(
                 issue=result.issue_ref,
                 model=result.model,
                 old=_score_blob(result.old_scores),
                 new=_score_blob(result.new_output.get("scores", {})),
+                rationale=result.new_output.get("rationale") or "-",
                 related=_related_blob(result.related_work),
                 rounds=result.rounds_used,
                 tools=", ".join(result.tools_called) or "-",

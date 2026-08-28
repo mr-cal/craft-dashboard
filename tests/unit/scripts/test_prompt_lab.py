@@ -22,6 +22,31 @@ class TestBuildScoringMessages:
         assert "quick_win" in system or "related_work" in system
         assert "tool" in system.lower()
 
+    def test_system_prompt_requires_rationale_citing_evidence(self) -> None:
+        msgs = build_scoring_messages(
+            title="Bug",
+            body="boom",
+            issue_type="issue",
+            labels=[],
+            project="craft-parts",
+            baseline="LAYOUT…",
+        )
+        system = msgs[0]["content"]
+        assert '"rationale"' in system
+        assert "cite" in system.lower()
+
+    def test_system_prompt_requires_rationale_when_scores_are_all_zero(self) -> None:
+        msgs = build_scoring_messages(
+            title="Bug",
+            body="boom",
+            issue_type="issue",
+            labels=[],
+            project="craft-parts",
+            baseline="LAYOUT…",
+        )
+        system = msgs[0]["content"]
+        assert "all zero" in system.lower() or "all-zero" in system.lower()
+
     def test_baseline_is_embedded_as_untrusted_data(self) -> None:
         msgs = build_scoring_messages(
             title="Bug",

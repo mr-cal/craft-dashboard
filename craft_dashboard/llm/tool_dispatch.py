@@ -38,6 +38,7 @@ class ToolContext:
     eval_server_base_url: str
     eval_api_token: str
     issue_id: int
+    default_project: str | None = None
     touched_paths: set[tuple[str, str]] = field(default_factory=set)
 
     def record_path(self, project: str, path: str) -> None:
@@ -65,8 +66,17 @@ def _resolve_ref(
 
 
 def _resolve_projects(ctx: ToolContext, repos: object | None) -> list[str]:
-    """Resolve a repo list argument or default to all allowed projects."""
+    """Resolve a repo list argument, defaulting to the issue's own project.
+
+    Narrowing the default scope to the issue's own project (rather than all
+    allowed projects) makes tool calls faster and more precise for the
+    common case. Callers can still pass an explicit `repos` list to search
+    across other projects, e.g. snapcraft-rocks acting as an "app" that
+    needs visibility into other apps/libraries.
+    """
     if repos is None:
+        if ctx.default_project is not None:
+            return [ctx.default_project]
         return list(ctx.allowed_projects)
     if not isinstance(repos, Iterable) or isinstance(repos, str):
         raise GitMirrorError("repos must be an iterable of project names")

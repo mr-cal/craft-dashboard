@@ -13,7 +13,11 @@ from typing import Any
 _REPOS_ARRAY = {
     "type": "array",
     "items": {"type": "string"},
-    "description": "Project names to search, e.g. ['craft-parts', 'snapcraft']. Omit to search all 18 tracked projects.",
+    "description": (
+        "Project names to search, e.g. ['craft-parts', 'snapcraft']. Omit to "
+        "search only this issue's own project by default; pass other project "
+        "names explicitly to search across apps/libraries."
+    ),
 }
 
 _REF_PROPERTY = {

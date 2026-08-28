@@ -219,9 +219,15 @@ def build_scoring_messages(
         'Respond with valid JSON shaped like: {"scores": {"impact": 0-100, "staleness": 0-100, '
         '"complexity": 0-100, "support_request": 0-100, "confidence": 0-100}, '
         '"related_work": [{"kind": "issue|pull_request|commit|file", "ref": "<ref>", '
-        '"confidence": 0-100, "note": "<why it matters>"}]}. '
+        '"confidence": 0-100, "note": "<why it matters>"}], '
+        '"rationale": "<2-4 sentences>"}. '
         "Impact measures maintainer/user value if resolved soon. quick_win is computed server-side later; "
-        "do not output it directly. Keep related_work evidence-focused and omit items you cannot justify."
+        "do not output it directly. Keep related_work evidence-focused and omit items you cannot justify. "
+        "rationale must cite specific evidence you gathered via tool calls (a file path, a commit sha, "
+        "a related issue/PR number, a specific line or excerpt) that justifies your scores — not a "
+        "generic restatement of the scores themselves. If your scores are all zero and related_work is "
+        "empty, rationale must explicitly say why (e.g. no relevant evidence found after N tool calls, "
+        "or the issue is genuinely trivial) rather than being left blank or vague."
     )
     label_text = ", ".join(labels) if labels else "none"
     issue_body = body or "(no body)"
