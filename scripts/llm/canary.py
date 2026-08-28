@@ -18,10 +18,15 @@ section for the full staged-rollout procedure.
 from __future__ import annotations
 
 import asyncio
+import pathlib
 import sys
 from dataclasses import dataclass
 
 import click
+
+# Make the `scripts` package importable when run directly (e.g.
+# `uv run scripts/llm/canary.py`), matching scripts/run_llm.py.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
 
 from scripts.llm.eval_worker import run_evaluate_loop
 
