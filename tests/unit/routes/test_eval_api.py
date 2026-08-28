@@ -2,7 +2,10 @@
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from craft_dashboard.routes import eval_api
+from tests.factories import make_evaluation, make_issue, make_project
 
 
 class TestEvalNextRateLimit:
@@ -67,5 +70,51 @@ class TestGetQuotaPauseUntil:
         # misreport the service as still paused.
         resume_at = datetime.now(UTC) - timedelta(minutes=1)
         monkeypatch.setattr(eval_api, "_quota_paused_until", resume_at)
+
+        assert eval_api.get_quota_pause_until() is None
+
+
+async def _seed_evaluations_with_cost(test_db_session, *, costs: list[float]) -> None:
+    project = make_project(id=1, name="snapcraft")
+    test_db_session.add(project)
+    await test_db_session.flush()
+
+    now = datetime.now(tz=UTC)
+    for idx, cost in enumerate(costs, start=1):
+        issue = make_issue(project_id=project.id, external_id=str(idx))
+        test_db_session.add(issue)
+        await test_db_session.flush()
+        test_db_session.add(
+            make_evaluation(
+                issue_id=issue.id,
+                cost_usd=cost,
+                evaluated_at=now,
+            )
+        )
+    await test_db_session.commit()
+
+
+class TestDailySpendCap:
+    @pytest.mark.asyncio
+    async def test_daily_spend_cap_trips_quota_pause(
+        self, test_db_session, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(eval_api.settings, "eval_daily_spend_cap_usd", 1.0)
+        monkeypatch.setattr(eval_api, "_quota_paused_until", None)
+        await _seed_evaluations_with_cost(test_db_session, costs=[0.60, 0.55])
+
+        await eval_api._maybe_trip_daily_spend_cap(test_db_session)
+
+        assert eval_api.get_quota_pause_until() is not None
+
+    @pytest.mark.asyncio
+    async def test_daily_spend_cap_disabled_when_zero(
+        self, test_db_session, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(eval_api.settings, "eval_daily_spend_cap_usd", 0.0)
+        monkeypatch.setattr(eval_api, "_quota_paused_until", None)
+        await _seed_evaluations_with_cost(test_db_session, costs=[5.00])
+
+        await eval_api._maybe_trip_daily_spend_cap(test_db_session)
 
         assert eval_api.get_quota_pause_until() is None

@@ -45,13 +45,16 @@ from craft_dashboard.repositories.issue_repository import (
     IssueRepository,
     _build_excluded_issues_condition,
 )
+from craft_dashboard.settings import Settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/eval")
 limiter = Limiter(key_func=get_remote_address)
+settings = Settings()
 
 _LOCK_TTL = timedelta(minutes=10)
+_AUTO_QUOTA_PAUSE_FOR = timedelta(minutes=30)
 
 #: How recently `/next`/`/result` must have been called for the service to
 
@@ -145,6 +148,30 @@ def get_quota_pause_until() -> datetime | None:
     if _quota_paused_until is not None and datetime.now(tz=UTC) >= _quota_paused_until:
         return None
     return _quota_paused_until
+
+
+async def _maybe_trip_daily_spend_cap(session: AsyncSession) -> None:
+    """Auto-pause evaluation when today's spend exceeds the configured cap."""
+    global _quota_paused_until  # noqa: PLW0603
+    cap = settings.eval_daily_spend_cap_usd
+    if cap <= 0:
+        return
+
+    start_of_day = datetime.now(tz=UTC).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    total = await session.scalar(
+        select(func.coalesce(func.sum(LLMEvaluation.cost_usd), 0.0)).where(
+            LLMEvaluation.evaluated_at >= start_of_day
+        )
+    )
+    if total is not None and total >= cap:
+        logger.warning(
+            "Daily eval spend $%.2f >= cap $%.2f — auto-pausing evaluation",
+            total,
+            cap,
+        )
+        _quota_paused_until = datetime.now(tz=UTC) + _AUTO_QUOTA_PAUSE_FOR
 
 
 async def _maybe_record_queue_snapshot(
@@ -624,6 +651,7 @@ async def submit_result(
 
     await session.commit()
     _last_result_submitted_at = datetime.now(tz=UTC)
+    await _maybe_trip_daily_spend_cap(session)
     return {"status": "stored", "issue_id": payload.issue_id}
 
 

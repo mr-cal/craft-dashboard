@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # superseded (non-latest) evaluations. latest=True transcripts are kept
     # indefinitely regardless.
     eval_transcript_retention_days: int = Field(default=30, ge=0)
+    eval_daily_spend_cap_usd: float = 0.0
+    """Auto-pause evaluation once today's summed cost_usd exceeds this many USD."""
 
     # OpenRouter model settings, split per Phase 5's bake-off results: the
     # closed-item summary path and the open-item scoring path can choose
