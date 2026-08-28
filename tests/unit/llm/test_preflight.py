@@ -180,11 +180,7 @@ class TestRunPreflight:
         _run_git("add", "-A", cwd=worktree)
         _run_git("commit", "-q", "-m", "Initial commit", cwd=worktree)
         sha = _run_git("rev-parse", "HEAD", cwd=worktree)
-        subprocess.run(
-            ["git", "clone", "--mirror", "-q", str(worktree), str(mirror)],
-            check=True,
-            capture_output=True,
-        )
+        _run_git("clone", "--mirror", "-q", str(worktree), str(mirror), cwd=tmp_path)
 
         llm = _SpyLLM()
         release = AsyncMock()
