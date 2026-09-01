@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from craft_dashboard.llm.preflight import PreflightResult
 from scripts.llm import eval_worker
 
 SAMPLE_ISSUE = {
@@ -458,3 +459,40 @@ async def test_worker_loop_skips_evaluate_when_preflight_blocks(
     )
 
     evaluate_issue.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_preflight_block_backs_off_before_next_claim(
+    monkeypatch: pytest.MonkeyPatch, base_runtime: SimpleNamespace
+) -> None:
+    """A blocked preflight must not immediately re-offer the same claim.
+
+    ``/api/eval/release`` clears the claim lock, so ``/next`` can hand the
+    same issue right back out. Without a backoff, a persistent preflight
+    failure (e.g. the related-issues embedding endpoint being down or
+    budget-limited) turns into a tight claim/release retry loop across all
+    workers, pinning the CPU.
+    """
+    monkeypatch.setattr(
+        eval_worker,
+        "run_preflight",
+        AsyncMock(
+            return_value=PreflightResult(
+                ok=False, reason="related_endpoint_unreachable"
+            )
+        ),
+    )
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr(eval_worker, "_sleep_until_next_poll", sleep_mock)
+    base_runtime.http_client.post = AsyncMock(
+        return_value=httpx.Response(200, request=_DUMMY_REQUEST)
+    )
+
+    result = await eval_worker._run_issue_preflight(
+        base_runtime,
+        issue_data=_make_issue(repo_shas={"snapcraft": "b" * 40}),
+        worker_name="worker-1",
+    )
+
+    assert result is False
+    sleep_mock.assert_awaited_once_with(base_runtime.poll_interval)

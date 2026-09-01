@@ -754,6 +754,12 @@ async def _run_issue_preflight(
     )
     runtime.progress.update(runtime.overall_id, description="Evaluating issues")
     await _release_and_maybe_stop(runtime)
+    # A released claim is immediately re-offered by ``/next``, so without a
+    # backoff here a persistent preflight failure (e.g. the embedding
+    # endpoint being down or rate/budget-limited) turns into a tight
+    # claim/release retry loop across all workers, pinning the CPU. Back off
+    # like the "no work available" path does.
+    await _sleep_until_next_poll(runtime.poll_interval)
     return False
 
 
