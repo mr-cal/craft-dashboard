@@ -4,6 +4,8 @@
     "staleness",
     "complexity",
     "support_request",
+    "impact",
+    "quick_win",
     "confidence",
   ];
   const defaultColumns = [
