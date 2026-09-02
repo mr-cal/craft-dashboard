@@ -28,6 +28,83 @@ from craft_dashboard.models.project import Project
 from craft_dashboard.models.snapshot import Snapshot
 from craft_dashboard.settings import Settings
 
+#: Columns compute_snapshot_for_date actually reads. Selecting only these
+#: (instead of full Issue ORM rows) avoids pulling body/comments/metadata_
+#: into memory for every issue, which is what caused this script to be
+#: OOM-killed on the production VPS when replaying years of history across
+#: ~20k issues at once.
+_ISSUE_SNAPSHOT_COLUMNS = (
+    Issue.external_id,
+    Issue.project_id,
+    Issue.issue_type,
+    Issue.author_is_maintainer,
+    Issue.author_is_bot,
+    Issue.labels,
+    Issue.created_at,
+    Issue.closed_at,
+)
+
+#: Snapshot fields computed by compute_snapshot_for_date, reused to build
+#: the on_conflict_do_update SET clause without repeating each field twice.
+_SNAPSHOT_METRIC_FIELDS = (
+    "open_issues",
+    "open_prs",
+    "open_issues_external",
+    "open_issues_internal",
+    "open_issues_bots",
+    "open_prs_external",
+    "open_prs_internal",
+    "open_prs_bots",
+    "open_bugs",
+    "median_issue_age",
+    "median_pr_age",
+    "nm_median_issue_age",
+    "nm_median_pr_age",
+    "median_issue_age_internal",
+    "median_pr_age_internal",
+    "median_issue_age_bots",
+    "median_pr_age_bots",
+    "median_age",
+    "nm_median_age",
+    "median_age_internal",
+    "median_age_bots",
+    "closed_issues",
+    "closed_prs",
+    "closed_issues_external",
+    "closed_issues_internal",
+    "closed_issues_bots",
+    "closed_prs_external",
+    "closed_prs_internal",
+    "closed_prs_bots",
+)
+
+#: Number of daily snapshots to accumulate in memory before upserting and
+#: committing. Keeping this small bounds peak memory at the cost of more
+#: (smaller) round-trips to the database.
+_COMMIT_BATCH_SIZE = 200
+
+
+def _upsert_snapshot_batch(session: Session, batch: list[dict]) -> None:
+    """Upsert one batch of snapshot dicts and commit immediately.
+
+    Args:
+        session: Database session.
+        batch: List of snapshot field dicts, each including project_id and
+            snapshot_date.
+
+    """
+    if not batch:
+        return
+    stmt = insert(Snapshot).values(batch)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["project_id", "snapshot_date"],
+        set_={
+            field: getattr(stmt.excluded, field) for field in _SNAPSHOT_METRIC_FIELDS
+        },
+    )
+    session.execute(stmt)
+    session.commit()
+
 
 def _make_age_buckets() -> dict[str, list[int]]:
     return {
@@ -197,12 +274,12 @@ def backfill_project(
     """
     print(f"Backfilling {project.name}...")
 
-    # Fetch all issues for this project
-    q = select(Issue).where(Issue.project_id == project.id)
+    # Fetch only the columns compute_snapshot_for_date needs (not full Issue
+    # rows with body/comments/metadata_) to keep memory usage low.
+    q = select(*_ISSUE_SNAPSHOT_COLUMNS).where(Issue.project_id == project.id)
     if filtered_issue_ids:
         q = q.where(~Issue.external_id.in_(filtered_issue_ids))
-    result = session.execute(q)
-    issues = list(result.scalars())
+    issues = list(session.execute(q).all())
 
     if not issues:
         print(f"  No issues found for {project.name}, skipping.")
@@ -221,64 +298,33 @@ def backfill_project(
         f"  Date range: {earliest_date} to {today} ({(today - earliest_date).days} days)"
     )
 
-    # Compute snapshots for each day
-    snapshots_to_upsert = []
+    # Compute snapshots for each day, committing in small batches to bound
+    # peak memory (this trades a bit of speed for a much lower memory
+    # ceiling, since this loop replays every historical day).
+    batch: list[dict] = []
+    total = 0
     current_date = earliest_date
 
     while current_date <= today:
         metrics = compute_snapshot_for_date(issues, current_date)
-        snapshots_to_upsert.append(
+        batch.append(
             {
                 "project_id": project.id,
                 "snapshot_date": current_date,
                 **metrics,
             }
         )
+        if len(batch) >= _COMMIT_BATCH_SIZE:
+            _upsert_snapshot_batch(session, batch)
+            total += len(batch)
+            batch = []
         current_date += timedelta(days=1)
 
-    print(f"  Computed {len(snapshots_to_upsert)} snapshots, upserting...")
+    if batch:
+        _upsert_snapshot_batch(session, batch)
+        total += len(batch)
 
-    # Bulk upsert
-    if snapshots_to_upsert:
-        stmt = insert(Snapshot).values(snapshots_to_upsert)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["project_id", "snapshot_date"],
-            set_={
-                "open_issues": stmt.excluded.open_issues,
-                "open_prs": stmt.excluded.open_prs,
-                "open_issues_external": stmt.excluded.open_issues_external,
-                "open_issues_internal": stmt.excluded.open_issues_internal,
-                "open_issues_bots": stmt.excluded.open_issues_bots,
-                "open_prs_external": stmt.excluded.open_prs_external,
-                "open_prs_internal": stmt.excluded.open_prs_internal,
-                "open_prs_bots": stmt.excluded.open_prs_bots,
-                "open_bugs": stmt.excluded.open_bugs,
-                "median_issue_age": stmt.excluded.median_issue_age,
-                "median_pr_age": stmt.excluded.median_pr_age,
-                "nm_median_issue_age": stmt.excluded.nm_median_issue_age,
-                "nm_median_pr_age": stmt.excluded.nm_median_pr_age,
-                "median_issue_age_internal": stmt.excluded.median_issue_age_internal,
-                "median_pr_age_internal": stmt.excluded.median_pr_age_internal,
-                "median_issue_age_bots": stmt.excluded.median_issue_age_bots,
-                "median_pr_age_bots": stmt.excluded.median_pr_age_bots,
-                "median_age": stmt.excluded.median_age,
-                "nm_median_age": stmt.excluded.nm_median_age,
-                "median_age_internal": stmt.excluded.median_age_internal,
-                "median_age_bots": stmt.excluded.median_age_bots,
-                "closed_issues": stmt.excluded.closed_issues,
-                "closed_prs": stmt.excluded.closed_prs,
-                "closed_issues_external": stmt.excluded.closed_issues_external,
-                "closed_issues_internal": stmt.excluded.closed_issues_internal,
-                "closed_issues_bots": stmt.excluded.closed_issues_bots,
-                "closed_prs_external": stmt.excluded.closed_prs_external,
-                "closed_prs_internal": stmt.excluded.closed_prs_internal,
-                "closed_prs_bots": stmt.excluded.closed_prs_bots,
-            },
-        )
-        session.execute(stmt)
-        session.commit()
-
-    print(f"  ✓ Backfilled {len(snapshots_to_upsert)} snapshots for {project.name}")
+    print(f"  ✓ Backfilled {total} snapshots for {project.name}")
 
 
 def backfill_cross_project(
@@ -313,25 +359,25 @@ def backfill_cross_project(
 
     print(f"Computing cross-project aggregate (project_id={agg_project.id})...")
 
-    # Load ALL issues across all real projects
+    # Load only the columns compute_snapshot_for_date needs across all real
+    # projects, instead of full Issue rows with body/comments/metadata_.
+    # This is the step that previously OOM-killed the container: pulling
+    # ~20k full Issue rows (with JSONB comments/body) into memory at once.
     project_ids = [p.id for p in all_projects if p.name != "all-projects"]
-    q = (
-        select(Issue, Project.name.label("project_name"))
-        .join(Project, Issue.project_id == Project.id)
-        .where(Issue.project_id.in_(project_ids))
-        .where(Issue.created_at.isnot(None))
+    id_to_name = {p.id: p.name for p in all_projects}
+    q = select(*_ISSUE_SNAPSHOT_COLUMNS).where(
+        Issue.project_id.in_(project_ids), Issue.created_at.isnot(None)
     )
     rows = session.execute(q).all()
     # Apply per-project filtering
     all_issues = []
     for row in rows:
-        issue = row[0]
-        project_name = row[1]
-        if filtered_issues:
-            excluded = filtered_issues.get(project_name, [])
-            if issue.external_id in excluded:
-                continue
-        all_issues.append(issue)
+        project_name = id_to_name.get(row.project_id)
+        excluded = (filtered_issues or {}).get(project_name, [])
+        if row.external_id in excluded:
+            continue
+        all_issues.append(row)
+    del rows
     print(f"  Loaded {len(all_issues)} issues across {len(project_ids)} projects")
 
     if not all_issues:
@@ -348,60 +394,29 @@ def backfill_cross_project(
     all_dates = list(date_rows)
     print(f"  Computing medians for {len(all_dates)} dates...")
 
-    snapshots_to_upsert = []
+    # Compute and commit in small batches to bound peak memory (trading
+    # speed for a much lower, flat memory ceiling).
+    batch: list[dict] = []
+    total = 0
     for i, snapshot_date in enumerate(all_dates):
         metrics = compute_snapshot_for_date(all_issues, snapshot_date)
         metrics["project_id"] = agg_project.id
         metrics["snapshot_date"] = snapshot_date
-        snapshots_to_upsert.append(metrics)
+        batch.append(metrics)
+
+        if len(batch) >= _COMMIT_BATCH_SIZE:
+            _upsert_snapshot_batch(session, batch)
+            total += len(batch)
+            batch = []
 
         if (i + 1) % 500 == 0:
             print(f"    {i + 1}/{len(all_dates)} dates processed...")
 
-    if snapshots_to_upsert:
-        # Upsert in batches to avoid memory issues
-        batch_size = 500
-        for batch_start in range(0, len(snapshots_to_upsert), batch_size):
-            batch = snapshots_to_upsert[batch_start : batch_start + batch_size]
-            stmt = pg_insert(Snapshot).values(batch)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["project_id", "snapshot_date"],
-                set_={
-                    "open_issues": stmt.excluded.open_issues,
-                    "open_prs": stmt.excluded.open_prs,
-                    "open_issues_external": stmt.excluded.open_issues_external,
-                    "open_issues_internal": stmt.excluded.open_issues_internal,
-                    "open_issues_bots": stmt.excluded.open_issues_bots,
-                    "open_prs_external": stmt.excluded.open_prs_external,
-                    "open_prs_internal": stmt.excluded.open_prs_internal,
-                    "open_prs_bots": stmt.excluded.open_prs_bots,
-                    "open_bugs": stmt.excluded.open_bugs,
-                    "median_issue_age": stmt.excluded.median_issue_age,
-                    "median_pr_age": stmt.excluded.median_pr_age,
-                    "nm_median_issue_age": stmt.excluded.nm_median_issue_age,
-                    "nm_median_pr_age": stmt.excluded.nm_median_pr_age,
-                    "median_issue_age_internal": stmt.excluded.median_issue_age_internal,
-                    "median_pr_age_internal": stmt.excluded.median_pr_age_internal,
-                    "median_issue_age_bots": stmt.excluded.median_issue_age_bots,
-                    "median_pr_age_bots": stmt.excluded.median_pr_age_bots,
-                    "median_age": stmt.excluded.median_age,
-                    "nm_median_age": stmt.excluded.nm_median_age,
-                    "median_age_internal": stmt.excluded.median_age_internal,
-                    "median_age_bots": stmt.excluded.median_age_bots,
-                    "closed_issues": stmt.excluded.closed_issues,
-                    "closed_prs": stmt.excluded.closed_prs,
-                    "closed_issues_external": stmt.excluded.closed_issues_external,
-                    "closed_issues_internal": stmt.excluded.closed_issues_internal,
-                    "closed_issues_bots": stmt.excluded.closed_issues_bots,
-                    "closed_prs_external": stmt.excluded.closed_prs_external,
-                    "closed_prs_internal": stmt.excluded.closed_prs_internal,
-                    "closed_prs_bots": stmt.excluded.closed_prs_bots,
-                },
-            )
-            session.execute(stmt)
-        session.commit()
+    if batch:
+        _upsert_snapshot_batch(session, batch)
+        total += len(batch)
 
-    print(f"  ✓ Backfilled {len(snapshots_to_upsert)} cross-project snapshots")
+    print(f"  ✓ Backfilled {total} cross-project snapshots")
 
 
 def main() -> None:
