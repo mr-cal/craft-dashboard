@@ -21,7 +21,6 @@ class TestMapLpStatus:
     def test_all_open_statuses_comprehensive(self) -> None:
         """All documented open statuses map correctly."""
         for status in [
-            "Opinion",
             "Incomplete (with response)",
             "Incomplete (without response)",
         ]:
@@ -35,6 +34,7 @@ class TestMapLpStatus:
             "Invalid",
             "Won't Fix",
             "Expired",
+            "Opinion",
         ]:
             assert _map_lp_status(status) == "closed"
 

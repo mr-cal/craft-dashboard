@@ -29,7 +29,6 @@ _OPEN_STATUSES = frozenset(
         "Triaged",
         "In Progress",
         "Incomplete",
-        "Opinion",
         "Incomplete (with response)",
         "Incomplete (without response)",
     }
@@ -42,6 +41,7 @@ _CLOSED_STATUSES = frozenset(
         "Invalid",
         "Won't Fix",
         "Expired",
+        "Opinion",
     }
 )
 
