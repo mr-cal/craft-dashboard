@@ -15,7 +15,6 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from craft_dashboard.cli import _load_project_orgs
 from craft_dashboard.config import load_config
 from craft_dashboard.git_mirrors.paths import clone_url_for, resolve_allowed_projects
 from craft_dashboard.git_mirrors.sync import sync_mirror
@@ -863,19 +862,6 @@ async def run_evaluate_loop(
         limit = 1
     settings = Settings()
     config = load_config(settings.config_path)
-    try:
-        project_orgs = await _load_project_orgs(settings)
-    except Exception as exc:
-        logger.warning(
-            "Could not load project orgs from DB (%s); "
-            "falling back to the 'canonical' org for every project.",
-            exc,
-        )
-        project_orgs = {}
-    allowed_projects = resolve_allowed_projects(
-        craft_projects=config.craft_projects,
-        project_orgs=project_orgs,
-    )
 
     llm_client = create_llm_client_for_backend(
         llm_backend=llm_backend,
@@ -907,6 +893,20 @@ async def run_evaluate_loop(
         async with httpx.AsyncClient(
             base_url=server_url, timeout=30.0, verify=verify
         ) as http_client:
+            project_orgs: dict[str, str] = {}
+            try:
+                projects_resp = await http_client.get(
+                    "/api/eval/projects", headers=headers
+                )
+                if projects_resp.status_code == HTTP_OK:
+                    project_orgs = projects_resp.json().get("projects", {})
+            except httpx.HTTPError:
+                pass
+            allowed_projects = resolve_allowed_projects(
+                craft_projects=config.craft_projects,
+                project_orgs=project_orgs,
+            )
+
             total_remaining = limit if limit > 0 else 0
             try:
                 status_resp = await http_client.get(

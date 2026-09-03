@@ -95,6 +95,7 @@ def _create_eval_app(test_db_session: AsyncSession) -> tuple[FastAPI, str]:
     app.router.lifespan_context = _noop_lifespan
     app.state.config = DashboardConfig(maintainers=["alice", "bob"])
     app.state.settings = Settings()
+    app.state.settings.mirror_dir = "/tmp/nonexistent-test-mirrors"
     app.state.settings.eval_api_token = _TEST_EVAL_TOKEN
 
     async def _override() -> AsyncGenerator[AsyncSession, None]:
@@ -2044,6 +2045,39 @@ class TestEvalStatusIntegration:
             "evaluated_today": 1,
             "total_evaluated": 1,
             "total_open": 4,
+        }
+
+
+class TestEvalProjectsIntegration:
+    """Integration tests for GET /api/eval/projects."""
+
+    def test_projects_requires_auth(self, test_db_session: AsyncSession) -> None:
+        app, _token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get("/api/eval/projects")
+
+        assert response.status_code == 401
+
+    def test_projects_returns_org_mapping(self, test_db_session: AsyncSession) -> None:
+        project1 = make_project(id=1, name="snapcraft", github_org="canonical")
+        project2 = make_project(id=2, name="customcraft", github_org="custom-org")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project1, project2)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/projects", headers={"Authorization": f"Bearer {token}"}
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "projects": {
+                "snapcraft": "canonical",
+                "customcraft": "custom-org",
+            }
         }
 
 

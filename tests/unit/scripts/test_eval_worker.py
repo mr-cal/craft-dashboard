@@ -152,6 +152,7 @@ _STATUS_RESPONSE = httpx.Response(
     },
 )
 _RELATED_RESPONSE = httpx.Response(status_code=200, json={"results": []})
+_PROJECTS_RESPONSE = httpx.Response(status_code=200, json={"projects": {}})
 
 _DUMMY_REQUEST = httpx.Request("GET", "http://localhost:8000/api/eval/next")
 
@@ -163,7 +164,7 @@ def _response(status_code: int, **kwargs: Any) -> httpx.Response:
 
 
 def _with_status(*responses: httpx.Response) -> list[httpx.Response]:
-    return [_STATUS_RESPONSE, *responses]
+    return [_PROJECTS_RESPONSE, _STATUS_RESPONSE, *responses]
 
 
 @pytest.fixture

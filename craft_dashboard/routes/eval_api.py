@@ -1050,3 +1050,17 @@ async def eval_status(
         "total_evaluated": total_evaluated or 0,
         "total_open": total_open or 0,
     }
+
+
+@router.get("/projects")
+async def get_projects(
+    request: Request,
+    *,
+    authorization: str = Header(default=""),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Return project org mappings for evaluation workers."""
+    _require_eval_auth(request, authorization)
+    result = await session.execute(select(Project.name, Project.github_org))
+    project_orgs = dict(result.tuples().all())
+    return {"projects": project_orgs}
