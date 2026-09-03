@@ -303,7 +303,16 @@ class LocalLLMClient:
         """
         self.base_url = base_url
         self.api_key = api_key
-        self.ca_cert = str(pathlib.Path(ca_cert).expanduser()) if ca_cert else ca_cert
+        if ca_cert:
+            expanded = pathlib.Path(ca_cert).expanduser()
+            if not expanded.is_file():
+                raise FileNotFoundError(
+                    f"LLM CA certificate file not found: '{ca_cert}' (resolved to '{expanded}'). "
+                    "Please check your LOCAL_LLM_CA_CERT configuration."
+                )
+            self.ca_cert = str(expanded)
+        else:
+            self.ca_cert = ""
         self._http: httpx.AsyncClient | None = None
         # Optional hook invoked as (attempt_number, max_attempts) before each
         # retry attempt of complete(); lets callers surface retry progress.
@@ -314,7 +323,13 @@ class LocalLLMClient:
         """Return a persistent HTTP client, creating one if needed."""
         if self._http is None or self._http.is_closed:
             verify: bool | str = self.ca_cert if self.ca_cert else True
-            self._http = httpx.AsyncClient(timeout=600.0, verify=verify)
+            try:
+                self._http = httpx.AsyncClient(timeout=600.0, verify=verify)
+            except FileNotFoundError as exc:
+                raise FileNotFoundError(
+                    f"LLM CA certificate file not found: '{verify}'. "
+                    "Please check your LOCAL_LLM_CA_CERT configuration."
+                ) from exc
         return self._http
 
     async def close(self) -> None:

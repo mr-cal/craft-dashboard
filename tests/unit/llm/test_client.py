@@ -118,11 +118,21 @@ class TestLocalLLMClient:
 
         assert client.api_key == ""
 
-    def test_init_with_ca_cert(self) -> None:
+    def test_init_with_ca_cert(self, tmp_path) -> None:
         """LocalLLMClient stores a CA cert path for self-signed TLS."""
-        client = LocalLLMClient(ca_cert="/etc/ssl/local-llm/cert.pem")
+        cert_file = tmp_path / "cert.pem"
+        cert_file.write_text("dummy-cert")
+        client = LocalLLMClient(ca_cert=str(cert_file))
 
-        assert client.ca_cert == "/etc/ssl/local-llm/cert.pem"
+        assert client.ca_cert == str(cert_file)
+
+    def test_init_with_missing_ca_cert_raises(self, tmp_path) -> None:
+        """LocalLLMClient raises FileNotFoundError with helpful message when CA cert does not exist."""
+        nonexistent = tmp_path / "nonexistent_cert.pem"
+        with pytest.raises(
+            FileNotFoundError, match="LLM CA certificate file not found"
+        ):
+            LocalLLMClient(ca_cert=str(nonexistent))
 
     def test_init_default_no_ca_cert(self) -> None:
         """LocalLLMClient defaults to no CA cert (uses system CA bundle)."""

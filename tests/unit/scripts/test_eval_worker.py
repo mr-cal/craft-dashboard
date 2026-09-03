@@ -494,3 +494,14 @@ async def test_preflight_block_backs_off_before_next_claim(
 
     assert result is False
     sleep_mock.assert_awaited_once_with(base_runtime.poll_interval)
+
+
+@pytest.mark.asyncio
+async def test_run_evaluate_loop_missing_server_ca_cert_raises(
+    tmp_path: pathlib.Path,
+) -> None:
+    """run_evaluate_loop raises FileNotFoundError with helpful message when server_ca_cert does not exist."""
+    nonexistent = tmp_path / "nonexistent_server_ca.pem"
+    kwargs = {**DEFAULT_KWARGS, "server_ca_cert": str(nonexistent)}
+    with pytest.raises(FileNotFoundError, match="Server CA certificate file not found"):
+        await eval_worker.run_evaluate_loop(**kwargs)

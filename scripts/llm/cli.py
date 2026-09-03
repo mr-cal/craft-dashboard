@@ -231,6 +231,14 @@ def evaluate_cmd(
     if issue and not project:
         raise click.UsageError("--issue requires --project")
 
+    if server_ca_cert:
+        expanded_server_ca = pathlib.Path(server_ca_cert).expanduser()
+        if not expanded_server_ca.is_file():
+            raise click.UsageError(
+                f"Server CA certificate file not found: '{server_ca_cert}' (resolved to '{expanded_server_ca}'). "
+                "Check the --server-ca-cert option or EVAL_CLIENT_SERVER_CA_CERT in your .env file."
+            )
+
     llm_backend = llm_backend.lower()
     llm_url = ""
     llm_api_key = ""
@@ -246,9 +254,17 @@ def evaluate_cmd(
             raise click.UsageError(
                 f"Missing required environment variable(s): {', '.join(missing)}. Set them in your .env file."
             )
+        if ca_cert:
+            expanded_ca = pathlib.Path(ca_cert).expanduser()
+            if not expanded_ca.is_file():
+                raise click.UsageError(
+                    f"CA certificate file not found: '{ca_cert}' (resolved to '{expanded_ca}'). "
+                    "Check the --ca-cert option or LOCAL_LLM_CA_CERT in your .env file."
+                )
         llm_api_key = os.environ.get("LOCAL_LLM_API_KEY", "")
         model_summary = model_scoring = model
     else:
+        ca_cert = ""
         model_summary = os.environ.get("OPENROUTER_MODEL_SUMMARY", "")
         model_scoring = os.environ.get("OPENROUTER_MODEL_SCORING", "")
         missing = [

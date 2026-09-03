@@ -98,3 +98,18 @@ async def test_embed_batch_sends_dimensions_when_requested():
             await client.close()
     _args, kwargs = mock_post.call_args
     assert kwargs["json"]["dimensions"] == 1024
+
+
+def test_init_with_ca_cert(tmp_path):
+    cert_file = tmp_path / "cert.pem"
+    cert_file.write_text("dummy-cert")
+    client = EmbeddingClient(ca_cert=str(cert_file))
+    assert client.ca_cert == str(cert_file)
+
+
+def test_init_with_missing_ca_cert_raises(tmp_path):
+    nonexistent = tmp_path / "nonexistent.pem"
+    with pytest.raises(
+        FileNotFoundError, match="Embedding CA certificate file not found"
+    ):
+        EmbeddingClient(ca_cert=str(nonexistent))

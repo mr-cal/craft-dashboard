@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import pathlib
 import select
 import signal
 import sys
@@ -848,7 +849,16 @@ async def run_evaluate_loop(
     _setup_logging(verbose=verbose, console=console)
 
     server_url = server.rstrip("/")
-    verify: bool | str = server_ca_cert if server_ca_cert else True
+    if server_ca_cert:
+        expanded_server_ca = pathlib.Path(server_ca_cert).expanduser()  # noqa: ASYNC240
+        if not expanded_server_ca.is_file():
+            raise FileNotFoundError(
+                f"Server CA certificate file not found: '{server_ca_cert}' (resolved to '{expanded_server_ca}'). "
+                "Please check your EVAL_CLIENT_SERVER_CA_CERT configuration."
+            )
+        verify: bool | str = str(expanded_server_ca)
+    else:
+        verify = True
     headers = {"Authorization": "Bearer " + token}
     params = {
         "project": project,

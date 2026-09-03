@@ -28,6 +28,7 @@ def test_evaluate_uses_http_worker_with_local_backend(monkeypatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
     monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
+    monkeypatch.delenv("LOCAL_LLM_CA_CERT", raising=False)
     run_loop = AsyncMock()
     monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
 
@@ -185,3 +186,57 @@ def test_evaluate_accepts_limit_option_spellings(monkeypatch, option_name: str) 
     assert result.exit_code == 0
     run_loop.assert_called_once()
     assert run_loop.call_args.kwargs["limit"] == 20
+
+
+def test_evaluate_missing_ca_cert_raises_usage_error(monkeypatch, tmp_path) -> None:
+    """Missing local LLM CA certificate raises a clear UsageError."""
+    runner = CliRunner()
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
+    nonexistent = tmp_path / "missing.pem"
+
+    result = runner.invoke(
+        cli,
+        [
+            "evaluate",
+            "--server",
+            "http://localhost:8000",
+            "--token",
+            "test-token",
+            "--llm-backend",
+            "local",
+            "--ca-cert",
+            str(nonexistent),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "CA certificate file not found" in result.output
+    assert str(nonexistent) in result.output
+
+
+def test_evaluate_missing_server_ca_cert_raises_usage_error(
+    monkeypatch, tmp_path
+) -> None:
+    """Missing server CA certificate raises a clear UsageError."""
+    runner = CliRunner()
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    nonexistent = tmp_path / "missing_server.pem"
+
+    result = runner.invoke(
+        cli,
+        [
+            "evaluate",
+            "--server",
+            "http://localhost:8000",
+            "--token",
+            "test-token",
+            "--server-ca-cert",
+            str(nonexistent),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Server CA certificate file not found" in result.output
+    assert str(nonexistent) in result.output
