@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from craft_dashboard.git_mirrors import reader
 from craft_dashboard.git_mirrors.paths import mirror_path_for
 from craft_dashboard.llm.tool_dispatch import ToolContext, _dispatch_http_tool
+
+logger = logging.getLogger(__name__)
 
 _MIN_USEFUL_HITS = 1
 _MAX_USEFUL_HITS = 100
@@ -100,9 +103,11 @@ async def build_round1_baseline(
         raw = await _dispatch_http_tool(
             ctx, name="related_issues", arguments={"query": title}
         )
-        related = json.loads(raw).get("results", [])
-    except Exception as exc:
-        raise BaselineError("related_issues endpoint failed after preflight") from exc
+        data = json.loads(raw)
+        related = data.get("results", []) if isinstance(data, dict) else []
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("related_issues endpoint failed during baseline: %s", exc)
+        related = []
 
     if related:
         related_lines = [

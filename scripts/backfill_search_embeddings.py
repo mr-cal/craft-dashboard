@@ -36,10 +36,9 @@ from craft_dashboard.models.issue import Issue
 logger = logging.getLogger(__name__)
 
 # openai/text-embedding-3-small has an 8191-token limit. Cap the embedded
-# text well under that (roughly 3 chars/token for typical GitHub issue
-# text) so unusually large bodies (seen in production, e.g. CI log dumps)
-# don't trigger a 400 from the embeddings endpoint.
-_MAX_EMBEDDING_TEXT_CHARS = 20_000
+# text well under that (8,000 characters) so dense logs, code dumps, or
+# short-token sequences never trigger a 400 from the embeddings endpoint.
+_MAX_EMBEDDING_TEXT_CHARS = 8_000
 
 
 def build_search_embedding_text(title: str, body: str | None) -> str:

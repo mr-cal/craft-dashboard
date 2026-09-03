@@ -352,6 +352,7 @@ async def grep_repo(mirror: pathlib.Path, *, pattern: str, ref: str) -> list[str
         mirror,
         "--no-pager",
         "grep",
+        "-F",
         "--threads=1",
         "-n",
         "-e",

@@ -100,6 +100,28 @@ async def test_embed_batch_sends_dimensions_when_requested():
     assert kwargs["json"]["dimensions"] == 1024
 
 
+@pytest.mark.asyncio
+async def test_embed_batch_retries_on_token_length_error():
+    err_response = httpx.Response(
+        400,
+        text='{"error":{"message":"Invalid input: maximum input length is 8192 tokens."}}',
+        request=httpx.Request("POST", "http://x"),
+    )
+    ok_response = _make_response([[0.1, 0.2]])
+    with patch(
+        "httpx.AsyncClient.post",
+        new_callable=AsyncMock,
+        side_effect=[err_response, ok_response],
+    ) as mock_post:
+        client = EmbeddingClient(base_url="http://localhost:11434/v1")
+        try:
+            results = await client.embed_batch(["x" * 2000])
+        finally:
+            await client.close()
+    assert results == [[0.1, 0.2]]
+    assert mock_post.call_count == 2
+
+
 def test_init_with_ca_cert(tmp_path):
     cert_file = tmp_path / "cert.pem"
     cert_file.write_text("dummy-cert")

@@ -9,6 +9,9 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+HTTP_BAD_REQUEST = 400
+_MIN_TRUNCATE_LEN = 1000
+
 
 class EmbeddingClient:
     """Compute embeddings using an OpenAI-compatible /v1/embeddings endpoint."""
@@ -76,7 +79,24 @@ class EmbeddingClient:
             headers=headers,
             json=payload,
         )
-        response.raise_for_status()
+        if response.is_error:
+            error_body = response.text
+            if (
+                response.status_code == HTTP_BAD_REQUEST
+                and "token" in error_body.lower()
+                and any(len(t) > _MIN_TRUNCATE_LEN for t in texts)
+            ):
+                logger.warning(
+                    "Embedding input exceeded model token limit (%s); truncating input texts and retrying.",
+                    error_body,
+                )
+                truncated_texts = [t[: len(t) // 2] for t in texts]
+                return await self.embed_batch(truncated_texts, dimensions=dimensions)
+            raise httpx.HTTPStatusError(
+                f"Client error '{response.status_code} {response.reason_phrase}' for url '{response.url}': {error_body}",
+                request=response.request,
+                response=response,
+            )
         data = response.json()
         # Sort by index to guarantee order matches input regardless of API response order
         sorted_data = sorted(data["data"], key=lambda d: d["index"])

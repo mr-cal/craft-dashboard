@@ -28,6 +28,7 @@ _GREP_HIT_MIN_FIELDS = 3
 #: model to narrow its pattern/query or the `repos` list instead of paying
 #: for (and reading) hundreds of matches it likely doesn't need.
 _MAX_MATCHES_PER_CALL = 50
+HTTP_BAD_REQUEST = 400
 
 
 @dataclass
@@ -257,27 +258,37 @@ async def _dispatch_http_tool(
             try:
                 embedding = await ctx.embed_client.embed(query, dimensions=1024)
             except Exception as exc:  # noqa: BLE001
-                return f"Error computing embedding: {exc}"
+                return json.dumps(
+                    {"results": [], "error": f"Error computing embedding: {exc}"}
+                )
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            if embedding is not None:
-                response = await client.post(
-                    f"{ctx.eval_server_base_url}/api/eval/related",
-                    json={
-                        "issue_id": ctx.issue_id,
-                        "query": query,
-                        "embedding": embedding,
-                    },
-                    headers={"Authorization": "Bearer " + ctx.eval_api_token},
+            try:
+                if embedding is not None:
+                    response = await client.post(
+                        f"{ctx.eval_server_base_url}/api/eval/related",
+                        json={
+                            "issue_id": ctx.issue_id,
+                            "query": query,
+                            "embedding": embedding,
+                        },
+                        headers={"Authorization": "Bearer " + ctx.eval_api_token},
+                    )
+                else:
+                    response = await client.get(
+                        f"{ctx.eval_server_base_url}/api/eval/related",
+                        params={"issue_id": ctx.issue_id, "query": query},
+                        headers={"Authorization": "Bearer " + ctx.eval_api_token},
+                    )
+                response.raise_for_status()
+                return json.dumps(response.json())
+            except httpx.HTTPStatusError as exc:
+                return json.dumps(
+                    {
+                        "results": [],
+                        "error": f"Error {exc.response.status_code}: {exc.response.text}",
+                    }
                 )
-            else:
-                response = await client.get(
-                    f"{ctx.eval_server_base_url}/api/eval/related",
-                    params={"issue_id": ctx.issue_id, "query": query},
-                    headers={"Authorization": "Bearer " + ctx.eval_api_token},
-                )
-            response.raise_for_status()
-            return json.dumps(response.json())
     else:
         path = "/api/eval/issue"
         params = {"ref": str(arguments.get("ref", ""))}

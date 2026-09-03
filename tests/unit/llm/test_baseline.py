@@ -147,3 +147,22 @@ class TestBuildRound1Baseline:
                     title="parse_manifest raises KeyError",
                     body=None,
                 )
+
+    @pytest.mark.asyncio
+    async def test_related_issues_failure_is_handled_gracefully(self) -> None:
+        with (
+            patch_repo_layout({"craft_parts": 12}),
+            patch_grep_repo([]),
+            patch(
+                "craft_dashboard.llm.baseline._dispatch_http_tool",
+                new=AsyncMock(side_effect=RuntimeError("connection refused")),
+            ),
+        ):
+            baseline = await build_round1_baseline(
+                _tool_ctx(),
+                project="craft-parts",
+                title="parse_manifest raises KeyError",
+                body=None,
+            )
+        assert "craft_parts\t12 files" in baseline
+        assert "## Related issues" not in baseline

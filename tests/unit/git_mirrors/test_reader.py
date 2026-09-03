@@ -216,6 +216,16 @@ class TestGrepRepo:
         )
         assert hits == []
 
+    async def test_pattern_with_regex_metacharacters_matches_literally(
+        self, bare_mirror: pathlib.Path, sample_repo_shas: list[str]
+    ) -> None:
+        # Fixed strings (-F) mode ensures patterns with unclosed brackets,
+        # parens, or regex metacharacters do not cause git grep syntax errors.
+        hits = await grep_repo(
+            bare_mirror, pattern="part_name[0]", ref=sample_repo_shas[-1]
+        )
+        assert hits == []
+
     async def test_output_is_capped_at_the_byte_ceiling(
         self, tmp_path: pathlib.Path, monkeypatch
     ) -> None:
