@@ -514,6 +514,7 @@ async def _evaluate_issue(  # noqa: PLR0911
         eval_server_base_url=runtime.eval_server_base_url,
         eval_api_token=runtime.headers.get("Authorization", "").removeprefix("Bearer "),
         issue_id=issue_data["issue_id"],
+        embed_client=runtime.embed_client,
     )
 
     try:
@@ -729,11 +730,29 @@ async def _run_issue_preflight(
 
     async def _check_related_endpoint() -> bool:
         query = (issue_data.get("title") or issue_ref)[:1000]
-        response = await runtime.http_client.get(
-            "/api/eval/related",
-            params={"issue_id": issue_data["issue_id"], "query": query},
-            headers=runtime.headers,
-        )
+        embedding: list[float] | None = None
+        if runtime.embed_client is not None and query:
+            try:
+                embedding = await runtime.embed_client.embed(query, dimensions=1024)
+            except Exception:
+                return False
+
+        if embedding is not None:
+            response = await runtime.http_client.post(
+                "/api/eval/related",
+                json={
+                    "issue_id": issue_data["issue_id"],
+                    "query": query,
+                    "embedding": embedding,
+                },
+                headers=runtime.headers,
+            )
+        else:
+            response = await runtime.http_client.get(
+                "/api/eval/related",
+                params={"issue_id": issue_data["issue_id"], "query": query},
+                headers=runtime.headers,
+            )
         return response.status_code == HTTP_OK
 
     result = await run_preflight(

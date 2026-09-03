@@ -245,9 +245,8 @@ async def test_run_evaluate_loop_posts_required_summary_embedding(
         monkeypatch,
         get_responses=_with_status(
             _response(200, json=_make_issue()),
-            _RELATED_RESPONSE,
         ),
-        post_responses=[httpx.Response(status_code=200)],
+        post_responses=[_RELATED_RESPONSE, httpx.Response(status_code=200)],
     )
 
     await eval_worker.run_evaluate_loop(**DEFAULT_KWARGS)
@@ -288,12 +287,12 @@ async def test_llm_quota_error_pauses_instead_of_crash_looping(
         monkeypatch,
         get_responses=_with_status(
             _response(200, json=_make_issue(external_id="100")),
-            _RELATED_RESPONSE,
             _response(200, json=_make_issue(external_id="100")),
-            _RELATED_RESPONSE,
         ),
         post_responses=[
+            _RELATED_RESPONSE,
             httpx.Response(status_code=200),
+            _RELATED_RESPONSE,
             httpx.Response(status_code=200),
         ],
     )
@@ -311,9 +310,8 @@ async def test_llm_quota_error_pauses_instead_of_crash_looping(
     # ... and the worker must have resumed and completed the retried issue
     # rather than getting stuck paused or crashing.
     assert patched_runtime["evaluator"].evaluate.await_count == 2
-    # One POST reports the quota pause to the server, the other submits the
-    # successful (retried) evaluation result.
-    assert http_client.post.await_count == 2
+    # Two _RELATED_RESPONSE posts, one quota pause post, and one final result post
+    assert http_client.post.await_count == 4
     assert eval_worker.paused_state["paused"] is False
     # Backs off for a fixed 30 minutes, not "until tomorrow".
     assert eval_worker._QUOTA_BACKOFF_SECONDS == 30 * 60
@@ -333,12 +331,12 @@ async def test_run_evaluate_loop_uses_requested_concurrency(
         monkeypatch,
         get_responses=_with_status(
             _response(200, json=_make_issue(external_id="100")),
-            _RELATED_RESPONSE,
             _response(200, json=_make_issue(issue_id=43, external_id="101")),
-            _RELATED_RESPONSE,
         ),
         post_responses=[
+            _RELATED_RESPONSE,
             httpx.Response(status_code=200),
+            _RELATED_RESPONSE,
             httpx.Response(status_code=200),
         ],
     )
@@ -348,7 +346,7 @@ async def test_run_evaluate_loop_uses_requested_concurrency(
     )
 
     assert patched_runtime["evaluator"].evaluate.await_count == 2
-    assert http_client.post.await_count == 2
+    assert http_client.post.await_count == 4
 
 
 @pytest.mark.asyncio
@@ -359,9 +357,8 @@ async def test_run_evaluate_loop_posts_serialized_evidence_paths(
         monkeypatch,
         get_responses=_with_status(
             _response(200, json=_make_issue()),
-            _RELATED_RESPONSE,
         ),
-        post_responses=[httpx.Response(status_code=200)],
+        post_responses=[_RELATED_RESPONSE, httpx.Response(status_code=200)],
     )
     patched_runtime["evaluator"].evaluate = AsyncMock(
         return_value={

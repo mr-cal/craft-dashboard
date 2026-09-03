@@ -29,7 +29,15 @@ def test_packages(project_main_module, tmp_path, request):
     root_dir = Path(request.config.rootdir)
     out_dir = tmp_path
     subprocess.check_call(
-        [sys.executable, "-m", "build", "--outdir", out_dir, root_dir],
+        [
+            sys.executable,
+            "-m",
+            "build",
+            "--no-isolation",
+            "--outdir",
+            out_dir,
+            root_dir,
+        ],
     )
     wheels = list(tmp_path.glob("*.whl"))
     assert len(wheels) == 1

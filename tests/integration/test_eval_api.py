@@ -1735,6 +1735,51 @@ class TestRelatedIssuesEndpoint:
         assert response.headers["content-type"].startswith("application/json")
         assert response.json() == {"detail": "Embedding service unavailable"}
 
+    def test_post_with_embedding_works_when_openrouter_key_is_unset(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="rockcraft")
+        source_issue = make_issue(id=1, project_id=1, external_id="1")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, source_issue)
+        )
+        app, token = self._create_app_with_missing_openrouter_key(test_db_session)
+        canned = [
+            {
+                "id": 2,
+                "project_name": "rockcraft",
+                "external_id": "2",
+                "title": "Similar crash report",
+                "summary": "Similar crash report",
+                "url": "https://example/2",
+                "state": "open",
+                "similarity": 0.91,
+            }
+        ]
+
+        with (
+            patch.object(
+                IssueRepository,
+                "find_related_by_summary_embedding",
+                new=AsyncMock(return_value=canned),
+            ) as mock_find,
+            TestClient(app) as client,
+        ):
+            response = client.post(
+                "/api/eval/related",
+                json={
+                    "issue_id": 1,
+                    "query": "crash in the pull step handler",
+                    "embedding": [0.2] * 1024,
+                },
+                headers={"Authorization": "Bearer " + token},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["results"][0]["external_id"] == "2"
+        mock_find.assert_awaited_once()
+        assert mock_find.call_args.kwargs["query_embedding"] == [0.2] * 1024
+
     def test_requires_auth(self, test_db_session: AsyncSession) -> None:
         app, _token = _create_eval_app(test_db_session)
 

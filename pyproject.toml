@@ -52,6 +52,7 @@ dev = [
     "ruff>=0.15.13",
     "requests>=2.31",
     "build>=1.2",
+    "setuptools-scm>=7.1",
     "psycopg2-binary",
 ]
 

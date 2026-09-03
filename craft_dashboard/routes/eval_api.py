@@ -99,6 +99,14 @@ class EvalReleaseRequest(BaseModel):
     reason: str
 
 
+class RelatedIssuesRequest(BaseModel):
+    """Request body for related issues endpoint."""
+
+    issue_id: int
+    query: str = Field(default="", max_length=1000)
+    embedding: list[float] | None = None
+
+
 def _is_local_caller(key: str) -> bool:
     """Return whether *key* (the caller's IP) counts as "local" for rate limits.
 
@@ -701,43 +709,45 @@ async def release_claim(
     return {"status": "released", "issue_id": payload.issue_id}
 
 
-@router.get("/related")
-async def related_issues(
+async def _find_related_issues(
     request: Request,
     *,
-    authorization: str = Header(default=""),
-    issue_id: int = Query(...),
-    query: str = Query(..., max_length=1000),
-    session: AsyncSession = Depends(get_db_session),
+    authorization: str,
+    issue_id: int,
+    query: str,
+    embedding: list[float] | None,
+    session: AsyncSession,
 ) -> dict[str, Any]:
-    """Return issues whose latest summary embeddings are closest to query."""
     _require_eval_auth(request, authorization)
     settings = request.app.state.settings
-    if not settings.openrouter_api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="Embedding service unavailable",
-        )
-    embed_client = EmbeddingClient(
-        base_url=OPENROUTER_BASE_URL,
-        model=settings.semantic_search_embedding_model,
-        api_key=settings.openrouter_api_key,
-        ca_cert="",
-    )
-    try:
-        try:
-            query_embedding = await embed_client.embed(query, dimensions=1024)
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Related-issues embedding failed for query",
-                exc_info=True,
-            )
+    if embedding is not None:
+        query_embedding = embedding
+    else:
+        if not settings.openrouter_api_key:
             raise HTTPException(
                 status_code=503,
                 detail="Embedding service unavailable",
-            ) from None
-    finally:
-        await embed_client.close()
+            )
+        embed_client = EmbeddingClient(
+            base_url=OPENROUTER_BASE_URL,
+            model=settings.semantic_search_embedding_model,
+            api_key=settings.openrouter_api_key,
+            ca_cert="",
+        )
+        try:
+            try:
+                query_embedding = await embed_client.embed(query, dimensions=1024)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Related-issues embedding failed for query",
+                    exc_info=True,
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail="Embedding service unavailable",
+                ) from None
+        finally:
+            await embed_client.close()
 
     repo = IssueRepository(session, filtered_issues=get_config(request).filtered_issues)
     results = await repo.find_related_by_summary_embedding(
@@ -747,6 +757,45 @@ async def related_issues(
         similarity_threshold=settings.related_issues_similarity_threshold,
     )
     return {"results": results}
+
+
+@router.post("/related")
+async def related_issues_post(
+    request: Request,
+    payload: RelatedIssuesRequest,
+    *,
+    authorization: str = Header(default=""),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Return issues whose latest summary embeddings are closest to query or embedding."""
+    return await _find_related_issues(
+        request,
+        authorization=authorization,
+        issue_id=payload.issue_id,
+        query=payload.query,
+        embedding=payload.embedding,
+        session=session,
+    )
+
+
+@router.get("/related")
+async def related_issues(
+    request: Request,
+    *,
+    authorization: str = Header(default=""),
+    issue_id: int = Query(...),
+    query: str = Query(default="", max_length=1000),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Return issues whose latest summary embeddings are closest to query."""
+    return await _find_related_issues(
+        request,
+        authorization=authorization,
+        issue_id=issue_id,
+        query=query,
+        embedding=None,
+        session=session,
+    )
 
 
 @router.get("/issue")

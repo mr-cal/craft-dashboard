@@ -223,10 +223,7 @@ def evaluate_cmd(
     verbose: bool,
 ) -> None:
     """Run the continuous HTTP-only evaluation service against /api/eval/*."""
-    settings = Settings()
-    openrouter_api_key = settings.openrouter_api_key or os.environ.get(
-        "OPENROUTER_API_KEY", ""
-    )
+    openrouter_api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not openrouter_api_key:
         raise click.UsageError(
             "OPENROUTER_API_KEY is required because evaluate always computes OpenRouter embeddings."
@@ -252,8 +249,8 @@ def evaluate_cmd(
         llm_api_key = os.environ.get("LOCAL_LLM_API_KEY", "")
         model_summary = model_scoring = model
     else:
-        model_summary = settings.openrouter_model_summary
-        model_scoring = settings.openrouter_model_scoring
+        model_summary = os.environ.get("OPENROUTER_MODEL_SUMMARY", "")
+        model_scoring = os.environ.get("OPENROUTER_MODEL_SCORING", "")
         missing = [
             name
             for name, value in (

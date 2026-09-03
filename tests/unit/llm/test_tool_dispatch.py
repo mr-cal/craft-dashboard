@@ -373,3 +373,32 @@ class TestDispatchToolCall:
         assert kwargs["headers"]["Authorization"].startswith("Bearer ")
         assert kwargs["headers"]["Authorization"].endswith(tool_context.eval_api_token)
         assert kwargs["headers"]["Authorization"] != "******"
+
+    async def test_related_issues_with_embed_client_computes_embedding_and_posts(
+        self, tool_context: ToolContext
+    ) -> None:
+        response = MagicMock()
+        response.raise_for_status = MagicMock()
+        response.json.return_value = {"results": []}
+
+        mock_embed_client = MagicMock()
+        mock_embed_client.embed = AsyncMock(return_value=[0.42] * 1024)
+        tool_context.embed_client = mock_embed_client
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = response
+            result = await dispatch_tool_call(
+                tool_context,
+                name="related_issues",
+                arguments={"query": "executor failures"},
+            )
+
+        mock_embed_client.embed.assert_awaited_once_with(
+            "executor failures", dimensions=1024
+        )
+        _args, kwargs = mock_post.call_args
+        assert kwargs["json"]["embedding"] == [0.42] * 1024
+        assert kwargs["json"]["query"] == "executor failures"
+        assert kwargs["json"]["issue_id"] == tool_context.issue_id
+        assert kwargs["headers"]["Authorization"].endswith(tool_context.eval_api_token)
+        assert result == '{"results": []}'
