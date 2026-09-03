@@ -483,6 +483,44 @@ class TestGetIssueDetail:
 
         assert detail is None
 
+    async def test_evaluation_history_query_excludes_claim_bookkeeping_rows(
+        self,
+    ) -> None:
+        """`pending` claim placeholders and `released:*` rows must be
+        excluded at the query level so they can never appear in the
+        evaluation history or be picked as evaluation_history[0] (the
+        "current evaluation") even when they're the most recent row.
+        """
+        issue = make_issue(
+            id=1,
+            project_id=1,
+            external_id="6413",
+            title="Flaky build",
+        )
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                _DetailQueryResult(
+                    _DetailRow(
+                        issue,
+                        project_name="snapcraft",
+                        summary=None,
+                        suggested_action=None,
+                        suggested_action_reason=None,
+                        scores=None,
+                    )
+                ),
+                _DetailQueryResult(evaluations=[]),
+            ]
+        )
+
+        await IssueRepository(session).get_issue_detail("snapcraft", "6413")
+
+        history_query = session.execute.call_args_list[1].args[0]
+        compiled = str(history_query.compile(compile_kwargs={"literal_binds": True}))
+        assert "'pending'" in compiled
+        assert "'released:%'" in compiled
+
 
 class TestGetIssueActivityHistory:
     async def test_returns_history_newest_first_for_the_given_issue(

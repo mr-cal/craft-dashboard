@@ -603,3 +603,66 @@ class TestIssueDetailRelatedWork:
 
         assert response.status_code == 200
         assert "related-work-indicator" in response.text
+
+
+class TestIssueDetailExcludesClaimBookkeepingRows:
+    """`pending`/`released:*` rows are worker claim bookkeeping, not real
+    evaluations, and must never appear in the evaluation history or be
+    picked as the "current evaluation" for an issue."""
+
+    @pytest.fixture
+    async def seeded(self, test_db_session: AsyncSession) -> None:
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(
+            id=1,
+            project_id=1,
+            external_id="6413",
+            title="Flaky build on core24",
+        )
+        real_evaluation = make_evaluation(
+            id=1,
+            issue_id=1,
+            model_name="gpt-4.1",
+            summary="A real evaluation summary.",
+            suggested_action="needs_review",
+            evaluated_at=datetime(2026, 9, 3, 10, 0, tzinfo=UTC),
+            latest=False,
+        )
+        # Newer than the real evaluation, simulating claim/release churn
+        # that happened after the real evaluation was recorded.
+        released_row = make_evaluation(
+            id=2,
+            issue_id=1,
+            model_name="released:related_endpoint_unreachable",
+            summary=None,
+            suggested_action=None,
+            evaluated_at=datetime(2026, 9, 3, 11, 0, tzinfo=UTC),
+            latest=False,
+        )
+        pending_row = make_evaluation(
+            id=3,
+            issue_id=1,
+            model_name="pending",
+            summary=None,
+            suggested_action=None,
+            evaluated_at=datetime(2026, 9, 3, 11, 2, tzinfo=UTC),
+            latest=True,
+        )
+        await _seed_entities(
+            test_db_session,
+            project,
+            issue,
+            real_evaluation,
+            released_row,
+            pending_row,
+        )
+
+    def test_placeholder_rows_are_excluded_from_history_and_current_evaluation(
+        self, test_client: TestClient, seeded: None
+    ) -> None:
+        response = test_client.get("/issues/snapcraft/6413")
+
+        assert response.status_code == 200
+        assert "A real evaluation summary." in response.text
+        assert "pending" not in response.text
+        assert "released:related_endpoint_unreachable" not in response.text

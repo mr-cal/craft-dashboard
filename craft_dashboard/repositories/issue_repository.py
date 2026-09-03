@@ -37,6 +37,12 @@ _VALID_SORT_FIELDS = _SCORE_SORT_FIELDS | {
     "number",
 }
 
+# Bookkeeping model_name values written by the eval worker claim/release
+# flow (see routes/eval_api.py). These aren't real evaluations and should
+# never surface as evaluation history or as the "current" evaluation.
+_PENDING_MODEL_NAME = "pending"
+_RELEASED_MODEL_PREFIX = "released:"
+
 
 def _compute_age_days(created_at: datetime | None) -> int | None:
     """Compute days since creation, or None if unknown."""
@@ -244,6 +250,8 @@ class IssueRepository:
                 await self.session.execute(
                     select(LLMEvaluation)
                     .where(LLMEvaluation.issue_id == issue.id)
+                    .where(LLMEvaluation.model_name != _PENDING_MODEL_NAME)
+                    .where(~LLMEvaluation.model_name.like(f"{_RELEASED_MODEL_PREFIX}%"))
                     .order_by(LLMEvaluation.evaluated_at.desc())
                 )
             ).scalars()
