@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import pathlib
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -73,6 +75,159 @@ def _make_before_sleep_log(max_attempts: int) -> Callable[[RetryCallState], None
     return _before_sleep
 
 
+def _parse_single_tool_call_body(body: str, index: int = 0) -> list[dict[str, Any]]:
+    """Parse one or more tool calls from a text snippet (JSON or XML-like format)."""
+    body = body.strip()
+    if not body:
+        return []
+
+    # 1. Try parsing as JSON first
+    try:
+        data = json.loads(body)
+        if isinstance(data, dict):
+            if "function" in data and isinstance(data["function"], dict):
+                fn = data["function"]
+                fn_name = fn.get("name")
+                args = fn.get("arguments", {})
+            else:
+                fn_name = data.get("name")
+                args = data.get("arguments", {})
+            if fn_name:
+                args_str = args if isinstance(args, str) else json.dumps(args)
+                return [
+                    {
+                        "id": f"call_{index}",
+                        "type": "function",
+                        "function": {
+                            "name": fn_name,
+                            "arguments": args_str,
+                        },
+                    }
+                ]
+        elif isinstance(data, list):
+            results = []
+            for item in data:
+                if isinstance(item, dict):
+                    fn_name = item.get("name") or (
+                        item.get("function", {}).get("name")
+                        if isinstance(item.get("function"), dict)
+                        else None
+                    )
+                    args = item.get("arguments") or (
+                        item.get("function", {}).get("arguments", {})
+                        if isinstance(item.get("function"), dict)
+                        else {}
+                    )
+                    if fn_name:
+                        args_str = args if isinstance(args, str) else json.dumps(args)
+                        results.append(
+                            {
+                                "id": f"call_{index + len(results)}",
+                                "type": "function",
+                                "function": {
+                                    "name": fn_name,
+                                    "arguments": args_str,
+                                },
+                            }
+                        )
+            if results:
+                return results
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Try parsing XML-like <function=...> or <function name="...">
+    fn_matches = list(
+        re.finditer(
+            r"<function[=\s](?:name=)?[\"']?([a-zA-Z0-9_\-]+)[\"']?\s*>(.*?)(?:</function>|$)",
+            body,
+            re.DOTALL,
+        )
+    )
+    if fn_matches:
+        results = []
+        for fn_idx, fn_match in enumerate(fn_matches):
+            fn_name = fn_match.group(1)
+            fn_body = fn_match.group(2)
+            args_dict: dict[str, Any] = {}
+            param_matches = re.finditer(
+                r"<parameter[=\s](?:name=)?[\"']?([a-zA-Z0-9_\-]+)[\"']?\s*>(.*?)(?:</parameter>|$)",
+                fn_body,
+                re.DOTALL,
+            )
+            for p_match in param_matches:
+                p_name = p_match.group(1)
+                p_val_raw = p_match.group(2).strip()
+                try:
+                    p_val = json.loads(p_val_raw)
+                except json.JSONDecodeError:
+                    p_val = p_val_raw
+                args_dict[p_name] = p_val
+            results.append(
+                {
+                    "id": f"call_{index + fn_idx}",
+                    "type": "function",
+                    "function": {
+                        "name": fn_name,
+                        "arguments": json.dumps(args_dict),
+                    },
+                }
+            )
+        return results
+
+    # 3. Check for self-closing XML <function=... />
+    self_closing_match = re.search(
+        r"<function[=\s](?:name=)?[\"']?([a-zA-Z0-9_\-]+)[\"']?\s*/>",
+        body,
+    )
+    if self_closing_match:
+        fn_name = self_closing_match.group(1)
+        return [
+            {
+                "id": f"call_{index}",
+                "type": "function",
+                "function": {
+                    "name": fn_name,
+                    "arguments": "{}",
+                },
+            }
+        ]
+
+    return []
+
+
+def _parse_tool_calls_from_content(
+    content: str,
+) -> tuple[list[dict[str, Any]] | None, str]:
+    """Extract tool calls embedded in content as <tool_call> tags or XML function calls."""
+    if not content:
+        return None, content
+
+    tool_call_blocks = list(
+        re.finditer(r"<tool_call>(.*?)(?:</tool_call>|$)", content, re.DOTALL)
+    )
+    if tool_call_blocks:
+        all_calls: list[dict[str, Any]] = []
+        for block in tool_call_blocks:
+            calls = _parse_single_tool_call_body(block.group(1), index=len(all_calls))
+            all_calls.extend(calls)
+
+        if all_calls:
+            cleaned = re.sub(
+                r"<tool_call>.*?(?:</tool_call>|$)", "", content, flags=re.DOTALL
+            ).strip()
+            return all_calls, cleaned
+
+    if "<function" in content:
+        calls = _parse_single_tool_call_body(content)
+        if calls:
+            cleaned = re.sub(
+                r"<function[=\s].*?(?:</function>|$)", "", content, flags=re.DOTALL
+            ).strip()
+            return calls, cleaned
+
+    return None, content
+
+
 @dataclass
 class LLMResponse:
     """Parsed response from an LLM API."""
@@ -126,6 +281,12 @@ class LLMResponse:
         content = message["content"] or ""
         usage = data.get("usage", {})
         completion_details = usage.get("completion_tokens_details") or {}
+        tool_calls = message.get("tool_calls")
+        if not tool_calls and content:
+            parsed_tools, remaining_content = _parse_tool_calls_from_content(content)
+            if parsed_tools:
+                tool_calls = parsed_tools
+                content = remaining_content
         return cls(
             content=content,
             prompt_tokens=usage.get("prompt_tokens", 0),
@@ -133,7 +294,7 @@ class LLMResponse:
             total_tokens=usage.get("total_tokens", 0),
             model=data.get("model", ""),
             cost_usd=usage.get("cost"),
-            tool_calls=message.get("tool_calls"),
+            tool_calls=tool_calls,
             reasoning=message.get("reasoning") or None,
             finish_reason=choice.get("finish_reason"),
             reasoning_tokens=completion_details.get("reasoning_tokens"),

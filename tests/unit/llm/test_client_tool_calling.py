@@ -46,6 +46,101 @@ class TestLLMResponseToolCalls:
         response = LLMResponse.from_api_response(data)
         assert response.tool_calls is None
 
+    def test_parses_qwen_xml_tool_calls_from_content(self) -> None:
+        xml_content = (
+            "<tool_call>\n"
+            "<function=git_diff>\n"
+            "<parameter=project>\n"
+            "charmcraft\n"
+            "</parameter>\n"
+            "<parameter=ref>\n"
+            "main\n"
+            "</parameter>\n"
+            "</function>\n"
+            "</tool_call>"
+        )
+        data = {
+            "choices": [{"message": {"content": xml_content, "tool_calls": None}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            "model": "qwen3.6-35b-a3b-mtp-q6",
+        }
+        response = LLMResponse.from_api_response(data)
+        assert response.tool_calls is not None
+        assert len(response.tool_calls) == 1
+        assert response.tool_calls[0]["function"]["name"] == "git_diff"
+        assert response.tool_calls[0]["function"]["arguments"] == (
+            '{"project": "charmcraft", "ref": "main"}'
+        )
+        assert response.content == ""
+
+    def test_parses_json_tool_calls_from_content(self) -> None:
+        json_content = (
+            '<tool_call>\n{"name": "grep_repo", "arguments": {"pattern": "def foo", '
+            '"repos": ["charmcraft"]}}\n</tool_call>'
+        )
+        data = {
+            "choices": [{"message": {"content": json_content}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            "model": "qwen3.6-35b-a3b-mtp-q6",
+        }
+        response = LLMResponse.from_api_response(data)
+        assert response.tool_calls is not None
+        assert len(response.tool_calls) == 1
+        assert response.tool_calls[0]["function"]["name"] == "grep_repo"
+        assert response.tool_calls[0]["function"]["arguments"] == (
+            '{"pattern": "def foo", "repos": ["charmcraft"]}'
+        )
+        assert response.content == ""
+
+    def test_parses_multiple_tool_calls_from_content(self) -> None:
+        content = (
+            "<tool_call>\n"
+            "<function=git_diff>\n"
+            "<parameter=project>charmcraft</parameter>\n"
+            "<parameter=ref>main</parameter>\n"
+            "</function>\n"
+            "</tool_call>\n"
+            "<tool_call>\n"
+            "<function=grep_repo>\n"
+            "<parameter=pattern>test</parameter>\n"
+            '<parameter=repos>["craft-parts"]</parameter>\n'
+            "</function>\n"
+            "</tool_call>"
+        )
+        data = {
+            "choices": [{"message": {"content": content}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            "model": "qwen3.6-35b-a3b-mtp-q6",
+        }
+        response = LLMResponse.from_api_response(data)
+        assert response.tool_calls is not None
+        assert len(response.tool_calls) == 2
+        assert response.tool_calls[0]["function"]["name"] == "git_diff"
+        assert response.tool_calls[1]["function"]["name"] == "grep_repo"
+        assert response.tool_calls[1]["function"]["arguments"] == (
+            '{"pattern": "test", "repos": ["craft-parts"]}'
+        )
+        assert response.content == ""
+
+    def test_preserves_content_surrounding_tool_calls(self) -> None:
+        content = (
+            "<think>Investigating changes</think>\n"
+            "<tool_call>\n"
+            "<function=git_diff>\n"
+            "<parameter=project>charmcraft</parameter>\n"
+            "</function>\n"
+            "</tool_call>"
+        )
+        data = {
+            "choices": [{"message": {"content": content}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            "model": "qwen3.6-35b-a3b-mtp-q6",
+        }
+        response = LLMResponse.from_api_response(data)
+        assert response.tool_calls is not None
+        assert response.tool_calls[0]["function"]["name"] == "git_diff"
+        assert response.content == "<think>Investigating changes</think>"
+
 
 class TestOpenRouterClientToolCalling:
     """OpenRouterClient.complete() forwards tools/tool_choice when given."""

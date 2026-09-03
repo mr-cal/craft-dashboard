@@ -804,6 +804,70 @@ class TestEvaluateIssue:
         assert call_kwargs["comment_count"] == 1
         assert call_kwargs["author"] == "jdoe-canonical"
 
+    @pytest.mark.asyncio
+    async def test_evaluate_unparseable_response_raises_evaluation_discarded(
+        self,
+    ) -> None:
+        """When LLM returns an unparseable response, evaluate() raises EvaluationDiscarded."""
+        mock_response = LLMResponse(
+            content="completely not json",
+            total_tokens=50,
+            prompt_tokens=30,
+            completion_tokens=20,
+            model="test-model",
+        )
+        mock_client = MagicMock()
+        mock_client.complete = AsyncMock(return_value=mock_response)
+        evaluator = IssueEvaluator(
+            client=mock_client, model_summary="test-model", model_scoring="test-model"
+        )
+
+        with pytest.raises(EvaluationDiscarded):
+            await evaluator.evaluate(
+                title="snapcraft pack fails",
+                body="Failure details.",
+                issue_type="issue",
+                state="open",
+                labels=["bug"],
+                age_days=45,
+                last_activity_days=3,
+                author="jdoe-canonical",
+                is_maintainer=False,
+                comment_count=0,
+            )
+
+    @pytest.mark.asyncio
+    async def test_evaluate_closed_unparseable_response_raises_evaluation_discarded(
+        self,
+    ) -> None:
+        """When closed LLM call returns unparseable response, evaluate() raises EvaluationDiscarded."""
+        mock_response = LLMResponse(
+            content="not json",
+            total_tokens=50,
+            prompt_tokens=30,
+            completion_tokens=20,
+            model="test-model",
+        )
+        mock_client = MagicMock()
+        mock_client.complete = AsyncMock(return_value=mock_response)
+        evaluator = IssueEvaluator(
+            client=mock_client, model_summary="test-model", model_scoring="test-model"
+        )
+
+        with pytest.raises(EvaluationDiscarded):
+            await evaluator.evaluate(
+                title="snapcraft pack fails",
+                body="Failure details.",
+                issue_type="issue",
+                state="closed",
+                labels=["bug"],
+                age_days=45,
+                last_activity_days=3,
+                author="jdoe-canonical",
+                is_maintainer=False,
+                comment_count=0,
+            )
+
 
 class TestComputeContentHash:
     """Tests for _compute_content_hash."""

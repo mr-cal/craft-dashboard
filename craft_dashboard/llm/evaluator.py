@@ -378,10 +378,13 @@ class IssueEvaluator:
                 response_format={"type": "json_object"},
             )
             parsed = _parse_evaluation_response(response.content)
-            if parsed is None:
+            if parsed is None or not (parsed.get("summary") or "").strip():
                 logger.warning("Could not parse evaluation response for: %s", title)
+                raise EvaluationDiscarded(
+                    f"Could not parse evaluation response JSON: {response.content[:200]}"
+                )
 
-            summary = (parsed.get("summary") if parsed else None) or ""
+            summary = parsed["summary"]
             return {
                 "summary": summary,
                 "scores": {},
@@ -438,27 +441,28 @@ class IssueEvaluator:
             )
             parsed = _parse_evaluation_response(response.content)
 
-        if parsed is None:
+        if parsed is None or not (parsed.get("summary") or "").strip():
             logger.warning("Could not parse evaluation response for: %s", title)
+            raise EvaluationDiscarded(
+                f"Could not parse evaluation response JSON: {response.content[:200]}"
+            )
 
-        summary = (parsed.get("summary") if parsed else None) or ""
-        scores = (parsed.get("scores") if parsed else None) or {}
+        summary = parsed["summary"]
+        scores = parsed.get("scores") or {}
         if "confidence" not in scores:
             scores["confidence"] = 50
 
         return {
             "summary": summary,
             "scores": scores,
-            "suggested_action": parsed.get("suggested_action") if parsed else None,
-            "suggested_action_reason": parsed.get("suggested_action_reason")
-            if parsed
-            else None,
+            "suggested_action": parsed.get("suggested_action"),
+            "suggested_action_reason": parsed.get("suggested_action_reason"),
             "tokens_used": response.total_tokens,
             "prompt_tokens": response.prompt_tokens,
             "completion_tokens": response.completion_tokens,
             "cost_usd": response.cost_usd,
             "issue_data_hash": current_hash,
-            "related_work": (parsed.get("related_work") if parsed else None) or [],
+            "related_work": parsed.get("related_work") or [],
             "transcript": transcript,
         }
 
@@ -495,7 +499,13 @@ class IssueEvaluator:
                     },
                 )
 
-            messages.append({"role": "assistant", "tool_calls": response.tool_calls})
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": response.content or None,
+                    "tool_calls": response.tool_calls,
+                }
+            )
             for call in response.tool_calls:
                 name = call["function"]["name"]
                 arguments_raw = call["function"].get("arguments") or "{}"
