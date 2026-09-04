@@ -419,7 +419,7 @@ class TestIssueEvaluatorToolLoop:
             model="scoring-model",
         )
         mock_client = AsyncMock()
-        mock_client.complete.side_effect = [loop_response] * 10 + [
+        mock_client.complete.side_effect = [loop_response] * 20 + [
             forced_final_response
         ]
 
@@ -461,11 +461,13 @@ class TestIssueEvaluatorToolLoop:
                 tool_ctx=_tool_ctx(),
             )
 
-        assert mock_client.complete.call_count == 11
+        assert mock_client.complete.call_count == 21
         assert mock_client.complete.call_args_list[-1].kwargs["tool_choice"] == "none"
+        final_messages = mock_client.complete.call_args_list[-1].kwargs["messages"]
+        assert "Tool limit reached" in final_messages[-1]["content"]
         assert result["scores"]["impact"] == 50
-        assert result["transcript"]["rounds_used"] == 10
-        assert len(result["transcript"]["rounds"]) == 10
+        assert result["transcript"]["rounds_used"] == 20
+        assert len(result["transcript"]["rounds"]) == 20
 
     @pytest.mark.asyncio
     async def test_tool_output_is_wrapped_in_untrusted_delimiters(self) -> None:
@@ -841,9 +843,9 @@ class TestEvaluateIssue:
         """When LLM exhausts completion tokens (finish_reason='length'), error explicitly mentions it."""
         mock_response = LLMResponse(
             content="",
-            total_tokens=8200,
-            prompt_tokens=8,
-            completion_tokens=8192,
+            total_tokens=16400,
+            prompt_tokens=16,
+            completion_tokens=16384,
             model="test-model",
             finish_reason="length",
         )
@@ -868,7 +870,7 @@ class TestEvaluateIssue:
             )
 
         assert "finish_reason='length'" in str(exc_info.value)
-        assert "8192" in str(exc_info.value)
+        assert "16384" in str(exc_info.value)
 
 
 class TestComputeContentHash:
