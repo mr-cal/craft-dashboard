@@ -56,7 +56,6 @@ def setup_rich_logging(*, verbose: bool, console: Console) -> None:
     if not verbose:
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
-        logging.getLogger("craft_dashboard.llm.client").setLevel(logging.WARNING)
 
 
 def format_elapsed(seconds: float) -> str:

@@ -287,6 +287,11 @@ class LLMResponse:
             if parsed_tools:
                 tool_calls = parsed_tools
                 content = remaining_content
+        reasoning = message.get("reasoning") or None
+        if not reasoning and "<think>" in content:
+            think_match = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
+            if think_match:
+                reasoning = think_match.group(1).strip()
         return cls(
             content=content,
             prompt_tokens=usage.get("prompt_tokens", 0),
@@ -295,7 +300,7 @@ class LLMResponse:
             model=data.get("model", ""),
             cost_usd=usage.get("cost"),
             tool_calls=tool_calls,
-            reasoning=message.get("reasoning") or None,
+            reasoning=reasoning,
             finish_reason=choice.get("finish_reason"),
             reasoning_tokens=completion_details.get("reasoning_tokens"),
         )
@@ -429,13 +434,16 @@ class OpenRouterClient:
         data = response.json()
         result = LLMResponse.from_api_response(data)
         logger.info(
-            "LLM call: requested_model=%s, actual_model=%s, tokens=%d (prompt=%d, completion=%d)",
+            "LLM call: requested_model=%s, actual_model=%s, tokens=%d (prompt=%d, completion=%d), finish_reason=%s",
             model,
             result.model or model,
             result.total_tokens,
             result.prompt_tokens,
             result.completion_tokens,
+            result.finish_reason,
         )
+        if result.reasoning:
+            logger.debug("Thinking trace: %s", result.reasoning)
         return result
 
 
@@ -551,13 +559,16 @@ class LocalLLMClient:
         data = response.json()
         result = LLMResponse.from_api_response(data)
         logger.info(
-            "Local LLM call: requested_model=%s, actual_model=%s, tokens=%d (prompt=%d, completion=%d)",
+            "Local LLM call: requested_model=%s, actual_model=%s, tokens=%d (prompt=%d, completion=%d), finish_reason=%s",
             model,
             result.model or model,
             result.total_tokens,
             result.prompt_tokens,
             result.completion_tokens,
+            result.finish_reason,
         )
+        if result.reasoning:
+            logger.debug("Thinking trace: %s", result.reasoning)
         return result
 
 

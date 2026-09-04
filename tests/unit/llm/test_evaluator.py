@@ -837,16 +837,15 @@ class TestEvaluateIssue:
             )
 
     @pytest.mark.asyncio
-    async def test_evaluate_closed_unparseable_response_raises_evaluation_discarded(
-        self,
-    ) -> None:
-        """When closed LLM call returns unparseable response, evaluate() raises EvaluationDiscarded."""
+    async def test_evaluate_finish_reason_length_error_message(self) -> None:
+        """When LLM exhausts completion tokens (finish_reason='length'), error explicitly mentions it."""
         mock_response = LLMResponse(
-            content="not json",
-            total_tokens=50,
-            prompt_tokens=30,
-            completion_tokens=20,
+            content="",
+            total_tokens=8200,
+            prompt_tokens=8,
+            completion_tokens=8192,
             model="test-model",
+            finish_reason="length",
         )
         mock_client = MagicMock()
         mock_client.complete = AsyncMock(return_value=mock_response)
@@ -854,12 +853,12 @@ class TestEvaluateIssue:
             client=mock_client, model_summary="test-model", model_scoring="test-model"
         )
 
-        with pytest.raises(EvaluationDiscarded):
+        with pytest.raises(EvaluationDiscarded) as exc_info:
             await evaluator.evaluate(
                 title="snapcraft pack fails",
                 body="Failure details.",
                 issue_type="issue",
-                state="closed",
+                state="open",
                 labels=["bug"],
                 age_days=45,
                 last_activity_days=3,
@@ -867,6 +866,9 @@ class TestEvaluateIssue:
                 is_maintainer=False,
                 comment_count=0,
             )
+
+        assert "finish_reason='length'" in str(exc_info.value)
+        assert "8192" in str(exc_info.value)
 
 
 class TestComputeContentHash:
