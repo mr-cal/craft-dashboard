@@ -832,6 +832,7 @@ async def run_evaluate_loop(
     embed_model: str = "openai/text-embedding-3-small",
     issue: str = "",
     concurrency: int = 10,
+    log: bool = False,
 ) -> None:
     """Run the continuous HTTP evaluation worker against ``/api/eval/*``.
 
@@ -846,7 +847,9 @@ async def run_evaluate_loop(
     _quota_paused = False
     signal.signal(signal.SIGINT, _signal_handler)
     console = Console()
-    _setup_logging(verbose=verbose, console=console)
+    log_file = _setup_logging(verbose=verbose, console=console, log=log)
+    if log_file:
+        logger.info("Logging detailed output to %s", log_file)
 
     server_url = server.rstrip("/")
     if server_ca_cert:

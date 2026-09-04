@@ -9,6 +9,8 @@ persistent-history-backed ETA.
 from __future__ import annotations
 
 import logging
+import pathlib
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from rich.logging import RichHandler
@@ -33,15 +35,25 @@ if TYPE_CHECKING:
     from scripts.eval_timing import TimingHistory
 
 
-def setup_rich_logging(*, verbose: bool, console: Console) -> None:
+def setup_rich_logging(
+    *,
+    verbose: bool,
+    console: Console,
+    log: bool = False,
+    log_dir: str | pathlib.Path = ".logs",
+) -> pathlib.Path | None:
     """Install a RichHandler on the root logger for colored, readable logs.
+
+    When ``log`` is True, also attach a FileHandler to write DEBUG-level logs
+    (including full timestamps, logger names, and LLM debug traces) to a
+    timestamped file in ``log_dir``.
 
     Explicitly replaces any existing handlers (rather than relying on
     ``logging.basicConfig()``'s no-op-if-already-configured behavior), so
     this is safe to call even in a process that already ran
     ``logging.basicConfig()`` earlier (e.g. a module import side effect).
     """
-    handler = RichHandler(
+    rich_handler = RichHandler(
         console=console,
         show_path=False,
         show_time=verbose,
@@ -49,13 +61,39 @@ def setup_rich_logging(*, verbose: bool, console: Console) -> None:
         rich_tracebacks=False,
         log_time_format="%H:%M:%S",
     )
-    handler.setFormatter(logging.Formatter("%(message)s"))
+    rich_handler.setFormatter(logging.Formatter("%(message)s"))
+    rich_handler.setLevel(logging.DEBUG if verbose else logging.INFO)
+
+    class ConsoleFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            if not verbose and record.name in ("httpx", "httpcore"):
+                return record.levelno >= logging.WARNING
+            return True
+
+    rich_handler.addFilter(ConsoleFilter())
+
+    handlers: list[logging.Handler] = [rich_handler]
+    log_path: pathlib.Path | None = None
+
+    if log:
+        target_dir = pathlib.Path(log_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = target_dir / f"evaluate_{timestamp}.log"
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)-8s %(name)s: %(message)s")
+        )
+        handlers.append(file_handler)
+
     root = logging.getLogger()
-    root.handlers = [handler]
-    root.setLevel(logging.DEBUG if verbose else logging.INFO)
-    if not verbose:
+    root.handlers = handlers
+    root.setLevel(logging.DEBUG if (verbose or log) else logging.INFO)
+    if not verbose and not log:
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
+    return log_path
 
 
 def format_elapsed(seconds: float) -> str:

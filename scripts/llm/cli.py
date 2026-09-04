@@ -204,6 +204,13 @@ def clear_evaluations_cmd(project: str, yes: bool) -> None:
     default=False,
     help="Show timestamps, URLs, and model details",
 )
+@click.option(
+    "--log",
+    "log",
+    is_flag=True,
+    default=False,
+    help="Write detailed debug traces and LLM logs to .logs/ directory",
+)
 def evaluate_cmd(
     server: str,
     token: str,
@@ -221,6 +228,7 @@ def evaluate_cmd(
     llm_backend: str,
     embed_model: str,
     verbose: bool,
+    log: bool,
 ) -> None:
     """Run the continuous HTTP-only evaluation service against /api/eval/*."""
     openrouter_api_key = os.environ.get("OPENROUTER_API_KEY", "")
@@ -304,5 +312,6 @@ def evaluate_cmd(
             embed_model=embed_model,
             issue=issue,
             concurrency=concurrency,
+            log=log,
         )
     )

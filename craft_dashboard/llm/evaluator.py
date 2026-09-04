@@ -493,7 +493,7 @@ class IssueEvaluator:
         total_tokens = 0
 
         for _round_number in range(1, MAX_TOOL_ROUNDS + 1):
-            logger.info(
+            logger.debug(
                 "Tool loop round %d/%d: calling %s (max_tokens=%d)...",
                 _round_number,
                 MAX_TOOL_ROUNDS,
@@ -516,7 +516,7 @@ class IssueEvaluator:
                 )
 
             if not response.tool_calls:
-                logger.info(
+                logger.debug(
                     "Tool loop round %d/%d: model emitted final response (%d completion tokens, finish_reason=%s)",
                     _round_number,
                     MAX_TOOL_ROUNDS,
@@ -535,7 +535,7 @@ class IssueEvaluator:
                 )
 
             tool_names = [call["function"]["name"] for call in response.tool_calls]
-            logger.info(
+            logger.debug(
                 "Tool loop round %d/%d: model requested %d tool call(s): %s (%d completion tokens, finish_reason=%s)",
                 _round_number,
                 MAX_TOOL_ROUNDS,
@@ -592,7 +592,7 @@ class IssueEvaluator:
             if total_tokens >= MAX_TOOL_TOKENS:
                 break
 
-        logger.info(
+        logger.debug(
             "Tool loop reached round limit (%d rounds, %d tokens); requesting final response...",
             MAX_TOOL_ROUNDS,
             total_tokens,

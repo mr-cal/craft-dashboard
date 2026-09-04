@@ -85,6 +85,33 @@ class TestSetupRichLogging:
         finally:
             root.handlers = original_handlers
 
+    def test_creates_log_file_when_log_is_true(self, tmp_path: pathlib.Path) -> None:
+        root = logging.getLogger()
+        original_handlers = list(root.handlers)
+        original_level = root.level
+        try:
+            console = Console(file=io.StringIO())
+            log_path = setup_rich_logging(
+                verbose=False, console=console, log=True, log_dir=tmp_path
+            )
+            assert log_path is not None
+            assert log_path.exists()
+            assert len(root.handlers) == 2
+            assert root.level == logging.DEBUG
+
+            test_logger = logging.getLogger("craft_dashboard.test")
+            test_logger.debug("test debug message in log")
+            for handler in root.handlers:
+                handler.flush()
+
+            content = log_path.read_text(encoding="utf-8")
+            assert "test debug message in log" in content
+        finally:
+            for handler in root.handlers:
+                handler.close()
+            root.handlers = original_handlers
+            root.setLevel(original_level)
+
 
 class TestTimingEtaColumn:
     """Tests for TimingEtaColumn."""

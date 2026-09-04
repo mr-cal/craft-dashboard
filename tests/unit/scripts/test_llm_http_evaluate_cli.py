@@ -20,6 +20,7 @@ def test_help_lists_http_evaluate_options() -> None:
     assert "--llm-backend" in result.output
     assert "--interval" in result.output
     assert "--concurrency" in result.output
+    assert "--log" in result.output
     assert "continuous" in result.output.lower()
 
 
@@ -58,7 +59,41 @@ def test_evaluate_uses_http_worker_with_local_backend(monkeypatch) -> None:
     run_loop.assert_called_once()
     assert run_loop.call_args.kwargs["llm_backend"] == "local"
     assert run_loop.call_args.kwargs["concurrency"] == 4
-    assert run_loop.call_args.kwargs["poll_interval"] == 15
+    assert run_loop.call_args.kwargs["log"] is False
+
+
+def test_evaluate_passes_log_flag(monkeypatch) -> None:
+    runner = CliRunner()
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
+    monkeypatch.delenv("LOCAL_LLM_CA_CERT", raising=False)
+    run_loop = AsyncMock()
+    monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
+
+    def _capture_run(coro):
+        coro.close()
+
+    monkeypatch.setattr("scripts.llm.cli.asyncio.run", _capture_run)
+
+    result = runner.invoke(
+        cli,
+        [
+            "evaluate",
+            "--server",
+            "http://localhost:8000",
+            "--token",
+            "test-token",
+            "--llm-backend",
+            "local",
+            "--log",
+        ],
+    )
+
+    assert result.exit_code == 0
+    run_loop.assert_called_once()
+    assert run_loop.call_args.kwargs["log"] is True
+    assert run_loop.call_args.kwargs["poll_interval"] == 30
 
 
 def test_evaluate_requires_openrouter_api_key_even_for_local_backend(

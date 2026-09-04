@@ -433,7 +433,7 @@ class OpenRouterClient:
 
         data = response.json()
         result = LLMResponse.from_api_response(data)
-        logger.info(
+        logger.debug(
             "LLM call: requested_model=%s, actual_model=%s, tokens=%d (prompt=%d, completion=%d), finish_reason=%s",
             model,
             result.model or model,
@@ -558,7 +558,7 @@ class LocalLLMClient:
 
         data = response.json()
         result = LLMResponse.from_api_response(data)
-        logger.info(
+        logger.debug(
             "Local LLM call: requested_model=%s, actual_model=%s, tokens=%d (prompt=%d, completion=%d), finish_reason=%s",
             model,
             result.model or model,
