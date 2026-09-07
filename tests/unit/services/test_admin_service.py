@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION
 from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.models.commit_scan_run import CommitScanRun
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
@@ -1330,10 +1331,51 @@ class TestOutdatedEvaluationCounts:
             .scalars()
             .first()
         )
-        evaluation.eval_version = admin_service_module.CURRENT_EVAL_VERSION
+        evaluation.eval_version = CURRENT_EVAL_VERSION
         evaluation.issue_data_hash = "stale-content"
         await test_db_session.commit()
 
         counts = await AdminService(test_db_session).get_outdated_evaluation_counts()
 
         assert counts["content_changed"] == 1
+
+    async def test_closed_issues_needing_summarization_are_counted(
+        self, test_db_session
+    ) -> None:
+        await _seed_admin_data(test_db_session)
+        project = (
+            (
+                await test_db_session.execute(
+                    select(Project).where(Project.name == "snapcraft")
+                )
+            )
+            .scalars()
+            .first()
+        )
+        # Add closed issue never evaluated
+        closed_never_eval = Issue(
+            project_id=project.id,
+            source="github",
+            external_id="100",
+            issue_type="issue",
+            title="Closed unevaluated issue",
+            body="",
+            state="closed",
+            author="dev",
+            author_is_maintainer=False,
+            author_is_bot=False,
+            labels=[],
+            created_at=datetime(2025, 1, 1, tzinfo=UTC),
+            updated_at=datetime(2025, 1, 1, tzinfo=UTC),
+            closed_at=datetime(2025, 1, 2, tzinfo=UTC),
+            url="https://example.com/snapcraft/issues/100",
+            metadata_={},
+            comments=[],
+            last_fetched_at=datetime(2025, 1, 1, tzinfo=UTC),
+        )
+        test_db_session.add(closed_never_eval)
+        await test_db_session.commit()
+
+        counts = await AdminService(test_db_session).get_outdated_evaluation_counts()
+        assert counts["never_evaluated"] == 1
+        assert counts["version_outdated"] == 2

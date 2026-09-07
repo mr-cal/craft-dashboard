@@ -442,17 +442,22 @@ async def issue_detail(
     is_outdated = False
     if current_evaluation:
         expected_version = current_version_for_state(issue["state"])
-        if current_evaluation.get("eval_version") != expected_version:
+        if current_evaluation.get("eval_version") != expected_version or (
+            issue["state"] == "open"
+            and current_evaluation.get("evidence_generation")
+            != issue.get("evidence_generation")
+        ):
             is_outdated = True
         else:
             stored_hash = current_evaluation.get("issue_data_hash")
             if stored_hash:
-                current_hash = _compute_content_hash(
+                current_hash = issue.get("content_hash") or _compute_content_hash(
                     issue["title"],
                     issue.get("body"),
                     issue["state"],
                     issue.get("labels") or [],
                     issue.get("comments") or [],
+                    pr_details=issue.get("metadata_") or None,
                 )
                 if stored_hash != current_hash:
                     is_outdated = True

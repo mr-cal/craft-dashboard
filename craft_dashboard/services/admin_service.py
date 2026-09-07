@@ -11,7 +11,9 @@ from sqlalchemy import String, cast, func, literal, or_, select
 from sqlalchemy.orm import aliased
 
 from craft_dashboard.collectors.github import GitHubCollector, RateLimitStatus
-from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION
+from craft_dashboard.llm.evaluator import (
+    expected_version_sql_expr,
+)
 from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.models.commit_scan_run import CommitScanRun
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
@@ -810,20 +812,21 @@ class AdminService:
     async def get_outdated_evaluation_counts(
         self, filtered_issues: dict[str, list[str]] | None = None
     ) -> OutdatedEvaluationCounts:
-        """Return open-issue counts needing (re-)evaluation, bucketed by reason.
+        """Return issue counts needing (re-)evaluation across open and closed states, bucketed by reason.
 
         Mirrors the priority tiers in
         ``craft_dashboard.llm.evaluation_queue.build_pending_evaluation_query``.
         """
+        expected_version = expected_version_sql_expr()
         latest_evaluation = aliased(LLMEvaluation)
         never_evaluated = latest_evaluation.id.is_(None)
         version_outdated = latest_evaluation.id.is_not(None) & (
             latest_evaluation.eval_version.is_(None)
-            | (latest_evaluation.eval_version != CURRENT_EVAL_VERSION)
+            | (latest_evaluation.eval_version != expected_version)
         )
         content_changed = (
             latest_evaluation.id.is_not(None)
-            & (latest_evaluation.eval_version == CURRENT_EVAL_VERSION)
+            & (latest_evaluation.eval_version == expected_version)
             & Issue.content_hash.is_distinct_from(latest_evaluation.issue_data_hash)
         )
 
@@ -839,7 +842,6 @@ class AdminService:
                 latest_evaluation,
                 (latest_evaluation.issue_id == Issue.id) & latest_evaluation.latest,
             )
-            .where(Issue.state == "open")
             .where(Project.category != "aggregate")
         )
         excl = _build_excluded_issues_condition(filtered_issues or {})

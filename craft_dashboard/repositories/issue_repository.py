@@ -100,6 +100,7 @@ def _serialize_evaluation(evaluation: LLMEvaluation) -> dict[str, Any]:
         "has_embedding": evaluation.summary_embedding is not None,
         "eval_version": evaluation.eval_version,
         "issue_data_hash": evaluation.issue_data_hash,
+        "evidence_generation": evaluation.evidence_generation,
     }
 
 
@@ -266,6 +267,10 @@ class IssueRepository:
             "state": issue.state,
             "author": issue.author,
             "labels": list(issue.labels or []),
+            "comments": list(issue.comments or []),
+            "metadata_": issue.metadata_ or {},
+            "content_hash": issue.content_hash,
+            "evidence_generation": issue.evidence_generation,
             "issue_type": issue.issue_type,
             "created_at": issue.created_at,
             "updated_at": issue.updated_at,

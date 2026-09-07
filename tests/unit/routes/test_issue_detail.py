@@ -7,6 +7,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from craft_dashboard.app import create_app
 from craft_dashboard.dependencies import get_db_session
+from craft_dashboard.llm.content_hash import compute_content_hash
+from craft_dashboard.llm.evaluator import (
+    CURRENT_EVAL_VERSION,
+)
 from craft_dashboard.models.views import IssueQueryResult, IssueView
 from craft_dashboard.repositories.issue_repository import IssueRepository
 from craft_dashboard.settings import Settings
@@ -329,3 +333,129 @@ class TestRelatedIssuesSection:
         assert response.status_code == 200
         assert "Related issues" in response.text
         assert "No related issues found above the similarity threshold" in response.text
+
+
+class TestOutdatedEvaluationNotice:
+    def test_outdated_notice_not_shown_when_up_to_date_with_comments(
+        self, test_client: TestClient
+    ) -> None:
+        comments = [
+            {
+                "author": "alice",
+                "body": "comment 1",
+                "created_at": "2025-01-11T10:00:00Z",
+            }
+        ]
+        content_hash = compute_content_hash(
+            "Support core24 builds end to end",
+            "Steps to reproduce\n1. Build\n2. Observe failure",
+            "open",
+            ["bug", "core24"],
+            comments=comments,
+        )
+        detail = {
+            **_DETAIL,
+            "comments": comments,
+            "content_hash": content_hash,
+            "evidence_generation": 1,
+            "evaluation_history": [
+                {
+                    **_DETAIL["evaluation_history"][0],
+                    "eval_version": CURRENT_EVAL_VERSION,
+                    "issue_data_hash": content_hash,
+                    "evidence_generation": 1,
+                }
+            ],
+        }
+        with (
+            patch.object(
+                IssueRepository,
+                "get_issue_detail",
+                AsyncMock(return_value=detail),
+            ),
+            patch.object(
+                IssueRepository,
+                "get_issue_activity_history",
+                AsyncMock(return_value=[]),
+            ),
+            patch.object(
+                IssueRepository,
+                "find_similar_issues",
+                AsyncMock(return_value=[]),
+            ),
+        ):
+            response = test_client.get("/issues/snapcraft/321")
+
+        assert response.status_code == 200
+        assert "evaluation-outdated-notice" not in response.text
+
+    def test_outdated_notice_shown_when_version_is_stale(
+        self, test_client: TestClient
+    ) -> None:
+        detail = {
+            **_DETAIL,
+            "evaluation_history": [
+                {
+                    **_DETAIL["evaluation_history"][0],
+                    "eval_version": CURRENT_EVAL_VERSION - 1,
+                    "issue_data_hash": "some-hash",
+                }
+            ],
+        }
+        with (
+            patch.object(
+                IssueRepository,
+                "get_issue_detail",
+                AsyncMock(return_value=detail),
+            ),
+            patch.object(
+                IssueRepository,
+                "get_issue_activity_history",
+                AsyncMock(return_value=[]),
+            ),
+            patch.object(
+                IssueRepository,
+                "find_similar_issues",
+                AsyncMock(return_value=[]),
+            ),
+        ):
+            response = test_client.get("/issues/snapcraft/321")
+
+        assert response.status_code == 200
+        assert "evaluation-outdated-notice" in response.text
+
+    def test_outdated_notice_shown_when_hash_mismatch(
+        self, test_client: TestClient
+    ) -> None:
+        detail = {
+            **_DETAIL,
+            "content_hash": "new-hash",
+            "evaluation_history": [
+                {
+                    **_DETAIL["evaluation_history"][0],
+                    "eval_version": CURRENT_EVAL_VERSION,
+                    "issue_data_hash": "old-hash",
+                }
+            ],
+        }
+        with (
+            patch.object(
+                IssueRepository,
+                "get_issue_detail",
+                AsyncMock(return_value=detail),
+            ),
+            patch.object(
+                IssueRepository,
+                "get_issue_activity_history",
+                AsyncMock(return_value=[]),
+            ),
+            patch.object(
+                IssueRepository,
+                "find_similar_issues",
+                AsyncMock(return_value=[]),
+            ),
+        ):
+            response = test_client.get("/issues/snapcraft/321")
+
+        assert response.status_code == 200
+        assert "evaluation-outdated-notice" in response.text
