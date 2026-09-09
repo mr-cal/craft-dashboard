@@ -33,6 +33,7 @@ craft-projects = [
     "craft-store",
     "craft-actions",
     "craft-artifacts",
+    "fetch-service",
     "snapcraft-rocks",
     "starbase",
     "starflow",
@@ -107,6 +108,7 @@ craft-platforms = [1]
 craft-providers = [323]
 craft-store = [93]
 debcraft = [1]
+fetch-service = [45]
 imagecraft = [1]
 rockcraft = [295]
 snapcraft = [2048, 4472]
