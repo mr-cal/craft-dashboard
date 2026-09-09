@@ -545,7 +545,7 @@ class GitHubCollector:
         refresh_age_days: int = 7,
         since: datetime | None = None,
         collection_run_id: int | None = None,
-        state: Literal["open", "closed", "all"] = "open",
+        state: Literal["open", "closed", "all", "full"] = "open",
     ) -> int:
         """Collect issues and PRs for a repository.
 
@@ -566,8 +566,9 @@ class GitHubCollector:
                 existing incremental REST refresh behavior.
             collection_run_id: ID of the collection run that fetched these issues.
             state: Which issues to fetch — "open" (always refreshed, no schedule
-                gate), "closed" (closed issues only), or "all" (open + closed).
-                Default is "open".
+                gate), "closed" (closed issues only), "all" (open + closed), or
+                "full" (unconstrained full refresh of all history). Default is
+                "open".
 
         Returns:
             The number of issues upserted.
@@ -628,12 +629,35 @@ class GitHubCollector:
             )
             total_count = total_result.scalar_one()
 
-            if since is None and due_count == 0 and total_count > 0:
+            # Check whether closed issues exist in the DB for this project.
+            closed_result = await session.execute(
+                sa.select(sa.func.count())
+                .select_from(Issue)
+                .where(
+                    Issue.project_id == project_id,
+                    Issue.source == "github",
+                    Issue.state == "closed",
+                )
+            )
+            closed_count = closed_result.scalar_one()
+
+            rest_state = "all" if state == "full" else state
+            is_full_collection = state == "full" or (
+                since is None and closed_count == 0
+            )
+
+            if (
+                not is_full_collection
+                and since is None
+                and due_count == 0
+                and total_count > 0
+            ):
                 logger.info(
                     "  %s/%s: no issues due for refresh, skipping", self.org, repo_name
                 )
                 return 0
 
+            since_date: datetime | None = None
             if since is not None:
                 since_date = (
                     since.replace(tzinfo=UTC) if since.tzinfo is None else since
@@ -644,7 +668,7 @@ class GitHubCollector:
                     repo_name,
                     since_date.isoformat(),
                 )
-            else:
+            elif not is_full_collection:
                 # Use 'since' based on the oldest last_fetched_at of due issues so we
                 # never miss a state transition that happened while the system was offline.
                 # Cap at 90 days to bound the amount of data fetched on a long outage.
@@ -666,18 +690,31 @@ class GitHubCollector:
                     # Fresh project with no issues yet: fetch the last 90 days.
                     since_date = _max_lookback
 
-            gh_issues = repo.get_issues(
-                state=state, sort="updated", direction="desc", since=since_date
-            )
-
-            logger.info(
-                "  %s/%s: starting full collection (%d issues due for refresh, fetching updated since %s)%s",
-                self.org,
-                repo_name,
-                due_count,
-                since_date.strftime("%Y-%m-%d"),
-                f", limit: {limit}" if limit else "",
-            )
+            if since_date is not None:
+                gh_issues = repo.get_issues(
+                    state=rest_state,
+                    sort="updated",
+                    direction="desc",
+                    since=since_date,
+                )
+                logger.info(
+                    "  %s/%s: starting collection (%d issues due for refresh, fetching updated since %s)%s",
+                    self.org,
+                    repo_name,
+                    due_count,
+                    since_date.strftime("%Y-%m-%d"),
+                    f", limit: {limit}" if limit else "",
+                )
+            else:
+                gh_issues = repo.get_issues(
+                    state=rest_state, sort="updated", direction="desc"
+                )
+                logger.info(
+                    "  %s/%s: starting full collection (all history)%s",
+                    self.org,
+                    repo_name,
+                    f", limit: {limit}" if limit else "",
+                )
 
         count = 0
         skipped = 0

@@ -258,6 +258,9 @@ class TestCollectIssuesExceptionHandling:
         total_count_result = MagicMock()
         total_count_result.scalar_one.return_value = 1
 
+        closed_count_result = MagicMock()
+        closed_count_result.scalar_one.return_value = 1
+
         oldest_fetch_result = MagicMock()
         oldest_fetch_result.scalar_one_or_none.return_value = None  # fresh project
 
@@ -270,6 +273,7 @@ class TestCollectIssuesExceptionHandling:
             side_effect=[
                 due_count_result,
                 total_count_result,
+                closed_count_result,
                 oldest_fetch_result,
                 existing_result,
                 None,
@@ -376,6 +380,171 @@ class TestCollectIssuesExceptionHandling:
 
         with pytest.raises(RuntimeError, match="boom"):
             await collector.collect_issues("repo", 1, session, state="all")
+
+
+class TestCollectIssuesRefreshBehavior:
+    """Tests for collect_issues full-refresh and fresh-project behavior."""
+
+    @staticmethod
+    def _make_issue(*, number: int = 123, is_closed: bool = True) -> MagicMock:
+        gh_issue = MagicMock()
+        gh_issue.number = number
+        gh_issue.title = "A closed bug"
+        gh_issue.body = "Issue description"
+        gh_issue.state = "closed" if is_closed else "open"
+        gh_issue.user = MagicMock(login="someone")
+        gh_issue.labels = []
+        gh_issue.created_at = datetime(2024, 1, 1, tzinfo=UTC)
+        gh_issue.updated_at = datetime(2024, 1, 2, tzinfo=UTC)
+        gh_issue.closed_at = datetime(2024, 1, 2, tzinfo=UTC) if is_closed else None
+        gh_issue.html_url = f"https://github.com/canonical/repo/issues/{number}"
+        gh_issue.pull_request = None
+        return gh_issue
+
+    @staticmethod
+    def _fake_insert(_table) -> MagicMock:
+        stmt = MagicMock()
+        stmt.excluded = MagicMock()
+        stmt.values.return_value = stmt
+        stmt.on_conflict_do_update.return_value = stmt
+        return stmt
+
+    async def test_full_refresh_does_not_skip_when_due_count_is_zero(
+        self, mocker
+    ) -> None:
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        gh_issue = self._make_issue()
+        repo = MagicMock()
+        repo.get_issues.return_value = [gh_issue]
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value = repo
+
+        due_count_result = MagicMock()
+        due_count_result.scalar_one.return_value = 0
+        total_count_result = MagicMock()
+        total_count_result.scalar_one.return_value = 5
+        closed_count_result = MagicMock()
+        closed_count_result.scalar_one.return_value = 2
+
+        existing_result = MagicMock()
+        existing_result.scalar_one_or_none.return_value = None
+        existing_result.one_or_none.return_value = None
+
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                due_count_result,
+                total_count_result,
+                closed_count_result,
+                existing_result,
+                None,
+            ]
+        )
+        session.add = MagicMock()
+        session.commit = AsyncMock()
+
+        mocker.patch(
+            "craft_dashboard.collectors.github._fetch_issue_comments",
+            return_value=[],
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.github._fetch_closing_references",
+            return_value=[],
+        )
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._fake_insert,
+        )
+
+        count = await collector.collect_issues("repo", 1, session, state="full")
+
+        assert count == 1
+        repo.get_issues.assert_called_once_with(
+            state="all", sort="updated", direction="desc"
+        )
+
+    async def test_fresh_project_with_only_open_issues_does_not_skip(
+        self, mocker
+    ) -> None:
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        gh_issue = self._make_issue()
+        repo = MagicMock()
+        repo.get_issues.return_value = [gh_issue]
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value = repo
+
+        # Scenario: Phase A inserted open issues, so total_count > 0 and due_count == 0,
+        # but closed_count == 0 (no closed issues yet collected).
+        due_count_result = MagicMock()
+        due_count_result.scalar_one.return_value = 0
+        total_count_result = MagicMock()
+        total_count_result.scalar_one.return_value = 10
+        closed_count_result = MagicMock()
+        closed_count_result.scalar_one.return_value = 0
+
+        existing_result = MagicMock()
+        existing_result.scalar_one_or_none.return_value = None
+        existing_result.one_or_none.return_value = None
+
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                due_count_result,
+                total_count_result,
+                closed_count_result,
+                existing_result,
+                None,
+            ]
+        )
+        session.add = MagicMock()
+        session.commit = AsyncMock()
+
+        mocker.patch(
+            "craft_dashboard.collectors.github._fetch_issue_comments",
+            return_value=[],
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.github._fetch_closing_references",
+            return_value=[],
+        )
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._fake_insert,
+        )
+
+        count = await collector.collect_issues("repo", 1, session, state="all")
+
+        assert count == 1
+        repo.get_issues.assert_called_once_with(
+            state="all", sort="updated", direction="desc"
+        )
+
+    async def test_skips_when_no_issues_due_and_not_full_refresh(self) -> None:
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        repo = MagicMock()
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value = repo
+
+        due_count_result = MagicMock()
+        due_count_result.scalar_one.return_value = 0
+        total_count_result = MagicMock()
+        total_count_result.scalar_one.return_value = 10
+        closed_count_result = MagicMock()
+        closed_count_result.scalar_one.return_value = 5
+
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                due_count_result,
+                total_count_result,
+                closed_count_result,
+            ]
+        )
+
+        count = await collector.collect_issues("repo", 1, session, state="all")
+
+        assert count == 0
+        repo.get_issues.assert_not_called()
 
 
 class TestCollectIssuesGraphQLOpenPath:

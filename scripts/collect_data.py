@@ -691,6 +691,7 @@ async def _collect_github(
                 if full_refresh
                 else await _get_collection_watermark(session, project_id, "github")
             )
+            is_full = full_refresh or (watermark is None)
             if full_refresh:
                 logger.info("  canonical/%s: full collection requested", project_name)
             elif watermark is not None:
@@ -708,7 +709,7 @@ async def _collect_github(
             try:
                 issues_started_at = time.monotonic()
                 issues_collected = await _retry_github(
-                    lambda _pn=project_name, _pid=project_id, _s=session, _w=watermark: (
+                    lambda _pn=project_name, _pid=project_id, _s=session, _w=watermark, _f=is_full: (
                         collector.collect_issues(
                             _pn,
                             _pid,
@@ -717,10 +718,10 @@ async def _collect_github(
                             refresh_age_days=settings.refresh_age_days,
                             since=_w,
                             collection_run_id=collection_run_id,
-                            state="all",
+                            state="full" if _f else "all",
                         )
                     ),
-                    f"collect_issues(all, {project_name})",
+                    f"collect_issues({'full' if is_full else 'all'}, {project_name})",
                 )
                 stats.issues_collected += issues_collected
                 logger.info(

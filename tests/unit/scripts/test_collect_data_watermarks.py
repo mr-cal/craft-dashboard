@@ -190,6 +190,7 @@ class TestCollectGithubWatermarks:
         )
 
         assert gh_collector.collect_issues.await_args.kwargs["since"] is None
+        assert gh_collector.collect_issues.await_args.kwargs["state"] == "full"
         assert "full collection" in caplog.text
 
 
