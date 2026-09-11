@@ -21,7 +21,7 @@ from craft_dashboard.models.forum import ForumBackfillState, ForumTopic
 if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
 
-router = APIRouter(prefix="/engagement")
+router = APIRouter(prefix="/engagement", tags=["Engagement"])
 
 
 @router.get("/forums", response_class=HTMLResponse)

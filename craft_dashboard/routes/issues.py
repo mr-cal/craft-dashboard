@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/issues")
+router = APIRouter(prefix="/issues", tags=["Issues"])
 
 VALID_PER_PAGE = {100, 250, 1000}
 PER_PAGE_ALL = 0  # sentinel for "show all"

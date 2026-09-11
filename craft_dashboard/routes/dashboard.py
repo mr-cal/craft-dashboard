@@ -19,7 +19,7 @@ from craft_dashboard.repositories.issue_repository import (
 if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
 
-router = APIRouter()
+router = APIRouter(tags=["Dashboard"])
 
 
 @router.get("/", response_class=HTMLResponse)

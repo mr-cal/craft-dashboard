@@ -207,7 +207,7 @@ def create_app() -> FastAPI:
         status: str
         database: str = "ok"
 
-    @app.get("/health", response_model=HealthResponse)
+    @app.get("/health", response_model=HealthResponse, tags=["Health"])
     async def health(
         session: AsyncSession = Depends(get_db_session),
     ) -> HealthResponse | JSONResponse:

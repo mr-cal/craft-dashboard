@@ -50,7 +50,7 @@ from craft_dashboard.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/eval")
+router = APIRouter(prefix="/api/eval", tags=["Evaluation API"])
 limiter = Limiter(key_func=get_remote_address)
 settings = Settings()
 

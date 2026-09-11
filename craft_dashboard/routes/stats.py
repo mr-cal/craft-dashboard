@@ -22,7 +22,7 @@ from craft_dashboard.repositories.issue_repository import (
 if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
 
-router = APIRouter(prefix="/stats")
+router = APIRouter(prefix="/stats", tags=["Stats"])
 
 _SCALAR_KEYS = [
     "open_issues",

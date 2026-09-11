@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/admin")
+router = APIRouter(prefix="/admin", tags=["Admin"])
 
 _ADMIN_SESSION_COOKIE = "admin_session"
 _LOG_SERVICE_UNITS: list[str] = ["collect-data", "craft-dashboard", "run-llm"]
