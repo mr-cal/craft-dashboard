@@ -20,6 +20,7 @@ __all__ = [
     "paginated_issues",
     "paginated_pull_requests",
     "paginated_releases_and_branches",
+    "fetch_issue_states",
     "classify_pr_review_status",
     "classify_pr_ci_checks",
     "GraphQLCost",
@@ -481,3 +482,76 @@ def classify_pr_ci_checks(
                 ci_pending.append(check["name"])
 
     return ci_passing, ci_failing, ci_pending
+
+
+def fetch_issue_states(
+    requester: "Requester",
+    owner: str,
+    name: str,
+    numbers: list[int],
+    *,
+    batch_size: int = 50,
+) -> dict[int, dict[str, Any]]:
+    """Batch fetch states and closed/merged timestamps for a list of issue/PR numbers.
+
+    Constructs dynamic GraphQL queries using aliased ``issueOrPullRequest(number: N)``
+    fields to reconcile status of multiple issues in a single request.
+
+    Args:
+        requester: ``Github.requester``.
+        owner: Repository owner/org.
+        name: Repository name.
+        numbers: List of issue/PR numbers to look up.
+        batch_size: Maximum number of items per GraphQL query.
+
+    Returns:
+        A dictionary mapping issue/PR number to a dict containing:
+        ``{"state": str, "closed_at": datetime | None, "merged_at": datetime | None}``.
+
+    """
+    if not numbers:
+        return {}
+
+    results: dict[int, dict[str, Any]] = {}
+    for i in range(0, len(numbers), batch_size):
+        chunk = numbers[i : i + batch_size]
+        fields = [
+            f"""
+            i{num}: issueOrPullRequest(number: {num}) {{
+                ... on Issue {{ state closedAt }}
+                ... on PullRequest {{ state closedAt mergedAt }}
+            }}
+            """
+            for num in chunk
+        ]
+        query = f"""
+        query($owner: String!, $name: String!) {{
+            rateLimit {{ cost remaining resetAt }}
+            repository(owner: $owner, name: $name) {{
+                {" ".join(fields)}
+            }}
+        }}
+        """
+        data = _graphql_query(
+            requester,
+            query,
+            {"owner": owner, "name": name},
+            owner=owner,
+            name=name,
+        )
+        repo_data = data.get("repository", {})
+        for num in chunk:
+            item = repo_data.get(f"i{num}")
+            if not item:
+                continue
+            raw_state = item.get("state", "").upper()
+            state = "closed" if raw_state in ("CLOSED", "MERGED") else "open"
+            closed_at_str = item.get("closedAt") or item.get("mergedAt")
+            merged_at_str = item.get("mergedAt")
+            results[num] = {
+                "state": state,
+                "closed_at": _parse_graphql_datetime(closed_at_str),
+                "merged_at": _parse_graphql_datetime(merged_at_str),
+            }
+
+    return results

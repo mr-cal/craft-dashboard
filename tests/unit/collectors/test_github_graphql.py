@@ -14,6 +14,7 @@ from craft_dashboard.collectors.github_graphql import (
     _summarize_graphql_errors,
     classify_pr_ci_checks,
     classify_pr_review_status,
+    fetch_issue_states,
     paginated_issues,
     paginated_pull_requests,
     paginated_releases_and_branches,
@@ -524,6 +525,57 @@ class TestClassifyPrCiChecks:
         ]
 
         assert classify_pr_ci_checks(commits) == ([], [], [])
+
+
+class TestFetchIssueStates:
+    def test_fetches_and_parses_states_for_numbers(self) -> None:
+        requester = MagicMock()
+        requester.graphql_query.return_value = (
+            {},
+            {
+                "data": {
+                    "rateLimit": {"cost": 1, "remaining": 4999, "resetAt": None},
+                    "repository": {
+                        "i101": {
+                            "state": "CLOSED",
+                            "closedAt": "2025-01-05T10:00:00Z",
+                        },
+                        "i102": {
+                            "state": "MERGED",
+                            "closedAt": "2025-01-06T11:00:00Z",
+                            "mergedAt": "2025-01-06T11:00:00Z",
+                        },
+                        "i103": {
+                            "state": "OPEN",
+                            "closedAt": None,
+                        },
+                    },
+                }
+            },
+        )
+
+        results = fetch_issue_states(requester, "canonical", "repo", [101, 102, 103])
+
+        assert results[101] == {
+            "state": "closed",
+            "closed_at": datetime(2025, 1, 5, 10, 0, tzinfo=UTC),
+            "merged_at": None,
+        }
+        assert results[102] == {
+            "state": "closed",
+            "closed_at": datetime(2025, 1, 6, 11, 0, tzinfo=UTC),
+            "merged_at": datetime(2025, 1, 6, 11, 0, tzinfo=UTC),
+        }
+        assert results[103] == {
+            "state": "open",
+            "closed_at": None,
+            "merged_at": None,
+        }
+
+    def test_empty_numbers_returns_empty_dict(self) -> None:
+        requester = MagicMock()
+        assert fetch_issue_states(requester, "canonical", "repo", []) == {}
+        requester.graphql_query.assert_not_called()
 
 
 class TestSummarizeGraphqlErrors:

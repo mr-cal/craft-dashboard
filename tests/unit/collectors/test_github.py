@@ -669,6 +669,8 @@ class TestCollectIssuesGraphQLOpenPath:
     @staticmethod
     def _make_session_with_no_existing_issue(fetch_count: int) -> AsyncMock:
         session = AsyncMock()
+        db_open_mock = MagicMock()
+        db_open_mock.fetchall.return_value = []
         session.execute = AsyncMock(
             side_effect=[
                 result
@@ -678,6 +680,7 @@ class TestCollectIssuesGraphQLOpenPath:
                     None,
                 )
             ]
+            + [db_open_mock]
         )
         session.add = MagicMock()
         session.commit = AsyncMock()
@@ -732,14 +735,13 @@ class TestCollectIssuesGraphQLOpenPath:
         collector.wait_for_rate_limit.assert_called_once_with(resource="graphql")
         collector.gh.get_repo.assert_not_called()
         paginated_issues.assert_called_once_with(
-            requester, "canonical", "repo", since=since, states=["OPEN", "CLOSED"]
+            requester, "canonical", "repo", since=since
         )
         paginated_pull_requests.assert_called_once_with(
             requester,
             "canonical",
             "repo",
             since=since,
-            states=["OPEN", "CLOSED", "MERGED"],
         )
         session.commit.assert_awaited_once()
 
@@ -806,8 +808,13 @@ class TestCollectIssuesGraphQLOpenPath:
 
         insert = mocker.patch("sqlalchemy.dialects.postgresql.insert")
         session = AsyncMock()
+        db_open_mock = MagicMock()
+        db_open_mock.fetchall.return_value = []
         session.execute = AsyncMock(
-            side_effect=[self._make_existing_result(datetime(2025, 1, 3, tzinfo=UTC))]
+            side_effect=[
+                self._make_existing_result(datetime(2025, 1, 3, tzinfo=UTC)),
+                db_open_mock,
+            ]
         )
         session.add = MagicMock()
         session.commit = AsyncMock()
@@ -958,6 +965,62 @@ class TestCollectIssuesGraphQLOpenPath:
         assert statements[0].values_kwargs is not None
         assert statements[0].values_kwargs["labels"] == []
         assert statements[0].values_kwargs["comments"] == []
+
+    async def test_collect_issues_reconciles_missing_open_items(self, mocker) -> None:
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        requester = MagicMock()
+        collector.gh = MagicMock()
+        collector.gh.requester = requester
+        collector.wait_for_rate_limit = MagicMock()
+
+        # GraphQL open set returns issue 101 only
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_issues",
+            return_value=iter([self._make_issue_node()]),
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_pull_requests",
+            return_value=iter([]),
+        )
+
+        # DB has issue 101 and issue 102 as 'open'. So 102 is missing and should be reconciled.
+        db_open_result = MagicMock()
+        db_open_result.fetchall.return_value = [("101",), ("102",)]
+
+        existing_101_result = self._make_existing_result()
+        title_result = MagicMock()
+        title_result.scalar_one_or_none.return_value = "Issue 102"
+
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                existing_101_result,  # check existing 101
+                None,  # upsert 101
+                db_open_result,  # query DB open items
+                title_result,  # query title for 102
+                None,  # update issue 102 to closed
+            ]
+        )
+        session.commit = AsyncMock()
+
+        fetch_states = mocker.patch(
+            "craft_dashboard.collectors.github.fetch_issue_states",
+            return_value={
+                102: {
+                    "state": "closed",
+                    "closed_at": datetime(2025, 1, 5, 12, 0, tzinfo=UTC),
+                    "merged_at": None,
+                }
+            },
+        )
+
+        mocker.patch("sqlalchemy.dialects.postgresql.insert")
+
+        count = await collector.collect_issues("repo", 1, session, state="open")
+
+        assert count == 1
+        fetch_states.assert_called_once_with(requester, "canonical", "repo", [102])
+        session.commit.assert_awaited_once()
 
 
 class TestFetchPRDetails:

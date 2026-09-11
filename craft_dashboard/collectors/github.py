@@ -22,6 +22,7 @@ from craft_dashboard.collectors.github_graphql import (
     _parse_graphql_datetime,
     classify_pr_ci_checks,
     classify_pr_review_status,
+    fetch_issue_states,
     paginated_issues,
     paginated_pull_requests,
     paginated_releases_and_branches,
@@ -586,24 +587,18 @@ class GitHubCollector:
         )
 
         repo = None
+        seen_open_external_ids: set[str] = set()
         if state == "open":
-            # Fetch currently-open issues and any recently updated issues/PRs
-            # (including closed/merged ones when `since` is provided).
+            # Always fetch all currently-open issues; no schedule gate.
             # The per-issue updated_at skip below handles efficiency.
             # Use GraphQL (not REST) for the open pass: this runs every 10
             # minutes, and REST's N+1 per-item calls (comments, reviews, CI
             # checks) would blow the REST rate limit at that cadence.
             self.wait_for_rate_limit(resource="graphql")
             requester = self.gh.requester
-            issue_states = ["OPEN", "CLOSED"] if since else ["OPEN"]
-            pr_states = ["OPEN", "CLOSED", "MERGED"] if since else ["OPEN"]
             gh_issues = _interleave_open_graphql_items(
-                paginated_issues(
-                    requester, self.org, repo_name, since=since, states=issue_states
-                ),
-                paginated_pull_requests(
-                    requester, self.org, repo_name, since=since, states=pr_states
-                ),
+                paginated_issues(requester, self.org, repo_name, since=since),
+                paginated_pull_requests(requester, self.org, repo_name, since=since),
             )
             logger.info(
                 "  %s/%s: collecting open issues (via GraphQL)%s",
@@ -728,6 +723,7 @@ class GitHubCollector:
         last_progress = time.monotonic()
 
         for gh_issue in gh_issues:
+            seen_open_external_ids.add(str(gh_issue.number))
             if limit > 0 and count >= limit:
                 logger.info(
                     "Reached issue limit (%d) for %s/%s", limit, self.org, repo_name
@@ -888,6 +884,68 @@ class GitHubCollector:
             if now - last_progress >= _PROGRESS_LOG_INTERVAL_SECONDS:
                 logger.info("  %s/%s: %d issues fetched...", self.org, repo_name, count)
                 last_progress = now
+
+        # In open mode, reconcile any issues/PRs that were open in our DB
+        # but are no longer in GitHub's open set (meaning they were closed/merged).
+        if state == "open" and not limit:
+            db_open_rows = await session.execute(
+                sa.select(Issue.external_id).where(
+                    Issue.project_id == project_id,
+                    Issue.source == "github",
+                    Issue.state == "open",
+                )
+            )
+            db_open_ids = {row[0] for row in db_open_rows.fetchall()}
+            missing_ids = db_open_ids - seen_open_external_ids
+            if missing_ids:
+                missing_numbers = [int(eid) for eid in missing_ids if eid.isdigit()]
+                logger.info(
+                    "  %s/%s: reconciling %d dropped open items: %s",
+                    self.org,
+                    repo_name,
+                    len(missing_numbers),
+                    missing_numbers,
+                )
+                reconciled = fetch_issue_states(
+                    self.gh.requester, self.org, repo_name, missing_numbers
+                )
+                now_utc = datetime.now(UTC)
+                for num, status in reconciled.items():
+                    if status["state"] == "closed":
+                        closed_at = status["closed_at"] or now_utc
+                        # Look up current issue title for the activity feed
+                        title_res = await session.execute(
+                            sa.select(Issue.title).where(
+                                Issue.project_id == project_id,
+                                Issue.source == "github",
+                                Issue.external_id == str(num),
+                            )
+                        )
+                        curr_title = title_res.scalar_one_or_none() or ""
+                        await session.execute(
+                            sa.update(Issue)
+                            .where(
+                                Issue.project_id == project_id,
+                                Issue.source == "github",
+                                Issue.external_id == str(num),
+                            )
+                            .values(
+                                state="closed",
+                                closed_at=closed_at,
+                                last_fetched_at=now_utc,
+                            )
+                        )
+                        # Record activity entry for issue closure
+                        session.add(
+                            IssueActivity(
+                                project_id=project_id,
+                                issue_number=num,
+                                change_type="closed",
+                                title=curr_title[:200],
+                                occurred_at=closed_at,
+                                collection_run_id=collection_run_id,
+                            )
+                        )
 
         await session.commit()
         logger.info(
