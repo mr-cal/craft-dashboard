@@ -829,6 +829,7 @@ async def run_evaluate_loop(
     server_ca_cert: str,
     verbose: bool,
     openrouter_api_key: str,
+    openrouter_api_key_embedding: str = "",
     embed_model: str = "openai/text-embedding-3-small",
     issue: str = "",
     concurrency: int = 10,
@@ -891,7 +892,7 @@ async def run_evaluate_loop(
     embed_client = EmbeddingClient(
         base_url=OPENROUTER_BASE_URL,
         model=embed_model,
-        api_key=openrouter_api_key,
+        api_key=openrouter_api_key_embedding,
         ca_cert="",
     )
 

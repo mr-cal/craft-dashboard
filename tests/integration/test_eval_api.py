@@ -1637,14 +1637,14 @@ class TestRelatedIssuesEndpoint:
         self, test_db_session: AsyncSession
     ) -> tuple[FastAPI, str]:
         app, token = _create_eval_app(test_db_session)
-        app.state.settings.openrouter_api_key = "test-openrouter-key"
+        app.state.settings.openrouter_api_key_embedding = "test-openrouter-key"
         return app, token
 
     def _create_app_with_missing_openrouter_key(
         self, test_db_session: AsyncSession
     ) -> tuple[FastAPI, str]:
         app, token = _create_eval_app(test_db_session)
-        app.state.settings.openrouter_api_key = ""
+        app.state.settings.openrouter_api_key_embedding = ""
         return app, token
 
     def test_returns_similar_issues(self, test_db_session: AsyncSession) -> None:

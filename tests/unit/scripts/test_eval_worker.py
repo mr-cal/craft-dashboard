@@ -72,6 +72,7 @@ DEFAULT_KWARGS = {
     "verbose": False,
     "embed_model": "openai/text-embedding-3-small",
     "openrouter_api_key": "test-openrouter-key",
+    "openrouter_api_key_embedding": "test-embedding-key",
     "concurrency": 1,
 }
 
@@ -255,7 +256,7 @@ async def test_run_evaluate_loop_posts_required_summary_embedding(
     eval_worker.EmbeddingClient.assert_called_once_with(
         base_url="https://openrouter.ai/api/v1",
         model="openai/text-embedding-3-small",
-        api_key="test-openrouter-key",
+        api_key="test-embedding-key",
         ca_cert="",
     )
     patched_runtime["embed_client"].embed.assert_any_await(

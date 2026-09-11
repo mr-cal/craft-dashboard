@@ -27,6 +27,7 @@ def test_help_lists_http_evaluate_options() -> None:
 def test_evaluate_uses_http_worker_with_local_backend(monkeypatch) -> None:
     runner = CliRunner()
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
     monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
     monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
     monkeypatch.delenv("LOCAL_LLM_CA_CERT", raising=False)
@@ -65,6 +66,7 @@ def test_evaluate_uses_http_worker_with_local_backend(monkeypatch) -> None:
 def test_evaluate_passes_log_flag(monkeypatch) -> None:
     runner = CliRunner()
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
     monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
     monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
     monkeypatch.delenv("LOCAL_LLM_CA_CERT", raising=False)
@@ -96,11 +98,12 @@ def test_evaluate_passes_log_flag(monkeypatch) -> None:
     assert run_loop.call_args.kwargs["poll_interval"] == 30
 
 
-def test_evaluate_requires_openrouter_api_key_even_for_local_backend(
+def test_evaluate_requires_openrouter_api_key_embedding_even_for_local_backend(
     monkeypatch,
 ) -> None:
     runner = CliRunner()
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.delenv("OPENROUTER_API_KEY_EMBEDDING", raising=False)
     monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
     monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
     monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", AsyncMock())
@@ -124,7 +127,7 @@ def test_evaluate_requires_openrouter_api_key_even_for_local_backend(
     )
 
     assert result.exit_code != 0
-    assert "OPENROUTER_API_KEY" in result.output
+    assert "OPENROUTER_API_KEY_EMBEDDING" in result.output
 
 
 def test_evaluate_requires_openrouter_summary_model_for_openrouter_backend(
@@ -133,6 +136,7 @@ def test_evaluate_requires_openrouter_summary_model_for_openrouter_backend(
     """OPENROUTER_MODEL_SUMMARY must be set explicitly; no silent fallback."""
     runner = CliRunner()
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
     monkeypatch.delenv("OPENROUTER_MODEL_SUMMARY", raising=False)
     monkeypatch.setenv("OPENROUTER_MODEL_SCORING", "qwen/qwen3.8-27b")
     monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", AsyncMock())
@@ -162,6 +166,7 @@ def test_evaluate_requires_openrouter_summary_model_for_openrouter_backend(
 def test_evaluate_uses_configured_openrouter_model(monkeypatch) -> None:
     runner = CliRunner()
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
     monkeypatch.setenv("OPENROUTER_MODEL_SUMMARY", "qwen/qwen3.8-27b")
     monkeypatch.setenv("OPENROUTER_MODEL_SCORING", "qwen/qwen3.8-27b")
     run_loop = AsyncMock()
@@ -195,6 +200,7 @@ def test_evaluate_uses_configured_openrouter_model(monkeypatch) -> None:
 def test_evaluate_accepts_limit_option_spellings(monkeypatch, option_name: str) -> None:
     runner = CliRunner()
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
     monkeypatch.setenv("OPENROUTER_MODEL_SUMMARY", "qwen/qwen3.8-27b")
     monkeypatch.setenv("OPENROUTER_MODEL_SCORING", "qwen/qwen3.8-27b")
     run_loop = AsyncMock()
@@ -227,6 +233,7 @@ def test_evaluate_missing_ca_cert_raises_usage_error(monkeypatch, tmp_path) -> N
     """Missing local LLM CA certificate raises a clear UsageError."""
     runner = CliRunner()
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
     monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
     monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
     nonexistent = tmp_path / "missing.pem"
@@ -257,6 +264,7 @@ def test_evaluate_missing_server_ca_cert_raises_usage_error(
     """Missing server CA certificate raises a clear UsageError."""
     runner = CliRunner()
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
     nonexistent = tmp_path / "missing_server.pem"
 
     result = runner.invoke(

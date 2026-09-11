@@ -179,10 +179,10 @@ async def run_backfill(
     help="Async SQLAlchemy database URL [env: DATABASE_URL]",
 )
 @click.option(
-    "--openrouter-api-key",
+    "--openrouter-api-key-embedding",
     required=True,
-    envvar="OPENROUTER_API_KEY",
-    help="OpenRouter API key [env: OPENROUTER_API_KEY]",
+    envvar="OPENROUTER_API_KEY_EMBEDDING",
+    help="OpenRouter embedding API key [env: OPENROUTER_API_KEY_EMBEDDING]",
 )
 @click.option(
     "--embedding-model",
@@ -212,7 +212,7 @@ async def run_backfill(
 )
 def main(
     database_url: str,
-    openrouter_api_key: str,
+    openrouter_api_key_embedding: str,
     embedding_model: str,
     batch_size: int,
     limit: int,
@@ -223,7 +223,7 @@ def main(
     asyncio.run(
         run_backfill(
             database_url=database_url,
-            openrouter_api_key=openrouter_api_key,
+            openrouter_api_key=openrouter_api_key_embedding,
             embedding_model=embedding_model,
             batch_size=batch_size,
             limit=limit,

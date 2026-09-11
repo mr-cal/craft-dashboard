@@ -498,7 +498,7 @@ class TestRunSemanticSearch:
             "session": _IssueSession(),
             "filters": filters,
             "existing_issue_ids": set(),
-            "openrouter_api_key": "test-key",
+            "openrouter_api_key_embedding": "test-key",
             "embedding_model": "openai/text-embedding-3-small",
             "top_n": 10,
             "similarity_threshold": 0.7,
@@ -513,7 +513,7 @@ class TestRunSemanticSearch:
 
     async def test_returns_empty_without_api_key(self) -> None:
         """No OpenRouter API key means no semantic search is attempted."""
-        result = await self._run(openrouter_api_key="")
+        result = await self._run(openrouter_api_key_embedding="")
         assert result == []
 
     async def test_returns_empty_and_logs_on_embed_failure(self) -> None:

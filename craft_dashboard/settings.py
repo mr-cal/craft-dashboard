@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://localhost/craft_dashboard"
     github_token: str = ""
     openrouter_api_key: str = ""
+    openrouter_api_key_embedding: str = ""
     admin_token: str = ""
     debug: bool = False
     host: str = "127.0.0.1"

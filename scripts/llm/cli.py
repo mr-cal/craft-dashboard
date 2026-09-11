@@ -232,9 +232,10 @@ def evaluate_cmd(
 ) -> None:
     """Run the continuous HTTP-only evaluation service against /api/eval/*."""
     openrouter_api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    if not openrouter_api_key:
+    openrouter_api_key_embedding = os.environ.get("OPENROUTER_API_KEY_EMBEDDING", "")
+    if not openrouter_api_key_embedding:
         raise click.UsageError(
-            "OPENROUTER_API_KEY is required because evaluate always computes OpenRouter embeddings."
+            "OPENROUTER_API_KEY_EMBEDDING is required because evaluate always computes OpenRouter embeddings."
         )
     if issue and not project:
         raise click.UsageError("--issue requires --project")
@@ -309,6 +310,7 @@ def evaluate_cmd(
             server_ca_cert=server_ca_cert,
             verbose=verbose,
             openrouter_api_key=openrouter_api_key,
+            openrouter_api_key_embedding=openrouter_api_key_embedding,
             embed_model=embed_model,
             issue=issue,
             concurrency=concurrency,

@@ -28,6 +28,7 @@ class TestSettings:
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://db:5432/dashboard")
         monkeypatch.setenv("GITHUB_TOKEN", _EXPECTED_GITHUB_TOKEN)
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test123")
+        monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "sk-or-embed456")
         monkeypatch.setenv("ADMIN_TOKEN", _EXPECTED_ADMIN_TOKEN)
         monkeypatch.setenv("DEBUG", "true")
 
@@ -36,6 +37,7 @@ class TestSettings:
         assert settings.database_url == "postgresql+asyncpg://db:5432/dashboard"
         assert settings.github_token == _EXPECTED_GITHUB_TOKEN
         assert settings.openrouter_api_key == "sk-or-test123"
+        assert settings.openrouter_api_key_embedding == "sk-or-embed456"
         assert settings.admin_token == _EXPECTED_ADMIN_TOKEN
         assert settings.debug is True
 
