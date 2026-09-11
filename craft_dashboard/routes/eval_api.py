@@ -323,9 +323,7 @@ def _current_content_hash(issue: Issue) -> str:
     every call. Falls back to computing it on the fly if somehow unset (e.g.
     a race with the one-time backfill script for pre-existing issues).
     """
-    if issue.content_hash:
-        return issue.content_hash
-    return compute_content_hash(
+    computed = compute_content_hash(
         issue.title,
         issue.body,
         issue.state,
@@ -333,6 +331,11 @@ def _current_content_hash(issue: Issue) -> str:
         issue.comments or [],
         pr_details=issue.metadata_ or None,
     )
+    if issue.content_hash and issue.content_hash != computed:
+        # Self-heal stale content_hash column (e.g., if issue transitioned
+        # state without updating content_hash).
+        issue.content_hash = computed
+    return computed
 
 
 def _normalize_evidence_paths(

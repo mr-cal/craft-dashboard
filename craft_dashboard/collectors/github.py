@@ -913,15 +913,34 @@ class GitHubCollector:
                 for num, status in reconciled.items():
                     if status["state"] == "closed":
                         closed_at = status["closed_at"] or now_utc
-                        # Look up current issue title for the activity feed
-                        title_res = await session.execute(
-                            sa.select(Issue.title).where(
+                        # Look up current issue fields to recompute content_hash and title for activity
+                        issue_res = await session.execute(
+                            sa.select(
+                                Issue.title,
+                                Issue.body,
+                                Issue.labels,
+                                Issue.comments,
+                                Issue.metadata_,
+                            ).where(
                                 Issue.project_id == project_id,
                                 Issue.source == "github",
                                 Issue.external_id == str(num),
                             )
                         )
-                        curr_title = title_res.scalar_one_or_none() or ""
+                        issue_row = issue_res.one_or_none()
+                        curr_title = issue_row[0] if issue_row and issue_row[0] else ""
+                        new_content_hash = (
+                            compute_content_hash(
+                                curr_title,
+                                issue_row[1] if issue_row else None,
+                                "closed",
+                                issue_row[2] or [] if issue_row else [],
+                                comments=issue_row[3] or [] if issue_row else [],
+                                pr_details=issue_row[4] if issue_row else None,
+                            )
+                            if issue_row
+                            else None
+                        )
                         await session.execute(
                             sa.update(Issue)
                             .where(
@@ -932,6 +951,7 @@ class GitHubCollector:
                             .values(
                                 state="closed",
                                 closed_at=closed_at,
+                                content_hash=new_content_hash,
                                 last_fetched_at=now_utc,
                                 collection_run_id=collection_run_id,
                             )

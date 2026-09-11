@@ -988,8 +988,14 @@ class TestCollectIssuesGraphQLOpenPath:
         db_open_result.fetchall.return_value = [("101",), ("102",)]
 
         existing_101_result = self._make_existing_result()
-        title_result = MagicMock()
-        title_result.scalar_one_or_none.return_value = "Issue 102"
+        issue_102_select_result = MagicMock()
+        issue_102_select_result.one_or_none.return_value = (
+            "Issue 102",
+            "Body 102",
+            ["bug"],
+            [],
+            {},
+        )
 
         session = AsyncMock()
         session.execute = AsyncMock(
@@ -997,7 +1003,7 @@ class TestCollectIssuesGraphQLOpenPath:
                 existing_101_result,  # check existing 101
                 None,  # upsert 101
                 db_open_result,  # query DB open items
-                title_result,  # query title for 102
+                issue_102_select_result,  # query issue details for 102
                 None,  # update issue 102 to closed
             ]
         )
