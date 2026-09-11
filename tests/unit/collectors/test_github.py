@@ -732,10 +732,14 @@ class TestCollectIssuesGraphQLOpenPath:
         collector.wait_for_rate_limit.assert_called_once_with(resource="graphql")
         collector.gh.get_repo.assert_not_called()
         paginated_issues.assert_called_once_with(
-            requester, "canonical", "repo", since=since
+            requester, "canonical", "repo", since=since, states=["OPEN", "CLOSED"]
         )
         paginated_pull_requests.assert_called_once_with(
-            requester, "canonical", "repo", since=since
+            requester,
+            "canonical",
+            "repo",
+            since=since,
+            states=["OPEN", "CLOSED", "MERGED"],
         )
         session.commit.assert_awaited_once()
 

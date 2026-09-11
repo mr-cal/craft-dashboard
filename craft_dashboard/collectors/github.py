@@ -587,16 +587,23 @@ class GitHubCollector:
 
         repo = None
         if state == "open":
-            # Always fetch all currently-open issues; no schedule gate.
+            # Fetch currently-open issues and any recently updated issues/PRs
+            # (including closed/merged ones when `since` is provided).
             # The per-issue updated_at skip below handles efficiency.
             # Use GraphQL (not REST) for the open pass: this runs every 10
             # minutes, and REST's N+1 per-item calls (comments, reviews, CI
             # checks) would blow the REST rate limit at that cadence.
             self.wait_for_rate_limit(resource="graphql")
             requester = self.gh.requester
+            issue_states = ["OPEN", "CLOSED"] if since else ["OPEN"]
+            pr_states = ["OPEN", "CLOSED", "MERGED"] if since else ["OPEN"]
             gh_issues = _interleave_open_graphql_items(
-                paginated_issues(requester, self.org, repo_name, since=since),
-                paginated_pull_requests(requester, self.org, repo_name, since=since),
+                paginated_issues(
+                    requester, self.org, repo_name, since=since, states=issue_states
+                ),
+                paginated_pull_requests(
+                    requester, self.org, repo_name, since=since, states=pr_states
+                ),
             )
             logger.info(
                 "  %s/%s: collecting open issues (via GraphQL)%s",

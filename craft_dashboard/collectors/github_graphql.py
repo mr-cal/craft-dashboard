@@ -28,10 +28,10 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 _ISSUES_QUERY = """
-query($owner: String!, $name: String!, $after: String, $since: DateTime) {
+query($owner: String!, $name: String!, $after: String, $since: DateTime, $states: [IssueState!] = [OPEN]) {
   rateLimit { cost remaining resetAt }
   repository(owner: $owner, name: $name) {
-    issues(first: 50, after: $after, states: [OPEN], filterBy: {since: $since}, orderBy: {field: UPDATED_AT, direction: DESC}) {
+    issues(first: 50, after: $after, states: $states, filterBy: {since: $since}, orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
         number
@@ -61,10 +61,10 @@ query($owner: String!, $name: String!, $after: String, $since: DateTime) {
 """
 
 _PULL_REQUESTS_QUERY = """
-query($owner: String!, $name: String!, $after: String) {
+query($owner: String!, $name: String!, $after: String, $states: [PullRequestState!] = [OPEN]) {
   rateLimit { cost remaining resetAt }
   repository(owner: $owner, name: $name) {
-    pullRequests(first: 50, after: $after, states: [OPEN], orderBy: {field: UPDATED_AT, direction: DESC}) {
+    pullRequests(first: 50, after: $after, states: $states, orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
         number
@@ -210,8 +210,9 @@ def paginated_issues(
     owner: str,
     name: str,
     since: datetime | None = None,
+    states: list[str] | None = None,
 ) -> Iterator[dict[str, Any]]:
-    """Yield normalized open-issue GraphQL nodes for one repo, following pagination.
+    """Yield normalized issue GraphQL nodes for one repo, following pagination.
 
     Args:
         requester: ``Github.requester`` — the same authenticated client used
@@ -221,21 +222,31 @@ def paginated_issues(
         since: Only fetch issues updated on or after this timestamp
             (GraphQL ``filterBy: {since: ...}``). ``None`` fetches all open
             issues.
+        states: List of issue states (e.g. ``["OPEN"]`` or ``["OPEN", "CLOSED"]``).
+            Defaults to ``["OPEN"]``.
 
     Yields:
-        Raw GraphQL issue node dicts (one per open issue), in
-        updated-at-descending order.
+        Raw GraphQL issue node dicts, in updated-at-descending order.
 
     """
     after: str | None = None
     since_str = (
         since.astimezone(UTC).isoformat().replace("+00:00", "Z") if since else None
     )
+    variables: dict[str, Any] = {
+        "owner": owner,
+        "name": name,
+        "after": after,
+        "since": since_str,
+    }
+    if states is not None:
+        variables["states"] = states
     while True:
+        variables["after"] = after
         data = _graphql_query(
             requester,
             _ISSUES_QUERY,
-            {"owner": owner, "name": name, "after": after, "since": since_str},
+            variables,
             owner=owner,
             name=name,
         )
@@ -262,8 +273,9 @@ def paginated_pull_requests(
     owner: str,
     name: str,
     since: datetime | None = None,
+    states: list[str] | None = None,
 ) -> Iterator[dict[str, Any]]:
-    """Yield normalized open-PR GraphQL nodes for one repo, following pagination.
+    """Yield normalized PR GraphQL nodes for one repo, following pagination.
 
     ``pullRequests`` has no server-side ``since``/``filterBy`` argument (unlike
     ``issues``), so filtering by ``since`` is done client-side against each
@@ -274,18 +286,24 @@ def paginated_pull_requests(
         owner: Repository owner/org.
         name: Repository name.
         since: Only yield PRs whose ``updatedAt`` is on or after this
-            timestamp. ``None`` yields all open PRs.
+            timestamp. ``None`` yields all matching PRs.
+        states: List of PR states (e.g. ``["OPEN"]`` or ``["OPEN", "CLOSED", "MERGED"]``).
+            Defaults to ``["OPEN"]``.
 
     Yields:
         Raw GraphQL PR node dicts, in updated-at-descending order.
 
     """
     after: str | None = None
+    variables: dict[str, Any] = {"owner": owner, "name": name, "after": after}
+    if states is not None:
+        variables["states"] = states
     while True:
+        variables["after"] = after
         data = _graphql_query(
             requester,
             _PULL_REQUESTS_QUERY,
-            {"owner": owner, "name": name, "after": after},
+            variables,
             owner=owner,
             name=name,
         )

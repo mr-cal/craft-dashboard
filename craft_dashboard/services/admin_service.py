@@ -60,6 +60,9 @@ class ProjectRefreshEntry(TypedDict):
     last_refreshed_at: datetime | None
     consecutive_failures: int
     days_since_last: int | None
+    hours_since_last: int | None
+    next_refresh_at: datetime
+    next_refresh_hours: int
     last_error: str | None
     # Tracked separately from the full-refresh columns above: the frequent
     # (every 10 minutes) open-issue-only poll fails far more often on large
@@ -209,6 +212,7 @@ class ActivityEntry(TypedDict):
 
 _EVALUATION_SOURCES = {"llm", "evaluation"}
 _OPEN_POLL_INTERVAL = timedelta(minutes=10)
+_HOURLY_ROTATION_CRON_MINUTE = 17
 
 
 def _ensure_utc(value: datetime | None) -> datetime | None:
@@ -313,19 +317,38 @@ class AdminService:
                 Project.name,
             )
         )
-        return [
-            {
-                "project": row.name,
-                "source": row.source,
-                "last_refreshed_at": _ensure_utc(row.last_refreshed_at),
-                "consecutive_failures": row.consecutive_failures,
-                "days_since_last": _days_delta(_ensure_utc(row.last_refreshed_at)),
-                "last_error": row.last_error,
-                "open_poll_consecutive_failures": row.open_poll_consecutive_failures,
-                "open_poll_last_error": row.open_poll_last_error,
-            }
-            for row in result
-        ]
+        now = datetime.now(UTC)
+        # Hourly rotation cron runs at minute 17 of every hour.
+        if now.minute < _HOURLY_ROTATION_CRON_MINUTE:
+            next_base = now.replace(
+                minute=_HOURLY_ROTATION_CRON_MINUTE, second=0, microsecond=0
+            )
+        else:
+            next_base = (now + timedelta(hours=1)).replace(
+                minute=_HOURLY_ROTATION_CRON_MINUTE, second=0, microsecond=0
+            )
+
+        entries: list[ProjectRefreshEntry] = []
+        for index, row in enumerate(result):
+            last_refreshed = _ensure_utc(row.last_refreshed_at)
+            next_at = next_base + timedelta(hours=index)
+            hours_until = max(1, round((next_at - now).total_seconds() / 3600))
+            entries.append(
+                {
+                    "project": row.name,
+                    "source": row.source,
+                    "last_refreshed_at": last_refreshed,
+                    "consecutive_failures": row.consecutive_failures,
+                    "days_since_last": _days_delta(last_refreshed),
+                    "hours_since_last": _hours_delta(last_refreshed),
+                    "next_refresh_at": next_at,
+                    "next_refresh_hours": hours_until,
+                    "last_error": row.last_error,
+                    "open_poll_consecutive_failures": row.open_poll_consecutive_failures,
+                    "open_poll_last_error": row.open_poll_last_error,
+                }
+            )
+        return entries
 
     async def get_project_names(self) -> list[str]:
         """Get all non-aggregate project names."""
@@ -854,6 +877,14 @@ class AdminService:
             "version_outdated": row[1] or 0,
             "content_changed": row[2] or 0,
         }
+
+
+def _hours_delta(ts: datetime | None) -> int | None:
+    """Return hours elapsed since *ts* (UTC)."""
+    if ts is None:
+        return None
+    diff_seconds = (datetime.now(UTC) - ts.astimezone(UTC)).total_seconds()
+    return max(0, round(diff_seconds / 3600))
 
 
 def _days_delta(ts: datetime | None) -> int | None:

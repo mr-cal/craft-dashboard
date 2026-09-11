@@ -235,14 +235,33 @@ class TestAdminService:
         by last_refreshed_at ascending (never-refreshed first)."""
         await _seed_admin_data(test_db_session)
 
-        refresh_list = await AdminService(test_db_session).get_project_refresh_list()
+        with patch(
+            "craft_dashboard.services.admin_service.datetime", FrozenStatsDateTime
+        ):
+            FrozenStatsDateTime.frozen_now = datetime(2025, 1, 10, 12, 0, tzinfo=UTC)
+            refresh_list = await AdminService(
+                test_db_session
+            ).get_project_refresh_list()
 
         assert [(e["project"], e["source"]) for e in refresh_list] == [
             ("snapcraft", "launchpad"),  # never refreshed -> sorts first
             ("charmcraft", "github"),
             ("snapcraft", "github"),
         ]
-        assert all("next_refresh_at" not in e for e in refresh_list)
+        assert all("next_refresh_at" in e for e in refresh_list)
+        # Check next_refresh_at offsets starting from next minute 17 (12:17 UTC)
+        assert refresh_list[0]["next_refresh_at"] == datetime(
+            2025, 1, 10, 12, 17, tzinfo=UTC
+        )
+        assert refresh_list[1]["next_refresh_at"] == datetime(
+            2025, 1, 10, 13, 17, tzinfo=UTC
+        )
+        assert refresh_list[2]["next_refresh_at"] == datetime(
+            2025, 1, 10, 14, 17, tzinfo=UTC
+        )
+        assert refresh_list[0]["hours_since_last"] is None
+        assert refresh_list[1]["hours_since_last"] == 122  # 5 days 2 hours ago
+        assert refresh_list[2]["hours_since_last"] == 26  # 1 day 2 hours ago
 
     async def test_get_project_names_excludes_aggregate_projects(
         self, test_db_session

@@ -162,6 +162,37 @@ class TestPaginatedIssues:
         second_call_variables = requester.graphql_query.call_args_list[1].args[1]
         assert second_call_variables["after"] == "CURSOR1"
 
+    def test_passes_custom_states_to_query_variables(self) -> None:
+        requester = MagicMock()
+        requester.graphql_query.return_value = (
+            {},
+            {
+                "data": {
+                    "rateLimit": {"cost": 1, "remaining": 4999, "resetAt": None},
+                    "repository": {
+                        "issues": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [_issue_node(1)],
+                        }
+                    },
+                }
+            },
+        )
+
+        results = list(
+            paginated_issues(
+                requester,
+                owner="canonical",
+                name="repo",
+                since=None,
+                states=["OPEN", "CLOSED"],
+            )
+        )
+
+        assert [node["number"] for node in results] == [1]
+        call_variables = requester.graphql_query.call_args[0][1]
+        assert call_variables["states"] == ["OPEN", "CLOSED"]
+
 
 def _pr_node(number: int, updated_at: str = "2025-01-10T12:00:00Z") -> dict:
     return {
@@ -299,6 +330,37 @@ class TestPaginatedPullRequests:
 
         assert [node["number"] for node in results] == [2]
         requester.graphql_query.assert_called_once()
+
+    def test_passes_custom_states_to_query_variables(self) -> None:
+        requester = MagicMock()
+        requester.graphql_query.return_value = (
+            {},
+            {
+                "data": {
+                    "rateLimit": {"cost": 7, "remaining": 4990, "resetAt": None},
+                    "repository": {
+                        "pullRequests": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [_pr_node(1)],
+                        }
+                    },
+                }
+            },
+        )
+
+        results = list(
+            paginated_pull_requests(
+                requester,
+                owner="canonical",
+                name="repo",
+                since=None,
+                states=["OPEN", "CLOSED", "MERGED"],
+            )
+        )
+
+        assert [node["number"] for node in results] == [1]
+        call_variables = requester.graphql_query.call_args[0][1]
+        assert call_variables["states"] == ["OPEN", "CLOSED", "MERGED"]
 
 
 class TestPaginatedReleasesAndBranches:
