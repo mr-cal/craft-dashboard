@@ -331,9 +331,11 @@ def _current_content_hash(issue: Issue) -> str:
         issue.comments or [],
         pr_details=issue.metadata_ or None,
     )
-    if issue.content_hash and issue.content_hash != computed:
-        # Self-heal stale content_hash column (e.g., if issue transitioned
-        # state without updating content_hash).
+    if issue.content_hash != computed:
+        # Self-heal a stale *or missing* (e.g. NULL/"") content_hash column
+        # — a falsy-only check here previously left NULL hashes unhealed,
+        # which made every such issue permanently look out-of-date to the
+        # SQL-level pending-evaluation filter and re-queued it forever.
         issue.content_hash = computed
     return computed
 

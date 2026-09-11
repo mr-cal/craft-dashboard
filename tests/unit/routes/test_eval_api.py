@@ -8,6 +8,41 @@ from craft_dashboard.routes import eval_api
 from tests.factories import make_evaluation, make_issue, make_project
 
 
+class TestCurrentContentHash:
+    """Tests for ``_current_content_hash``'s self-heal behavior.
+
+    Regression coverage for a bug where issues with a missing (NULL/"")
+    ``content_hash`` were never healed, because the self-heal condition was
+    gated on ``issue.content_hash`` being truthy. That left such issues
+    permanently mismatched against ``LLMEvaluation.issue_data_hash`` in the
+    SQL-level pending-evaluation filter, so they were re-evaluated forever
+    (see e.g. charmcraft#2689 after migration 7f8e9d0c1b2a nulled out
+    ``content_hash`` for all closed issues).
+    """
+
+    def test_heals_missing_content_hash(self) -> None:
+        issue = make_issue(content_hash=None)
+        computed = eval_api._current_content_hash(issue)
+        assert issue.content_hash == computed
+
+    def test_heals_empty_string_content_hash(self) -> None:
+        issue = make_issue(content_hash="")
+        computed = eval_api._current_content_hash(issue)
+        assert issue.content_hash == computed
+
+    def test_heals_stale_content_hash(self) -> None:
+        issue = make_issue(content_hash="stale-hash-value")
+        computed = eval_api._current_content_hash(issue)
+        assert issue.content_hash == computed
+        assert issue.content_hash != "stale-hash-value"
+
+    def test_leaves_up_to_date_content_hash_unchanged(self) -> None:
+        issue = make_issue()
+        original = issue.content_hash
+        computed = eval_api._current_content_hash(issue)
+        assert issue.content_hash == original == computed
+
+
 class TestEvalNextRateLimit:
     """Tests for the loopback rate-limit override on GET /api/eval/next."""
 
