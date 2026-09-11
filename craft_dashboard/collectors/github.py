@@ -933,6 +933,7 @@ class GitHubCollector:
                                 state="closed",
                                 closed_at=closed_at,
                                 last_fetched_at=now_utc,
+                                collection_run_id=collection_run_id,
                             )
                         )
                         # Record activity entry for issue closure
@@ -946,6 +947,7 @@ class GitHubCollector:
                                 collection_run_id=collection_run_id,
                             )
                         )
+                        count += 1
 
         await session.commit()
         logger.info(

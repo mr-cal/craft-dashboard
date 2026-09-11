@@ -1016,9 +1016,11 @@ class TestCollectIssuesGraphQLOpenPath:
 
         mocker.patch("sqlalchemy.dialects.postgresql.insert")
 
-        count = await collector.collect_issues("repo", 1, session, state="open")
+        count = await collector.collect_issues(
+            "repo", 1, session, state="open", collection_run_id=42
+        )
 
-        assert count == 1
+        assert count == 2
         fetch_states.assert_called_once_with(requester, "canonical", "repo", [102])
         session.commit.assert_awaited_once()
 
