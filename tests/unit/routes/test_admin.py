@@ -663,12 +663,12 @@ class TestAdminPage:
         assert response.status_code == 200
         assert (
             '<div style="position: relative; width: 100%; height: 320px;">\n'
-            '      <canvas id="queue-depth-chart"></canvas>\n'
+            '      <canvas id="queue-depth-chart" style="width: 100%; height: 100%;"></canvas>\n'
             "    </div>" in response.text
         )
         assert (
             '<div style="position: relative; width: 100%; height: 320px;">\n'
-            '      <canvas id="invalidations-chart"></canvas>\n'
+            '      <canvas id="invalidations-chart" style="width: 100%; height: 100%;"></canvas>\n'
             "    </div>" in response.text
         )
         assert "maintainAspectRatio: false" in response.text
