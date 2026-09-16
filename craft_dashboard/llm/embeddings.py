@@ -7,9 +7,14 @@ import pathlib
 
 import httpx
 
+from craft_dashboard.llm.exceptions import LLMQuotaError
+
 logger = logging.getLogger(__name__)
 
+HTTP_OK = 200
 HTTP_BAD_REQUEST = 400
+HTTP_PAYMENT_REQUIRED = 402
+HTTP_FORBIDDEN = 403
 _MIN_TRUNCATE_LEN = 1000
 
 
@@ -57,6 +62,31 @@ class EmbeddingClient:
         if self._http is not None and not self._http.is_closed:
             await self._http.aclose()
 
+    async def check_quota(self) -> None:
+        """Check if embedding key has remaining quota when using OpenRouter."""
+        if not self.api_key or "openrouter.ai" not in self.base_url:
+            return
+        try:
+            response = await self._client.get(
+                f"{self.base_url}/auth/key",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Embedding check_quota network error: %s", exc)
+            return
+
+        if response.status_code == HTTP_OK:
+            data = response.json().get("data", {})
+            limit_remaining = data.get("limit_remaining")
+            if limit_remaining is not None and limit_remaining <= 0:
+                raise LLMQuotaError(
+                    f"Embedding provider budget limit reached (remaining: {limit_remaining})."
+                )
+        elif response.status_code in (HTTP_PAYMENT_REQUIRED, HTTP_FORBIDDEN):
+            raise LLMQuotaError(
+                f"Embedding provider quota error ({response.status_code}): {response.text}"
+            )
+
     async def embed(self, text: str, *, dimensions: int | None = None) -> list[float]:
         """Compute an embedding for a single text string."""
         results = await self.embed_batch([text], dimensions=dimensions)
@@ -92,6 +122,10 @@ class EmbeddingClient:
                 )
                 truncated_texts = [t[: len(t) // 2] for t in texts]
                 return await self.embed_batch(truncated_texts, dimensions=dimensions)
+            if response.status_code in (HTTP_PAYMENT_REQUIRED, HTTP_FORBIDDEN):
+                raise LLMQuotaError(
+                    f"Embedding provider quota or budget exhausted ({response.status_code}): {error_body}"
+                )
             raise httpx.HTTPStatusError(
                 f"Client error '{response.status_code} {response.reason_phrase}' for url '{response.url}': {error_body}",
                 request=response.request,

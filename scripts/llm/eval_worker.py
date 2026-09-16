@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import pathlib
 import select
@@ -359,7 +360,28 @@ async def _enter_quota_backoff(runtime: _Runtime) -> None:
         _format_elapsed(_QUOTA_BACKOFF_SECONDS),
     )
     await _report_quota_pause(runtime, resume_at=resume_at)
-    await _sleep_until_next_poll(_QUOTA_BACKOFF_SECONDS)
+
+    while not shutdown_state["requested"]:
+        await _sleep_until_next_poll(_QUOTA_BACKOFF_SECONDS)
+        if shutdown_state["requested"]:
+            break
+        client_to_check = getattr(runtime, "client", None)
+        if client_to_check is not None and hasattr(client_to_check, "check_quota"):
+            try:
+                await client_to_check.check_quota()
+                break
+            except LLMQuotaError:
+                logger.warning(
+                    "LLM quota still exhausted after backoff; pausing for another %s.",
+                    _format_elapsed(_QUOTA_BACKOFF_SECONDS),
+                )
+                resume_at = datetime.now(tz=UTC) + timedelta(
+                    seconds=_QUOTA_BACKOFF_SECONDS
+                )
+                await _report_quota_pause(runtime, resume_at=resume_at)
+        else:
+            break
+
     paused_state["paused"] = False
     async with _quota_pause_lock:
         _quota_paused = False
@@ -464,6 +486,34 @@ async def _post_submission(
     return None
 
 
+async def _release_claim(
+    runtime: _Runtime,
+    *,
+    issue_id: int,
+    issue_ref: str,
+    reason: str,
+) -> None:
+    """Release a claimed issue back to the server queue."""
+    try:
+        response = await runtime.http_client.post(
+            "/api/eval/release",
+            json={"issue_id": issue_id, "reason": reason},
+            headers=runtime.headers,
+        )
+    except httpx.HTTPError:
+        logger.warning("%s: failed to release claim", issue_ref, exc_info=True)
+        return
+
+    if response.status_code != HTTP_OK:
+        logger.warning(
+            "%s: release claim failed %d from %s: %s",
+            issue_ref,
+            response.status_code,
+            response.url,
+            _format_error_body(response),
+        )
+
+
 async def _evaluate_issue(  # noqa: PLR0911
     runtime: _Runtime,
     *,
@@ -517,145 +567,171 @@ async def _evaluate_issue(  # noqa: PLR0911
         embed_client=runtime.embed_client,
     )
 
+    submitted = False
+    release_reason = "evaluation_incomplete"
+    issue_id = issue_data["issue_id"]
+
     try:
-        result, evaluate_elapsed = await _timed(
-            runtime.evaluator.evaluate(
-                title=issue_data["title"],
-                body=issue_data.get("body"),
-                issue_type=issue_data["issue_type"],
-                state=normalized_state,
-                labels=issue_data.get("labels", []),
-                age_days=_days_since(issue_data.get("created_at")),
-                last_activity_days=_days_since(issue_data.get("updated_at")),
-                author=author,
-                is_maintainer=author in maintainers
-                or issue_data.get("author_association") == "MAINTAINER",
-                comment_count=len(issue_data.get("comments", [])),
-                comments=issue_data.get("comments"),
-                closing_references=issue_data.get("closing_references"),
-                pr_details=issue_data.get("pr_details"),
-                project=project_name,
-                tool_ctx=tool_ctx,
+        try:
+            result, evaluate_elapsed = await _timed(
+                runtime.evaluator.evaluate(
+                    title=issue_data["title"],
+                    body=issue_data.get("body"),
+                    issue_type=issue_data["issue_type"],
+                    state=normalized_state,
+                    labels=issue_data.get("labels", []),
+                    age_days=_days_since(issue_data.get("created_at")),
+                    last_activity_days=_days_since(issue_data.get("updated_at")),
+                    author=author,
+                    is_maintainer=author in maintainers
+                    or issue_data.get("author_association") == "MAINTAINER",
+                    comment_count=len(issue_data.get("comments", [])),
+                    comments=issue_data.get("comments"),
+                    closing_references=issue_data.get("closing_references"),
+                    pr_details=issue_data.get("pr_details"),
+                    project=project_name,
+                    tool_ctx=tool_ctx,
+                )
             )
-        )
-    except EvaluationDiscarded as exc:
-        runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-        logger.warning(
-            "%s: evaluation discarded (post-preflight tool failure): %s; "
-            "releasing claim, submitting nothing",
-            issue_ref,
-            exc,
-        )
-        await _release_and_maybe_stop(runtime)
-        return
-    except LLMQuotaError:
-        runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-        await runtime.state.release()
-        await _enter_quota_backoff(runtime)
-        return
-    except Exception:
-        runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-        logger.exception(
-            "%s: evaluation failed after %s",
-            issue_ref,
-            _format_elapsed(time.monotonic() - started_at),
-        )
-        await _release_and_maybe_stop(runtime)
-        return
+        except EvaluationDiscarded as exc:
+            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            logger.warning(
+                "%s: evaluation discarded (post-preflight tool failure): %s; "
+                "releasing claim, submitting nothing",
+                issue_ref,
+                exc,
+            )
+            release_reason = "evaluation_discarded"
+            await _release_and_maybe_stop(runtime)
+            return
+        except LLMQuotaError:
+            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            release_reason = "quota_exhausted"
+            await runtime.state.release()
+            await _enter_quota_backoff(runtime)
+            return
+        except Exception:
+            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            logger.exception(
+                "%s: evaluation failed after %s",
+                issue_ref,
+                _format_elapsed(time.monotonic() - started_at),
+            )
+            release_reason = "evaluation_error"
+            await _release_and_maybe_stop(runtime)
+            return
 
-    if result is None:
-        logger.warning("%s: content unchanged, skipping", issue_ref)
-        await _release_and_maybe_stop(runtime)
-        return
+        if result is None:
+            logger.warning("%s: content unchanged, skipping", issue_ref)
+            release_reason = "content_unchanged"
+            await _release_and_maybe_stop(runtime)
+            return
 
-    runtime.progress.update(
-        runtime.overall_id,
-        description=f"[dim]{issue_ref} ({worker_name}):[/dim] embed…",
-    )
-    try:
-        embedding, embed_elapsed = await _timed(
-            _embed_summary(
+        runtime.progress.update(
+            runtime.overall_id,
+            description=f"[dim]{issue_ref} ({worker_name}):[/dim] embed…",
+        )
+        try:
+            embedding, embed_elapsed = await _timed(
+                _embed_summary(
+                    runtime.embed_client,
+                    title=issue_data["title"],
+                    summary=result["summary"],
+                )
+            )
+        except LLMQuotaError:
+            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            release_reason = "quota_exhausted"
+            await runtime.state.release()
+            await _enter_quota_backoff(runtime)
+            return
+        except Exception:
+            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            logger.exception("%s: embedding failed", issue_ref)
+            release_reason = "embedding_error"
+            await _release_and_maybe_stop(runtime)
+            return
+
+        try:
+            search_embedding = await _embed_search_text(
                 runtime.embed_client,
                 title=issue_data["title"],
-                summary=result["summary"],
+                body=issue_data.get("body"),
             )
+        except LLMQuotaError:
+            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            release_reason = "quota_exhausted"
+            await runtime.state.release()
+            await _enter_quota_backoff(runtime)
+            return
+        except Exception:
+            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            logger.exception("%s: search embedding failed", issue_ref)
+            release_reason = "search_embedding_error"
+            await _release_and_maybe_stop(runtime)
+            return
+
+        submission: dict[str, Any] = {
+            "issue_id": issue_data["issue_id"],
+            "content_hash": result["issue_data_hash"],
+            "summary": result["summary"],
+            "scores": result["scores"],
+            "suggested_action": result["suggested_action"],
+            "suggested_action_reason": result["suggested_action_reason"],
+            "tokens_used": result["tokens_used"],
+            "prompt_tokens": result["prompt_tokens"],
+            "completion_tokens": result["completion_tokens"],
+            "model_used": runtime.model,
+            "llm_backend": runtime.llm_backend,
+            "cost_usd": result["cost_usd"],
+            "summary_embedding": embedding,
+            "search_embedding": search_embedding,
+            "related_work": result.get("related_work", []),
+            "transcript": result.get("transcript"),
+            "evidence_paths": _serialize_evidence_paths(result.get("tool_context")),
+        }
+
+        runtime.progress.update(
+            runtime.overall_id,
+            description=f"[dim]{issue_ref} ({worker_name}):[/dim] posting eval…",
         )
-    except LLMQuotaError:
-        runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-        await runtime.state.release()
-        await _enter_quota_backoff(runtime)
-        return
-    except Exception:
-        runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-        logger.exception("%s: embedding failed", issue_ref)
-        await _release_and_maybe_stop(runtime)
-        return
-
-    try:
-        search_embedding = await _embed_search_text(
-            runtime.embed_client,
-            title=issue_data["title"],
-            body=issue_data.get("body"),
+        submit_response = await _post_submission(
+            runtime,
+            issue_ref=issue_ref,
+            submission=submission,
         )
-    except LLMQuotaError:
-        runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-        await runtime.state.release()
-        await _enter_quota_backoff(runtime)
-        return
-    except Exception:
-        runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-        logger.exception("%s: search embedding failed", issue_ref)
-        await _release_and_maybe_stop(runtime)
-        return
+        if submit_response is None:
+            release_reason = "submit_network_error"
+            await _release_and_maybe_stop(runtime)
+            return
 
-    submission: dict[str, Any] = {
-        "issue_id": issue_data["issue_id"],
-        "content_hash": result["issue_data_hash"],
-        "summary": result["summary"],
-        "scores": result["scores"],
-        "suggested_action": result["suggested_action"],
-        "suggested_action_reason": result["suggested_action_reason"],
-        "tokens_used": result["tokens_used"],
-        "prompt_tokens": result["prompt_tokens"],
-        "completion_tokens": result["completion_tokens"],
-        "model_used": runtime.model,
-        "llm_backend": runtime.llm_backend,
-        "cost_usd": result["cost_usd"],
-        "summary_embedding": embedding,
-        "search_embedding": search_embedding,
-        "related_work": result.get("related_work", []),
-        "transcript": result.get("transcript"),
-        "evidence_paths": _serialize_evidence_paths(result.get("tool_context")),
-    }
+        if submit_response.status_code == HTTP_CONFLICT:
+            logger.warning("%s: content changed during evaluation, skipped", issue_ref)
+            release_reason = "content_changed"
+            await _release_and_maybe_stop(runtime)
+            return
 
-    runtime.progress.update(
-        runtime.overall_id,
-        description=f"[dim]{issue_ref} ({worker_name}):[/dim] posting eval…",
-    )
-    submit_response = await _post_submission(
-        runtime,
-        issue_ref=issue_ref,
-        submission=submission,
-    )
-    if submit_response is None:
-        await _release_and_maybe_stop(runtime)
-        return
+        if submit_response.status_code != HTTP_OK:
+            logger.error(
+                "%s: submit failed %d from %s: %s",
+                issue_ref,
+                submit_response.status_code,
+                submit_response.url,
+                _format_error_body(submit_response),
+            )
+            release_reason = f"submit_failed_{submit_response.status_code}"
+            await _release_and_maybe_stop(runtime)
+            return
 
-    if submit_response.status_code == HTTP_CONFLICT:
-        logger.warning("%s: content changed during evaluation, skipped", issue_ref)
-        await _release_and_maybe_stop(runtime)
-        return
-
-    if submit_response.status_code != HTTP_OK:
-        logger.error(
-            "%s: submit failed %d from %s: %s",
-            issue_ref,
-            submit_response.status_code,
-            submit_response.url,
-            _format_error_body(submit_response),
-        )
-        await _release_and_maybe_stop(runtime)
-        return
+        submitted = True
+    finally:
+        if not submitted:
+            await _release_claim(
+                runtime,
+                issue_id=issue_id,
+                issue_ref=issue_ref,
+                reason=release_reason,
+            )
 
     completed = await runtime.state.complete(
         prompt_tokens=submission["prompt_tokens"],
@@ -708,25 +784,13 @@ async def _run_issue_preflight(
         )
         return result.status != "skipped"
 
-    async def _release_claim(*, issue_id: int, reason: str) -> None:
-        try:
-            response = await runtime.http_client.post(
-                "/api/eval/release",
-                json={"issue_id": issue_id, "reason": reason},
-                headers=runtime.headers,
-            )
-        except httpx.HTTPError:
-            logger.warning("%s: failed to release claim", issue_ref, exc_info=True)
-            return
-
-        if response.status_code != HTTP_OK:
-            logger.warning(
-                "%s: release claim failed %d from %s: %s",
-                issue_ref,
-                response.status_code,
-                response.url,
-                _format_error_body(response),
-            )
+    async def _release_claim_preflight(*, issue_id: int, reason: str) -> None:
+        await _release_claim(
+            runtime,
+            issue_id=issue_id,
+            issue_ref=issue_ref,
+            reason=reason,
+        )
 
     async def _check_related_endpoint() -> bool:
         query = (issue_data.get("title") or issue_ref)[:1000]
@@ -760,7 +824,7 @@ async def _run_issue_preflight(
         mirror_dir=runtime.mirror_dir,
         llm=runtime.client,
         sync_mirror=_sync_claimed_repo,
-        release_claim=_release_claim,
+        release_claim=_release_claim_preflight,
         check_related_endpoint=_check_related_endpoint,
     )
     if result.ok:
@@ -956,6 +1020,69 @@ async def run_evaluate_loop(
                     model_scoring,
                     concurrency,
                 )
+
+            while not shutdown_state["requested"] and hasattr(
+                llm_client, "check_quota"
+            ):
+                try:
+                    await llm_client.check_quota()
+                    break
+                except LLMQuotaError:
+                    logger.exception("LLM quota check failed")
+                    resume_at = datetime.now(tz=UTC) + timedelta(
+                        seconds=_QUOTA_BACKOFF_SECONDS
+                    )
+                    with contextlib.suppress(httpx.HTTPError):
+                        await http_client.post(
+                            "/api/eval/quota-pause",
+                            json={
+                                "resume_at": resume_at.isoformat(),
+                                "reason": "quota",
+                            },
+                            headers=headers,
+                        )
+                    if issue or limit > 0:
+                        return
+                    logger.info(
+                        "Pausing evaluation for %s due to quota exhaustion...",
+                        _format_elapsed(_QUOTA_BACKOFF_SECONDS),
+                    )
+                    paused_state["paused"] = True
+                    await _sleep_until_next_poll(_QUOTA_BACKOFF_SECONDS)
+                    paused_state["paused"] = False
+
+            while not shutdown_state["requested"] and hasattr(
+                embed_client, "check_quota"
+            ):
+                try:
+                    await embed_client.check_quota()
+                    break
+                except LLMQuotaError:
+                    logger.exception("Embedding client quota check failed")
+                    resume_at = datetime.now(tz=UTC) + timedelta(
+                        seconds=_QUOTA_BACKOFF_SECONDS
+                    )
+                    with contextlib.suppress(httpx.HTTPError):
+                        await http_client.post(
+                            "/api/eval/quota-pause",
+                            json={
+                                "resume_at": resume_at.isoformat(),
+                                "reason": "quota",
+                            },
+                            headers=headers,
+                        )
+                    if issue or limit > 0:
+                        return
+                    logger.info(
+                        "Pausing evaluation for %s due to embedding quota exhaustion...",
+                        _format_elapsed(_QUOTA_BACKOFF_SECONDS),
+                    )
+                    paused_state["paused"] = True
+                    await _sleep_until_next_poll(_QUOTA_BACKOFF_SECONDS)
+                    paused_state["paused"] = False
+
+            if shutdown_state["requested"]:
+                return
 
             _start_keyboard_monitor()
             if sys.stdin.isatty():

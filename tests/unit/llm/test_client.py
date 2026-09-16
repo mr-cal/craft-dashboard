@@ -73,6 +73,79 @@ class TestQuotaError:
                     model="test/model", messages=[{"role": "user", "content": "hi"}]
                 )
 
+    @pytest.mark.asyncio
+    async def test_raises_quota_error_on_403(self) -> None:
+        """HTTP 403 budget/limit response raises LLMQuotaError."""
+        mock_response = httpx.Response(
+            403,
+            json={
+                "error": {
+                    "message": "Org member budget limit exceeded (monthly limit)."
+                }
+            },
+            request=httpx.Request("POST", "http://x"),
+        )
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+            client = OpenRouterClient(api_key="test")
+
+            with pytest.raises(
+                LLMQuotaError, match="budget or permission limit reached"
+            ):
+                await client.complete(
+                    model="test/model", messages=[{"role": "user", "content": "hi"}]
+                )
+
+    @pytest.mark.asyncio
+    async def test_check_quota_exhausted_raises(self) -> None:
+        """check_quota raises LLMQuotaError when limit_remaining <= 0."""
+        mock_response = httpx.Response(
+            200,
+            json={"data": {"limit": 50, "limit_remaining": 0, "usage_monthly": 50}},
+            request=httpx.Request("GET", "http://x"),
+        )
+
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = mock_response
+            client = OpenRouterClient(api_key="test")
+
+            with pytest.raises(LLMQuotaError, match="budget limit reached"):
+                await client.check_quota()
+
+    @pytest.mark.asyncio
+    async def test_check_quota_401_or_403_raises(self) -> None:
+        """check_quota raises LLMQuotaError when key is invalid or rejected."""
+        mock_response = httpx.Response(401, request=httpx.Request("GET", "http://x"))
+
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = mock_response
+            client = OpenRouterClient(api_key="test")
+
+            with pytest.raises(LLMQuotaError, match="invalid or unauthorized"):
+                await client.check_quota()
+
+    @pytest.mark.asyncio
+    async def test_check_quota_ok_does_not_raise(self) -> None:
+        """check_quota passes when budget remains."""
+        mock_response = httpx.Response(
+            200,
+            json={"data": {"limit": 50, "limit_remaining": 10}},
+            request=httpx.Request("GET", "http://x"),
+        )
+
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = mock_response
+            client = OpenRouterClient(api_key="test")
+
+            await client.check_quota()
+
+    @pytest.mark.asyncio
+    async def test_local_llm_check_quota_is_noop(self) -> None:
+        """LocalLLMClient check_quota runs without errors."""
+        client = LocalLLMClient()
+        await client.check_quota()
+
 
 class TestPersistentHttpClient:
     def test_http_property_creates_client(self) -> None:

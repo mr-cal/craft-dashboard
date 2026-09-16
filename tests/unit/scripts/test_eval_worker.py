@@ -115,7 +115,10 @@ def base_runtime() -> SimpleNamespace:
             )
         ),
         embed_client=MagicMock(),
-        http_client=MagicMock(),
+        http_client=SimpleNamespace(
+            post=AsyncMock(return_value=httpx.Response(200, request=_DUMMY_REQUEST)),
+            get=AsyncMock(return_value=httpx.Response(200, request=_DUMMY_REQUEST)),
+        ),
         headers={"Authorization": "Bearer test-token"},
         params={},
         progress=MagicMock(update=MagicMock(), console=MagicMock(print=MagicMock())),
@@ -172,11 +175,13 @@ def _with_status(*responses: httpx.Response) -> list[httpx.Response]:
 def patched_runtime(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     llm_client = MagicMock()
     llm_client.close = AsyncMock()
+    llm_client.check_quota = AsyncMock()
     evaluator = MagicMock()
     evaluator.evaluate = AsyncMock(return_value=SAMPLE_EVALUATE_RESULT)
     embed_client = MagicMock()
     embed_client.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
     embed_client.close = AsyncMock()
+    embed_client.check_quota = AsyncMock()
     sleep_mock = AsyncMock()
 
     mock_progress = MagicMock()
@@ -293,9 +298,10 @@ async def test_llm_quota_error_pauses_instead_of_crash_looping(
         ),
         post_responses=[
             _RELATED_RESPONSE,
-            httpx.Response(status_code=200),
+            httpx.Response(status_code=200),  # /api/eval/release
+            httpx.Response(status_code=200),  # /api/eval/quota-pause
             _RELATED_RESPONSE,
-            httpx.Response(status_code=200),
+            httpx.Response(status_code=200),  # /api/eval/result
         ],
     )
     patched_runtime["evaluator"].evaluate = AsyncMock(
@@ -312,11 +318,17 @@ async def test_llm_quota_error_pauses_instead_of_crash_looping(
     # ... and the worker must have resumed and completed the retried issue
     # rather than getting stuck paused or crashing.
     assert patched_runtime["evaluator"].evaluate.await_count == 2
-    # Two _RELATED_RESPONSE posts, one quota pause post, and one final result post
-    assert http_client.post.await_count == 4
+    # Two _RELATED_RESPONSE posts, one release post, one quota pause post, and one final result post
+    assert http_client.post.await_count == 5
     assert eval_worker.paused_state["paused"] is False
     # Backs off for a fixed 30 minutes, not "until tomorrow".
     assert eval_worker._QUOTA_BACKOFF_SECONDS == 30 * 60
+    release_call = next(
+        call
+        for call in http_client.post.await_args_list
+        if call.args[0] == "/api/eval/release"
+    )
+    assert release_call.kwargs["json"]["reason"] == "quota_exhausted"
     quota_pause_call = next(
         call
         for call in http_client.post.await_args_list
@@ -506,3 +518,78 @@ async def test_run_evaluate_loop_missing_server_ca_cert_raises(
     kwargs = {**DEFAULT_KWARGS, "server_ca_cert": str(nonexistent)}
     with pytest.raises(FileNotFoundError, match="Server CA certificate file not found"):
         await eval_worker.run_evaluate_loop(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_evaluate_issue_releases_claim_on_quota_error(
+    monkeypatch: pytest.MonkeyPatch, base_runtime: SimpleNamespace
+) -> None:
+    """When an LLM quota error occurs, the claimed issue must be released back to the queue."""
+    base_runtime.evaluator.evaluate = AsyncMock(
+        side_effect=eval_worker.LLMQuotaError("quota exhausted")
+    )
+    release_claim = AsyncMock()
+    monkeypatch.setattr(eval_worker, "_release_claim", release_claim)
+    monkeypatch.setattr(eval_worker, "_enter_quota_backoff", AsyncMock())
+
+    await eval_worker._evaluate_issue(
+        base_runtime,
+        issue_data=_make_issue(issue_id=42, repo_shas={"snapcraft": "a" * 40}),
+        worker_name="worker-1",
+    )
+
+    release_claim.assert_awaited_once_with(
+        base_runtime,
+        issue_id=42,
+        issue_ref="snapcraft#100",
+        reason="quota_exhausted",
+    )
+
+
+@pytest.mark.asyncio
+async def test_evaluate_issue_releases_claim_on_exception(
+    monkeypatch: pytest.MonkeyPatch, base_runtime: SimpleNamespace
+) -> None:
+    """When an evaluation throws an exception, the claimed issue must be released back to the queue."""
+    base_runtime.evaluator.evaluate = AsyncMock(
+        side_effect=RuntimeError("unexpected error")
+    )
+    release_claim = AsyncMock()
+    monkeypatch.setattr(eval_worker, "_release_claim", release_claim)
+
+    await eval_worker._evaluate_issue(
+        base_runtime,
+        issue_data=_make_issue(issue_id=42, repo_shas={"snapcraft": "a" * 40}),
+        worker_name="worker-1",
+    )
+
+    release_claim.assert_awaited_once_with(
+        base_runtime,
+        issue_id=42,
+        issue_ref="snapcraft#100",
+        reason="evaluation_error",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_evaluate_loop_startup_quota_pause(
+    monkeypatch: pytest.MonkeyPatch, patched_runtime: dict[str, Any]
+) -> None:
+    """When check_quota fails at startup, the worker pauses and does not claim issues."""
+    patched_runtime["llm_client"].check_quota = AsyncMock(
+        side_effect=eval_worker.LLMQuotaError("quota exhausted")
+    )
+    http_client = _patch_http_client(
+        monkeypatch,
+        get_responses=[_PROJECTS_RESPONSE, _STATUS_RESPONSE],
+        post_responses=[httpx.Response(status_code=200)],
+    )
+
+    # In single-issue / limit mode, startup quota failure returns immediately
+    await eval_worker.run_evaluate_loop(**{**DEFAULT_KWARGS, "issue": "100"})
+
+    # Ensure quota-pause was posted and next was never called
+    assert http_client.post.await_count == 1
+    pause_payload = http_client.post.await_args.kwargs["json"]
+    assert pause_payload["reason"] == "quota"
+    assert patched_runtime["evaluator"].evaluate.await_count == 0

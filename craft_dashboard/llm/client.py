@@ -28,8 +28,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-HTTP_TOO_MANY_REQUESTS = 429
+HTTP_OK = 200
+HTTP_UNAUTHORIZED = 401
 HTTP_PAYMENT_REQUIRED = 402
+HTTP_FORBIDDEN = 403
+HTTP_TOO_MANY_REQUESTS = 429
 
 
 def _make_before_attempt(max_attempts: int) -> Callable[[RetryCallState], None]:
@@ -323,6 +326,9 @@ class LLMClient(Protocol):
     ) -> LLMResponse:
         """Return a completion response for the supplied messages."""
 
+    async def check_quota(self) -> None:
+        """Verify remaining quota/budget for this client, raising LLMQuotaError if exhausted."""
+
 
 def _is_retriable(exc: BaseException) -> bool:
     """Return True for transient errors that should trigger a retry.
@@ -371,6 +377,39 @@ class OpenRouterClient:
         """Close the underlying HTTP client."""
         if self._http is not None and not self._http.is_closed:
             await self._http.aclose()
+
+    async def check_quota(self) -> None:
+        """Check if OpenRouter key has remaining quota/budget.
+
+        Queries the ``/auth/key`` endpoint. Raises ``LLMQuotaError`` if the key
+        has zero budget remaining, is invalid, or has reached spending limits.
+        """
+        if not self.api_key:
+            return
+        try:
+            response = await self.http.get(
+                f"{self.base_url}/auth/key",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("OpenRouter check_quota network error: %s", exc)
+            return
+
+        if response.status_code == HTTP_UNAUTHORIZED:
+            raise LLMQuotaError("OpenRouter API key is invalid or unauthorized.")
+        if response.status_code in (HTTP_PAYMENT_REQUIRED, HTTP_FORBIDDEN):
+            raise LLMQuotaError(
+                f"OpenRouter key budget or limit error ({response.status_code}): {response.text}"
+            )
+        if response.status_code == HTTP_OK:
+            data = response.json().get("data", {})
+            limit_remaining = data.get("limit_remaining")
+            if limit_remaining is not None and limit_remaining <= 0:
+                limit = data.get("limit")
+                usage = data.get("usage_monthly") or data.get("usage")
+                raise LLMQuotaError(
+                    f"OpenRouter budget limit reached (limit: {limit}, usage: {usage}, remaining: {limit_remaining})."
+                )
 
     @retry(
         retry=retry_if_exception(_is_retriable),
@@ -427,6 +466,16 @@ class OpenRouterClient:
             raise LLMQuotaError(
                 "OpenRouter daily quota exhausted. "
                 "Evaluation will resume tomorrow after reset."
+            )
+        if response.status_code == HTTP_FORBIDDEN:
+            err_msg = ""
+            try:
+                err_data = response.json().get("error", {})
+                err_msg = err_data.get("message", "")
+            except Exception:  # noqa: BLE001
+                err_msg = response.text
+            raise LLMQuotaError(
+                f"OpenRouter budget or permission limit reached: {err_msg or response.text}"
             )
 
         response.raise_for_status()
@@ -505,6 +554,9 @@ class LocalLLMClient:
         """Close the underlying HTTP client."""
         if self._http is not None and not self._http.is_closed:
             await self._http.aclose()
+
+    async def check_quota(self) -> None:
+        """No-op for local LLMs which do not have API budget limits."""
 
     @retry(
         retry=retry_if_exception(
