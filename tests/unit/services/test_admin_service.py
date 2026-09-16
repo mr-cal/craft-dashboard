@@ -1182,6 +1182,34 @@ class TestQueueDepthHistory:
         assert [point["pending_count"] for point in history] == [5, 6]
         assert history[0]["captured_at"] < history[1]["captured_at"]
 
+    async def test_defaults_to_45_days(self, test_db_session) -> None:
+        now = datetime(2025, 1, 10, 12, 0, tzinfo=UTC)
+        test_db_session.add_all(
+            [
+                EvalQueueSnapshot(
+                    captured_at=now - timedelta(days=40),
+                    pending_count=10,
+                    total_open=50,
+                    evaluated_today=3,
+                ),
+                EvalQueueSnapshot(
+                    captured_at=now - timedelta(days=50),
+                    pending_count=20,
+                    total_open=50,
+                    evaluated_today=1,
+                ),
+            ]
+        )
+        await test_db_session.commit()
+
+        with patch(
+            "craft_dashboard.services.admin_service.datetime", FrozenStatsDateTime
+        ):
+            FrozenStatsDateTime.frozen_now = now
+            history = await AdminService(test_db_session).get_queue_depth_history()
+
+        assert [point["pending_count"] for point in history] == [10]
+
     async def test_returns_empty_list_when_no_samples(self, test_db_session) -> None:
         history = await AdminService(test_db_session).get_queue_depth_history()
 
@@ -1218,6 +1246,46 @@ class TestGetCommitScanHistory:
         assert history[0]["qualified_ref"] == 2
         assert history[0]["path"] == 3
         assert history[0]["launchpad"] == 4
+
+    async def test_get_commit_scan_history_defaults_to_45_days(
+        self, test_db_session
+    ) -> None:
+        project = make_project(id=1, name="craft-parts")
+        await _seed(test_db_session, project)
+        run_40d = CommitScanRun(
+            project_id=1,
+            scanned_at=datetime.now(tz=UTC) - timedelta(days=40),
+            commits_scanned=5,
+            sha_before="a" * 40,
+            sha_after="b" * 40,
+            duration_seconds=1.0,
+            invalidated_qualified_ref=1,
+            invalidated_path=0,
+            invalidated_semantic=0,
+            invalidated_bare_ref=0,
+            invalidated_launchpad=0,
+        )
+        run_50d = CommitScanRun(
+            project_id=1,
+            scanned_at=datetime.now(tz=UTC) - timedelta(days=50),
+            commits_scanned=5,
+            sha_before="a" * 40,
+            sha_after="b" * 40,
+            duration_seconds=1.0,
+            invalidated_qualified_ref=1,
+            invalidated_path=0,
+            invalidated_semantic=0,
+            invalidated_bare_ref=0,
+            invalidated_launchpad=0,
+        )
+        await _seed(test_db_session, run_40d)
+        await _seed(test_db_session, run_50d)
+
+        service = AdminService(test_db_session)
+        history = await service.get_commit_scan_history()
+
+        assert len(history) == 1
+        assert history[0]["qualified_ref"] == 1
 
     async def test_get_commit_scan_history_rolling_total_and_threshold_warning(
         self, test_db_session

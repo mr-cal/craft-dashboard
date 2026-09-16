@@ -750,15 +750,23 @@ class AdminService:
         result = await self.session.execute(query)
         return [{"date": str(row.day), "count": row.total} for row in result]
 
-    async def get_queue_depth_history(self, hours: int = 48) -> list[QueueDepthPoint]:
-        """Return recent eval queue-depth samples for the last `hours` hours.
+    async def get_queue_depth_history(
+        self, days: int = 45, hours: int | None = None
+    ) -> list[QueueDepthPoint]:
+        """Return recent eval queue-depth samples.
+
+        Defaults to the last 45 days. If ``hours`` is specified, it overrides
+        ``days``.
 
         Samples are recorded as a side effect of `/api/eval/next` (see
         ``_maybe_record_queue_snapshot``), throttled to at most one every
         few minutes — so this reflects queue depth only while some worker
         (in-cluster or otherwise) has been actively polling.
         """
-        since = datetime.now(UTC) - timedelta(hours=hours)
+        if hours is not None:
+            since = datetime.now(UTC) - timedelta(hours=hours)
+        else:
+            since = datetime.now(UTC) - timedelta(days=days)
         query = (
             select(EvalQueueSnapshot)
             .where(EvalQueueSnapshot.captured_at >= since)
@@ -776,7 +784,7 @@ class AdminService:
         ]
 
     async def get_commit_scan_history(
-        self, days: int = 14
+        self, days: int = 45
     ) -> list[CommitScanHistoryPoint]:
         """Return daily commit-scanner invalidation totals, broken out by signal."""
         since = datetime.now(UTC) - timedelta(days=days)

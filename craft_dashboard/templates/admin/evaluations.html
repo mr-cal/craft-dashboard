@@ -170,6 +170,7 @@
                 data: pending,
                 borderColor: "#c7162b",
                 backgroundColor: "rgba(199, 22, 43, 0.1)",
+                yAxisID: "y",
                 tension: 0.2,
                 pointRadius: 0,
               },
@@ -178,6 +179,7 @@
                 data: totalOpen,
                 borderColor: "#0e8420",
                 backgroundColor: "rgba(14, 132, 32, 0.1)",
+                yAxisID: "y1",
                 tension: 0.2,
                 pointRadius: 0,
               },
@@ -189,7 +191,21 @@
             interaction: { mode: "index", intersect: false },
             scales: {
               x: { ticks: { maxTicksLimit: 8 } },
-              y: { beginAtZero: true },
+              y: {
+                type: "linear",
+                display: true,
+                position: "left",
+                beginAtZero: true,
+                title: { display: true, text: "Pending" },
+              },
+              y1: {
+                type: "linear",
+                display: true,
+                position: "right",
+                beginAtZero: true,
+                title: { display: true, text: "Total open" },
+                grid: { drawOnChartArea: false },
+              },
             },
           },
         });
@@ -237,6 +253,12 @@
       is the honest headline.
     </p>
     {% if commit_scan_history %}
+    {% set total_inval = commit_scan_history | sum(attribute="qualified_ref") + commit_scan_history | sum(attribute="path") + commit_scan_history | sum(attribute="semantic") + commit_scan_history | sum(attribute="bare_ref") + commit_scan_history | sum(attribute="launchpad") %}
+    {% if total_inval == 0 %}
+    <p class="u-text--muted">
+      <em>No invalidations were triggered across any signals in this period.</em>
+    </p>
+    {% endif %}
     <div style="position: relative; width: 100%; height: 320px;">
       <canvas id="invalidations-chart" style="width: 100%; height: 100%;"></canvas>
     </div>
