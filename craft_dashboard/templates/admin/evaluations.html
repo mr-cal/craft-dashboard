@@ -152,7 +152,9 @@
       (in-cluster or remote) is actively polling.
     </p>
     {% if llm_queue_depth_history %}
-    <canvas id="queue-depth-chart" style="width: 100%; height: 320px;"></canvas>
+    <div style="position: relative; width: 100%; height: 320px;">
+      <canvas id="queue-depth-chart"></canvas>
+    </div>
     <script>
       (function () {
         const labels = {{ llm_queue_depth_history | map(attribute="captured_at") | map("string") | list | tojson }};
@@ -235,7 +237,9 @@
       is the honest headline.
     </p>
     {% if commit_scan_history %}
-    <canvas id="invalidations-chart" style="width: 100%; height: 320px;"></canvas>
+    <div style="position: relative; width: 100%; height: 320px;">
+      <canvas id="invalidations-chart"></canvas>
+    </div>
     <script>
       (function () {
         const labels = {{ commit_scan_history | map(attribute="day") | list | tojson }};
