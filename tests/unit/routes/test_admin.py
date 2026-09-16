@@ -661,8 +661,15 @@ class TestAdminPage:
             response = client.get("/admin/evaluations")
 
         assert response.status_code == 200
-        assert '<canvas id="queue-depth-chart"' in response.text
-        assert '<canvas id="invalidations-chart"' in response.text
+        assert (
+            '<div style="position: relative; width: 100%; height: 320px;">\n      <canvas id="queue-depth-chart"></canvas>\n    </div>'
+            in response.text
+        )
+        assert (
+            '<div style="position: relative; width: 100%; height: 320px;">\n      <canvas id="invalidations-chart"></canvas>\n    </div>'
+            in response.text
+        )
+        assert "maintainAspectRatio: false" in response.text
         assert (
             '<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>'
             in response.text
