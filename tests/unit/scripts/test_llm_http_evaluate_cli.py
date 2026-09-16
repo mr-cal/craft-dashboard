@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
+import click
 import pytest
 from click.testing import CliRunner
-from scripts.llm.cli import cli
+from scripts.llm.cli import _handle_fatal_config_error, cli
 
 
 def test_help_lists_http_evaluate_options() -> None:
@@ -283,3 +284,29 @@ def test_evaluate_missing_server_ca_cert_raises_usage_error(
     assert result.exit_code != 0
     assert "Server CA certificate file not found" in result.output
     assert str(nonexistent) in result.output
+
+
+def test_handle_fatal_config_error_sleeps_when_delay_positive(monkeypatch) -> None:
+    """_handle_fatal_config_error sleeps before raising UsageError to prevent tight crash loops."""
+    slept = []
+    monkeypatch.setattr("scripts.llm.cli.time.sleep", slept.append)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("LLM_CONFIG_ERROR_DELAY_SECONDS", "10")
+
+    with pytest.raises(click.UsageError, match="test error"):
+        _handle_fatal_config_error("test error")
+
+    assert slept == [10.0]
+
+
+def test_handle_fatal_config_error_no_sleep_when_delay_zero(monkeypatch) -> None:
+    """_handle_fatal_config_error skips sleep when LLM_CONFIG_ERROR_DELAY_SECONDS is 0."""
+    slept = []
+    monkeypatch.setattr("scripts.llm.cli.time.sleep", slept.append)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("LLM_CONFIG_ERROR_DELAY_SECONDS", "0")
+
+    with pytest.raises(click.UsageError, match="test error"):
+        _handle_fatal_config_error("test error")
+
+    assert slept == []

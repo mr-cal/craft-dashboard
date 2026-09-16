@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import pathlib
+import time
 
 import click
 from craft_dashboard.database import get_engine, get_session_factory
@@ -107,6 +108,23 @@ def cli(ctx: click.Context) -> None:
 def clear_evaluations_cmd(project: str, yes: bool) -> None:
     """Delete all LLM evaluations and reset token counts."""
     asyncio.run(_clear_main(project, yes))
+
+
+def _handle_fatal_config_error(message: str) -> None:
+    """Sleep before raising UsageError to prevent tight restart loops in container environments."""
+    delay_str = os.environ.get("LLM_CONFIG_ERROR_DELAY_SECONDS", "15")
+    try:
+        delay = float(delay_str)
+    except ValueError:
+        delay = 15.0
+    if delay > 0 and not os.environ.get("PYTEST_CURRENT_TEST"):
+        logger.error(
+            "%s Sleeping for %gs before exit to prevent tight restart loop.",
+            message,
+            delay,
+        )
+        time.sleep(delay)
+    raise click.UsageError(message)
 
 
 @cli.command(name="evaluate")
@@ -234,16 +252,16 @@ def evaluate_cmd(
     openrouter_api_key = os.environ.get("OPENROUTER_API_KEY", "")
     openrouter_api_key_embedding = os.environ.get("OPENROUTER_API_KEY_EMBEDDING", "")
     if not openrouter_api_key_embedding:
-        raise click.UsageError(
+        _handle_fatal_config_error(
             "OPENROUTER_API_KEY_EMBEDDING is required because evaluate always computes OpenRouter embeddings."
         )
     if issue and not project:
-        raise click.UsageError("--issue requires --project")
+        _handle_fatal_config_error("--issue requires --project")
 
     if server_ca_cert:
         expanded_server_ca = pathlib.Path(server_ca_cert).expanduser()
         if not expanded_server_ca.is_file():
-            raise click.UsageError(
+            _handle_fatal_config_error(
                 f"Server CA certificate file not found: '{server_ca_cert}' (resolved to '{expanded_server_ca}'). "
                 "Check the --server-ca-cert option or EVAL_CLIENT_SERVER_CA_CERT in your .env file."
             )
@@ -260,13 +278,13 @@ def evaluate_cmd(
             if not value
         ]
         if missing:
-            raise click.UsageError(
+            _handle_fatal_config_error(
                 f"Missing required environment variable(s): {', '.join(missing)}. Set them in your .env file."
             )
         if ca_cert:
             expanded_ca = pathlib.Path(ca_cert).expanduser()
             if not expanded_ca.is_file():
-                raise click.UsageError(
+                _handle_fatal_config_error(
                     f"CA certificate file not found: '{ca_cert}' (resolved to '{expanded_ca}'). "
                     "Check the --ca-cert option or LOCAL_LLM_CA_CERT in your .env file."
                 )
@@ -285,7 +303,7 @@ def evaluate_cmd(
             if not value
         ]
         if missing:
-            raise click.UsageError(
+            _handle_fatal_config_error(
                 f"Missing required setting(s): {', '.join(missing)}. "
                 "Set them in your .env file."
             )
