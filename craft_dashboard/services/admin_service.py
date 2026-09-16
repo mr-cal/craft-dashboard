@@ -858,7 +858,15 @@ class AdminService:
         content_changed = (
             latest_evaluation.id.is_not(None)
             & (latest_evaluation.eval_version == expected_version)
-            & Issue.content_hash.is_distinct_from(latest_evaluation.issue_data_hash)
+            & (
+                Issue.content_hash.is_distinct_from(latest_evaluation.issue_data_hash)
+                | (
+                    (Issue.state == "open")
+                    & Issue.evidence_generation.is_distinct_from(
+                        latest_evaluation.evidence_generation
+                    )
+                )
+            )
         )
 
         query = (

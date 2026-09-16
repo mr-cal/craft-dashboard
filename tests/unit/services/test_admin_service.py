@@ -1426,6 +1426,36 @@ class TestOutdatedEvaluationCounts:
 
         assert counts["content_changed"] == 1
 
+    async def test_evidence_generation_drift_counted_in_content_changed(
+        self, test_db_session
+    ) -> None:
+        await _seed_admin_data(test_db_session)
+        issue = (
+            (await test_db_session.execute(select(Issue).order_by(Issue.id)))
+            .scalars()
+            .first()
+        )
+        issue.content_hash = "same-content"
+        issue.evidence_generation = 2
+        issue.state = "open"
+        evaluation = (
+            (
+                await test_db_session.execute(
+                    select(LLMEvaluation).where(LLMEvaluation.issue_id == issue.id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        evaluation.eval_version = CURRENT_EVAL_VERSION
+        evaluation.issue_data_hash = "same-content"
+        evaluation.evidence_generation = 1
+        await test_db_session.commit()
+
+        counts = await AdminService(test_db_session).get_outdated_evaluation_counts()
+
+        assert counts["content_changed"] == 1
+
     async def test_closed_issues_needing_summarization_are_counted(
         self, test_db_session
     ) -> None:
