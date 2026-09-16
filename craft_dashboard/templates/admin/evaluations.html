@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}LLM Evaluations - Admin - craft-dashboard{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+{% endblock %}
 {% block content %}
 <h2>Admin</h2>
 {% include "admin/partials/tabs.html" %}
@@ -141,7 +144,7 @@
 <hr class="p-rule" />
 
 <div class="row">
-  <div class="col">
+  <div class="col-12">
     <h3>Eval queue depth over time</h3>
     <p>
       Pending issues (queued for evaluation), sampled from worker polls of
@@ -150,7 +153,6 @@
     </p>
     {% if llm_queue_depth_history %}
     <canvas id="queue-depth-chart" height="80"></canvas>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
     <script>
       (function () {
         const labels = {{ llm_queue_depth_history | map(attribute="captured_at") | map("string") | list | tojson }};
@@ -199,7 +201,7 @@
 <hr class="p-rule" />
 
 <div class="row">
-  <div class="col">
+  <div class="col-12">
     <h3>Daily invalidations by signal</h3>
     {% if commit_scan_summary %}
     {% if commit_scan_summary.warn %}
@@ -233,7 +235,6 @@
     </p>
     {% if commit_scan_history %}
     <canvas id="invalidations-chart" height="80"></canvas>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
     <script>
       (function () {
         const labels = {{ commit_scan_history | map(attribute="day") | list | tojson }};

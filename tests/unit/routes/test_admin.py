@@ -560,3 +560,119 @@ class TestAdminPage:
 
         assert response.status_code == 200
         assert state["max_active"] == 1
+
+    def test_admin_evaluations_page_renders_charts_in_full_width_columns(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GET /admin/evaluations renders charts inside col-12 full-width columns."""
+        app = _create_admin_app()
+
+        async def _stub_token_stats(self, *args, **kwargs):
+            return {
+                "evaluations": 1,
+                "tokens": 100,
+                "prompt_tokens": 80,
+                "completion_tokens": 20,
+            }
+
+        async def _stub_status(self, *args, **kwargs):
+            return {
+                "status": "running",
+                "last_poll_at": None,
+                "last_result_at": None,
+                "quota_resume_at": None,
+            }
+
+        async def _stub_recent(self, *args, **kwargs):
+            return [], 0
+
+        async def _stub_daily(self, *args, **kwargs):
+            return []
+
+        async def _stub_queue(self, *args, **kwargs):
+            return [
+                {
+                    "captured_at": "2026-09-16T10:00:00Z",
+                    "pending_count": 5,
+                    "total_open": 20,
+                }
+            ]
+
+        async def _stub_outdated(self, *args, **kwargs):
+            return {
+                "never_evaluated": 0,
+                "version_outdated": 0,
+                "content_changed": 0,
+            }
+
+        async def _stub_scan_history(self, *args, **kwargs):
+            return [
+                {
+                    "day": "2026-09-16",
+                    "qualified_ref": 1,
+                    "path": 0,
+                    "semantic": 0,
+                    "bare_ref": 0,
+                    "launchpad": 0,
+                }
+            ]
+
+        async def _stub_scan_summary(self, *args, **kwargs):
+            return {"rolling_total": 1, "warn_threshold": 200, "warn": False}
+
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_lifetime_token_stats",
+            _stub_token_stats,
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_seven_day_token_stats",
+            _stub_token_stats,
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_llm_service_status",
+            _stub_status,
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_recent_evaluations",
+            _stub_recent,
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_daily_evaluation_stats",
+            _stub_daily,
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_queue_depth_history",
+            _stub_queue,
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_outdated_evaluation_counts",
+            _stub_outdated,
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_commit_scan_history",
+            _stub_scan_history,
+        )
+        monkeypatch.setattr(
+            "craft_dashboard.routes.admin.AdminService.get_commit_scan_summary",
+            _stub_scan_summary,
+        )
+
+        with TestClient(app) as client:
+            response = client.get("/admin/evaluations")
+
+        assert response.status_code == 200
+        assert '<canvas id="queue-depth-chart"' in response.text
+        assert '<canvas id="invalidations-chart"' in response.text
+        assert (
+            '<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>'
+            in response.text
+        )
+        # Ensure col-12 is used instead of bare col inside the chart rows
+        assert (
+            '<div class="row">\n  <div class="col-12">\n    <h3>Eval queue depth over time</h3>'
+            in response.text
+        )
+        assert (
+            '<div class="row">\n  <div class="col-12">\n    <h3>Daily invalidations by signal</h3>'
+            in response.text
+        )
