@@ -16,8 +16,9 @@ from craft_dashboard.dependencies import get_config, get_db_session
 from craft_dashboard.llm.client import OPENROUTER_BASE_URL
 from craft_dashboard.llm.embeddings import EmbeddingClient
 from craft_dashboard.llm.evaluator import (
+    CURRENT_EVAL_VERSION,
+    CURRENT_SUMMARY_VERSION,
     _compute_content_hash,
-    current_version_for_state,
 )
 from craft_dashboard.models.views import IssueFilters, IssueView
 from craft_dashboard.repositories.issue_link_repository import IssueLinkRepository
@@ -441,11 +442,34 @@ async def issue_detail(
 
     is_outdated = False
     if current_evaluation:
-        expected_version = current_version_for_state(issue["state"])
-        if current_evaluation.get("eval_version") != expected_version or (
-            issue["state"] == "open"
-            and current_evaluation.get("evidence_generation")
-            != issue.get("evidence_generation")
+        eval_type = current_evaluation.get("eval_type") or (
+            "summary"
+            if not current_evaluation.get("suggested_action")
+            and not current_evaluation.get("scores")
+            else "scoring"
+        )
+        eval_ver = current_evaluation.get("eval_version")
+        is_open = issue["state"] == "open"
+        matching_type = (is_open and eval_type == "scoring") or (
+            not is_open and eval_type == "summary"
+        )
+        version_outdated = (
+            eval_ver is None
+            or (is_open and eval_type == "scoring" and eval_ver != CURRENT_EVAL_VERSION)
+            or (
+                not is_open
+                and eval_type == "summary"
+                and eval_ver != CURRENT_SUMMARY_VERSION
+            )
+        )
+        if (
+            version_outdated
+            or not matching_type
+            or (
+                is_open
+                and current_evaluation.get("evidence_generation")
+                != issue.get("evidence_generation")
+            )
         ):
             is_outdated = True
         else:

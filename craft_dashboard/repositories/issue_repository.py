@@ -98,6 +98,7 @@ def _serialize_evaluation(evaluation: LLMEvaluation) -> dict[str, Any]:
         "llm_backend": evaluation.llm_backend,
         "latest": evaluation.latest,
         "has_embedding": evaluation.summary_embedding is not None,
+        "eval_type": evaluation.eval_type,
         "eval_version": evaluation.eval_version,
         "issue_data_hash": evaluation.issue_data_hash,
         "evidence_generation": evaluation.evidence_generation,

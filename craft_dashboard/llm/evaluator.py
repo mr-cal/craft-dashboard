@@ -5,8 +5,9 @@ import json
 import logging
 from typing import Any, TypedDict
 
-from sqlalchemy import case
+from sqlalchemy import case, or_
 from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.expression import SQLColumnExpression
 
 from craft_dashboard.llm.baseline import BaselineError, build_round1_baseline
 from craft_dashboard.llm.client import LLMClient
@@ -53,6 +54,39 @@ def expected_version_sql_expr() -> ColumnElement[int]:
     return case(
         (Issue.state == "open", CURRENT_EVAL_VERSION),
         else_=CURRENT_SUMMARY_VERSION,
+    )
+
+
+def is_version_outdated_sql_expr(
+    eval_type_col: SQLColumnExpression[str],
+    eval_version_col: SQLColumnExpression[int | None],
+    state_col: SQLColumnExpression[str],
+) -> ColumnElement[bool]:
+    """Return SQL expression indicating whether an evaluation's prompt version is outdated.
+
+    An evaluation is version-outdated ONLY when the prompt version used for
+    its specific evaluation type ('scoring' vs 'summary') predates the current
+    version for that type:
+    - Open issues with a scoring evaluation: eval_version != CURRENT_EVAL_VERSION
+    - Closed issues with a summary evaluation: eval_version != CURRENT_SUMMARY_VERSION
+    - Unset eval_version: always outdated.
+
+    Evaluations across state transitions (e.g. a scoring evaluation on a now-closed
+    issue) are NOT version-outdated; they are queued under content/state drift.
+    """
+    return or_(
+        eval_version_col.is_(None),
+        case(
+            (
+                state_col == "open",
+                (eval_type_col == "scoring")
+                & (eval_version_col != CURRENT_EVAL_VERSION),
+            ),
+            else_=(
+                (eval_type_col == "summary")
+                & (eval_version_col != CURRENT_SUMMARY_VERSION)
+            ),
+        ),
     )
 
 

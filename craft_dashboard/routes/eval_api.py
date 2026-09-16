@@ -618,9 +618,11 @@ async def submit_result(
         .values(latest=False, eval_locked_until=None)
     )
     issue.search_embedding = payload.search_embedding
+    eval_type = "summary" if issue.state in {"closed", "merged"} else "scoring"
     evaluation = LLMEvaluation(
         issue_id=payload.issue_id,
         model_name=payload.model_used,
+        eval_type=eval_type,
         eval_version=current_version_for_state(issue.state),
         summary=payload.summary,
         suggested_action=payload.suggested_action,

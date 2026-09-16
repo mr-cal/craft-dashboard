@@ -16,7 +16,7 @@ from sqlalchemy import and_, case, or_, select
 from sqlalchemy.orm import aliased, defer
 
 from craft_dashboard.llm.evaluator import (
-    expected_version_sql_expr,
+    is_version_outdated_sql_expr,
 )
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
@@ -73,10 +73,10 @@ def build_pending_evaluation_query(
     now = now or datetime.now(tz=UTC)
     latest_evaluation = aliased(LLMEvaluation)
 
-    expected_version = expected_version_sql_expr()
-    old_version = or_(
-        latest_evaluation.eval_version.is_(None),
-        latest_evaluation.eval_version != expected_version,
+    old_version = is_version_outdated_sql_expr(
+        latest_evaluation.eval_type,
+        latest_evaluation.eval_version,
+        Issue.state,
     )
     priority = case(
         (latest_evaluation.id.is_(None) & (Issue.state == "open"), 1),
@@ -165,9 +165,18 @@ def build_pending_evaluation_query(
                 ),
             ),
         )
+        has_matching_type = case(
+            (Issue.state == "open", latest_evaluation.eval_type == "scoring"),
+            else_=(latest_evaluation.eval_type == "summary"),
+        )
         is_up_to_date = and_(
             has_complete_evaluation,
-            latest_evaluation.eval_version == expected_version,
+            has_matching_type,
+            ~is_version_outdated_sql_expr(
+                latest_evaluation.eval_type,
+                latest_evaluation.eval_version,
+                Issue.state,
+            ),
             ~latest_evaluation.issue_data_hash.is_distinct_from(Issue.content_hash),
             or_(
                 Issue.state != "open",

@@ -1230,6 +1230,7 @@ class TestEvalResultIntegration:
         )
         assert len(evaluations) == 1
         assert evaluations[0].eval_version == CURRENT_EVAL_VERSION
+        assert evaluations[0].eval_type == "scoring"
 
     def test_submit_result_for_closed_issue_uses_summary_version(
         self, test_db_session: AsyncSession
@@ -1279,6 +1280,7 @@ class TestEvalResultIntegration:
             .scalar_one()
         )
         assert evaluation.eval_version == CURRENT_SUMMARY_VERSION
+        assert evaluation.eval_type == "summary"
 
     def test_submit_result_persists_cost_usd(
         self, test_db_session: AsyncSession

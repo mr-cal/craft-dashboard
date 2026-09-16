@@ -158,6 +158,9 @@ class TestBuildPendingEvaluationQuery:
         evaluation = make_evaluation(
             id=1,
             issue_id=1,
+            eval_type="summary",
+            suggested_action=None,
+            scores={},
             eval_version=4,
             issue_data_hash=current_hash,
             latest=True,
@@ -188,6 +191,9 @@ class TestBuildPendingEvaluationQuery:
         evaluation = make_evaluation(
             id=1,
             issue_id=1,
+            eval_type="summary",
+            suggested_action=None,
+            scores={},
             eval_version=3,
             issue_data_hash=current_hash,
             latest=True,
@@ -304,3 +310,35 @@ class TestBuildPendingEvaluationQuery:
         pending_issue_ids = {row[0].id for row in result.all()}
 
         assert issue.id not in pending_issue_ids
+
+    async def test_closed_issue_with_scoring_eval_is_requeued_for_summary(
+        self, test_db_session
+    ) -> None:
+        project = make_project(name="craft-parts")
+        test_db_session.add(project)
+        await test_db_session.flush()
+        issue = make_issue(
+            project_id=project.id,
+            state="closed",
+            content_hash="closed-hash",
+        )
+        test_db_session.add(issue)
+        await test_db_session.flush()
+        evaluation = make_evaluation(
+            issue_id=issue.id,
+            eval_type="scoring",
+            eval_version=CURRENT_EVAL_VERSION,
+            issue_data_hash="open-hash",
+            scores={"staleness": 10},
+            suggested_action="keep_open",
+            latest=True,
+        )
+        test_db_session.add(evaluation)
+        await test_db_session.commit()
+
+        result = await test_db_session.execute(
+            build_pending_evaluation_query(open_only=False)
+        )
+        pending_issue_ids = {row[0].id for row in result.all()}
+
+        assert issue.id in pending_issue_ids

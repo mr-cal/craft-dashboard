@@ -90,33 +90,40 @@ def make_evaluation(
     issue_id: int = 1,
     model_name: str = "test-model",
     summary: str = "Test summary",
-    suggested_action: str = "needs_triage",
+    suggested_action: str | None = "needs_triage",
     scores: dict[str, Any] | None = None,
-    suggested_action_reason: str = "Test reason",
+    suggested_action_reason: str | None = "Test reason",
     tokens_used: int = 10,
     prompt_tokens: int = 6,
     completion_tokens: int = 4,
     llm_backend: str = "test-backend",
     evaluated_at: datetime | None = None,
     issue_data_hash: str | None = None,
+    eval_type: str | None = None,
     latest: bool = True,
     **kwargs: Any,
 ) -> LLMEvaluation:
     """Build an LLMEvaluation model with defaults shared across tests."""
     now = datetime.now(tz=UTC)
+    scores_dict = {} if scores is None else scores
+    if eval_type is None:
+        eval_type = (
+            "summary" if (suggested_action is None and not scores_dict) else "scoring"
+        )
     return LLMEvaluation(
         issue_id=issue_id,
         model_name=model_name,
         summary=summary,
         suggested_action=suggested_action,
         suggested_action_reason=suggested_action_reason,
-        scores={} if scores is None else scores,
+        scores=scores_dict,
         tokens_used=tokens_used,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         llm_backend=llm_backend,
         evaluated_at=evaluated_at or now,
         issue_data_hash=issue_data_hash or f"hash-{issue_id}",
+        eval_type=eval_type,
         latest=latest,
         **kwargs,
     )

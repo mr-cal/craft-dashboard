@@ -1496,3 +1496,74 @@ class TestOutdatedEvaluationCounts:
         counts = await AdminService(test_db_session).get_outdated_evaluation_counts()
         assert counts["never_evaluated"] == 1
         assert counts["version_outdated"] == 2
+
+    async def test_closed_issue_with_scoring_eval_counted_in_content_changed_not_version_outdated(
+        self, test_db_session
+    ) -> None:
+        """A closed issue whose latest eval was done while open (eval_type='scoring',
+        eval_version=5) is counted under content_changed, not version_outdated."""
+        await _seed_admin_data(test_db_session)
+        evals = (await test_db_session.execute(select(LLMEvaluation))).scalars().all()
+        for ev in evals:
+            ev.eval_version = CURRENT_EVAL_VERSION
+            ev.eval_type = "scoring"
+            ev.issue_data_hash = "hash"
+
+        issues = (
+            (await test_db_session.execute(select(Issue).order_by(Issue.id)))
+            .scalars()
+            .all()
+        )
+        for iss in issues:
+            iss.content_hash = "hash"
+
+        # Now take one issue and close it, so its state changed
+        issue = issues[0]
+        issue.state = "closed"
+        issue.content_hash = "new-closed-hash"
+
+        await test_db_session.commit()
+
+        counts = await AdminService(test_db_session).get_outdated_evaluation_counts()
+        assert counts["version_outdated"] == 0
+        assert counts["content_changed"] == 1
+
+    async def test_closed_issue_with_stale_summary_version_counted_in_version_outdated(
+        self, test_db_session
+    ) -> None:
+        """A closed issue with eval_type='summary' but an older eval_version=3
+        is counted under version_outdated."""
+        await _seed_admin_data(test_db_session)
+        evals = (await test_db_session.execute(select(LLMEvaluation))).scalars().all()
+        for ev in evals:
+            ev.eval_version = CURRENT_EVAL_VERSION
+            ev.eval_type = "scoring"
+            ev.issue_data_hash = "hash"
+
+        issues = (
+            (await test_db_session.execute(select(Issue).order_by(Issue.id)))
+            .scalars()
+            .all()
+        )
+        for iss in issues:
+            iss.content_hash = "hash"
+
+        issue = issues[0]
+        issue.state = "closed"
+        ev = (
+            (
+                await test_db_session.execute(
+                    select(LLMEvaluation).where(LLMEvaluation.issue_id == issue.id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        ev.eval_type = "summary"
+        ev.eval_version = 3
+
+        await test_db_session.commit()
+
+        counts = await AdminService(test_db_session).get_outdated_evaluation_counts()
+        assert counts["version_outdated"] == 1
+        assert counts["content_changed"] == 0

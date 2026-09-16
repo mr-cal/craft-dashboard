@@ -12,7 +12,7 @@ from sqlalchemy.orm import aliased
 
 from craft_dashboard.collectors.github import GitHubCollector, RateLimitStatus
 from craft_dashboard.llm.evaluator import (
-    expected_version_sql_expr,
+    is_version_outdated_sql_expr,
 )
 from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.models.commit_scan_run import CommitScanRun
@@ -848,16 +848,22 @@ class AdminService:
         Mirrors the priority tiers in
         ``craft_dashboard.llm.evaluation_queue.build_pending_evaluation_query``.
         """
-        expected_version = expected_version_sql_expr()
         latest_evaluation = aliased(LLMEvaluation)
         never_evaluated = latest_evaluation.id.is_(None)
-        version_outdated = latest_evaluation.id.is_not(None) & (
-            latest_evaluation.eval_version.is_(None)
-            | (latest_evaluation.eval_version != expected_version)
+        version_outdated = latest_evaluation.id.is_not(
+            None
+        ) & is_version_outdated_sql_expr(
+            latest_evaluation.eval_type,
+            latest_evaluation.eval_version,
+            Issue.state,
         )
         content_changed = (
             latest_evaluation.id.is_not(None)
-            & (latest_evaluation.eval_version == expected_version)
+            & ~is_version_outdated_sql_expr(
+                latest_evaluation.eval_type,
+                latest_evaluation.eval_version,
+                Issue.state,
+            )
             & (
                 Issue.content_hash.is_distinct_from(latest_evaluation.issue_data_hash)
                 | (

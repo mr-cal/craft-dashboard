@@ -91,6 +91,9 @@ class LLMEvaluation(Base):
     evidence_generation: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    eval_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="scoring", server_default="scoring"
+    )
     eval_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     eval_locked_until: Mapped[datetime | None] = mapped_column(
