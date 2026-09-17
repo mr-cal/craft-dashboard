@@ -42,14 +42,18 @@
     </div>
     {% endif %}
     <p>{{ current_evaluation.summary or "No summary available." }}</p>
+    {% if issue.state in ("closed", "merged") %}
+    <p><strong>Resolution:</strong> {{ (current_evaluation.suggested_action or "—")|replace("_", " ") }}</p>
+    {% else %}
     <p><strong>Suggested action:</strong> {{ (current_evaluation.suggested_action or "—")|replace("_", " ") }}</p>
+    {% endif %}
     {% if current_evaluation.suggested_action_reason %}
     <p><strong>Reason:</strong> {{ current_evaluation.suggested_action_reason }}</p>
     {% endif %}
     <div class="issue-detail-scores">
       {% for score_key, score_value in (current_evaluation.scores or {}).items() %}
       {% set score_name = score_key|replace("_", " ")|title %}
-      {% set score_inverted = False %}
+      {% set score_inverted = score_key in ["impact", "actionability", "quick_win"] %}
       <span class="issue-detail-score">
         <strong>{{ score_name }}:</strong>
         {% include "components/score_badge.html" %}
@@ -91,7 +95,7 @@
           {% if evaluation.scores %}
             {% for score_key, score_value in evaluation.scores.items() %}
             {% set score_name = score_key|replace("_", " ")|title %}
-            {% set score_inverted = False %}
+            {% set score_inverted = score_key in ["impact", "actionability", "quick_win"] %}
             <div>{{ score_name }}: {% include "components/score_badge.html" %}</div>
             {% endfor %}
           {% else %}

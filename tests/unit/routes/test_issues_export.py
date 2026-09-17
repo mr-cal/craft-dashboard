@@ -117,12 +117,13 @@ class TestIssueExport:
                 "updated_at": "2025-01-02T00:00:00+00:00",
                 "author_is_maintainer": True,
                 "author_is_bot": False,
-                "staleness": 72.5,
+                "actionability": None,
                 "complexity": None,
-                "support_request": None,
-                "confidence": 65.0,
                 "impact": None,
                 "quick_win": None,
+                "confidence": 65.0,
+                "staleness": 72.5,
+                "support_request": None,
                 "has_related_links": False,
             }
         ]

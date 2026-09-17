@@ -132,21 +132,11 @@ class TestBuildPendingEvaluationQuery:
         assert row is not None
         assert row[0].id == 1
 
-    async def test_closed_issue_at_preexisting_version_4_is_not_requeued(
+    async def test_closed_issue_at_current_summary_version_is_not_requeued(
         self, test_db_session
     ) -> None:
-        """Regression guard for the version-impact blocker.
-
-        Every pre-split production row — open and closed — was stamped with
-        the hardcoded CURRENT_EVAL_VERSION (== 4). After the split, a closed
-        issue whose latest evaluation carries that literal 4 must remain up
-        to date, i.e. CURRENT_SUMMARY_VERSION must also be 4. If someone
-        initializes CURRENT_SUMMARY_VERSION to a fresh value, this row would
-        be treated as stale and the whole closed corpus (17,206 items) would
-        be re-summarized — this test fails loudly in that case.
-        """
-        # The value every existing production row already carries.
-        assert CURRENT_SUMMARY_VERSION == 4
+        """A closed issue evaluated at CURRENT_SUMMARY_VERSION remains up to date."""
+        assert CURRENT_SUMMARY_VERSION == 5
 
         project = make_project(id=1, name="snapcraft")
         issue = make_issue(
@@ -161,7 +151,7 @@ class TestBuildPendingEvaluationQuery:
             eval_type="summary",
             suggested_action=None,
             scores={},
-            eval_version=4,
+            eval_version=CURRENT_SUMMARY_VERSION,
             issue_data_hash=current_hash,
             latest=True,
         )

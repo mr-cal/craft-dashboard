@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 from pathlib import Path
@@ -274,6 +275,34 @@ class TestDispatchToolCall:
 
         assert "error" in result.lower()
         assert "pinned" in result.lower()
+
+    async def test_historical_valid_commit_ref_is_accepted(
+        self, tool_context: ToolContext, sample_repo: Path
+    ) -> None:
+        # Get the first commit SHA from the repo
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            ["git", "rev-list", "--max-parents=0", "HEAD"],
+            cwd=sample_repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        initial_sha = proc.stdout.strip()
+        # Verify initial_sha is not the pinned HEAD SHA
+        assert initial_sha != tool_context.pinned_shas["sample-project"]
+
+        # Now read a file from the historical commit
+        result = await dispatch_tool_call(
+            tool_context,
+            name="read_file",
+            arguments={
+                "project": "sample-project",
+                "path": "README.md",
+                "ref": initial_sha,
+            },
+        )
+        assert "# Sample project" in result
 
     async def test_string_false_pickaxe_uses_log_search_not_pickaxe(
         self, tool_context: ToolContext

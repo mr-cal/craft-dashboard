@@ -11,9 +11,8 @@ def _valid_result() -> dict:
         "suggested_action": "keep_open",
         "suggested_action_reason": "Maintainers still have enough detail to act on it.",
         "scores": {
-            "staleness": 10,
             "complexity": 40,
-            "support_request": 15,
+            "actionability": 70,
             "impact": 30,
             "confidence": 85,
         },
@@ -30,43 +29,36 @@ def test_accepts_valid_issue_results() -> None:
 
 def test_rejects_boolean_score_values() -> None:
     result = _valid_result()
-    result["scores"]["staleness"] = True
+    result["scores"]["actionability"] = True
 
-    with pytest.raises(LLMValidationError, match="staleness"):
+    with pytest.raises(LLMValidationError, match="actionability"):
         validate_evaluation_result(result, issue_type="issue")
 
 
 def test_accepts_valid_pull_request_results() -> None:
     result = _valid_result()
-    result["scores"] = {
-        "staleness": 10,
-        "complexity": 40,
-        "impact": 30,
-        "confidence": 85,
-    }
-
     validate_evaluation_result(result, issue_type="pull_request")
 
 
 def test_rejects_missing_required_score_key() -> None:
     result = _valid_result()
-    del result["scores"]["support_request"]
+    del result["scores"]["actionability"]
 
-    with pytest.raises(LLMValidationError, match="support_request"):
+    with pytest.raises(LLMValidationError, match="actionability"):
         validate_evaluation_result(result, issue_type="issue")
 
 
 def test_rejects_non_numeric_score_values() -> None:
     result = _valid_result()
-    result["scores"]["staleness"] = "high"
+    result["scores"]["actionability"] = "high"
 
-    with pytest.raises(LLMValidationError, match="staleness"):
+    with pytest.raises(LLMValidationError, match="actionability"):
         validate_evaluation_result(result, issue_type="issue")
 
 
 def test_rejects_out_of_range_scores() -> None:
     result = _valid_result()
-    result["scores"]["staleness"] = 101
+    result["scores"]["actionability"] = 101
 
     with pytest.raises(LLMValidationError, match="0-100"):
         validate_evaluation_result(result, issue_type="issue")
@@ -120,7 +112,7 @@ def test_accepts_close_not_mergeable_for_pr() -> None:
     """PR evaluations may produce close_not_mergeable action."""
     result = _valid_result()
     result["scores"] = {
-        "staleness": 30,
+        "actionability": 30,
         "complexity": 60,
         "impact": 30,
         "confidence": 75,
@@ -145,52 +137,105 @@ def test_rejects_close_not_mergeable_for_issue() -> None:
 def test_accepts_close_not_a_bug_for_pr() -> None:
     """close_not_a_bug is valid for both issues and PRs."""
     result = _valid_result()
-    result["scores"] = {
-        "staleness": 30,
-        "complexity": 60,
-        "impact": 30,
-        "confidence": 75,
-    }
     result["suggested_action"] = "close_not_a_bug"
     result["suggested_action_reason"] = "The reported behaviour is working as intended."
     validate_evaluation_result(result, issue_type="pull_request")
 
 
-class TestImpactScoreRequired:
-    """impact joins the required score keys for both issues and PRs."""
+def test_accepts_close_resolved_for_issue() -> None:
+    """close_resolved is valid for issue evaluations."""
+    result = _valid_result()
+    result["suggested_action"] = "close_resolved"
+    result["suggested_action_reason"] = "Implemented in canonical/snapcraft#3629."
+    validate_evaluation_result(result, issue_type="issue")
 
-    def test_issue_missing_impact_raises(self) -> None:
+
+def test_rejects_close_resolved_for_pr() -> None:
+    """close_resolved is invalid for PR evaluations (use close_superseded or close_not_mergeable)."""
+    result = _valid_result()
+    result["suggested_action"] = "close_resolved"
+    result["suggested_action_reason"] = "Already resolved."
+    with pytest.raises(LLMValidationError, match="suggested_action"):
+        validate_evaluation_result(result, issue_type="pull_request")
+
+
+def test_accepts_close_superseded_for_pr() -> None:
+    """close_superseded is valid for PR evaluations."""
+    result = _valid_result()
+    result["suggested_action"] = "close_superseded"
+    result["suggested_action_reason"] = (
+        "Superseded by PR #123 which adopted the newer API."
+    )
+    validate_evaluation_result(result, issue_type="pull_request")
+
+
+def test_rejects_close_superseded_for_issue() -> None:
+    """close_superseded is invalid for open issues."""
+    result = _valid_result()
+    result["suggested_action"] = "close_superseded"
+    result["suggested_action_reason"] = "Superseded by newer issue."
+    with pytest.raises(LLMValidationError, match="suggested_action"):
+        validate_evaluation_result(result, issue_type="issue")
+
+
+def test_accepts_closed_action_for_closed_issue() -> None:
+    """Closed issues accept actions from _CLOSED_ACTIONS."""
+    for action in [
+        "closed_resolved",
+        "closed_superseded",
+        "closed_not_a_bug",
+        "closed_stale",
+    ]:
+        result = _valid_result()
+        result["scores"] = {}
+        result["suggested_action"] = action
+        result["suggested_action_reason"] = f"Closing details for {action}."
+        validate_evaluation_result(result, issue_type="issue", state="closed")
+
+
+def test_rejects_open_action_for_closed_issue() -> None:
+    """Closed issues reject open actions like keep_open or needs_triage."""
+    result = _valid_result()
+    result["scores"] = {}
+    result["suggested_action"] = "keep_open"
+    result["suggested_action_reason"] = "Should not be open."
+    with pytest.raises(LLMValidationError, match="suggested_action for closed issue"):
+        validate_evaluation_result(result, issue_type="issue", state="closed")
+
+
+class TestActionabilityScoreRequired:
+    """actionability joins the required score keys for both issues and PRs."""
+
+    def test_issue_missing_actionability_raises(self) -> None:
         result = {
             "summary": "Issue remains actionable because the reproducer and scope are clear.",
             "scores": {
-                "staleness": 10,
                 "complexity": 10,
-                "support_request": 10,
+                "impact": 10,
                 "confidence": 50,
             },
             "suggested_action": "keep_open",
             "suggested_action_reason": "r",
         }
-        with pytest.raises(LLMValidationError, match="impact"):
+        with pytest.raises(LLMValidationError, match="actionability"):
             validate_evaluation_result(result, issue_type="issue", state="open")
 
-    def test_pr_missing_impact_raises(self) -> None:
+    def test_pr_missing_actionability_raises(self) -> None:
         result = {
             "summary": "PR remains actionable because the reproducer and scope are clear.",
-            "scores": {"staleness": 10, "complexity": 10, "confidence": 50},
+            "scores": {"complexity": 10, "impact": 10, "confidence": 50},
             "suggested_action": "keep_open",
             "suggested_action_reason": "r",
         }
-        with pytest.raises(LLMValidationError, match="impact"):
+        with pytest.raises(LLMValidationError, match="actionability"):
             validate_evaluation_result(result, issue_type="pull_request", state="open")
 
-    def test_issue_with_impact_passes(self) -> None:
+    def test_issue_with_actionability_passes(self) -> None:
         result = {
             "summary": "Issue remains actionable because the reproducer and scope are clear.",
             "scores": {
-                "staleness": 10,
+                "actionability": 80,
                 "complexity": 10,
-                "support_request": 10,
                 "impact": 40,
                 "confidence": 50,
             },

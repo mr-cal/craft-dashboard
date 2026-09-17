@@ -176,9 +176,9 @@ every open issue/PR's current evaluation "outdated" — the next
 latest `eval_version` against the current constant. No manual database write
 is required to mark rows stale.
 
-As of the Phase 6 rewrite (`CURRENT_EVAL_VERSION` 4 -> 5), this affects
-approximately 2,269 open issues/PRs across all 18 tracked projects. The
-scoring and summary paths both use `deepseek/deepseek-v4-pro-0813`. Running
+As of the scoring and pipeline modernization (`CURRENT_EVAL_VERSION` 5 -> 6,
+`CURRENT_SUMMARY_VERSION` 4 -> 5), this re-evaluates both open and closed
+items across tracked projects. The scoring and summary paths both use `deepseek/deepseek-v4-pro-0813`. Running
 the worker unthrottled against the full backlog risks exhausting the day's
 OpenRouter quota in one run and produces an unreviewable wall of new
 `impact`/`related_work` data all at once. Roll it out in stages instead:

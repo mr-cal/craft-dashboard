@@ -71,16 +71,15 @@ def _semantic_search_cost(request: Request) -> int:
 
 
 ALL_SCORES = {
-    "staleness": "Staleness",
-    "complexity": "Complexity",
-    "support_request": "Support Request",
     "impact": "Impact",
+    "complexity": "Complexity",
+    "actionability": "Actionability",
     "quick_win": "Quick Win",
     "confidence": "Confidence",
 }
 # Scores where a higher value is better (green) rather than worse (red)
-INVERTED_SCORES: frozenset[str] = frozenset({"impact", "quick_win"})
-DEFAULT_SCORES = "staleness,confidence"
+INVERTED_SCORES: frozenset[str] = frozenset({"impact", "actionability", "quick_win"})
+DEFAULT_SCORES = "impact,actionability,quick_win"
 
 
 class IssueTemplateContext(TypedDict):
@@ -282,10 +281,13 @@ async def _build_issue_context(
 class IssueSort(StrEnum):
     """Valid sort fields for the issue list."""
 
-    staleness = "staleness"
+    impact = "impact"
     complexity = "complexity"
-    support_request = "support_request"
+    actionability = "actionability"
+    quick_win = "quick_win"
     confidence = "confidence"
+    staleness = "staleness"
+    support_request = "support_request"
     age = "age"
     updated = "updated"
     title = "title"
@@ -315,7 +317,7 @@ async def issue_list(
     issue_type: str = Query("", alias="type"),
     action: str = Query("", alias="action"),
     author_role: str = Query("", alias="author_role"),
-    sort: str = Query("staleness", alias="sort"),
+    sort: str = Query("impact", alias="sort"),
     page: int = Query(1, ge=1),
     search: str = Query(
         "", alias="search", max_length=SEMANTIC_SEARCH_QUERY_MAX_LENGTH
@@ -371,7 +373,7 @@ async def issue_table_partial(
     issue_type: str = Query("", alias="type"),
     action: str = Query("", alias="action"),
     author_role: str = Query("", alias="author_role"),
-    sort: str = Query("staleness", alias="sort"),
+    sort: str = Query("impact", alias="sort"),
     page: int = Query(1, ge=1),
     search: str = Query(
         "", alias="search", max_length=SEMANTIC_SEARCH_QUERY_MAX_LENGTH
@@ -525,7 +527,7 @@ async def issue_export(
     issue_type: str = Query("", alias="type"),
     action: str = Query("", alias="action"),
     author_role: str = Query("", alias="author_role"),
-    sort: str = Query("staleness", alias="sort"),
+    sort: str = Query("impact", alias="sort"),
     page: int = Query(1, ge=1),
     search: str = Query("", alias="search"),
     per_page: str = Query("", alias="per_page"),

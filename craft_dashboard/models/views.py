@@ -27,12 +27,13 @@ class IssueView:
     updated_at: datetime | None = None
     author_is_maintainer: bool = False
     author_is_bot: bool = False
-    staleness: float | None = None
+    actionability: float | None = None
     complexity: float | None = None
-    support_request: float | None = None
-    confidence: float | None = None
     impact: float | None = None
     quick_win: float | None = None
+    confidence: float | None = None
+    staleness: float | None = None
+    support_request: float | None = None
     has_related_links: bool = False
 
     def as_dict(self) -> dict[str, object]:
@@ -62,7 +63,7 @@ class IssueFilters:
     issue_type: str = ""
     action: str = ""
     author_role: str = ""
-    sort_by: str = "staleness"
+    sort_by: str = "impact"
     page: int = 1
     search: str = ""
     items_per_page: int = 100

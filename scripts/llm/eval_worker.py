@@ -182,8 +182,24 @@ async def _embed_summary(
     title: str,
     summary: str,
 ) -> list[float]:
-    """Compute the required summary embedding for a finished evaluation."""
-    return await embed_client.embed(f"{title}. {summary}", dimensions=1024)
+    """Compute the required summary embedding for a finished evaluation with retry."""
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            return await embed_client.embed(f"{title}. {summary}", dimensions=1024)
+        except Exception as exc:
+            if attempt < max_retries and not isinstance(exc, LLMQuotaError):
+                logger.warning(
+                    "Embedding summary attempt %d/%d failed: %s; retrying in %ds...",
+                    attempt,
+                    max_retries,
+                    exc,
+                    2**attempt,
+                )
+                await asyncio.sleep(2**attempt)
+                continue
+            raise
+    raise RuntimeError("Unreachable")
 
 
 async def _embed_search_text(
@@ -472,17 +488,49 @@ async def _post_submission(
     issue_ref: str,
     submission: dict[str, Any],
 ) -> httpx.Response | None:
-    """POST an evaluation result back to the craft-dashboard API."""
-    try:
-        return await runtime.http_client.post(
-            "/api/eval/result",
-            json=submission,
-            headers=runtime.headers,
-        )
-    except httpx.ConnectError:
-        logger.error("%s: lost connection to server while submitting", issue_ref)  # noqa: TRY400
-    except httpx.HTTPError as exc:
-        logger.error("%s: HTTP error submitting result: %s", issue_ref, exc)  # noqa: TRY400
+    """POST an evaluation result back to the craft-dashboard API with retry backoff."""
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = await runtime.http_client.post(
+                "/api/eval/result",
+                json=submission,
+                headers=runtime.headers,
+            )
+            if response.status_code in {502, 503, 504} and attempt < max_retries:
+                logger.warning(
+                    "%s: submit returned %d on attempt %d/%d; retrying in %ds...",
+                    issue_ref,
+                    response.status_code,
+                    attempt,
+                    max_retries,
+                    2**attempt,
+                )
+                await asyncio.sleep(2**attempt)
+                continue
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
+            if attempt < max_retries:
+                logger.warning(
+                    "%s: network error (%s) submitting result on attempt %d/%d; retrying in %ds...",
+                    issue_ref,
+                    exc,
+                    attempt,
+                    max_retries,
+                    2**attempt,
+                )
+                await asyncio.sleep(2**attempt)
+                continue
+            logger.error(  # noqa: TRY400
+                "%s: failed to submit result after %d attempts: %s",
+                issue_ref,
+                max_retries,
+                exc,
+            )
+        except httpx.HTTPError as exc:
+            logger.error("%s: HTTP error submitting result: %s", issue_ref, exc)  # noqa: TRY400
+            return None
+        else:
+            return response
     return None
 
 

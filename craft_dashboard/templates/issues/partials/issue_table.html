@@ -1,16 +1,22 @@
 {# Partial: issue table body, swapped via HTMX #}
 {# Score descriptions for column header tooltips #}
 {% set score_tooltips = {
-  "staleness": "How stale/inactive this issue is (0=very active, 100=completely dead)",
+  "impact": "Value/severity of fixing or merging (0=none, 100=critical/huge)",
   "complexity": "How complex this issue is to resolve (0=trivial, 100=extremely complex)",
-  "support_request": "How likely this is a support request rather than a bug or feature (0=not support, 100=clearly support)",
+  "actionability": "How clearly scoped, reproducible, and ready for development (0=vague/blocked, 100=ready to implement)",
+  "quick_win": "Weighted score based on high impact, low complexity, and high actionability",
   "confidence": "How confident the evaluation is in its suggested action (0=uncertain, 100=highly certain)",
+  "staleness": "How stale/inactive this issue is (0=very active, 100=completely dead)",
+  "support_request": "How likely this is a support request rather than a bug or feature (0=not support, 100=clearly support)",
 } %}
 {% set score_labels = {
-  "staleness": "Staleness",
+  "impact": "Impact",
   "complexity": "Complexity",
-  "support_request": "Support Req",
+  "actionability": "Actionability",
+  "quick_win": "Quick Win",
   "confidence": "Confidence",
+  "staleness": "Staleness",
+  "support_request": "Support Req",
 } %}
 <div id="issue-table">
   <p class="u-text--muted" style="margin-bottom:0.5rem;">
@@ -78,10 +84,10 @@
         <td data-col="author">{{ issue.author or "unknown" }}</td>
         <td data-col="age">{{ (issue.age_days ~ "d") if issue.age_days is not none else "?" }}</td>
         <td data-col="action">
-          {% if issue.state in ("closed", "merged") %}
+          {% if issue.suggested_action %}
+          <span class="action-badge" aria-label="Action: {{ issue.suggested_action|replace('_', ' ') }}">{{ issue.suggested_action|replace("_", " ") }}</span>
+          {% elif issue.state in ("closed", "merged") %}
           <span style="color:var(--app-text-muted);">-</span>
-          {% elif issue.suggested_action %}
-          <span class="action-badge" aria-label="Suggested action: {{ issue.suggested_action|replace('_', ' ') }}">{{ issue.suggested_action|replace("_", " ") }}</span>
           {% endif %}
         </td>
         {% for score_key in active_scores %}

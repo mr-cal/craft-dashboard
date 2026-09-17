@@ -445,7 +445,8 @@ async def _resolve_repo_shas(
 
     shas: dict[str, str] = {}
     for repo in repos_needed:
-        mirror_path = mirror_dir / f"{canonical_git_project_name(repo)}.git"
+        canonical_repo = canonical_git_project_name(repo)
+        mirror_path = mirror_dir / f"{canonical_repo}.git"
         if not mirror_path.exists():
             continue
         try:
@@ -453,6 +454,7 @@ async def _resolve_repo_shas(
         except Exception:  # noqa: BLE001 - a corrupt/empty mirror must not break /next
             continue
         shas[repo] = sha
+        shas[canonical_repo] = sha
     return shas
 
 
@@ -606,8 +608,16 @@ async def submit_result(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     scores = dict(payload.scores)
-    if issue.state == "open" and "impact" in scores and "complexity" in scores:
-        scores["quick_win"] = scores["impact"] * (100 - scores["complexity"]) / 100
+    if issue.state == "open" and all(
+        k in scores for k in ("impact", "complexity", "actionability")
+    ):
+        scores["quick_win"] = round(
+            scores["impact"]
+            * (100 - scores["complexity"])
+            * scores["actionability"]
+            / 10000.0,
+            1,
+        )
 
     await session.execute(
         update(LLMEvaluation)

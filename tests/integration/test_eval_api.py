@@ -977,11 +977,10 @@ class TestEvalResultIntegration:
                     "summary_embedding": [0.1] * 1024,
                     "search_embedding": [0.1] * 1024,
                     "scores": {
-                        "staleness": 1,
-                        "complexity": 3,
-                        "support_request": 4,
                         "impact": 10,
-                        "readiness": 5,
+                        "complexity": 3,
+                        "actionability": 50,
+                        "confidence": 70,
                     },
                     "suggested_action": "keep_open",
                     "suggested_action_reason": "Maintainers still need to investigate this regression.",
@@ -1019,11 +1018,10 @@ class TestEvalResultIntegration:
                     "summary_embedding": [0.1] * 1024,
                     "search_embedding": [0.1] * 1024,
                     "scores": {
-                        "staleness": 1,
-                        "complexity": 3,
-                        "support_request": 4,
                         "impact": 10,
-                        "readiness": 5,
+                        "complexity": 3,
+                        "actionability": 50,
+                        "confidence": 70,
                     },
                     "suggested_action": "keep_open",
                     "suggested_action_reason": "Maintainers still need to investigate this regression.",
@@ -1076,10 +1074,9 @@ class TestEvalResultIntegration:
                     "content_hash": current_hash,
                     "summary": "Maintainers confirmed the regression is still reproducible.",
                     "scores": {
-                        "staleness": 2,
-                        "complexity": 55,
-                        "support_request": 12,
                         "impact": 35,
+                        "complexity": 55,
+                        "actionability": 60,
                         "confidence": 70,
                     },
                     "suggested_action": "keep_open",
@@ -1151,10 +1148,9 @@ class TestEvalResultIntegration:
                     "content_hash": current_hash,
                     "summary": "This summary is definitely long enough to pass.",
                     "scores": {
-                        "staleness": 2,
-                        "complexity": 55,
-                        "support_request": 12,
                         "impact": 35,
+                        "complexity": 55,
+                        "actionability": 60,
                         "confidence": 70,
                     },
                     "suggested_action": "keep_open",
@@ -1205,10 +1201,9 @@ class TestEvalResultIntegration:
                     "content_hash": current_hash,
                     "summary": "Maintainers confirmed the regression is still reproducible.",
                     "scores": {
-                        "staleness": 2,
-                        "complexity": 55,
-                        "support_request": 12,
                         "impact": 35,
+                        "complexity": 55,
+                        "actionability": 60,
                         "confidence": 70,
                     },
                     "suggested_action": "keep_open",
@@ -1314,10 +1309,9 @@ class TestEvalResultIntegration:
                     "content_hash": current_hash,
                     "summary": "Maintainers confirmed the regression is still reproducible.",
                     "scores": {
-                        "staleness": 2,
-                        "complexity": 55,
-                        "support_request": 12,
                         "impact": 35,
+                        "complexity": 55,
+                        "actionability": 60,
                         "confidence": 70,
                     },
                     "suggested_action": "keep_open",
@@ -1377,10 +1371,9 @@ class TestEvalResultIntegration:
                     "content_hash": current_hash,
                     "summary": "Maintainers confirmed the regression is still reproducible.",
                     "scores": {
-                        "staleness": 2,
-                        "complexity": 55,
-                        "support_request": 12,
                         "impact": 35,
+                        "complexity": 55,
+                        "actionability": 60,
                         "confidence": 70,
                     },
                     "suggested_action": "keep_open",
@@ -1439,10 +1432,9 @@ class TestEvalResultIntegration:
                     "content_hash": current_hash,
                     "summary": "Maintainers confirmed the regression is still reproducible.",
                     "scores": {
-                        "staleness": 2,
-                        "complexity": 55,
-                        "support_request": 12,
                         "impact": 35,
+                        "complexity": 55,
+                        "actionability": 60,
                         "confidence": 70,
                     },
                     "suggested_action": "keep_open",
@@ -1486,10 +1478,9 @@ class TestEvalResultIntegration:
                     "content_hash": issue.content_hash,
                     "summary": "A sufficiently long summary describing the issue state.",
                     "scores": {
-                        "staleness": 10,
-                        "complexity": 20,
-                        "support_request": 0,
                         "impact": 80,
+                        "complexity": 20,
+                        "actionability": 75,
                         "confidence": 90,
                     },
                     "suggested_action": "keep_open",
@@ -1506,7 +1497,7 @@ class TestEvalResultIntegration:
         evaluations = asyncio.get_event_loop().run_until_complete(
             _all_evaluations(test_db_session)
         )
-        assert evaluations[0].scores["quick_win"] == 64
+        assert evaluations[0].scores["quick_win"] == 48.0
 
     def test_submit_result_persists_related_work_as_issue_links(
         self, test_db_session: AsyncSession
@@ -1528,10 +1519,9 @@ class TestEvalResultIntegration:
                     "content_hash": from_issue.content_hash,
                     "summary": "A sufficiently long summary describing the issue state.",
                     "scores": {
-                        "staleness": 10,
-                        "complexity": 20,
-                        "support_request": 0,
                         "impact": 30,
+                        "complexity": 20,
+                        "actionability": 80,
                         "confidence": 90,
                     },
                     "suggested_action": "keep_open",
@@ -1584,10 +1574,9 @@ class TestEvalResultIntegration:
                     "content_hash": issue.content_hash,
                     "summary": "A sufficiently long summary describing the issue state.",
                     "scores": {
-                        "staleness": 10,
-                        "complexity": 20,
-                        "support_request": 0,
                         "impact": 40,
+                        "complexity": 20,
+                        "actionability": 70,
                         "confidence": 70,
                     },
                     "suggested_action": "keep_open",

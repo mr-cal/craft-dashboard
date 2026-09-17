@@ -136,7 +136,7 @@ class TestBuildOpenEvaluatePrompt:
         assert msgs[1]["role"] == "user"
         assert "Crash on startup" in msgs[1]["content"]
 
-    def test_issue_system_has_support_request_score(self) -> None:
+    def test_issue_system_has_actionability_score(self) -> None:
         msgs = build_open_evaluate_prompt(
             title="T",
             body=None,
@@ -148,9 +148,10 @@ class TestBuildOpenEvaluatePrompt:
             is_maintainer=False,
             comment_count=0,
         )
-        assert "support_request" in msgs[0]["content"]
+        assert "actionability" in msgs[0]["content"]
+        assert "support_request" not in msgs[0]["content"]
 
-    def test_pr_system_has_no_support_request_score(self) -> None:
+    def test_pr_system_has_actionability_score(self) -> None:
         msgs = build_open_evaluate_prompt(
             title="Fix auth bug",
             body=None,
@@ -162,6 +163,7 @@ class TestBuildOpenEvaluatePrompt:
             is_maintainer=True,
             comment_count=0,
         )
+        assert "actionability" in msgs[0]["content"]
         assert "support_request" not in msgs[0]["content"]
         assert "needs_review" in msgs[0]["content"]
 
@@ -236,6 +238,18 @@ class TestOpenPromptSchemaFields:
 
     def test_pr_prompt_mentions_related_work(self) -> None:
         assert '"related_work"' in _OPEN_PR_EVAL_SYSTEM
+
+    def test_issue_prompt_mentions_actionability_score(self) -> None:
+        assert '"actionability"' in _OPEN_ISSUE_EVAL_SYSTEM
+
+    def test_issue_prompt_mentions_close_resolved(self) -> None:
+        assert "close_resolved" in _OPEN_ISSUE_EVAL_SYSTEM
+
+    def test_pr_prompt_mentions_actionability_score(self) -> None:
+        assert '"actionability"' in _OPEN_PR_EVAL_SYSTEM
+
+    def test_pr_prompt_mentions_close_superseded(self) -> None:
+        assert "close_superseded" in _OPEN_PR_EVAL_SYSTEM
 
     def test_confidence_description_covers_all_scores(self) -> None:
         assert "all scores collectively" in _OPEN_ISSUE_EVAL_SYSTEM
@@ -329,6 +343,9 @@ class TestBuildClosedEvaluatePrompt:
             comment_count=0,
         )
         assert '"summary"' in msgs[0]["content"]
+        assert '"suggested_action"' in msgs[0]["content"]
+        assert '"related_work"' in msgs[0]["content"]
+        assert "closed_resolved" in msgs[0]["content"]
 
     def test_system_does_not_ask_for_scores(self) -> None:
         msgs = build_closed_evaluate_prompt(

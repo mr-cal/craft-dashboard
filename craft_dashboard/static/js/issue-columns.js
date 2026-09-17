@@ -1,19 +1,20 @@
 (function () {
   const storageKey = "visible_columns";
   const scoreColumns = [
-    "staleness",
-    "complexity",
-    "support_request",
     "impact",
+    "complexity",
+    "actionability",
     "quick_win",
     "confidence",
+    "staleness",
+    "support_request",
   ];
   const defaultColumns = [
     "issue",
     "title",
     "author",
     "age",
-    ...scoreColumns.filter((column) => ["staleness", "confidence"].includes(column)),
+    ...scoreColumns.filter((column) => ["impact", "actionability", "quick_win"].includes(column)),
     "action",
     "summary",
   ];

@@ -10,18 +10,25 @@ from craft_dashboard.llm.exceptions import LLMValidationError
 # Actions common to both issues and PRs.
 _ALL_ACTIONS: Final[frozenset[str]] = frozenset(
     {
+        "close_resolved",
+        "close_superseded",
         "close_stale",
         "close_not_a_bug",
         "close_not_mergeable",
         "needs_triage",
         "needs_review",
         "keep_open",
+        "closed_resolved",
+        "closed_superseded",
+        "closed_not_a_bug",
+        "closed_stale",
     }
 )
 
 # Actions valid for issue evaluations.
 _ISSUE_ACTIONS: Final[frozenset[str]] = frozenset(
     {
+        "close_resolved",
         "close_stale",
         "close_not_a_bug",
         "needs_triage",
@@ -33,6 +40,7 @@ _ISSUE_ACTIONS: Final[frozenset[str]] = frozenset(
 # Actions valid for PR evaluations.
 _PR_ACTIONS: Final[frozenset[str]] = frozenset(
     {
+        "close_superseded",
         "close_stale",
         "close_not_a_bug",
         "close_not_mergeable",
@@ -41,15 +49,28 @@ _PR_ACTIONS: Final[frozenset[str]] = frozenset(
     }
 )
 
+# Actions valid for closed issue/PR evaluations.
+_CLOSED_ACTIONS: Final[frozenset[str]] = frozenset(
+    {
+        "closed_resolved",
+        "closed_superseded",
+        "closed_not_a_bug",
+        "closed_stale",
+    }
+)
+
 _ISSUE_REQUIRED_SCORE_KEYS: Final[frozenset[str]] = frozenset(
-    {"staleness", "complexity", "support_request", "impact", "confidence"}
+    {"impact", "complexity", "actionability", "confidence"}
 )
 _PR_REQUIRED_SCORE_KEYS: Final[frozenset[str]] = frozenset(
-    {"staleness", "complexity", "impact", "confidence"}
+    {"impact", "complexity", "actionability", "confidence"}
 )
 
 # Backward-compatible exports.
 ALLOWED_ACTIONS: Final[frozenset[str]] = _ALL_ACTIONS
+CLOSED_ACTIONS: Final[frozenset[str]] = _CLOSED_ACTIONS
+ISSUE_ACTIONS: Final[frozenset[str]] = _ISSUE_ACTIONS
+PR_ACTIONS: Final[frozenset[str]] = _PR_ACTIONS
 
 _MIN_SUMMARY_LENGTH: Final[int] = 20
 _MAX_SCORE: Final[int] = 100
@@ -80,12 +101,15 @@ def validate_evaluation_result(
         if scores:
             msg = "scores must be empty for closed issues"
             raise LLMValidationError(msg)
-        if result.get("suggested_action") is not None:
-            msg = "suggested_action must be None for closed issues"
-            raise LLMValidationError(msg)
-        if result.get("suggested_action_reason") is not None:
-            msg = "suggested_action_reason must be None for closed issues"
-            raise LLMValidationError(msg)
+        suggested_action = result.get("suggested_action")
+        if suggested_action is not None:
+            if suggested_action not in _CLOSED_ACTIONS:
+                msg = f"suggested_action for closed issue must be one of: {', '.join(sorted(_CLOSED_ACTIONS))}"
+                raise LLMValidationError(msg)
+            _require_non_empty_string(
+                result.get("suggested_action_reason"),
+                field_name="suggested_action_reason",
+            )
         return
 
     if issue_type == "pull_request":

@@ -24,19 +24,14 @@ from craft_dashboard.models.issue import Issue
 #: prompt (build_open_evaluate_prompt). Increment only when a change to
 #: that prompt is expected to alter open-item scores/summaries — this
 #: re-evaluates just the ~2,269 open items, not the closed-item corpus.
-CURRENT_EVAL_VERSION: int = 5
+CURRENT_EVAL_VERSION: int = 6
 
 #: Evaluation version produced by the current closed-issue/merged-PR
 #: *summary* prompt (build_closed_evaluate_prompt). Versioned
 #: independently of CURRENT_EVAL_VERSION so a scoring-prompt change never
 #: forces a re-summarization of the much larger (17,206-item) closed
 #: corpus, and vice versa.
-#:
-#: MUST be initialized to 4 — the *same* value CURRENT_EVAL_VERSION
-#: currently holds — NOT a fresh 1 — because pre-split production rows for
-#: closed items already carry ``eval_version = 4`` and a fresh value would
-#: incorrectly re-queue the entire closed corpus on first deploy.
-CURRENT_SUMMARY_VERSION: int = 4
+CURRENT_SUMMARY_VERSION: int = 5
 
 
 def current_version_for_state(state: str) -> int:
@@ -96,6 +91,7 @@ IssueComment = dict[str, Any]
 IssueDetails = dict[str, Any]
 ScoreMap = dict[str, int | float]
 MAX_TOOL_ROUNDS: int = 20
+MAX_CLOSED_TOOL_ROUNDS: int = 5
 MAX_TOOL_TOKENS: int = 120_000
 MAX_EVAL_TOKENS: int = 16_384
 TOOL_RESULT_MAX_BYTES: int = 4_000
@@ -391,12 +387,12 @@ class IssueEvaluator:
         logger.debug("Evaluating: %s", title)
 
         if normalized_state in {"closed", "merged"}:
-            messages = build_closed_evaluate_prompt(
+            return await self._evaluate_closed(
                 title=title,
                 body=body,
                 issue_type=issue_type,
-                state=normalized_state,
-                labels=label_names,
+                normalized_state=normalized_state,
+                label_names=label_names,
                 age_days=age_days,
                 last_activity_days=last_activity_days,
                 author=author,
@@ -405,7 +401,75 @@ class IssueEvaluator:
                 comments=comments,
                 closing_references=closing_references,
                 pr_details=pr_details,
+                current_hash=current_hash,
+                project=project,
+                tool_ctx=tool_ctx,
             )
+
+        return await self._evaluate_open(
+            title=title,
+            body=body,
+            issue_type=issue_type,
+            normalized_state=normalized_state,
+            label_names=label_names,
+            age_days=age_days,
+            last_activity_days=last_activity_days,
+            author=author,
+            is_maintainer=is_maintainer,
+            comment_count=comment_count,
+            comments=comments,
+            closing_references=closing_references,
+            pr_details=pr_details,
+            current_hash=current_hash,
+            project=project,
+            tool_ctx=tool_ctx,
+        )
+
+    async def _evaluate_closed(
+        self,
+        *,
+        title: str,
+        body: str | None,
+        issue_type: str,
+        normalized_state: str,
+        label_names: list[str],
+        age_days: int,
+        last_activity_days: int,
+        author: str,
+        is_maintainer: bool,
+        comment_count: int,
+        comments: list[IssueComment] | None,
+        closing_references: list[IssueComment] | None,
+        pr_details: IssueDetails | None,
+        current_hash: str,
+        project: str | None = None,
+        tool_ctx: ToolContext | None = None,
+    ) -> EvaluationResult:
+        """Evaluate a closed issue or merged PR."""
+        messages = build_closed_evaluate_prompt(
+            title=title,
+            body=body,
+            issue_type=issue_type,
+            state=normalized_state,
+            labels=label_names,
+            age_days=age_days,
+            last_activity_days=last_activity_days,
+            author=author,
+            is_maintainer=is_maintainer,
+            comment_count=comment_count,
+            comments=comments,
+            closing_references=closing_references,
+            pr_details=pr_details,
+        )
+        transcript = None
+        if project and tool_ctx:
+            self._tool_ctx = tool_ctx
+            parsed, response, transcript = await self._run_tool_loop(
+                messages,
+                model=self.model_summary,
+                max_rounds=MAX_CLOSED_TOOL_ROUNDS,
+            )
+        else:
             response = await self.client.complete(
                 model=self.model_summary,
                 messages=messages,
@@ -413,34 +477,56 @@ class IssueEvaluator:
                 response_format={"type": "json_object"},
             )
             parsed = _parse_evaluation_response(response.content)
-            if parsed is None or not (parsed.get("summary") or "").strip():
-                if response.finish_reason == "length":
-                    err_msg = (
-                        f"LLM consumed all {response.completion_tokens} completion tokens "
-                        f"(finish_reason='length') without producing a valid evaluation JSON summary"
-                    )
-                else:
-                    err_msg = f"Could not parse evaluation response JSON: {response.content[:200]}"
-                logger.warning(
-                    "Could not parse evaluation response for %s: %s", title, err_msg
+
+        if parsed is None or not (parsed.get("summary") or "").strip():
+            if response.finish_reason == "length":
+                err_msg = (
+                    f"LLM consumed all {response.completion_tokens} completion tokens "
+                    f"(finish_reason='length') without producing a valid evaluation JSON summary"
                 )
-                raise EvaluationDiscarded(err_msg)
+            else:
+                err_msg = f"Could not parse evaluation response JSON: {response.content[:200]}"
+            logger.warning(
+                "Could not parse evaluation response for %s: %s", title, err_msg
+            )
+            raise EvaluationDiscarded(err_msg)
 
-            summary = parsed["summary"]
-            return {
-                "summary": summary,
-                "scores": {},
-                "suggested_action": None,
-                "suggested_action_reason": None,
-                "tokens_used": response.total_tokens,
-                "prompt_tokens": response.prompt_tokens,
-                "completion_tokens": response.completion_tokens,
-                "cost_usd": response.cost_usd,
-                "issue_data_hash": current_hash,
-                "related_work": [],
-                "transcript": None,
-            }
+        summary = parsed["summary"]
+        return {
+            "summary": summary,
+            "scores": {},
+            "suggested_action": parsed.get("suggested_action"),
+            "suggested_action_reason": parsed.get("suggested_action_reason"),
+            "tokens_used": response.total_tokens,
+            "prompt_tokens": response.prompt_tokens,
+            "completion_tokens": response.completion_tokens,
+            "cost_usd": response.cost_usd,
+            "issue_data_hash": current_hash,
+            "related_work": parsed.get("related_work") or [],
+            "transcript": transcript,
+        }
 
+    async def _evaluate_open(
+        self,
+        *,
+        title: str,
+        body: str | None,
+        issue_type: str,
+        normalized_state: str,
+        label_names: list[str],
+        age_days: int,
+        last_activity_days: int,
+        author: str,
+        is_maintainer: bool,
+        comment_count: int,
+        comments: list[IssueComment] | None,
+        closing_references: list[IssueComment] | None,
+        pr_details: IssueDetails | None,
+        current_hash: str,
+        project: str | None = None,
+        tool_ctx: ToolContext | None = None,
+    ) -> EvaluationResult:
+        """Evaluate an open issue or PR."""
         messages = build_open_evaluate_prompt(
             title=title,
             body=body,
@@ -453,6 +539,8 @@ class IssueEvaluator:
             comment_count=comment_count,
             comments=comments,
             pr_details=pr_details,
+            closing_references=closing_references,
+            state=normalized_state,
         )
         transcript = None
         if project and tool_ctx:
@@ -473,7 +561,11 @@ class IssueEvaluator:
                     ),
                 }
             )
-            parsed, response, transcript = await self._run_tool_loop(messages)
+            parsed, response, transcript = await self._run_tool_loop(
+                messages,
+                model=self.model_scoring,
+                max_rounds=MAX_TOOL_ROUNDS,
+            )
         else:
             response = await self.client.complete(
                 model=self.model_scoring,
@@ -516,26 +608,30 @@ class IssueEvaluator:
         }
 
     async def _run_tool_loop(
-        self, messages: list[dict[str, Any]]
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        max_rounds: int = MAX_TOOL_ROUNDS,
     ) -> tuple[ParsedEvaluation | None, Any, dict[str, Any]]:
-        """Run the bounded tool-calling loop for open-item evaluation."""
+        """Run the bounded tool-calling loop for issue/PR evaluation."""
         if self._tool_ctx is None:  # pragma: no cover
             raise RuntimeError("tool context must be set before running the tool loop")
 
+        active_model = model or self.model_scoring
         rounds: list[dict[str, Any]] = []
         rounds_completed = 0
         total_tokens = 0
 
-        for _round_number in range(1, MAX_TOOL_ROUNDS + 1):
+        for _round_number in range(1, max_rounds + 1):
             logger.debug(
                 "Tool loop round %d/%d: calling %s (max_tokens=%d)...",
                 _round_number,
-                MAX_TOOL_ROUNDS,
-                self.model_scoring,
+                max_rounds,
+                active_model,
                 MAX_EVAL_TOKENS,
             )
             response = await self.client.complete(
-                model=self.model_scoring,
+                model=active_model,
                 messages=messages,
                 max_tokens=MAX_EVAL_TOKENS,
                 tools=TOOL_SCHEMAS,
@@ -553,7 +649,7 @@ class IssueEvaluator:
                 logger.debug(
                     "Tool loop round %d/%d: model emitted final response (%d completion tokens, finish_reason=%s)",
                     _round_number,
-                    MAX_TOOL_ROUNDS,
+                    max_rounds,
                     response.completion_tokens,
                     response.finish_reason,
                 )
@@ -563,7 +659,7 @@ class IssueEvaluator:
                     {
                         "rounds": rounds,
                         "full_capture": False,
-                        "model_name": self.model_scoring,
+                        "model_name": active_model,
                         "rounds_used": rounds_completed,
                     },
                 )
@@ -572,7 +668,7 @@ class IssueEvaluator:
             logger.debug(
                 "Tool loop round %d/%d: model requested %d tool call(s): %s (%d completion tokens, finish_reason=%s)",
                 _round_number,
-                MAX_TOOL_ROUNDS,
+                max_rounds,
                 len(response.tool_calls),
                 ", ".join(tool_names),
                 response.completion_tokens,
@@ -628,7 +724,7 @@ class IssueEvaluator:
 
         logger.debug(
             "Tool loop reached round limit (%d rounds, %d tokens); requesting final response...",
-            MAX_TOOL_ROUNDS,
+            max_rounds,
             total_tokens,
         )
         messages.append(
@@ -641,7 +737,7 @@ class IssueEvaluator:
             }
         )
         response = await self.client.complete(
-            model=self.model_scoring,
+            model=active_model,
             messages=messages,
             max_tokens=MAX_EVAL_TOKENS,
             tool_choice="none",
@@ -653,7 +749,7 @@ class IssueEvaluator:
             {
                 "rounds": rounds,
                 "full_capture": False,
-                "model_name": self.model_scoring,
+                "model_name": active_model,
                 "rounds_used": rounds_completed,
             },
         )

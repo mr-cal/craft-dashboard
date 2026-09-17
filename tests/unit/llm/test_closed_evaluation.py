@@ -66,6 +66,50 @@ async def test_closed_issue_uses_summary_only_evaluation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_closed_issue_returns_action_and_related_work() -> None:
+    """Closed issues preserve suggested_action, reason, and related_work."""
+    mock_response = LLMResponse(
+        content=(
+            '{"summary": "Fixed by core24 patch.", '
+            '"suggested_action": "closed_resolved", '
+            '"suggested_action_reason": "Resolved in PR #3629.", '
+            '"related_work": [{"kind": "likely_fixed_by", "ref": "snapcraft#3629", "confidence": 95, "note": "closing PR"}]}'
+        ),
+        total_tokens=25,
+        prompt_tokens=15,
+        completion_tokens=10,
+        model="test-model",
+    )
+    mock_client = MagicMock()
+    mock_client.complete = AsyncMock(return_value=mock_response)
+    evaluator = IssueEvaluator(
+        client=mock_client,
+        model_summary="test-model",
+        model_scoring="test-model",
+    )
+
+    result = await evaluator.evaluate(
+        title="snapcraft pack fails with LXD backend",
+        body="details",
+        issue_type="issue",
+        state="closed",
+        labels=["bug"],
+        age_days=10,
+        last_activity_days=1,
+        author="alice",
+        is_maintainer=False,
+        comment_count=1,
+    )
+
+    assert result is not None
+    assert result["summary"] == "Fixed by core24 patch."
+    assert result["suggested_action"] == "closed_resolved"
+    assert result["suggested_action_reason"] == "Resolved in PR #3629."
+    assert len(result["related_work"]) == 1
+    assert result["related_work"][0]["ref"] == "snapcraft#3629"
+
+
+@pytest.mark.asyncio
 async def test_state_change_triggers_reevaluation_with_new_hash() -> None:
     """Changing an issue from open to closed produces a different content hash."""
     mock_client = MagicMock()

@@ -160,7 +160,7 @@ class TestTriagePage:
         )
 
     def test_triage_default_score_columns(self, seeded_url: str) -> None:
-        """The triage page should show Staleness and Confidence by default."""
+        """The triage page should show Impact, Actionability, and Quick Win by default."""
         script = make_script("""\
     await page.goto(`${BASE}/issues`, {waitUntil: 'networkidle0', timeout: 30000});
     await new Promise(r => setTimeout(r, 2000));
@@ -172,22 +172,26 @@ class TestTriagePage:
 
     console.log(JSON.stringify({
       headers: headers,
-      has_staleness: headers.some(h => h.toLowerCase().includes('staleness')),
-      has_confidence: headers.some(h => h.toLowerCase().includes('confidence')),
+      has_impact: headers.some(h => h.toLowerCase().includes('impact')),
+      has_actionability: headers.some(h => h.toLowerCase().includes('actionability')),
+      has_quick_win: headers.some(h => h.toLowerCase().includes('quick win')),
     }));
 """)
         result = run_puppeteer(script, base_url=seeded_url, timeout=20)
-        assert result["has_staleness"], (
-            f"Expected 'Staleness' column, got headers: {result['headers']}"
+        assert result["has_impact"], (
+            f"Expected 'Impact' column, got headers: {result['headers']}"
         )
-        assert result["has_confidence"], (
-            f"Expected 'Confidence' column by default, got headers: {result['headers']}"
+        assert result["has_actionability"], (
+            f"Expected 'Actionability' column by default, got headers: {result['headers']}"
+        )
+        assert result["has_quick_win"], (
+            f"Expected 'Quick Win' column by default, got headers: {result['headers']}"
         )
 
     def test_triage_complexity_column_toggling(self, seeded_url: str) -> None:
-        """Complexity should appear when selected, confidence remains visible."""
+        """Complexity should appear when selected."""
         script = make_script("""\
-    await page.goto(`${BASE}/issues?scores=staleness,confidence,complexity`, {waitUntil: 'networkidle0', timeout: 30000});
+    await page.goto(`${BASE}/issues?scores=impact,confidence,complexity`, {waitUntil: 'networkidle0', timeout: 30000});
     await new Promise(r => setTimeout(r, 2000));
 
     const headers = await page.evaluate(() => {
@@ -197,14 +201,14 @@ class TestTriagePage:
 
     console.log(JSON.stringify({
       headers: headers,
-      has_staleness: headers.some(h => h.toLowerCase().includes('staleness')),
+      has_impact: headers.some(h => h.toLowerCase().includes('impact')),
       has_confidence: headers.some(h => h.toLowerCase().includes('confidence')),
       has_complexity: headers.some(h => h.toLowerCase().includes('complexity')),
     }));
 """)
         result = run_puppeteer(script, base_url=seeded_url, timeout=20)
-        assert result["has_staleness"], (
-            f"Expected 'Staleness' column, got headers: {result['headers']}"
+        assert result["has_impact"], (
+            f"Expected 'Impact' column, got headers: {result['headers']}"
         )
         assert result["has_confidence"], (
             f"Expected 'Confidence' column, got headers: {result['headers']}"

@@ -276,9 +276,9 @@ class TestIssueList:
         assert ">Scores<" not in response.text
         assert 'id="columns-hidden"' in response.text
         assert 'name="scores" id="scores-hidden"' in response.text
-        assert 'value="staleness"' in response.text
+        assert 'value="actionability"' in response.text
         assert 'value="complexity"' in response.text
-        assert 'value="support_request"' in response.text
+        assert 'value="impact"' in response.text
         assert 'value="confidence"' in response.text
         assert 'src="/static/js/issue-columns.js"' in response.text
         assert 'data-col="issue"' in response.text

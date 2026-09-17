@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -12,6 +13,7 @@ import httpx
 from craft_dashboard.git_mirrors import reader
 from craft_dashboard.git_mirrors.exceptions import GitMirrorError
 from craft_dashboard.git_mirrors.paths import mirror_path_for
+from craft_dashboard.git_mirrors.reader import _SHA_RE
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,15 +54,24 @@ class ToolContext:
         self.touched_paths.add((repo, path))
 
 
-def _resolve_ref(
+async def _resolve_ref(
     ctx: ToolContext, *, project: str, requested_ref: object | None
 ) -> str:
     """Resolve an explicit ref or fall back to the pinned SHA for project."""
     if requested_ref is not None:
-        ref = str(requested_ref)
-        if ref not in ctx.pinned_shas.values():
-            raise GitMirrorError(f"ref must be one of the pinned SHAs, got: {ref!r}")
-        return ref
+        ref = str(requested_ref).strip()
+        if ref in ctx.pinned_shas.values():
+            return ref
+        if _SHA_RE.match(ref):
+            with contextlib.suppress(Exception):
+                mirror = mirror_path_for(
+                    project,
+                    mirror_dir=ctx.mirror_dir,
+                    allowed_projects=ctx.allowed_projects,
+                )
+                if await reader.has_commit(mirror, ref):
+                    return ref
+        raise GitMirrorError(f"ref must be one of the pinned SHAs, got: {ref!r}")
     try:
         return ctx.pinned_shas[project]
     except KeyError as exc:
@@ -145,7 +156,7 @@ async def dispatch_tool_call(
 async def _handle_read_file(ctx: ToolContext, arguments: dict[str, object]) -> str:
     project = str(arguments["project"])
     path = str(arguments["path"])
-    ref = _resolve_ref(ctx, project=project, requested_ref=arguments.get("ref"))
+    ref = await _resolve_ref(ctx, project=project, requested_ref=arguments.get("ref"))
     mirror = mirror_path_for(
         project, mirror_dir=ctx.mirror_dir, allowed_projects=ctx.allowed_projects
     )
@@ -168,7 +179,7 @@ async def _handle_grep_repo(ctx: ToolContext, arguments: dict[str, object]) -> s
     for project in _resolve_projects(ctx, arguments.get("repos")):
         if truncated:
             break
-        ref = _resolve_ref(ctx, project=project, requested_ref=ref_arg)
+        ref = await _resolve_ref(ctx, project=project, requested_ref=ref_arg)
         mirror = mirror_path_for(
             project,
             mirror_dir=ctx.mirror_dir,
@@ -192,7 +203,7 @@ async def _handle_grep_repo(ctx: ToolContext, arguments: dict[str, object]) -> s
 
 async def _handle_repo_layout(ctx: ToolContext, arguments: dict[str, object]) -> str:
     project = str(arguments["project"])
-    ref = _resolve_ref(ctx, project=project, requested_ref=arguments.get("ref"))
+    ref = await _resolve_ref(ctx, project=project, requested_ref=arguments.get("ref"))
     mirror = mirror_path_for(
         project, mirror_dir=ctx.mirror_dir, allowed_projects=ctx.allowed_projects
     )
@@ -206,7 +217,7 @@ async def _handle_repo_layout(ctx: ToolContext, arguments: dict[str, object]) ->
 async def _handle_git_log_path(ctx: ToolContext, arguments: dict[str, object]) -> str:
     project = str(arguments["project"])
     path = str(arguments["path"])
-    ref = _resolve_ref(ctx, project=project, requested_ref=arguments.get("ref"))
+    ref = await _resolve_ref(ctx, project=project, requested_ref=arguments.get("ref"))
     mirror = mirror_path_for(
         project, mirror_dir=ctx.mirror_dir, allowed_projects=ctx.allowed_projects
     )
@@ -224,7 +235,7 @@ async def _handle_git_log_search(ctx: ToolContext, arguments: dict[str, object])
     for project in _resolve_projects(ctx, arguments.get("repos")):
         if truncated:
             break
-        ref = _resolve_ref(ctx, project=project, requested_ref=ref_arg)
+        ref = await _resolve_ref(ctx, project=project, requested_ref=ref_arg)
         mirror = mirror_path_for(
             project,
             mirror_dir=ctx.mirror_dir,
