@@ -81,6 +81,30 @@ def _apply_author_role_filter(query: Select, author_role: str) -> Select:
     return query
 
 
+def _to_int_score(val: float | None) -> int | None:
+    """Coerce a score value to an integer, or None."""
+    if val is None:
+        return None
+    try:
+        return int(round(val))
+    except (ValueError, TypeError):
+        return None
+
+
+def _normalize_scores(
+    scores: dict[str, float | None] | None,
+) -> dict[str, float | None]:
+    """Normalize score values (e.g. coerce quick_win to integer)."""
+    if not scores:
+        return {}
+    normalized = dict(scores)
+    if "quick_win" in normalized and normalized["quick_win"] is not None:
+        int_val = _to_int_score(normalized["quick_win"])
+        if int_val is not None:
+            normalized["quick_win"] = int_val
+    return normalized
+
+
 def _serialize_evaluation(evaluation: LLMEvaluation) -> dict[str, Any]:
     """Serialize an evaluation for template rendering."""
     return {
@@ -88,7 +112,7 @@ def _serialize_evaluation(evaluation: LLMEvaluation) -> dict[str, Any]:
         "summary": evaluation.summary,
         "suggested_action": evaluation.suggested_action,
         "suggested_action_reason": evaluation.suggested_action_reason,
-        "scores": evaluation.scores or {},
+        "scores": _normalize_scores(evaluation.scores),
         "evaluated_at": evaluation.evaluated_at,
         "model_name": evaluation.model_name,
         "tokens_used": evaluation.tokens_used,
@@ -411,7 +435,7 @@ class IssueRepository:
         issues = []
         for row in result:
             issue = row[0]
-            scores = row.scores or {}
+            scores = _normalize_scores(row.scores)
             has_related_links = bool(row[6])
             issues.append(
                 IssueView(
@@ -437,7 +461,7 @@ class IssueRepository:
                     actionability=scores.get("actionability"),
                     complexity=scores.get("complexity"),
                     impact=scores.get("impact"),
-                    quick_win=scores.get("quick_win"),
+                    quick_win=_to_int_score(scores.get("quick_win")),
                     confidence=scores.get("confidence"),
                     has_related_links=has_related_links,
                 )
@@ -657,7 +681,7 @@ class IssueRepository:
         issues = []
         for row in result:
             issue = row[0]
-            scores = row.scores or {}
+            scores = _normalize_scores(row.scores)
             issues.append(
                 IssueView(
                     id=issue.id,
@@ -683,7 +707,7 @@ class IssueRepository:
                     complexity=scores.get("complexity"),
                     confidence=scores.get("confidence"),
                     impact=scores.get("impact"),
-                    quick_win=scores.get("quick_win"),
+                    quick_win=_to_int_score(scores.get("quick_win")),
                 )
             )
         return issues

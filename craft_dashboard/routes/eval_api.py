@@ -611,12 +611,13 @@ async def submit_result(
     if issue.state == "open" and all(
         k in scores for k in ("impact", "complexity", "actionability")
     ):
-        scores["quick_win"] = round(
-            scores["impact"]
-            * (100 - scores["complexity"])
-            * scores["actionability"]
-            / 10000.0,
-            1,
+        scores["quick_win"] = int(
+            round(
+                scores["impact"]
+                * (100 - scores["complexity"])
+                * scores["actionability"]
+                / 10000.0
+            )
         )
 
     await session.execute(

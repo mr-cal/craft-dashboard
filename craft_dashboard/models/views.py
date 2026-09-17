@@ -30,7 +30,7 @@ class IssueView:
     actionability: float | None = None
     complexity: float | None = None
     impact: float | None = None
-    quick_win: float | None = None
+    quick_win: int | None = None
     confidence: float | None = None
     has_related_links: bool = False
 

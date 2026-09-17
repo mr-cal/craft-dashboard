@@ -1620,7 +1620,8 @@ class TestEvalResultIntegration:
         evaluations = asyncio.get_event_loop().run_until_complete(
             _all_evaluations(test_db_session)
         )
-        assert evaluations[0].scores["quick_win"] == 48.0
+        assert evaluations[0].scores["quick_win"] == 48
+        assert isinstance(evaluations[0].scores["quick_win"], int)
 
     def test_submit_result_persists_related_work_as_issue_links(
         self, test_db_session: AsyncSession

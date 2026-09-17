@@ -850,7 +850,7 @@ async def _seed_issues_with_scores(session) -> None:
                 "actionability": 0.1,
                 "complexity": 0.3,
                 "impact": 0.8,
-                "quick_win": 0.56,
+                "quick_win": 56,
                 "confidence": 70.0,
             },
         )
@@ -878,7 +878,7 @@ async def _seed_issues_with_scores(session) -> None:
                 "actionability": 0.95,
                 "complexity": 0.2,
                 "impact": 0.9,
-                "quick_win": 0.72,
+                "quick_win": 72,
                 "confidence": 85.0,
             },
         )
@@ -906,7 +906,7 @@ async def _seed_issues_with_scores(session) -> None:
                 "actionability": 0.4,
                 "complexity": 0.95,
                 "impact": 0.4,
-                "quick_win": 0.02,
+                "quick_win": 2,
                 "confidence": 60.0,
             },
         )
@@ -962,7 +962,7 @@ class TestQueryIssuesLLMScores:
         assert scored_issue.actionability == 0.1
         assert scored_issue.complexity == 0.3
         assert scored_issue.impact == 0.8
-        assert scored_issue.quick_win == 0.56
+        assert scored_issue.quick_win == 56
         assert scored_issue.get("impact") == 0.8
         assert scored_issue.confidence == 70.0
         assert scored_issue.suggested_action == "close"
@@ -1038,7 +1038,7 @@ class TestQueryIssuesLLMScores:
         issues, *_ = await _query(test_db_session, sort_by="quick_win")
 
         assert issues[0]["external_id"] == "101"
-        assert issues[0]["quick_win"] == 0.72
+        assert issues[0]["quick_win"] == 72
 
 
 class TestLLMStatusFilter:
