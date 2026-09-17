@@ -10,6 +10,7 @@ from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.llm.content_hash import compute_content_hash
 from craft_dashboard.llm.evaluator import (
     CURRENT_EVAL_VERSION,
+    OPEN_PR_EVAL_VERSION,
 )
 from craft_dashboard.models.views import IssueQueryResult, IssueView
 from craft_dashboard.repositories.issue_repository import IssueRepository
@@ -407,6 +408,73 @@ class TestOutdatedEvaluationNotice:
                 IssueRepository,
                 "get_issue_detail",
                 AsyncMock(return_value=detail),
+            ),
+            patch.object(
+                IssueRepository,
+                "get_issue_activity_history",
+                AsyncMock(return_value=[]),
+            ),
+            patch.object(
+                IssueRepository,
+                "find_similar_issues",
+                AsyncMock(return_value=[]),
+            ),
+        ):
+            response = test_client.get("/issues/snapcraft/321")
+
+        assert response.status_code == 200
+        assert "evaluation-outdated-notice" in response.text
+
+    def test_outdated_notice_for_pr_eval_version(self, test_client: TestClient) -> None:
+        pr_detail_current = {
+            **_DETAIL,
+            "is_pr": True,
+            "evaluation_history": [
+                {
+                    **_DETAIL["evaluation_history"][0],
+                    "eval_version": OPEN_PR_EVAL_VERSION,
+                    "issue_data_hash": "some-hash",
+                }
+            ],
+            "content_hash": "some-hash",
+        }
+        with (
+            patch.object(
+                IssueRepository,
+                "get_issue_detail",
+                AsyncMock(return_value=pr_detail_current),
+            ),
+            patch.object(
+                IssueRepository,
+                "get_issue_activity_history",
+                AsyncMock(return_value=[]),
+            ),
+            patch.object(
+                IssueRepository,
+                "find_similar_issues",
+                AsyncMock(return_value=[]),
+            ),
+        ):
+            response = test_client.get("/issues/snapcraft/321")
+
+        assert response.status_code == 200
+        assert "evaluation-outdated-notice" not in response.text
+
+        pr_detail_stale = {
+            **pr_detail_current,
+            "evaluation_history": [
+                {
+                    **_DETAIL["evaluation_history"][0],
+                    "eval_version": OPEN_PR_EVAL_VERSION - 1,
+                    "issue_data_hash": "some-hash",
+                }
+            ],
+        }
+        with (
+            patch.object(
+                IssueRepository,
+                "get_issue_detail",
+                AsyncMock(return_value=pr_detail_stale),
             ),
             patch.object(
                 IssueRepository,

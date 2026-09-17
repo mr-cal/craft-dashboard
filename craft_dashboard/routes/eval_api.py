@@ -30,8 +30,7 @@ from craft_dashboard.llm.content_hash import compute_content_hash
 from craft_dashboard.llm.embeddings import EmbeddingClient
 from craft_dashboard.llm.evaluation_queue import build_pending_evaluation_query
 from craft_dashboard.llm.evaluator import (
-    CURRENT_EVAL_VERSION,
-    current_version_for_state,
+    current_version_for_item,
     expected_version_sql_expr,
 )
 from craft_dashboard.llm.exceptions import LLMValidationError
@@ -240,9 +239,10 @@ async def _maybe_record_queue_snapshot(
     )
     if excl is not None:
         pending_query = pending_query.where(excl)
+    expected_version = expected_version_sql_expr()
     old_version = or_(
         latest_evaluation.eval_version.is_(None),
-        latest_evaluation.eval_version != CURRENT_EVAL_VERSION,
+        latest_evaluation.eval_version != expected_version,
     )
     old_version_unlocked = old_version & or_(
         latest_evaluation.eval_locked_until.is_(None),
@@ -633,7 +633,7 @@ async def submit_result(
         issue_id=payload.issue_id,
         model_name=payload.model_used,
         eval_type=eval_type,
-        eval_version=current_version_for_state(issue.state),
+        eval_version=current_version_for_item(state=issue.state, is_pr=issue.is_pr),
         summary=payload.summary,
         suggested_action=payload.suggested_action,
         suggested_action_reason=payload.suggested_action_reason,

@@ -109,6 +109,11 @@ class Issue(Base):
     )
 
     @property
+    def is_pr(self) -> bool:
+        """Return True if this issue is a pull request."""
+        return self.issue_type == "pull_request"
+
+    @property
     def latest_evaluation(self) -> "LLMEvaluation | None":
         """Return the most recent LLM evaluation, or None."""
         return next((e for e in self.evaluations if e.latest), None)

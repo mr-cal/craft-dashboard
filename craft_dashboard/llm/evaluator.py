@@ -5,7 +5,7 @@ import json
 import logging
 from typing import Any, TypedDict
 
-from sqlalchemy import case, or_
+from sqlalchemy import and_, case, or_
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.expression import SQLColumnExpression
 
@@ -20,67 +20,84 @@ from craft_dashboard.llm.tool_dispatch import ToolContext, dispatch_tool_call
 from craft_dashboard.llm.tools import TOOL_SCHEMAS
 from craft_dashboard.models.issue import Issue
 
-#: Evaluation version produced by the current open-issue/PR *scoring*
-#: prompt (build_open_evaluate_prompt). Increment only when a change to
-#: that prompt is expected to alter open-item scores/summaries — this
-#: re-evaluates just the ~2,269 open items, not the closed-item corpus.
-CURRENT_EVAL_VERSION: int = 6
+#: Evaluation version produced by the current open-issue *scoring* prompt.
+OPEN_ISSUE_EVAL_VERSION: int = 6
 
-#: Evaluation version produced by the current closed-issue/merged-PR
-#: *summary* prompt (build_closed_evaluate_prompt). Versioned
-#: independently of CURRENT_EVAL_VERSION so a scoring-prompt change never
-#: forces a re-summarization of the much larger (17,206-item) closed
-#: corpus, and vice versa.
-CURRENT_SUMMARY_VERSION: int = 5
+#: Evaluation version produced by the current open-PR *scoring* prompt.
+OPEN_PR_EVAL_VERSION: int = 6
+
+#: Evaluation version produced by the current closed-issue *summary* prompt.
+CLOSED_ISSUE_EVAL_VERSION: int = 5
+
+#: Evaluation version produced by the current closed-PR *summary* prompt.
+CLOSED_PR_EVAL_VERSION: int = 5
+
+#: Backwards-compatibility aliases
+CURRENT_EVAL_VERSION: int = OPEN_ISSUE_EVAL_VERSION
+CURRENT_SUMMARY_VERSION: int = CLOSED_ISSUE_EVAL_VERSION
 
 
-def current_version_for_state(state: str) -> int:
-    """Return the eval-version constant that applies to an issue's state.
+def current_version_for_item(*, state: str, is_pr: bool) -> int:
+    """Return the eval-version constant that applies to an issue's state and PR flag.
 
-    Open issues/PRs go through the scoring path (CURRENT_EVAL_VERSION);
-    everything else (closed issues, merged/closed PRs) goes through the
-    summary-only path (CURRENT_SUMMARY_VERSION).
+    - Open issues: OPEN_ISSUE_EVAL_VERSION
+    - Open PRs: OPEN_PR_EVAL_VERSION
+    - Closed issues: CLOSED_ISSUE_EVAL_VERSION
+    - Closed/merged PRs: CLOSED_PR_EVAL_VERSION
     """
-    return CURRENT_EVAL_VERSION if state == "open" else CURRENT_SUMMARY_VERSION
+    if state == "open":
+        return OPEN_PR_EVAL_VERSION if is_pr else OPEN_ISSUE_EVAL_VERSION
+    return CLOSED_PR_EVAL_VERSION if is_pr else CLOSED_ISSUE_EVAL_VERSION
 
 
-def expected_version_sql_expr() -> ColumnElement[int]:
-    """Return the SQL expression for the eval version expected per issue state."""
+def current_version_for_state(state: str, *, is_pr: bool = False) -> int:
+    """Return the eval-version constant that applies to an issue's state and PR flag."""
+    return current_version_for_item(state=state, is_pr=is_pr)
+
+
+def expected_version_sql_expr(
+    state_col: SQLColumnExpression[str] = Issue.state,
+    issue_type_col: SQLColumnExpression[str] = Issue.issue_type,
+) -> ColumnElement[int]:
+    """Return the SQL expression for the eval version expected per issue state and issue type."""
+    is_pr = issue_type_col == "pull_request"
     return case(
-        (Issue.state == "open", CURRENT_EVAL_VERSION),
-        else_=CURRENT_SUMMARY_VERSION,
+        (and_(state_col == "open", ~is_pr), OPEN_ISSUE_EVAL_VERSION),
+        (and_(state_col == "open", is_pr), OPEN_PR_EVAL_VERSION),
+        (and_(state_col != "open", ~is_pr), CLOSED_ISSUE_EVAL_VERSION),
+        else_=CLOSED_PR_EVAL_VERSION,
     )
 
 
 def is_version_outdated_sql_expr(
     eval_type_col: SQLColumnExpression[str],
     eval_version_col: SQLColumnExpression[int | None],
-    state_col: SQLColumnExpression[str],
+    state_col: SQLColumnExpression[str] = Issue.state,
+    issue_type_col: SQLColumnExpression[str] = Issue.issue_type,
 ) -> ColumnElement[bool]:
     """Return SQL expression indicating whether an evaluation's prompt version is outdated.
 
     An evaluation is version-outdated ONLY when the prompt version used for
     its specific evaluation type ('scoring' vs 'summary') predates the current
-    version for that type:
-    - Open issues with a scoring evaluation: eval_version != CURRENT_EVAL_VERSION
-    - Closed issues with a summary evaluation: eval_version != CURRENT_SUMMARY_VERSION
+    version for that item's category:
+    - Open issues with scoring: eval_version != OPEN_ISSUE_EVAL_VERSION
+    - Open PRs with scoring: eval_version != OPEN_PR_EVAL_VERSION
+    - Closed issues with summary: eval_version != CLOSED_ISSUE_EVAL_VERSION
+    - Closed PRs with summary: eval_version != CLOSED_PR_EVAL_VERSION
     - Unset eval_version: always outdated.
 
     Evaluations across state transitions (e.g. a scoring evaluation on a now-closed
     issue) are NOT version-outdated; they are queued under content/state drift.
     """
+    expected = expected_version_sql_expr(state_col, issue_type_col)
     return or_(
         eval_version_col.is_(None),
         case(
             (
                 state_col == "open",
-                (eval_type_col == "scoring")
-                & (eval_version_col != CURRENT_EVAL_VERSION),
+                (eval_type_col == "scoring") & (eval_version_col != expected),
             ),
-            else_=(
-                (eval_type_col == "summary")
-                & (eval_version_col != CURRENT_SUMMARY_VERSION)
-            ),
+            else_=((eval_type_col == "summary") & (eval_version_col != expected)),
         ),
     )
 

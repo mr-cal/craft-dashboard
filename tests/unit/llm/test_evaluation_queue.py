@@ -5,8 +5,13 @@ from datetime import UTC, datetime
 from craft_dashboard.llm.content_hash import compute_content_hash
 from craft_dashboard.llm.evaluation_queue import build_pending_evaluation_query
 from craft_dashboard.llm.evaluator import (
+    CLOSED_ISSUE_EVAL_VERSION,
+    CLOSED_PR_EVAL_VERSION,
     CURRENT_EVAL_VERSION,
     CURRENT_SUMMARY_VERSION,
+    OPEN_ISSUE_EVAL_VERSION,
+    OPEN_PR_EVAL_VERSION,
+    current_version_for_item,
     expected_version_sql_expr,
 )
 from craft_dashboard.models.issue import Issue
@@ -199,10 +204,26 @@ class TestBuildPendingEvaluationQuery:
     async def test_expected_version_sql_expr_matches_issue_state(
         self, test_db_session
     ) -> None:
-        open_issue = make_issue(id=1, project_id=1, external_id="1", state="open")
-        closed_issue = make_issue(id=2, project_id=1, external_id="2", state="closed")
+        open_issue = make_issue(
+            id=1, project_id=1, external_id="1", state="open", issue_type="issue"
+        )
+        open_pr = make_issue(
+            id=2, project_id=1, external_id="2", state="open", issue_type="pull_request"
+        )
+        closed_issue = make_issue(
+            id=3, project_id=1, external_id="3", state="closed", issue_type="issue"
+        )
+        closed_pr = make_issue(
+            id=4,
+            project_id=1,
+            external_id="4",
+            state="closed",
+            issue_type="pull_request",
+        )
         project = make_project(id=1, name="snapcraft")
-        await _seed(test_db_session, project, open_issue, closed_issue)
+        await _seed(
+            test_db_session, project, open_issue, open_pr, closed_issue, closed_pr
+        )
 
         rows = (
             await test_db_session.execute(
@@ -213,9 +234,28 @@ class TestBuildPendingEvaluationQuery:
         ).all()
 
         assert rows == [
-            (1, CURRENT_EVAL_VERSION),
-            (2, CURRENT_SUMMARY_VERSION),
+            (1, OPEN_ISSUE_EVAL_VERSION),
+            (2, OPEN_PR_EVAL_VERSION),
+            (3, CLOSED_ISSUE_EVAL_VERSION),
+            (4, CLOSED_PR_EVAL_VERSION),
         ]
+
+    def test_current_version_for_item(self) -> None:
+        assert (
+            current_version_for_item(state="open", is_pr=False)
+            == OPEN_ISSUE_EVAL_VERSION
+        )
+        assert (
+            current_version_for_item(state="open", is_pr=True) == OPEN_PR_EVAL_VERSION
+        )
+        assert (
+            current_version_for_item(state="closed", is_pr=False)
+            == CLOSED_ISSUE_EVAL_VERSION
+        )
+        assert (
+            current_version_for_item(state="closed", is_pr=True)
+            == CLOSED_PR_EVAL_VERSION
+        )
 
     async def test_locked_issue_is_excluded_until_lock_expires(
         self, test_db_session

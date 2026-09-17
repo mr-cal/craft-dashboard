@@ -167,21 +167,24 @@ Full staged rollout, from smallest to largest blast radius:
 If any stage surfaces a problem, stop and roll back (see Task 12's rollback
 procedure) rather than proceeding to the next stage.
 
-## Backfilling after a CURRENT_EVAL_VERSION bump
+## Evaluation versioning & granular bumps
 
-Bumping `CURRENT_EVAL_VERSION` (in `craft_dashboard/llm/evaluator.py`) makes
-every open issue/PR's current evaluation "outdated" — the next
-`/api/eval/next` poll will naturally re-surface all of them, since
-`build_pending_evaluation_query()`'s steady-state check compares each issue's
-latest `eval_version` against the current constant. No manual database write
-is required to mark rows stale.
+Evaluations are versioned by four granular constants in `craft_dashboard/llm/evaluator.py`:
 
-As of the scoring and pipeline modernization (`CURRENT_EVAL_VERSION` 5 -> 6,
-`CURRENT_SUMMARY_VERSION` 4 -> 5), this re-evaluates both open and closed
-items across tracked projects. The scoring and summary paths both use `deepseek/deepseek-v4-pro-0813`. Running
-the worker unthrottled against the full backlog risks exhausting the day's
-OpenRouter quota in one run and produces an unreviewable wall of new
-`impact`/`related_work` data all at once. Roll it out in stages instead:
+- `OPEN_ISSUE_EVAL_VERSION` (~2,000 items): open issues scoring prompt.
+- `OPEN_PR_EVAL_VERSION` (~250 items): open PRs scoring prompt.
+- `CLOSED_ISSUE_EVAL_VERSION` (~15,000 items): closed issues resolution/summary prompt.
+- `CLOSED_PR_EVAL_VERSION` (~2,000 items): closed/merged PRs resolution/summary prompt.
+
+Bumping any of these constants makes only that specific category's latest evaluations
+"outdated" — the next `/api/eval/next` poll will naturally re-surface them via
+`build_pending_evaluation_query()`. No manual database write is required to mark rows stale.
+
+The legacy aliases `CURRENT_EVAL_VERSION` (maps to `OPEN_ISSUE_EVAL_VERSION`) and
+`CURRENT_SUMMARY_VERSION` (maps to `CLOSED_ISSUE_EVAL_VERSION`) remain for compatibility.
+
+Running the worker unthrottled against large backlogs risks exhausting the day's
+OpenRouter quota in one run and produces an unreviewable wall of data all at once. Roll it out in stages instead:
 
 1. **Smallest project first.** Run with `--project <smallest-project>
    --limit 20` and manually review a sample of the resulting evaluations

@@ -16,9 +16,8 @@ from craft_dashboard.dependencies import get_config, get_db_session
 from craft_dashboard.llm.client import OPENROUTER_BASE_URL
 from craft_dashboard.llm.embeddings import EmbeddingClient
 from craft_dashboard.llm.evaluator import (
-    CURRENT_EVAL_VERSION,
-    CURRENT_SUMMARY_VERSION,
     _compute_content_hash,
+    current_version_for_item,
 )
 from craft_dashboard.models.views import IssueFilters, IssueView
 from craft_dashboard.repositories.issue_link_repository import IssueLinkRepository
@@ -452,18 +451,12 @@ async def issue_detail(
         )
         eval_ver = current_evaluation.get("eval_version")
         is_open = issue["state"] == "open"
+        is_pr = bool(issue.get("is_pr"))
+        expected_ver = current_version_for_item(state=issue["state"], is_pr=is_pr)
         matching_type = (is_open and eval_type == "scoring") or (
             not is_open and eval_type == "summary"
         )
-        version_outdated = (
-            eval_ver is None
-            or (is_open and eval_type == "scoring" and eval_ver != CURRENT_EVAL_VERSION)
-            or (
-                not is_open
-                and eval_type == "summary"
-                and eval_ver != CURRENT_SUMMARY_VERSION
-            )
-        )
+        version_outdated = eval_ver is None or eval_ver != expected_ver
         if (
             version_outdated
             or not matching_type

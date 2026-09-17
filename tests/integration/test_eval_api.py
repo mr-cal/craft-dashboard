@@ -13,8 +13,10 @@ from craft_dashboard.app import create_app
 from craft_dashboard.config import DashboardConfig
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.llm.evaluator import (
+    CLOSED_PR_EVAL_VERSION,
     CURRENT_EVAL_VERSION,
     CURRENT_SUMMARY_VERSION,
+    OPEN_PR_EVAL_VERSION,
     _compute_content_hash,
 )
 from craft_dashboard.models.commit_scan_evidence_path import CommitScanEvidencePath
@@ -1275,6 +1277,127 @@ class TestEvalResultIntegration:
             .scalar_one()
         )
         assert evaluation.eval_version == CURRENT_SUMMARY_VERSION
+        assert evaluation.eval_type == "summary"
+
+    def test_submit_result_for_open_pr_uses_open_pr_version(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        pr = make_issue(
+            id=1,
+            project_id=1,
+            external_id="101",
+            issue_type="pull_request",
+            state="open",
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, pr)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/result",
+                headers={"Authorization": "Bearer " + token},
+                json={
+                    "issue_id": 1,
+                    "content_hash": _compute_content_hash(
+                        pr.title,
+                        pr.body,
+                        pr.state,
+                        pr.labels,
+                        pr.comments,
+                        pr_details=pr.metadata_ or None,
+                    ),
+                    "summary": "Open PR summary for merge review",
+                    "scores": {
+                        "impact": 50,
+                        "complexity": 20,
+                        "actionability": 90,
+                        "confidence": 80,
+                    },
+                    "suggested_action": "needs_review",
+                    "suggested_action_reason": "Clean diff awaiting review",
+                    "tokens_used": 100,
+                    "prompt_tokens": 80,
+                    "completion_tokens": 20,
+                    "model_used": "test-model",
+                    "llm_backend": "openrouter",
+                    "summary_embedding": [0.1] * 1024,
+                    "search_embedding": [0.1] * 1024,
+                },
+            )
+
+        assert response.status_code == 200
+
+        evaluation = (
+            asyncio.get_event_loop()
+            .run_until_complete(
+                test_db_session.execute(
+                    select(LLMEvaluation).where(LLMEvaluation.issue_id == 1)
+                )
+            )
+            .scalar_one()
+        )
+        assert evaluation.eval_version == OPEN_PR_EVAL_VERSION
+        assert evaluation.eval_type == "scoring"
+
+    def test_submit_result_for_closed_pr_uses_closed_pr_version(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project = make_project(id=1, name="snapcraft")
+        pr = make_issue(
+            id=1,
+            project_id=1,
+            external_id="102",
+            issue_type="pull_request",
+            state="closed",
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, pr)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/result",
+                headers={"Authorization": "Bearer " + token},
+                json={
+                    "issue_id": 1,
+                    "content_hash": _compute_content_hash(
+                        pr.title,
+                        pr.body,
+                        pr.state,
+                        pr.labels,
+                        pr.comments,
+                        pr_details=pr.metadata_ or None,
+                    ),
+                    "summary": "Closed PR was merged into main",
+                    "scores": {},
+                    "suggested_action": "closed_resolved",
+                    "suggested_action_reason": "Merged cleanly",
+                    "tokens_used": 100,
+                    "prompt_tokens": 80,
+                    "completion_tokens": 20,
+                    "model_used": "test-model",
+                    "llm_backend": "openrouter",
+                    "summary_embedding": [0.1] * 1024,
+                    "search_embedding": [0.1] * 1024,
+                },
+            )
+
+        assert response.status_code == 200
+
+        evaluation = (
+            asyncio.get_event_loop()
+            .run_until_complete(
+                test_db_session.execute(
+                    select(LLMEvaluation).where(LLMEvaluation.issue_id == 1)
+                )
+            )
+            .scalar_one()
+        )
+        assert evaluation.eval_version == CLOSED_PR_EVAL_VERSION
         assert evaluation.eval_type == "summary"
 
     def test_submit_result_persists_cost_usd(

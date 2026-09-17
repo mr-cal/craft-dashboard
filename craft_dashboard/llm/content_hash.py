@@ -15,11 +15,11 @@ This hash is used two ways:
     Any change to ``compute_content_hash``'s output MUST be accompanied in
     the same commit by the eval-version bump(s) for every path that consumes
     this hash (see ``craft_dashboard.llm.evaluator``): bump
-    ``CURRENT_EVAL_VERSION`` for open-item scoring, ``CURRENT_SUMMARY_VERSION``
-    for closed-item summaries, and both if the hash change affects both
-    paths. Changing the hash without the matching version bump makes
-    existing evaluations appear stale and can trigger mass re-evaluation of
-    issues that haven't actually changed.
+    ``OPEN_ISSUE_EVAL_VERSION`` / ``OPEN_PR_EVAL_VERSION`` for open items,
+    and ``CLOSED_ISSUE_EVAL_VERSION`` / ``CLOSED_PR_EVAL_VERSION`` for closed items.
+    Changing the hash without the matching version bump makes existing
+    evaluations appear stale and can trigger mass re-evaluation of issues
+    that haven't actually changed.
 """
 
 from __future__ import annotations
