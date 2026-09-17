@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import pathlib
 import select
 import signal
@@ -266,6 +267,12 @@ def _serialize_evidence_paths(ctx: object | None) -> list[dict[str, str]]:
 
 def _signal_handler(signum: int, frame: object) -> None:
     del signum, frame
+    if shutdown_state["requested"]:
+        # Second Ctrl+C: the user already asked us to wind down gracefully
+        # and doesn't want to wait (e.g. a stuck in-flight LLM call). Exit
+        # immediately rather than waiting for the current evaluation.
+        logger.info("Shutting down immediately...")
+        os._exit(1)
     shutdown_state["requested"] = True
     logger.info("Shutting down after current evaluation...")
 
