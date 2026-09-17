@@ -34,11 +34,9 @@ SAMPLE_ISSUE = {
 SAMPLE_EVALUATE_RESULT = {
     "summary": "This is a test summary for the issue evaluation.",
     "scores": {
-        "staleness": 10,
-        "complexity": 30,
-        "support_request": 0,
         "impact": 40,
-        "readiness": 50,
+        "complexity": 30,
+        "actionability": 70,
         "confidence": 80,
     },
     "suggested_action": "needs_triage",

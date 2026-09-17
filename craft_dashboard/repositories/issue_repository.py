@@ -27,8 +27,6 @@ _SCORE_SORT_FIELDS = {
     "complexity",
     "quick_win",
     "confidence",
-    "staleness",
-    "support_request",
 }
 _VALID_SORT_FIELDS = _SCORE_SORT_FIELDS | {
     "age",
@@ -441,8 +439,6 @@ class IssueRepository:
                     impact=scores.get("impact"),
                     quick_win=scores.get("quick_win"),
                     confidence=scores.get("confidence"),
-                    staleness=scores.get("staleness"),
-                    support_request=scores.get("support_request"),
                     has_related_links=has_related_links,
                 )
             )
@@ -683,9 +679,8 @@ class IssueRepository:
                     updated_at=issue.updated_at,
                     author_is_maintainer=issue.author_is_maintainer,
                     author_is_bot=issue.author_is_bot,
-                    staleness=scores.get("staleness"),
+                    actionability=scores.get("actionability"),
                     complexity=scores.get("complexity"),
-                    support_request=scores.get("support_request"),
                     confidence=scores.get("confidence"),
                     impact=scores.get("impact"),
                     quick_win=scores.get("quick_win"),

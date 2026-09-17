@@ -6,8 +6,6 @@
   "actionability": "How clearly scoped, reproducible, and ready for development (0=vague/blocked, 100=ready to implement)",
   "quick_win": "Weighted score based on high impact, low complexity, and high actionability",
   "confidence": "How confident the evaluation is in its suggested action (0=uncertain, 100=highly certain)",
-  "staleness": "How stale/inactive this issue is (0=very active, 100=completely dead)",
-  "support_request": "How likely this is a support request rather than a bug or feature (0=not support, 100=clearly support)",
 } %}
 {% set score_labels = {
   "impact": "Impact",
@@ -15,8 +13,6 @@
   "actionability": "Actionability",
   "quick_win": "Quick Win",
   "confidence": "Confidence",
-  "staleness": "Staleness",
-  "support_request": "Support Req",
 } %}
 <div id="issue-table">
   <p class="u-text--muted" style="margin-bottom:0.5rem;">
@@ -121,6 +117,6 @@
     </tbody>
   </table>
 
-  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&source=" ~ (filter_source or "") ~ "&state=" ~ (filter_state or "open") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&author_role=" ~ (filter_author_role or "") ~ "&sort=" ~ (sort_by or "staleness") ~ "&search=" ~ (filter_search or "") ~ "&per_page=" ~ (per_page or 100) ~ "&scores=" ~ (filter_scores or "staleness") ~ "&llm_status=" ~ (filter_llm_status or "") %}
+  {% set base_url = "/issues/table?project=" ~ (filter_project or "") ~ "&source=" ~ (filter_source or "") ~ "&state=" ~ (filter_state or "open") ~ "&type=" ~ (filter_type or "") ~ "&action=" ~ (filter_action or "") ~ "&author_role=" ~ (filter_author_role or "") ~ "&sort=" ~ (sort_by or "impact") ~ "&search=" ~ (filter_search or "") ~ "&per_page=" ~ (per_page or 100) ~ "&scores=" ~ (filter_scores or "impact,actionability,quick_win") ~ "&llm_status=" ~ (filter_llm_status or "") %}
   {% include "components/pagination.html" %}
 </div>

@@ -285,8 +285,6 @@ class IssueSort(StrEnum):
     actionability = "actionability"
     quick_win = "quick_win"
     confidence = "confidence"
-    staleness = "staleness"
-    support_request = "support_request"
     age = "age"
     updated = "updated"
     title = "title"

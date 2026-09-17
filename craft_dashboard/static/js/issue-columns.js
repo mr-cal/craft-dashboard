@@ -6,8 +6,6 @@
     "actionability",
     "quick_win",
     "confidence",
-    "staleness",
-    "support_request",
   ];
   const defaultColumns = [
     "issue",

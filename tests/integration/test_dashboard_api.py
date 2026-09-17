@@ -216,10 +216,10 @@ class TestIssuesPageWithData:
                 "type": "",
                 "action": "",
                 "author_role": "",
-                "sort": "staleness",
+                "sort": "impact",
                 "search": "",
                 "per_page": "100",
-                "scores": "staleness,readiness",
+                "scores": "impact,actionability",
                 "llm_status": "",
             },
         )

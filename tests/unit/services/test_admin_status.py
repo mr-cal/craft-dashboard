@@ -85,7 +85,7 @@ async def _seed_status_data(session) -> None:
                 summary="Regression in the core24 build pipeline.",
                 suggested_action="needs_review",
                 suggested_action_reason="Recent failures need maintainer attention.",
-                scores={"staleness": 0.2},
+                scores={"actionability": 0.8},
                 tokens_used=120,
                 prompt_tokens=80,
                 completion_tokens=40,

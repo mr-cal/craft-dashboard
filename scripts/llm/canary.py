@@ -5,13 +5,13 @@ Evaluates an explicit, small set of issues one at a time via the real
 (`scripts.llm.eval_worker.run_evaluate_loop`), the exact same code path the
 continuous production worker uses. Each target is evaluated with
 `--force`/`--issue` semantics (bypassing version/hash eligibility, so this
-never depends on or triggers a `CURRENT_EVAL_VERSION` bump) and a hard
+never depends on or triggers an evaluation version bump) and a hard
 per-issue timeout, so a hang or bug affects at most one issue instead of the
 whole backlog.
 
 Use this to review a handful of real evaluations on production before
-letting the continuous worker process the full backlog (e.g. before/after a
-`CURRENT_EVAL_VERSION` bump). See docs/evaluate.md's "Canary rollout"
+letting the continuous worker process the full backlog (e.g. before/after an
+evaluation version bump). See docs/evaluate.md's "Canary rollout"
 section for the full staged-rollout procedure.
 """
 

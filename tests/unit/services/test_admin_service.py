@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from craft_dashboard.llm.evaluator import CURRENT_EVAL_VERSION
+from craft_dashboard.llm.evaluator import OPEN_ISSUE_EVAL_VERSION
 from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.models.commit_scan_run import CommitScanRun
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
@@ -1418,7 +1418,7 @@ class TestOutdatedEvaluationCounts:
             .scalars()
             .first()
         )
-        evaluation.eval_version = CURRENT_EVAL_VERSION
+        evaluation.eval_version = OPEN_ISSUE_EVAL_VERSION
         evaluation.issue_data_hash = "stale-content"
         await test_db_session.commit()
 
@@ -1447,7 +1447,7 @@ class TestOutdatedEvaluationCounts:
             .scalars()
             .first()
         )
-        evaluation.eval_version = CURRENT_EVAL_VERSION
+        evaluation.eval_version = OPEN_ISSUE_EVAL_VERSION
         evaluation.issue_data_hash = "same-content"
         evaluation.evidence_generation = 1
         await test_db_session.commit()
@@ -1500,12 +1500,12 @@ class TestOutdatedEvaluationCounts:
     async def test_closed_issue_with_scoring_eval_counted_in_content_changed_not_version_outdated(
         self, test_db_session
     ) -> None:
-        """A closed issue whose latest eval was done while open (eval_type='scoring',
-        eval_version=5) is counted under content_changed, not version_outdated."""
+        """A closed issue whose latest eval was done while open (eval_type='scoring')
+        is counted under content_changed, not version_outdated."""
         await _seed_admin_data(test_db_session)
         evals = (await test_db_session.execute(select(LLMEvaluation))).scalars().all()
         for ev in evals:
-            ev.eval_version = CURRENT_EVAL_VERSION
+            ev.eval_version = OPEN_ISSUE_EVAL_VERSION
             ev.eval_type = "scoring"
             ev.issue_data_hash = "hash"
 
@@ -1536,7 +1536,7 @@ class TestOutdatedEvaluationCounts:
         await _seed_admin_data(test_db_session)
         evals = (await test_db_session.execute(select(LLMEvaluation))).scalars().all()
         for ev in evals:
-            ev.eval_version = CURRENT_EVAL_VERSION
+            ev.eval_version = OPEN_ISSUE_EVAL_VERSION
             ev.eval_type = "scoring"
             ev.issue_data_hash = "hash"
 

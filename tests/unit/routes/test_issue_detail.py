@@ -9,7 +9,7 @@ from craft_dashboard.app import create_app
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.llm.content_hash import compute_content_hash
 from craft_dashboard.llm.evaluator import (
-    CURRENT_EVAL_VERSION,
+    OPEN_ISSUE_EVAL_VERSION,
     OPEN_PR_EVAL_VERSION,
 )
 from craft_dashboard.models.views import IssueQueryResult, IssueView
@@ -83,13 +83,13 @@ _DETAIL = {
     "summary": "Regression in the core24 build pipeline.",
     "suggested_action": "needs_review",
     "suggested_action_reason": "Recent failures need maintainer attention.",
-    "scores": {"staleness": 0.2, "complexity": 0.7},
+    "scores": {"actionability": 0.8, "complexity": 0.7},
     "evaluation_history": [
         {
             "summary": "Regression in the core24 build pipeline.",
             "suggested_action": "needs_review",
             "suggested_action_reason": "Recent failures need maintainer attention.",
-            "scores": {"staleness": 0.2, "complexity": 0.7},
+            "scores": {"actionability": 0.8, "complexity": 0.7},
             "evaluated_at": "2025-01-12T15:00:00+00:00",
             "model_name": "gpt-4.1",
             "llm_backend": "openai",
@@ -101,7 +101,7 @@ _DETAIL = {
             "summary": "Earlier summary.",
             "suggested_action": "keep_open",
             "suggested_action_reason": "Still active.",
-            "scores": {"staleness": 0.1},
+            "scores": {"actionability": 0.7},
             "evaluated_at": "2025-01-11T15:00:00+00:00",
             "model_name": "gpt-4o-mini",
             "llm_backend": "openai",
@@ -231,7 +231,7 @@ class TestIssueDetailRoute:
             summary="Regression in the core24 build pipeline.",
             suggested_action="needs_review",
             suggested_action_reason="Recent failures need maintainer attention.",
-            scores={"staleness": 0.2},
+            scores={"actionability": 0.8},
         )
         result = IssueQueryResult(issues=[issue], total_count=1, total_pages=1, page=1)
 
@@ -362,7 +362,7 @@ class TestOutdatedEvaluationNotice:
             "evaluation_history": [
                 {
                     **_DETAIL["evaluation_history"][0],
-                    "eval_version": CURRENT_EVAL_VERSION,
+                    "eval_version": OPEN_ISSUE_EVAL_VERSION,
                     "issue_data_hash": content_hash,
                     "evidence_generation": 1,
                 }
@@ -398,7 +398,7 @@ class TestOutdatedEvaluationNotice:
             "evaluation_history": [
                 {
                     **_DETAIL["evaluation_history"][0],
-                    "eval_version": CURRENT_EVAL_VERSION - 1,
+                    "eval_version": OPEN_ISSUE_EVAL_VERSION - 1,
                     "issue_data_hash": "some-hash",
                 }
             ],
@@ -501,7 +501,7 @@ class TestOutdatedEvaluationNotice:
             "evaluation_history": [
                 {
                     **_DETAIL["evaluation_history"][0],
-                    "eval_version": CURRENT_EVAL_VERSION,
+                    "eval_version": OPEN_ISSUE_EVAL_VERSION,
                     "issue_data_hash": "old-hash",
                 }
             ],

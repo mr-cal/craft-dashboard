@@ -156,7 +156,7 @@ class OutdatedEvaluationCounts(TypedDict):
 
     - ``never_evaluated``: no evaluation exists at all yet.
     - ``version_outdated``: an evaluation exists but used an older
-      ``CURRENT_EVAL_VERSION``.
+      evaluation version.
     - ``content_changed``: an evaluation exists at the current eval version,
       but the issue's content has changed since (``content_hash`` mismatch).
     """

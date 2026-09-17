@@ -13,9 +13,9 @@ from craft_dashboard.app import create_app
 from craft_dashboard.config import DashboardConfig
 from craft_dashboard.dependencies import get_db_session
 from craft_dashboard.llm.evaluator import (
+    CLOSED_ISSUE_EVAL_VERSION,
     CLOSED_PR_EVAL_VERSION,
-    CURRENT_EVAL_VERSION,
-    CURRENT_SUMMARY_VERSION,
+    OPEN_ISSUE_EVAL_VERSION,
     OPEN_PR_EVAL_VERSION,
     _compute_content_hash,
 )
@@ -305,12 +305,12 @@ class TestEvalNextIntegration:
             suggested_action="keep_open",
             suggested_action_reason="The issue still needs maintainer attention.",
             scores={
-                "staleness": 0,
-                "complexity": 0,
-                "support_request": 0,
-                "readiness": 0,
+                "impact": 50,
+                "complexity": 20,
+                "actionability": 70,
+                "confidence": 80,
             },
-            eval_version=CURRENT_EVAL_VERSION,
+            eval_version=OPEN_ISSUE_EVAL_VERSION,
             issue_data_hash=issue_hash,
         )
         asyncio.get_event_loop().run_until_complete(
@@ -368,12 +368,12 @@ class TestEvalNextIntegration:
             suggested_action="keep_open",
             suggested_action_reason="Waiting on review.",
             scores={
-                "staleness": 0,
-                "complexity": 0,
-                "support_request": 0,
-                "readiness": 0,
+                "impact": 50,
+                "complexity": 20,
+                "actionability": 70,
+                "confidence": 80,
             },
-            eval_version=CURRENT_EVAL_VERSION,
+            eval_version=OPEN_PR_EVAL_VERSION,
             issue_data_hash=stale_hash,
         )
         # The PR has since been approved: re-fetched with new pr_details,
@@ -668,12 +668,12 @@ class TestEvalNextPriorityOrdering:
             suggested_action="keep_open",
             suggested_action_reason="This still needs attention from maintainers.",
             scores={
-                "staleness": 1,
-                "complexity": 1,
-                "support_request": 1,
-                "readiness": 1,
+                "impact": 50,
+                "complexity": 20,
+                "actionability": 70,
+                "confidence": 80,
             },
-            eval_version=CURRENT_EVAL_VERSION - 1,
+            eval_version=OPEN_ISSUE_EVAL_VERSION - 1,
             issue_data_hash=old_issue_hash,
         )
         asyncio.get_event_loop().run_until_complete(
@@ -725,12 +725,12 @@ class TestEvalNextPriorityOrdering:
             suggested_action="keep_open",
             suggested_action_reason="This issue changed since the last evaluation.",
             scores={
-                "staleness": 1,
-                "complexity": 1,
-                "support_request": 1,
-                "readiness": 1,
+                "impact": 50,
+                "complexity": 20,
+                "actionability": 70,
+                "confidence": 80,
             },
-            eval_version=CURRENT_EVAL_VERSION,
+            eval_version=OPEN_ISSUE_EVAL_VERSION,
             issue_data_hash="stale-hash",
         )
         old_version_evaluation = make_evaluation(
@@ -741,12 +741,12 @@ class TestEvalNextPriorityOrdering:
             suggested_action="keep_open",
             suggested_action_reason="This issue needs reevaluation on the old version.",
             scores={
-                "staleness": 2,
-                "complexity": 2,
-                "support_request": 2,
-                "readiness": 2,
+                "impact": 50,
+                "complexity": 20,
+                "actionability": 70,
+                "confidence": 80,
             },
-            eval_version=CURRENT_EVAL_VERSION - 1,
+            eval_version=OPEN_ISSUE_EVAL_VERSION - 1,
             issue_data_hash="older-stale-hash",
         )
         asyncio.get_event_loop().run_until_complete(
@@ -800,7 +800,7 @@ class TestEvalNextPriorityOrdering:
             suggested_action="close",
             suggested_action_reason="This old-version evaluation must be refreshed.",
             scores={},
-            eval_version=CURRENT_EVAL_VERSION - 1,
+            eval_version=CLOSED_ISSUE_EVAL_VERSION - 1,
             issue_data_hash="old-closed-hash",
         )
         open_evaluation = make_evaluation(
@@ -811,12 +811,12 @@ class TestEvalNextPriorityOrdering:
             suggested_action="keep_open",
             suggested_action_reason="This old-version evaluation must be refreshed.",
             scores={
-                "staleness": 1,
-                "complexity": 1,
-                "support_request": 1,
-                "readiness": 1,
+                "impact": 50,
+                "complexity": 20,
+                "actionability": 70,
+                "confidence": 80,
             },
-            eval_version=CURRENT_EVAL_VERSION - 1,
+            eval_version=OPEN_ISSUE_EVAL_VERSION - 1,
             issue_data_hash="old-open-hash",
         )
         asyncio.get_event_loop().run_until_complete(
@@ -872,7 +872,7 @@ class TestEvalNextPriorityOrdering:
             suggested_action="close",
             suggested_action_reason="This issue changed after the last evaluation.",
             scores={},
-            eval_version=CURRENT_SUMMARY_VERSION,
+            eval_version=CLOSED_ISSUE_EVAL_VERSION,
             issue_data_hash="stale-closed-hash",
         )
         open_evaluation = make_evaluation(
@@ -883,12 +883,12 @@ class TestEvalNextPriorityOrdering:
             suggested_action="keep_open",
             suggested_action_reason="This issue changed after the last evaluation.",
             scores={
-                "staleness": 1,
-                "complexity": 1,
-                "support_request": 1,
-                "readiness": 1,
+                "impact": 50,
+                "complexity": 20,
+                "actionability": 70,
+                "confidence": 80,
             },
-            eval_version=CURRENT_EVAL_VERSION,
+            eval_version=OPEN_ISSUE_EVAL_VERSION,
             issue_data_hash="stale-open-hash",
         )
         asyncio.get_event_loop().run_until_complete(
@@ -1047,9 +1047,9 @@ class TestEvalResultIntegration:
             suggested_action="keep_open",
             suggested_action_reason="The issue still needs maintainer investigation.",
             scores={
-                "staleness": 0,
+                "impact": 0,
                 "complexity": 0,
-                "support_request": 0,
+                "actionability": 0,
                 "confidence": 0,
             },
             issue_data_hash=None,
@@ -1109,7 +1109,7 @@ class TestEvalResultIntegration:
         assert evaluations[1].model_name == "haiku"
         assert evaluations[1].llm_backend == "local"
         assert evaluations[1].issue_data_hash == current_hash
-        assert evaluations[1].eval_version == CURRENT_EVAL_VERSION
+        assert evaluations[1].eval_version == OPEN_ISSUE_EVAL_VERSION
         assert evaluations[1].eval_locked_until is not None
 
     def test_submit_result_stamps_evidence_generation(
@@ -1226,7 +1226,7 @@ class TestEvalResultIntegration:
             _all_evaluations(test_db_session)
         )
         assert len(evaluations) == 1
-        assert evaluations[0].eval_version == CURRENT_EVAL_VERSION
+        assert evaluations[0].eval_version == OPEN_ISSUE_EVAL_VERSION
         assert evaluations[0].eval_type == "scoring"
 
     def test_submit_result_for_closed_issue_uses_summary_version(
@@ -1276,7 +1276,7 @@ class TestEvalResultIntegration:
             )
             .scalar_one()
         )
-        assert evaluation.eval_version == CURRENT_SUMMARY_VERSION
+        assert evaluation.eval_version == CLOSED_ISSUE_EVAL_VERSION
         assert evaluation.eval_type == "summary"
 
     def test_submit_result_for_open_pr_uses_open_pr_version(
@@ -2120,7 +2120,7 @@ class TestEvalStatusIntegration:
             latest=True,
             evaluated_at=now,
             eval_locked_until=None,
-            eval_version=CURRENT_EVAL_VERSION,
+            eval_version=OPEN_ISSUE_EVAL_VERSION,
         )
         expired_pending_eval = make_evaluation(
             id=3,

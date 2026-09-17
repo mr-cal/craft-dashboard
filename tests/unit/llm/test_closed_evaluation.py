@@ -115,7 +115,7 @@ async def test_state_change_triggers_reevaluation_with_new_hash() -> None:
     mock_client = MagicMock()
     mock_client.complete = AsyncMock(
         return_value=LLMResponse(
-            content='{"summary": "Summary text.", "scores": {"staleness": 10, "complexity": 20, "support_request": 5, "impact": 40, "confidence": 80}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
+            content='{"summary": "Summary text.", "scores": {"impact": 40, "complexity": 20, "actionability": 70, "confidence": 80}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
             total_tokens=10,
             prompt_tokens=7,
             completion_tokens=3,

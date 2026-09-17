@@ -136,40 +136,6 @@ def format_issue_context(
     )
 
 
-def _build_summary_user_content(
-    *,
-    title: str,
-    body: str | None,
-    issue_type: str,
-    labels: list[str],
-    age_days: int = 0,
-    last_activity_days: int = 0,
-    comment_count: int = 0,
-    author: str = "unknown",
-    is_maintainer: bool = False,
-    comments: list[dict] | None = None,
-    state: str | None = None,
-    closing_references: list[dict] | None = None,
-    pr_details: dict | None = None,
-) -> str:
-    """Build shared user content for summary prompts (alias for format_issue_context)."""
-    return format_issue_context(
-        title=title,
-        body=body,
-        issue_type=issue_type,
-        labels=labels,
-        age_days=age_days,
-        last_activity_days=last_activity_days,
-        comment_count=comment_count,
-        author=author,
-        is_maintainer=is_maintainer,
-        comments=comments,
-        state=state,
-        closing_references=closing_references,
-        pr_details=pr_details,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Combined evaluate prompts (summary + scores in a single LLM call)
 # ---------------------------------------------------------------------------
@@ -483,7 +449,7 @@ def build_closed_evaluate_prompt(
     pr_details: dict | None = None,
 ) -> list[dict[str, Any]]:
     """Build a combined summary prompt for a closed issue or merged PR."""
-    user_content = _build_summary_user_content(
+    user_content = format_issue_context(
         title=title,
         body=body,
         issue_type=issue_type,

@@ -7,8 +7,6 @@ from craft_dashboard.llm.evaluation_queue import build_pending_evaluation_query
 from craft_dashboard.llm.evaluator import (
     CLOSED_ISSUE_EVAL_VERSION,
     CLOSED_PR_EVAL_VERSION,
-    CURRENT_EVAL_VERSION,
-    CURRENT_SUMMARY_VERSION,
     OPEN_ISSUE_EVAL_VERSION,
     OPEN_PR_EVAL_VERSION,
     current_version_for_item,
@@ -64,12 +62,12 @@ class TestBuildPendingEvaluationQuery:
             suggested_action="keep_open",
             suggested_action_reason="Still relevant.",
             scores={
-                "staleness": 0,
-                "complexity": 0,
-                "support_request": 0,
-                "readiness": 0,
+                "impact": 50,
+                "complexity": 20,
+                "actionability": 80,
+                "confidence": 90,
             },
-            eval_version=CURRENT_EVAL_VERSION,
+            eval_version=OPEN_ISSUE_EVAL_VERSION,
             issue_data_hash=current_hash,
         )
         await _seed(test_db_session, project, issue, evaluation)
@@ -91,12 +89,12 @@ class TestBuildPendingEvaluationQuery:
             suggested_action="keep_open",
             suggested_action_reason="Still relevant.",
             scores={
-                "staleness": 0,
-                "complexity": 0,
-                "support_request": 0,
-                "readiness": 0,
+                "impact": 50,
+                "complexity": 20,
+                "actionability": 80,
+                "confidence": 90,
             },
-            eval_version=CURRENT_EVAL_VERSION,
+            eval_version=OPEN_ISSUE_EVAL_VERSION,
             issue_data_hash="stale-hash-does-not-match-current-content",
         )
         await _seed(test_db_session, project, issue, evaluation)
@@ -121,12 +119,12 @@ class TestBuildPendingEvaluationQuery:
             suggested_action="keep_open",
             suggested_action_reason="Still relevant.",
             scores={
-                "staleness": 0,
-                "complexity": 0,
-                "support_request": 0,
-                "readiness": 0,
+                "impact": 50,
+                "complexity": 20,
+                "actionability": 80,
+                "confidence": 90,
             },
-            eval_version=CURRENT_EVAL_VERSION,
+            eval_version=OPEN_ISSUE_EVAL_VERSION,
             issue_data_hash=current_hash,
         )
         await _seed(test_db_session, project, issue, evaluation)
@@ -140,8 +138,8 @@ class TestBuildPendingEvaluationQuery:
     async def test_closed_issue_at_current_summary_version_is_not_requeued(
         self, test_db_session
     ) -> None:
-        """A closed issue evaluated at CURRENT_SUMMARY_VERSION remains up to date."""
-        assert CURRENT_SUMMARY_VERSION == 5
+        """A closed issue evaluated at CLOSED_ISSUE_EVAL_VERSION remains up to date."""
+        assert CLOSED_ISSUE_EVAL_VERSION == 5
 
         project = make_project(id=1, name="snapcraft")
         issue = make_issue(
@@ -156,7 +154,7 @@ class TestBuildPendingEvaluationQuery:
             eval_type="summary",
             suggested_action=None,
             scores={},
-            eval_version=CURRENT_SUMMARY_VERSION,
+            eval_version=CLOSED_ISSUE_EVAL_VERSION,
             issue_data_hash=current_hash,
             latest=True,
         )
@@ -295,7 +293,7 @@ class TestBuildPendingEvaluationQuery:
         await test_db_session.flush()
         evaluation = make_evaluation(
             issue_id=issue.id,
-            eval_version=CURRENT_EVAL_VERSION,
+            eval_version=OPEN_ISSUE_EVAL_VERSION,
             issue_data_hash="same-hash",
             evidence_generation=1,
             scores={"confidence": 50},
@@ -326,7 +324,7 @@ class TestBuildPendingEvaluationQuery:
         await test_db_session.flush()
         evaluation = make_evaluation(
             issue_id=issue.id,
-            eval_version=CURRENT_SUMMARY_VERSION,
+            eval_version=CLOSED_ISSUE_EVAL_VERSION,
             issue_data_hash="same-hash",
             evidence_generation=1,
             scores={},
@@ -357,9 +355,9 @@ class TestBuildPendingEvaluationQuery:
         evaluation = make_evaluation(
             issue_id=issue.id,
             eval_type="scoring",
-            eval_version=CURRENT_EVAL_VERSION,
+            eval_version=OPEN_ISSUE_EVAL_VERSION,
             issue_data_hash="open-hash",
-            scores={"staleness": 10},
+            scores={"actionability": 70},
             suggested_action="keep_open",
             latest=True,
         )

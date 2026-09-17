@@ -285,17 +285,18 @@ def _make_llm_evaluations(
         issue_id = issue_id_start + j
         # Deterministic scores based on index
         is_pr = j in (3, 5, 7)  # matches _make_issues PR indices
-        staleness = min(100, (j + 1) * 15)
+        actionability = min(100, (j + 1) * 15)
         complexity = min(100, 20 + j * 10)
+        impact = min(100, 30 + j * 10)
 
         scores: dict = {
-            "staleness": staleness,
+            "actionability": actionability,
             "complexity": complexity,
+            "impact": impact,
         }
         if is_pr:
             scores["confidence"] = min(100, 30 + j * 15)
         else:
-            scores["support_request"] = min(100, j * 18)
             scores["confidence"] = min(100, 40 + j * 12)
         action_idx = j % len(_ACTIONS)
         evals.append(

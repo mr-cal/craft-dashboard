@@ -99,31 +99,16 @@ Evaluation is pull-based:
 This keeps local and home-lab setups simple: you can point the worker at the
 public craft-dashboard API without exposing your developer machine.
 
-## Phase 5 bake-off hard gate
-
-Phase 5's standalone bake-off tooling is a hard gate before any Phase 6
-deep-evaluation backfill. A human must review and sign off on:
-
-- `report_scoring.md`
-- `report_summary.md`
-- `report_grading.md`
-
-The Phase 6 backfill must not start until those three reports have been
-generated, reviewed, and explicitly approved.
-
-See [`docs/how-to.md`](how-to.md) for the operator workflow that produces the
-reports.
-
 ## Canary rollout
 
-Bumping `CURRENT_EVAL_VERSION` (see `craft_dashboard/llm/evaluator.py`) makes
-every currently-`latest` open issue/PR evaluation "outdated" and the
+Bumping one of the evaluation version constants (such as `OPEN_ISSUE_EVAL_VERSION`
+or `OPEN_PR_EVAL_VERSION` in `craft_dashboard/llm/evaluator.py`) makes
+every currently-`latest` evaluation for that state/type "outdated" and the
 continuous worker's `/api/eval/next` polling naturally re-surfaces all of
-them — there is no way to make a version bump affect only a handful of items.
-To avoid a bug in a new evaluator/prompt version silently wasting time and
+them. To avoid a bug in a new evaluator/prompt version silently wasting time and
 money re-evaluating the entire backlog before anyone notices, use
 `scripts/llm/canary.py` to hand-pick a small number of real issues and
-evaluate them one at a time, **before** touching `CURRENT_EVAL_VERSION`:
+evaluate them one at a time, **before** touching the version constants:
 
 ```bash
 uv run scripts/llm/canary.py \
@@ -138,7 +123,7 @@ uv run scripts/llm/canary.py \
 
 Each `--issue PROJECT:NUMBER` target is evaluated with `--force`/`--issue`
 semantics (bypassing version/hash eligibility entirely — this never depends
-on or requires a `CURRENT_EVAL_VERSION` bump) and persists its result to the
+on or requires an evaluation version bump) and persists its result to the
 live database exactly like a normal evaluation, so the resulting
 `suggested_action`/`suggested_action_reason`/`impact`/`related_work` can be
 reviewed on the real issue detail page. Each target also gets its own hard
@@ -151,12 +136,10 @@ Full staged rollout, from smallest to largest blast radius:
 1. **Canary (5 issues).** Run `canary.py` against 5 hand-picked real issues
    (as above). A human reviews the resulting evaluations on the live issue
    detail pages before proceeding.
-2. **`CURRENT_EVAL_VERSION` bump.** Only after the canary is reviewed and
-   approved, bump `CURRENT_EVAL_VERSION` (see
-   `plans/42-deep-evaluation-phase6-prompt-rewrite-and-backfill.md`'s Task 12
-   runbook for the exact gate/rollback procedure). This re-queues the full
-   ~2,269-item backlog, but nothing evaluates yet until the worker actually
-   claims work.
+2. **Evaluation version bump.** Only after the canary is reviewed and
+   approved, bump the target evaluation version constant (e.g. `OPEN_ISSUE_EVAL_VERSION`).
+   This re-queues items in that category, but nothing evaluates yet until the worker
+   actually claims work.
 3. **Safety-margin batch (50 issues).** Run `evaluate --limit 50` (see
    `--limit`/`--max-evaluations` above) and review a sample of the results
    and the admin page's cost/error dashboard before continuing.
@@ -164,8 +147,7 @@ Full staged rollout, from smallest to largest blast radius:
    `--concurrency 6` in production) drain the remaining backlog at its
    normal polling cadence, checking the cost dashboard periodically.
 
-If any stage surfaces a problem, stop and roll back (see Task 12's rollback
-procedure) rather than proceeding to the next stage.
+If any stage surfaces a problem, stop and roll back rather than proceeding to the next stage.
 
 ## Evaluation versioning & granular bumps
 
@@ -179,9 +161,6 @@ Evaluations are versioned by four granular constants in `craft_dashboard/llm/eva
 Bumping any of these constants makes only that specific category's latest evaluations
 "outdated" — the next `/api/eval/next` poll will naturally re-surface them via
 `build_pending_evaluation_query()`. No manual database write is required to mark rows stale.
-
-The legacy aliases `CURRENT_EVAL_VERSION` (maps to `OPEN_ISSUE_EVAL_VERSION`) and
-`CURRENT_SUMMARY_VERSION` (maps to `CLOSED_ISSUE_EVAL_VERSION`) remain for compatibility.
 
 Running the worker unthrottled against large backlogs risks exhausting the day's
 OpenRouter quota in one run and produces an unreviewable wall of data all at once. Roll it out in stages instead:
@@ -213,13 +192,13 @@ convention means no partial evaluation is ever left half-applied, and
 re-running the same command simply continues from wherever the queue
 naturally resumes.
 
-## Rolling back the version bump
+## Rolling back a version bump
 
-If the v5 rollout produces bad evaluations, roll back **before** letting the
+If a version rollout produces bad evaluations, roll back **before** letting the
 backfill drain further:
 
-1. `git revert` the `CURRENT_EVAL_VERSION` bump commit and redeploy, so the
-   constant returns to 4 and the queue stops treating v4 rows as stale.
+1. `git revert` the version bump commit and redeploy, so the
+   constant returns to its previous value and the queue stops treating older rows as stale.
 2. For any issue that already got a v5 `latest` row, restore the prior v4
    row as current (this is the exact drill exercised in Task 12, Step 2):
 

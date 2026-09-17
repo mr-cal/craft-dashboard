@@ -32,10 +32,6 @@ CLOSED_ISSUE_EVAL_VERSION: int = 5
 #: Evaluation version produced by the current closed-PR *summary* prompt.
 CLOSED_PR_EVAL_VERSION: int = 5
 
-#: Backwards-compatibility aliases
-CURRENT_EVAL_VERSION: int = OPEN_ISSUE_EVAL_VERSION
-CURRENT_SUMMARY_VERSION: int = CLOSED_ISSUE_EVAL_VERSION
-
 
 def current_version_for_item(*, state: str, is_pr: bool) -> int:
     """Return the eval-version constant that applies to an issue's state and PR flag.

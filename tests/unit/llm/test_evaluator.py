@@ -58,7 +58,7 @@ class TestParseEvaluationResponse:
         """Parse valid JSON evaluation response."""
         content = json.dumps(
             {
-                "scores": {"staleness": 85},
+                "scores": {"actionability": 85},
                 "suggested_action": "close_stale",
                 "suggested_action_reason": "No activity for 6 months.",
             }
@@ -66,24 +66,24 @@ class TestParseEvaluationResponse:
 
         result = _parse_evaluation_response(content)
 
-        assert result["scores"]["staleness"] == 85
+        assert result["scores"]["actionability"] == 85
         assert result["suggested_action"] == "close_stale"
         assert "No activity" in result["suggested_action_reason"]
 
     def test_json_wrapped_in_markdown(self) -> None:
         """Parse JSON wrapped in markdown code fences."""
-        content = '```json\n{"scores": {"staleness": 50}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}\n```'
+        content = '```json\n{"scores": {"actionability": 50}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}\n```'
 
         result = _parse_evaluation_response(content)
 
-        assert result["scores"]["staleness"] == 50
+        assert result["scores"]["actionability"] == 50
 
     def test_parse_response_extracts_json_from_code_fence(self) -> None:
         """JSON in markdown code fences with surrounding text is extracted."""
-        content = 'Here is the result:\n```json\n{"scores": {"staleness": 50}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}\n```\nDone.'
+        content = 'Here is the result:\n```json\n{"scores": {"actionability": 50}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}\n```\nDone.'
         result = _parse_evaluation_response(content)
         assert result is not None
-        assert result["scores"]["staleness"] == 50
+        assert result["scores"]["actionability"] == 50
         assert result["suggested_action"] == "keep_open"
 
     def test_invalid_json_returns_none(self) -> None:
@@ -96,25 +96,25 @@ class TestParseEvaluationResponse:
         """Thinking model <think> block is stripped before parsing JSON."""
         content = (
             "<think>Let me reason about this issue carefully...</think>\n"
-            '{"scores": {"staleness": 70}, "suggested_action": "keep_open", "suggested_action_reason": "Recent activity."}'
+            '{"scores": {"actionability": 70}, "suggested_action": "keep_open", "suggested_action_reason": "Recent activity."}'
         )
 
         result = _parse_evaluation_response(content)
 
         assert result is not None
-        assert result["scores"]["staleness"] == 70
+        assert result["scores"]["actionability"] == 70
 
     def test_strips_think_block_with_braces_inside(self) -> None:
         """Braces inside <think> block are not mistaken for JSON."""
         content = (
-            "<think>The JSON should look like: {staleness: 99}</think>\n"
-            '{"scores": {"staleness": 10}, "suggested_action": "keep_open", "suggested_action_reason": "Fine."}'
+            "<think>The JSON should look like: {actionability: 99}</think>\n"
+            '{"scores": {"actionability": 10}, "suggested_action": "keep_open", "suggested_action_reason": "Fine."}'
         )
 
         result = _parse_evaluation_response(content)
 
         assert result is not None
-        assert result["scores"]["staleness"] == 10
+        assert result["scores"]["actionability"] == 10
 
     def test_unescaped_quotes_inside_summary_are_recovered(self) -> None:
         """Stray unescaped quotes inside a string value don't break parsing."""
@@ -234,9 +234,8 @@ class TestIssueEvaluatorTwoModels:
                 {
                     "summary": "An open issue summary that is long enough to pass.",
                     "scores": {
-                        "staleness": 10,
+                        "actionability": 70,
                         "complexity": 10,
-                        "support_request": 10,
                         "impact": 30,
                         "confidence": 60,
                     },
@@ -301,9 +300,8 @@ class TestIssueEvaluatorToolLoop:
                 {
                     "summary": "An open issue summary that is long enough to pass.",
                     "scores": {
-                        "staleness": 10,
+                        "actionability": 70,
                         "complexity": 10,
-                        "support_request": 10,
                         "impact": 70,
                         "confidence": 80,
                     },
@@ -402,9 +400,8 @@ class TestIssueEvaluatorToolLoop:
                 {
                     "summary": "An open issue summary that is long enough to pass.",
                     "scores": {
-                        "staleness": 10,
+                        "actionability": 70,
                         "complexity": 10,
-                        "support_request": 10,
                         "impact": 50,
                         "confidence": 40,
                     },
@@ -490,9 +487,8 @@ class TestIssueEvaluatorToolLoop:
                 {
                     "summary": "An open issue summary that is long enough to pass.",
                     "scores": {
-                        "staleness": 10,
+                        "actionability": 70,
                         "complexity": 10,
-                        "support_request": 10,
                         "impact": 10,
                         "confidence": 10,
                     },
@@ -623,7 +619,7 @@ class TestEvaluateIssue:
     async def test_evaluate_open_issue(self) -> None:
         """Open issues return summary + scores + action from a single LLM call."""
         mock_response = LLMResponse(
-            content='{"summary": "Crash on startup.", "scores": {"staleness": 20, "complexity": 40, "support_request": 10, "confidence": 80}, "suggested_action": "needs_triage", "suggested_action_reason": "No maintainer response."}',
+            content='{"summary": "Crash on startup.", "scores": {"actionability": 20, "complexity": 40, "confidence": 80}, "suggested_action": "needs_triage", "suggested_action_reason": "No maintainer response."}',
             total_tokens=300,
             prompt_tokens=200,
             completion_tokens=100,
@@ -650,7 +646,7 @@ class TestEvaluateIssue:
 
         assert result is not None
         assert result["summary"] == "Crash on startup."
-        assert result["scores"]["staleness"] == 20
+        assert result["scores"]["actionability"] == 20
         assert result["suggested_action"] == "needs_triage"
         assert result["tokens_used"] == 300
         # Single LLM call
@@ -726,7 +722,7 @@ class TestEvaluateIssue:
     async def test_evaluate_confidence_defaults_to_50(self) -> None:
         """Missing confidence in scores defaults to 50."""
         mock_response = LLMResponse(
-            content='{"summary": "X", "scores": {"staleness": 10, "complexity": 20, "support_request": 5}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
+            content='{"summary": "X", "scores": {"actionability": 10, "complexity": 20}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
             total_tokens=100,
             prompt_tokens=70,
             completion_tokens=30,
@@ -758,7 +754,7 @@ class TestEvaluateIssue:
     async def test_evaluate_passes_comments_to_prompt(self) -> None:
         """Comments are forwarded to the prompt builder."""
         mock_response = LLMResponse(
-            content='{"summary": "Regression.", "scores": {"staleness": 10, "complexity": 20, "support_request": 5, "confidence": 80}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
+            content='{"summary": "Regression.", "scores": {"actionability": 10, "complexity": 20, "confidence": 80}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
             total_tokens=50,
             prompt_tokens=30,
             completion_tokens=20,

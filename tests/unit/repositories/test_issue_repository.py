@@ -244,112 +244,6 @@ async def _seed_issue_types(session) -> None:
     await session.commit()
 
 
-async def _seed_issues_with_scores(session) -> None:
-    project = await _add_project(session, name="snapcraft")
-
-    issue_stale = make_issue(
-        project_id=project.id,
-        external_id="100",
-        title="snapcraft pack fails with LXD backend on Ubuntu 24.04",
-        body="When running `snapcraft pack` with the LXD backend, the build fails during prime with a mount namespace error.",
-        author="craft-contributor",
-        created_at=FIXED_NOW - timedelta(days=30),
-        updated_at=FIXED_NOW - timedelta(days=30),
-        url="https://github.com/canonical/snapcraft/issues/6100",
-    )
-    session.add(issue_stale)
-    await session.flush()
-    session.add(
-        make_evaluation(
-            issue_id=issue_stale.id,
-            summary="Stale LXD regression report without recent maintainer follow-up",
-            suggested_action="close",
-            suggested_action_reason="No activity since the Ubuntu 24.04 migration",
-            scores={
-                "staleness": 0.95,
-                "complexity": 0.3,
-                "support_request": 0.2,
-                "impact": 0.8,
-                "quick_win": 0.56,
-                "confidence": 70.0,
-            },
-        )
-    )
-
-    issue_ready = make_issue(
-        project_id=project.id,
-        external_id="101",
-        title="Add support for core24 base",
-        body="Please add support for `base: core24` so new snaps can target Ubuntu 24.04.",
-        author="sergio-cazzolato",
-        created_at=FIXED_NOW - timedelta(days=1),
-        updated_at=FIXED_NOW - timedelta(hours=1),
-        url="https://github.com/canonical/snapcraft/issues/6101",
-    )
-    session.add(issue_ready)
-    await session.flush()
-    session.add(
-        make_evaluation(
-            issue_id=issue_ready.id,
-            summary="Clear enhancement request with maintainers aligned on core24 support",
-            suggested_action="work",
-            suggested_action_reason="Implementation scope is clear and unblocked",
-            scores={
-                "staleness": 0.1,
-                "complexity": 0.2,
-                "support_request": 0.05,
-                "impact": 0.9,
-                "quick_win": 0.72,
-                "confidence": 85.0,
-            },
-        )
-    )
-
-    issue_complex = make_issue(
-        project_id=project.id,
-        external_id="102",
-        title="Refactor manifest parsing for multi-arch builds",
-        body="Rework manifest parsing so multi-architecture builds share a consistent metadata pipeline.",
-        author="jdoe-canonical",
-        created_at=FIXED_NOW - timedelta(days=5),
-        updated_at=FIXED_NOW - timedelta(days=2),
-        url="https://github.com/canonical/snapcraft/issues/6102",
-    )
-    session.add(issue_complex)
-    await session.flush()
-    session.add(
-        make_evaluation(
-            issue_id=issue_complex.id,
-            summary="Large refactor touching manifest parsing and multi-arch build logic",
-            suggested_action="investigate",
-            suggested_action_reason="Touches multiple build stages and architecture-specific paths",
-            scores={
-                "staleness": 0.4,
-                "complexity": 0.95,
-                "support_request": 0.1,
-                "impact": 0.4,
-                "quick_win": 0.02,
-                "confidence": 60.0,
-            },
-        )
-    )
-
-    session.add(
-        make_issue(
-            project_id=project.id,
-            external_id="103",
-            title="charmcraft deploy times out on large bundles",
-            body="Deploying a large bundle stalls while charmcraft waits for the controller response.",
-            author="craft-contributor",
-            created_at=FIXED_NOW - timedelta(days=3),
-            updated_at=FIXED_NOW - timedelta(days=1),
-            url="https://github.com/canonical/charmcraft/issues/6103",
-        )
-    )
-
-    await session.commit()
-
-
 class TestComputeAgeDays:
     def test_none_returns_none(self) -> None:
         assert _compute_age_days(None) is None
@@ -432,7 +326,7 @@ class TestGetIssueDetail:
             summary="Regression in the core24 build pipeline.",
             suggested_action="needs_review",
             suggested_action_reason="Recent failures need maintainer attention.",
-            scores={"staleness": 0.2, "complexity": 0.7},
+            scores={"actionability": 0.8, "complexity": 0.7},
             evaluated_at=FIXED_NOW - timedelta(hours=1),
             latest=True,
         )
@@ -442,7 +336,7 @@ class TestGetIssueDetail:
             summary="Earlier summary.",
             suggested_action="keep_open",
             suggested_action_reason="Still active.",
-            scores={"staleness": 0.1},
+            scores={"actionability": 0.7},
             evaluated_at=FIXED_NOW - timedelta(days=1),
             latest=False,
         )
@@ -865,10 +759,8 @@ class TestQueryIssuesPerPage:
 
 
 class TestQueryIssuesSortValidation:
-    async def test_invalid_sort_field_defaults_to_staleness(
-        self, test_db_session
-    ) -> None:
-        """An invalid sort field falls back to staleness sort."""
+    async def test_invalid_sort_field_defaults_to_impact(self, test_db_session) -> None:
+        """An invalid sort field falls back to impact sort."""
         await _seed_projects_and_issues(test_db_session)
 
         issues, *_ = await _query(test_db_session, sort_by="invalid_field")
@@ -955,9 +847,8 @@ async def _seed_issues_with_scores(session) -> None:
             suggested_action="close",
             suggested_action_reason="No activity since the Ubuntu 24.04 migration",
             scores={
-                "staleness": 0.95,
+                "actionability": 0.1,
                 "complexity": 0.3,
-                "support_request": 0.2,
                 "impact": 0.8,
                 "quick_win": 0.56,
                 "confidence": 70.0,
@@ -984,9 +875,8 @@ async def _seed_issues_with_scores(session) -> None:
             suggested_action="work",
             suggested_action_reason="Implementation scope is clear and unblocked",
             scores={
-                "staleness": 0.1,
+                "actionability": 0.95,
                 "complexity": 0.2,
-                "support_request": 0.05,
                 "impact": 0.9,
                 "quick_win": 0.72,
                 "confidence": 85.0,
@@ -1013,9 +903,8 @@ async def _seed_issues_with_scores(session) -> None:
             suggested_action="investigate",
             suggested_action_reason="Touches multiple build stages and architecture-specific paths",
             scores={
-                "staleness": 0.4,
+                "actionability": 0.4,
                 "complexity": 0.95,
-                "support_request": 0.1,
                 "impact": 0.4,
                 "quick_win": 0.02,
                 "confidence": 60.0,
@@ -1052,7 +941,7 @@ class TestQueryIssuesLLMScores:
         """_query_issues should return all LLM score fields for issues."""
         await _seed_issues_with_scores(test_db_session)
 
-        issues, *_ = await _query(test_db_session, sort_by="staleness")
+        issues, *_ = await _query(test_db_session, sort_by="impact")
 
         # Find the issue with scores
         scored_issue = next(
@@ -1061,9 +950,8 @@ class TestQueryIssuesLLMScores:
         assert scored_issue is not None
 
         # Verify all score fields are present
-        assert "staleness" in scored_issue
+        assert "actionability" in scored_issue
         assert "complexity" in scored_issue
-        assert "support_request" in scored_issue
         assert "impact" in scored_issue
         assert "quick_win" in scored_issue
         assert "confidence" in scored_issue
@@ -1071,9 +959,8 @@ class TestQueryIssuesLLMScores:
         assert "suggested_action_reason" in scored_issue
 
         # Verify score values
-        assert scored_issue.staleness == 0.95
+        assert scored_issue.actionability == 0.1
         assert scored_issue.complexity == 0.3
-        assert scored_issue.support_request == 0.2
         assert scored_issue.impact == 0.8
         assert scored_issue.quick_win == 0.56
         assert scored_issue.get("impact") == 0.8
@@ -1097,24 +984,23 @@ class TestQueryIssuesLLMScores:
         assert unscored_issue is not None
 
         # Verify score fields are None
-        assert unscored_issue.staleness is None
+        assert unscored_issue.actionability is None
         assert unscored_issue.complexity is None
-        assert unscored_issue.support_request is None
         assert unscored_issue.impact is None
         assert unscored_issue.quick_win is None
         assert unscored_issue.confidence is None
         assert unscored_issue.suggested_action is None
         assert unscored_issue.suggested_action_reason is None
 
-    async def test_sort_by_staleness_score(self, test_db_session) -> None:
-        """Sort by staleness should order by staleness score descending."""
+    async def test_sort_by_actionability_score(self, test_db_session) -> None:
+        """Sort by actionability should order by actionability score descending."""
         await _seed_issues_with_scores(test_db_session)
 
-        issues, *_ = await _query(test_db_session, sort_by="staleness")
+        issues, *_ = await _query(test_db_session, sort_by="actionability")
 
-        # First issue should be the one with highest staleness
-        assert issues[0]["external_id"] == "100"
-        assert issues[0]["staleness"] == 0.95
+        # First issue should be the one with highest actionability
+        assert issues[0]["external_id"] == "101"
+        assert issues[0]["actionability"] == 0.95
 
     async def test_sort_by_complexity_score(self, test_db_session) -> None:
         """Sort by complexity should order by complexity score descending."""
@@ -1125,16 +1011,6 @@ class TestQueryIssuesLLMScores:
         # First issue should be the one with highest complexity
         assert issues[0]["external_id"] == "102"
         assert issues[0]["complexity"] == 0.95
-
-    async def test_sort_by_support_request_score(self, test_db_session) -> None:
-        """Sort by support_request should order by support_request score descending."""
-        await _seed_issues_with_scores(test_db_session)
-
-        issues, *_ = await _query(test_db_session, sort_by="support_request")
-
-        # First issue should be the one with highest support_request
-        assert issues[0]["external_id"] == "100"
-        assert issues[0]["support_request"] == 0.2
 
     async def test_sort_by_confidence_score(self, test_db_session) -> None:
         """Sort by confidence should order by confidence score descending."""
@@ -1191,7 +1067,7 @@ class TestLLMStatusFilter:
                 summary="A summary",
                 suggested_action="keep_open",
                 suggested_action_reason="reason",
-                scores={"staleness": 0.5},
+                scores={"actionability": 0.5},
             )
         )
         await test_db_session.commit()
@@ -1219,7 +1095,7 @@ class TestLLMStatusFilter:
                 summary="",
                 suggested_action="keep_open",
                 suggested_action_reason="reason",
-                scores={"staleness": 0.5},
+                scores={"actionability": 0.5},
             )
         )
         await test_db_session.commit()
@@ -1383,7 +1259,7 @@ class TestSemanticSearch:
                 summary="Parser crashes on malformed input.",
                 suggested_action="needs_triage",
                 suggested_action_reason="Needs investigation.",
-                scores={"staleness": 5},
+                scores={"actionability": 5},
                 distance=0.1,
             ),
             _SemanticSearchRow(
@@ -1418,7 +1294,7 @@ class TestSemanticSearch:
 
         assert [issue.id for issue in result] == [1, 2]
         assert result[0].title == "Fix YAML parser crash"
-        assert result[0].staleness == 5
+        assert result[0].actionability == 5
         assert result[1].summary is None
         assert result[1].scores == {}
 
