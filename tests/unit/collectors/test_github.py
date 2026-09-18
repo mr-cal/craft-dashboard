@@ -519,6 +519,60 @@ class TestCollectIssuesRefreshBehavior:
             state="all", sort="updated", direction="desc"
         )
 
+    async def test_full_collection_fetches_unbounded_history_even_when_closed_issues_exist(
+        self, mocker
+    ) -> None:
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        gh_issue = self._make_issue()
+        repo = MagicMock()
+        repo.get_issues.return_value = [gh_issue]
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value = repo
+
+        due_count_result = MagicMock()
+        due_count_result.scalar_one.return_value = 0
+        total_count_result = MagicMock()
+        total_count_result.scalar_one.return_value = 100
+        closed_count_result = MagicMock()
+        closed_count_result.scalar_one.return_value = 50
+
+        existing_result = MagicMock()
+        existing_result.scalar_one_or_none.return_value = None
+        existing_result.one_or_none.return_value = None
+
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                due_count_result,
+                total_count_result,
+                closed_count_result,
+                existing_result,
+                None,
+            ]
+        )
+        session.add = MagicMock()
+        session.commit = AsyncMock()
+
+        mocker.patch(
+            "craft_dashboard.collectors.github._fetch_issue_comments",
+            return_value=[],
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.github._fetch_closing_references",
+            return_value=[],
+        )
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._fake_insert,
+        )
+
+        count = await collector.collect_issues("repo", 1, session, state="full")
+
+        assert count == 1
+        repo.get_issues.assert_called_once_with(
+            state="all", sort="updated", direction="desc"
+        )
+
     async def test_skips_when_no_issues_due_and_not_full_refresh(self) -> None:
         collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
         repo = MagicMock()

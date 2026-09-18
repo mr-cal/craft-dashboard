@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from craft_dashboard.app import JSONFormatter, create_app, lifespan
+from craft_dashboard.app import JSONFormatter, _ref_external_url, create_app, lifespan
 from craft_dashboard.settings import Settings
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -146,3 +146,31 @@ class TestCreateApp:
         """Rate limiter is set up on the app."""
         app = create_app()
         assert hasattr(app.state, "limiter")
+
+
+class TestRefExternalUrl:
+    """Tests for _ref_external_url template filter."""
+
+    def test_github_simple_ref(self) -> None:
+        assert (
+            _ref_external_url("craft-providers#823")
+            == "https://github.com/canonical/craft-providers/issues/823"
+        )
+
+    def test_github_qualified_ref(self) -> None:
+        assert (
+            _ref_external_url("canonical/craft-parts#123")
+            == "https://github.com/canonical/craft-parts/issues/123"
+        )
+
+    def test_launchpad_ref(self) -> None:
+        assert (
+            _ref_external_url("snapcraft (launchpad)#2048")
+            == "https://bugs.launchpad.net/snapcraft/+bug/2048"
+        )
+
+    def test_invalid_refs(self) -> None:
+        assert _ref_external_url(None) is None
+        assert _ref_external_url("") is None
+        assert _ref_external_url("invalid-no-hash") is None
+        assert _ref_external_url("#123") is None

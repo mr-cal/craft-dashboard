@@ -139,6 +139,26 @@ def _format_duration_seconds(seconds: float) -> str:
     return f"{hours}h {mins}m {secs}s"
 
 
+def _ref_external_url(ref: str | None) -> str | None:
+    """Build an external URL for a project-qualified issue reference.
+
+    e.g. 'craft-providers#823' -> 'https://github.com/canonical/craft-providers/issues/823'
+         'canonical/snapcraft#100' -> 'https://github.com/canonical/snapcraft/issues/100'
+         'snapcraft (launchpad)#12345' -> 'https://bugs.launchpad.net/snapcraft/+bug/12345'
+    """
+    if not ref or "#" not in ref:
+        return None
+    prefix, _, external_id = ref.rpartition("#")
+    if not prefix or not external_id:
+        return None
+    if "(launchpad)" in prefix:
+        lp_name = prefix.replace("(launchpad)", "").strip()
+        return f"https://bugs.launchpad.net/{lp_name}/+bug/{external_id}"
+    project_name = prefix.rsplit("/", 1)[-1].strip()
+    org = prefix.rsplit("/", 1)[0].strip() if "/" in prefix else "canonical"
+    return f"https://github.com/{org}/{project_name}/issues/{external_id}"
+
+
 def _local_datetime(value: datetime | str | None, empty: str = "—") -> str:
     """Render a timestamp as a ``<time>`` element upgraded to local time by JS.
 
@@ -223,6 +243,7 @@ def create_app() -> FastAPI:
     templates.env.filters["urlencode_path"] = lambda s: _url_quote(str(s), safe="")
     templates.env.filters["format_duration"] = _format_duration_seconds
     templates.env.filters["local_datetime"] = _local_datetime
+    templates.env.filters["ref_external_url"] = _ref_external_url
     app.state.templates = templates
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 

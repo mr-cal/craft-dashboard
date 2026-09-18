@@ -56,6 +56,7 @@ from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.models.collection_watermark import CollectionWatermark
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.refresh_schedule import RefreshSchedule
+from craft_dashboard.repositories.issue_link_repository import IssueLinkRepository
 from craft_dashboard.settings import Settings
 
 logging.basicConfig(
@@ -1106,6 +1107,23 @@ async def _main(
         except Exception:
             logger.warning(
                 "Failed to generate cross-project snapshot",
+                exc_info=True,
+            )
+
+        # Reconcile previously unresolved issue links against any newly collected issues
+        try:
+            async with session_factory() as session:
+                link_repo = IssueLinkRepository(session)
+                reconciled = await link_repo.reconcile_unresolved_links()
+                if reconciled:
+                    await session.commit()
+                    logger.info(
+                        "Reconciled %d previously unresolved issue link(s)",
+                        reconciled,
+                    )
+        except Exception:
+            logger.warning(
+                "Failed to reconcile unresolved issue links",
                 exc_info=True,
             )
     finally:

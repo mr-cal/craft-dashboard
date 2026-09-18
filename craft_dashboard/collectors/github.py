@@ -660,7 +660,10 @@ class GitHubCollector:
                 return 0
 
             since_date: datetime | None = None
-            if since is not None:
+            if state == "full":
+                # Unbounded collection back to repository creation
+                since_date = None
+            elif since is not None:
                 since_date = (
                     since.replace(tzinfo=UTC) if since.tzinfo is None else since
                 )
@@ -689,8 +692,8 @@ class GitHubCollector:
                     )
                     since_date = max(oldest_fetch_tz - timedelta(days=1), _max_lookback)
                 else:
-                    # Fresh project with no issues yet: fetch the last 90 days.
-                    since_date = _max_lookback
+                    # Fresh project with no issues yet: fetch all history.
+                    since_date = None
 
             if since_date is not None:
                 gh_issues = repo.get_issues(
@@ -879,6 +882,8 @@ class GitHubCollector:
             )
             await session.execute(stmt)
             count += 1
+            if state != "open" and count % 25 == 0:
+                self.wait_for_rate_limit(resource="core")
 
             now = time.monotonic()
             if now - last_progress >= _PROGRESS_LOG_INTERVAL_SECONDS:

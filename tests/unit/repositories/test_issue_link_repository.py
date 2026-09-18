@@ -249,6 +249,48 @@ class TestCreateFromRelatedWork:
         assert len(links) == 1
         assert links[0].kind == "superseded_by"
 
+
+class TestReconcileUnresolvedLinks:
+    """Tests for IssueLinkRepository.reconcile_unresolved_links."""
+
+    async def test_reconciles_previously_unmatched_links(self, test_db_session) -> None:
+        project_from = make_project(id=1, name="charmcraft")
+        project_to = make_project(id=2, name="craft-providers")
+        test_db_session.add_all([project_from, project_to])
+        await test_db_session.flush()
+
+        from_issue = make_issue(id=1, project_id=1, external_id="2686")
+        test_db_session.add(from_issue)
+        await test_db_session.flush()
+
+        evaluation = make_evaluation(id=1, issue_id=1)
+        test_db_session.add(evaluation)
+        await test_db_session.flush()
+
+        # Create link pointing to craft-providers#823 before to_issue exists
+        repo = IssueLinkRepository(test_db_session)
+        links = await repo.create_from_related_work(
+            from_issue_id=1,
+            llm_evaluation_id=1,
+            related_work=[
+                {
+                    "kind": "likely_fixed_by",
+                    "ref": "craft-providers#823",
+                    "confidence": 85,
+                }
+            ],
+        )
+        assert links[0].to_issue_id is None
+
+        # Now simulate craft-providers#823 being collected into the database
+        to_issue = make_issue(id=2, project_id=2, external_id="823")
+        test_db_session.add(to_issue)
+        await test_db_session.flush()
+
+        reconciled = await repo.reconcile_unresolved_links()
+        assert reconciled == 1
+        assert links[0].to_issue_id == to_issue.id
+
     async def test_unknown_kind_is_skipped_not_raised(self, test_db_session) -> None:
         """A hallucinated kind value must not crash the whole submission.
 

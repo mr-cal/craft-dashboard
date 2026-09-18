@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from craft_dashboard.app import create_app
@@ -13,6 +13,7 @@ from craft_dashboard.llm.evaluator import (
     OPEN_PR_EVAL_VERSION,
 )
 from craft_dashboard.models.views import IssueQueryResult, IssueView
+from craft_dashboard.repositories.issue_link_repository import IssueLinkRepository
 from craft_dashboard.repositories.issue_repository import IssueRepository
 from craft_dashboard.settings import Settings
 from fastapi import FastAPI
@@ -527,3 +528,48 @@ class TestOutdatedEvaluationNotice:
 
         assert response.status_code == 200
         assert "evaluation-outdated-notice" in response.text
+
+
+class TestRelatedLinksSection:
+    def test_related_links_external_fallback_when_to_issue_is_none(
+        self, test_client: TestClient
+    ) -> None:
+        mock_link = MagicMock()
+        mock_link.kind = "likely_fixed_by"
+        mock_link.to_ref = "craft-providers#823"
+        mock_link.to_issue = None
+        mock_link.confidence = 85
+        mock_link.note = None
+
+        with (
+            patch.object(
+                IssueRepository,
+                "get_issue_detail",
+                AsyncMock(return_value=_DETAIL),
+            ),
+            patch.object(
+                IssueRepository,
+                "get_issue_activity_history",
+                AsyncMock(return_value=[]),
+            ),
+            patch.object(
+                IssueRepository,
+                "find_similar_issues",
+                AsyncMock(return_value=[]),
+            ),
+            patch.object(
+                IssueLinkRepository,
+                "get_latest_links_for_issue",
+                AsyncMock(return_value=[mock_link]),
+            ),
+        ):
+            response = test_client.get("/issues/snapcraft/321")
+
+        assert response.status_code == 200
+        assert "Related work" in response.text
+        assert "Likely Fixed By" in response.text
+        assert (
+            'href="https://github.com/canonical/craft-providers/issues/823"'
+            in response.text
+        )
+        assert "craft-providers#823" in response.text

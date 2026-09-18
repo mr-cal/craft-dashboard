@@ -149,3 +149,26 @@ class IssueLinkRepository:
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def reconcile_unresolved_links(self) -> int:
+        """Reconcile existing IssueLink rows where to_issue_id IS NULL.
+
+        Finds all unlinked rows, attempts to resolve their to_ref against
+        the issues table, and updates to_issue_id for any newly discovered matches.
+
+        Returns:
+            The number of links successfully reconciled.
+
+        """
+        query = select(IssueLink).where(IssueLink.to_issue_id.is_(None))
+        result = await self.session.execute(query)
+        unlinked = list(result.scalars().all())
+        reconciled = 0
+        for link in unlinked:
+            resolved_id = await self._resolve_ref_to_issue_id(link.to_ref)
+            if resolved_id is not None:
+                link.to_issue_id = resolved_id
+                reconciled += 1
+        if reconciled:
+            await self.session.flush()
+        return reconciled

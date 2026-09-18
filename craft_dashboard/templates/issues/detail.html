@@ -146,6 +146,8 @@
       <strong>{{ link.kind | replace("_", " ") | title }}</strong>:
       {% if link.to_issue %}
       <a href="/issues/{{ link.to_issue.project.name | urlencode_path }}/{{ link.to_issue.external_id }}">{{ link.to_ref }}</a>
+      {% elif link.to_ref | ref_external_url %}
+      <a href="{{ link.to_ref | ref_external_url }}" target="_blank" rel="noopener noreferrer">{{ link.to_ref }}</a>
       {% else %}
       {{ link.to_ref }}
       {% endif %}
