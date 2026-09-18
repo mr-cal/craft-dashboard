@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import pathlib
 import re
 from dataclasses import dataclass
@@ -68,11 +69,14 @@ def _make_before_sleep_log(max_attempts: int) -> Callable[[RetryCallState], None
         exception = retry_state.outcome.exception() if retry_state.outcome else None
         if exception is None:
             return
+        exc_name = type(exception).__name__
+        exc_msg = str(exception).strip()
+        detail = f"{exc_name}: {exc_msg}" if exc_msg else exc_name
         logger.warning(
             "HTTP retry (attempt %d/%d): %s",
             retry_state.attempt_number,
             max_attempts,
-            exception,
+            detail,
         )
 
     return _before_sleep
@@ -506,7 +510,11 @@ class LocalLLMClient:
     """
 
     def __init__(
-        self, base_url: str = LOCAL_LLM_BASE_URL, api_key: str = "", ca_cert: str = ""
+        self,
+        base_url: str = LOCAL_LLM_BASE_URL,
+        api_key: str = "",
+        ca_cert: str = "",
+        timeout: float | None = None,
     ) -> None:
         """Initialize the local LLM client.
 
@@ -517,6 +525,8 @@ class LocalLLMClient:
             ca_cert: Path to a PEM CA certificate for verifying the server's TLS
                      certificate. Required when base_url uses https:// with a
                      self-signed cert. Leave empty to use the system CA bundle.
+            timeout: HTTP request timeout in seconds. Defaults to LOCAL_LLM_TIMEOUT
+                     env var or 600.0s.
 
         """
         self.base_url = base_url
@@ -531,6 +541,16 @@ class LocalLLMClient:
             self.ca_cert = str(expanded)
         else:
             self.ca_cert = ""
+        if timeout is None:
+            env_timeout = os.getenv("LOCAL_LLM_TIMEOUT")
+            if env_timeout:
+                try:
+                    timeout = float(env_timeout)
+                except ValueError:
+                    timeout = 600.0
+            else:
+                timeout = 600.0
+        self.timeout = timeout
         self._http: httpx.AsyncClient | None = None
         # Optional hook invoked as (attempt_number, max_attempts) before each
         # retry attempt of complete(); lets callers surface retry progress.
@@ -542,12 +562,10 @@ class LocalLLMClient:
         if self._http is None or self._http.is_closed:
             verify: bool | str = self.ca_cert if self.ca_cert else True
             try:
-                # 120s comfortably covers the slowest legitimate completions
-                # observed (~50s) while surfacing a stuck/stalled local server
-                # far sooner than the previous 600s, so tenacity retries
-                # (below) can kick in without blocking the worker for 10+
-                # minutes per stall.
-                self._http = httpx.AsyncClient(timeout=120.0, verify=verify)
+                # 600s allows local hardware ample time for large prompt
+                # prefills (>14k tokens) and generation up to MAX_EVAL_TOKENS
+                # (16,384 tokens) without premature timeouts.
+                self._http = httpx.AsyncClient(timeout=self.timeout, verify=verify)
             except FileNotFoundError as exc:
                 raise FileNotFoundError(
                     f"LLM CA certificate file not found: '{verify}'. "
@@ -568,9 +586,9 @@ class LocalLLMClient:
             lambda exc: isinstance(exc, (httpx.TransportError, LLMUnavailableError))
         ),
         wait=wait_exponential(multiplier=1, min=2, max=30),
-        stop=stop_after_attempt(5),
-        before=_make_before_attempt(5),
-        before_sleep=_make_before_sleep_log(5),
+        stop=stop_after_attempt(3),
+        before=_make_before_attempt(3),
+        before_sleep=_make_before_sleep_log(3),
         reraise=True,
     )
     async def complete(

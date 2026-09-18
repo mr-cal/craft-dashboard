@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import pathlib
 from copy import deepcopy
 from types import SimpleNamespace
@@ -567,6 +568,33 @@ async def test_evaluate_issue_releases_claim_on_exception(
         issue_ref="snapcraft#100",
         reason="evaluation_error",
     )
+
+
+@pytest.mark.asyncio
+async def test_evaluate_issue_handles_timeout_cleanly(
+    monkeypatch: pytest.MonkeyPatch,
+    base_runtime: SimpleNamespace,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """When an evaluation times out, it logs a clean error and releases claim."""
+    base_runtime.evaluator.evaluate = AsyncMock(side_effect=httpx.ReadTimeout(""))
+    release_claim = AsyncMock()
+    monkeypatch.setattr(eval_worker, "_release_claim", release_claim)
+
+    with caplog.at_level(logging.ERROR):
+        await eval_worker._evaluate_issue(
+            base_runtime,
+            issue_data=_make_issue(issue_id=42, repo_shas={"snapcraft": "a" * 40}),
+            worker_name="worker-1",
+        )
+
+    release_claim.assert_awaited_once_with(
+        base_runtime,
+        issue_id=42,
+        issue_ref="snapcraft#100",
+        reason="evaluation_error",
+    )
+    assert "LLM request timed out (ReadTimeout)" in caplog.text
 
 
 @pytest.mark.asyncio

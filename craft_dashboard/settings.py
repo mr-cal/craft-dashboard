@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # worker now always uses OpenRouter embeddings instead.
     local_llm_embedding_model: str = ""
 
+    # Timeout (seconds) for local LLM completion requests.
+    local_llm_timeout: float = 600.0
+
     # Related issues — shown on the issue detail page.
     related_issues_top_n: int = 10
     related_issues_similarity_threshold: float = 0.70

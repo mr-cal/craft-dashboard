@@ -32,7 +32,11 @@ from craft_dashboard.llm.evaluator import (
     IssueEvaluator,
     _compute_content_hash,
 )
-from craft_dashboard.llm.exceptions import LLMQuotaError
+from craft_dashboard.llm.exceptions import (
+    LLMQuotaError,
+    LLMTimeoutError,
+    LLMUnavailableError,
+)
 from craft_dashboard.llm.preflight import run_preflight
 from craft_dashboard.llm.tool_dispatch import ToolContext
 from craft_dashboard.settings import Settings
@@ -226,6 +230,7 @@ def create_llm_client_for_backend(
     llm_url: str,
     llm_api_key: str,
     ca_cert: str,
+    timeout: float | None = None,
 ) -> LLMClient:
     """Create the completion client for the selected backend."""
     if llm_backend == "openrouter":
@@ -235,6 +240,7 @@ def create_llm_client_for_backend(
             base_url=llm_url.rstrip("/"),
             api_key=llm_api_key,
             ca_cert=ca_cert,
+            timeout=timeout,
         )
     raise ValueError(f"Unsupported llm backend: {llm_backend}")
 
@@ -665,6 +671,31 @@ async def _evaluate_issue(  # noqa: PLR0911
             await runtime.state.release()
             await _enter_quota_backoff(runtime)
             return
+        except (httpx.TimeoutException, LLMTimeoutError) as exc:
+            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            exc_name = type(exc).__name__
+            logger.error(  # noqa: TRY400
+                "%s: evaluation failed after %s: LLM request timed out (%s)",
+                issue_ref,
+                _format_elapsed(time.monotonic() - started_at),
+                exc_name,
+            )
+            logger.debug("%s: LLM timeout traceback:", issue_ref, exc_info=True)
+            release_reason = "evaluation_error"
+            await _release_and_maybe_stop(runtime)
+            return
+        except LLMUnavailableError as exc:
+            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            logger.error(  # noqa: TRY400
+                "%s: evaluation failed after %s: LLM service unavailable (%s)",
+                issue_ref,
+                _format_elapsed(time.monotonic() - started_at),
+                exc,
+            )
+            logger.debug("%s: LLM unavailable traceback:", issue_ref, exc_info=True)
+            release_reason = "evaluation_error"
+            await _release_and_maybe_stop(runtime)
+            return
         except Exception:
             runtime.progress.update(runtime.overall_id, description="Evaluating issues")
             logger.exception(
@@ -700,6 +731,18 @@ async def _evaluate_issue(  # noqa: PLR0911
             await runtime.state.release()
             await _enter_quota_backoff(runtime)
             return
+        except (httpx.TimeoutException, LLMTimeoutError) as exc:
+            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            exc_name = type(exc).__name__
+            logger.error(  # noqa: TRY400
+                "%s: embedding failed: LLM request timed out (%s)",
+                issue_ref,
+                exc_name,
+            )
+            logger.debug("%s: embedding timeout traceback:", issue_ref, exc_info=True)
+            release_reason = "embedding_error"
+            await _release_and_maybe_stop(runtime)
+            return
         except Exception:
             runtime.progress.update(runtime.overall_id, description="Evaluating issues")
             logger.exception("%s: embedding failed", issue_ref)
@@ -718,6 +761,20 @@ async def _evaluate_issue(  # noqa: PLR0911
             release_reason = "quota_exhausted"
             await runtime.state.release()
             await _enter_quota_backoff(runtime)
+            return
+        except (httpx.TimeoutException, LLMTimeoutError) as exc:
+            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            exc_name = type(exc).__name__
+            logger.error(  # noqa: TRY400
+                "%s: search embedding failed: LLM request timed out (%s)",
+                issue_ref,
+                exc_name,
+            )
+            logger.debug(
+                "%s: search embedding timeout traceback:", issue_ref, exc_info=True
+            )
+            release_reason = "search_embedding_error"
+            await _release_and_maybe_stop(runtime)
             return
         except Exception:
             runtime.progress.update(runtime.overall_id, description="Evaluating issues")
@@ -1002,6 +1059,7 @@ async def run_evaluate_loop(
         llm_url=llm_url,
         llm_api_key=llm_api_key,
         ca_cert=ca_cert,
+        timeout=settings.local_llm_timeout,
     )
     evaluator = IssueEvaluator(
         client=llm_client,
