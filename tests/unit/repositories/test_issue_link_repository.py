@@ -220,6 +220,77 @@ class TestCreateFromRelatedWork:
         assert links[0].to_issue_id is None
         assert links[0].to_ref == "craft-parts#999"
 
+    async def test_superseded_by_is_a_valid_kind(self, test_db_session) -> None:
+        project = make_project(name="craft-parts")
+        test_db_session.add(project)
+        await test_db_session.flush()
+        from_issue = make_issue(project_id=project.id, external_id="1")
+        to_issue = make_issue(project_id=project.id, external_id="42")
+        test_db_session.add_all([from_issue, to_issue])
+        await test_db_session.flush()
+        evaluation = make_evaluation(issue_id=from_issue.id)
+        test_db_session.add(evaluation)
+        await test_db_session.flush()
+
+        repo = IssueLinkRepository(test_db_session)
+        links = await repo.create_from_related_work(
+            from_issue_id=from_issue.id,
+            llm_evaluation_id=evaluation.id,
+            related_work=[
+                {
+                    "kind": "superseded_by",
+                    "ref": "craft-parts#42",
+                    "confidence": 85,
+                    "note": "a newer PR replaces this one",
+                }
+            ],
+        )
+
+        assert len(links) == 1
+        assert links[0].kind == "superseded_by"
+
+    async def test_unknown_kind_is_skipped_not_raised(self, test_db_session) -> None:
+        """A hallucinated kind value must not crash the whole submission.
+
+        Regression test: previously an unrecognized ``kind`` was passed
+        straight to the ORM and only caught by the DB's CHECK constraint,
+        raising an unhandled IntegrityError that discarded an entire
+        evaluation result for the sake of one bad entry.
+        """
+        project = make_project(name="craft-parts")
+        test_db_session.add(project)
+        await test_db_session.flush()
+        from_issue = make_issue(project_id=project.id, external_id="1")
+        to_issue = make_issue(project_id=project.id, external_id="42")
+        test_db_session.add_all([from_issue, to_issue])
+        await test_db_session.flush()
+        evaluation = make_evaluation(issue_id=from_issue.id)
+        test_db_session.add(evaluation)
+        await test_db_session.flush()
+
+        repo = IssueLinkRepository(test_db_session)
+        links = await repo.create_from_related_work(
+            from_issue_id=from_issue.id,
+            llm_evaluation_id=evaluation.id,
+            related_work=[
+                {
+                    "kind": "not_a_real_kind",
+                    "ref": "craft-parts#42",
+                    "confidence": 85,
+                    "note": "hallucinated kind",
+                },
+                {
+                    "kind": "duplicate_of",
+                    "ref": "craft-parts#42",
+                    "confidence": 90,
+                    "note": "a valid entry alongside the bad one",
+                },
+            ],
+        )
+
+        assert len(links) == 1
+        assert links[0].kind == "duplicate_of"
+
     async def test_empty_related_work_creates_nothing(self, test_db_session) -> None:
         project = make_project(name="craft-parts")
         test_db_session.add(project)

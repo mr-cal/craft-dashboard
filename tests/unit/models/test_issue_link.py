@@ -82,3 +82,28 @@ class TestIssueLink:
 
         assert "duplicate_of" in repr(link)
         assert "canonical/craft-parts#567" in repr(link)
+
+    async def test_superseded_by_is_accepted_by_the_db_constraint(
+        self, test_db_session
+    ) -> None:
+        """The ck_issue_links_kind CHECK constraint allows 'superseded_by'."""
+        project = make_project(id=1, name="rockcraft")
+        from_issue = make_issue(id=1, project_id=1, external_id="100")
+        to_issue = make_issue(id=2, project_id=1, external_id="200")
+        evaluation = make_evaluation(id=1, issue_id=1)
+        await _seed(test_db_session, project, from_issue, to_issue, evaluation)
+
+        link = IssueLink(
+            from_issue_id=1,
+            llm_evaluation_id=1,
+            to_issue_id=2,
+            to_ref="rockcraft#200",
+            kind="superseded_by",
+            confidence=85,
+            source="evaluator",
+        )
+        test_db_session.add(link)
+        await test_db_session.commit()
+
+        assert link.id is not None
+        assert link.kind == "superseded_by"

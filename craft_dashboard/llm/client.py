@@ -542,7 +542,12 @@ class LocalLLMClient:
         if self._http is None or self._http.is_closed:
             verify: bool | str = self.ca_cert if self.ca_cert else True
             try:
-                self._http = httpx.AsyncClient(timeout=600.0, verify=verify)
+                # 120s comfortably covers the slowest legitimate completions
+                # observed (~50s) while surfacing a stuck/stalled local server
+                # far sooner than the previous 600s, so tenacity retries
+                # (below) can kick in without blocking the worker for 10+
+                # minutes per stall.
+                self._http = httpx.AsyncClient(timeout=120.0, verify=verify)
             except FileNotFoundError as exc:
                 raise FileNotFoundError(
                     f"LLM CA certificate file not found: '{verify}'. "

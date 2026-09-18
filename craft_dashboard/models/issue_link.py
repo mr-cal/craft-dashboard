@@ -42,6 +42,7 @@ LINK_KINDS = (
     "duplicate_of",
     "related_to",
     "caused_by",
+    "superseded_by",
 )
 
 #: Valid values for IssueLink.source.
@@ -55,7 +56,7 @@ class IssueLink(Base):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('likely_fixed_by', 'blocked_by', 'duplicate_of', "
-            "'related_to', 'caused_by')",
+            "'related_to', 'caused_by', 'superseded_by')",
             name="ck_issue_links_kind",
         ),
         CheckConstraint(

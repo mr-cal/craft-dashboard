@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from craft_dashboard.models.issue import Issue
-from craft_dashboard.models.issue_link import IssueLink
+from craft_dashboard.models.issue_link import LINK_KINDS, IssueLink
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 
 class IssueLinkRepository:
@@ -72,16 +75,36 @@ class IssueLinkRepository:
         llm_evaluation_id: int,
         related_work: list[dict[str, Any]],
     ) -> list[IssueLink]:
-        """Persist an evaluator's related_work findings as IssueLink rows."""
+        """Persist an evaluator's related_work findings as IssueLink rows.
+
+        Entries with a ``kind`` outside ``LINK_KINDS`` are skipped (with a
+        warning) rather than passed through to the DB: the LLM occasionally
+        hallucinates a plausible-sounding but unsupported value (e.g.
+        ``superseded_by`` before it was added to the enum), and letting the
+        DB's CHECK constraint be the only guard means a single bad entry
+        raises an unhandled IntegrityError that discards the *entire*
+        evaluation submission, not just the offending link.
+        """
         links: list[IssueLink] = []
         for entry in related_work:
+            kind = entry.get("kind", "related_to")
+            if kind not in LINK_KINDS:
+                logger.warning(
+                    "Skipping related_work entry for issue %d with unknown kind %r "
+                    "(evaluation %d, ref=%r)",
+                    from_issue_id,
+                    kind,
+                    llm_evaluation_id,
+                    entry.get("ref"),
+                )
+                continue
             ref = str(entry.get("ref", "")).strip()
             link = IssueLink(
                 from_issue_id=from_issue_id,
                 llm_evaluation_id=llm_evaluation_id,
                 to_issue_id=await self._resolve_ref_to_issue_id(ref),
                 to_ref=ref,
-                kind=entry.get("kind", "related_to"),
+                kind=kind,
                 confidence=entry.get("confidence", 0),
                 note=entry.get("note") or None,
                 source="evaluator",

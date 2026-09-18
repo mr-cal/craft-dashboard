@@ -4,7 +4,8 @@ import json
 import logging
 import os
 import pathlib
-from collections.abc import AsyncGenerator
+import time
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import cast
@@ -188,6 +189,30 @@ def create_app() -> FastAPI:
     limiter = eval_api_limiter
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _slowapi_rate_limit_handler)
+
+    @app.middleware("http")
+    async def _access_log_middleware(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        """Log method, path, status, duration, and client IP for every request.
+
+        Minimal diagnostic trail — previously there was none, which made it
+        impossible to tell what traffic (bot burst, legitimate spike, etc.)
+        was behind incidents like a sudden DB connection pool exhaustion.
+        """
+        started = time.monotonic()
+        response = await call_next(request)
+        duration_ms = (time.monotonic() - started) * 1000
+        client_host = request.client.host if request.client else "-"
+        logger.info(
+            "%s %s %d %.1fms client=%s",
+            request.method,
+            request.url.path,
+            response.status_code,
+            duration_ms,
+            client_host,
+        )
+        return response
 
     app.state.settings = settings
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))

@@ -162,7 +162,7 @@ this schema:
   "suggested_action": "<one of: keep_open, needs_triage, close_resolved, close_stale, close_not_a_bug>",
   "suggested_action_reason": "<1-3 sentences justifying the suggested action and scores>",
   "related_work": [
-    {"kind": "<one of: likely_fixed_by, blocked_by, duplicate_of, related_to, caused_by>",
+    {"kind": "<one of: likely_fixed_by, blocked_by, duplicate_of, related_to, caused_by, superseded_by>",
      "ref": "<owner/project#N or project#N>",
      "confidence": <0-100>,
      "note": "<short justification>"}
@@ -268,7 +268,7 @@ with valid JSON matching this schema:
   "suggested_action": "<one of: keep_open, needs_review, close_superseded, close_not_mergeable, close_stale>",
   "suggested_action_reason": "<1-3 sentences justifying the suggested action and scores>",
   "related_work": [
-    {"kind": "<one of: likely_fixed_by, blocked_by, duplicate_of, related_to, caused_by>",
+    {"kind": "<one of: likely_fixed_by, blocked_by, duplicate_of, related_to, caused_by, superseded_by>",
      "ref": "<owner/project#N or project#N>",
      "confidence": <0-100>,
      "note": "<short justification>"}
@@ -355,7 +355,7 @@ issue or pull request, and respond with valid JSON matching this schema:
   "suggested_action": "<one of: closed_resolved, closed_superseded, closed_not_a_bug, closed_stale>",
   "suggested_action_reason": "<1-3 sentences stating the concrete resolution and citing evidence (e.g. closing PR #123, commit SHA, or closing maintainer comment)>",
   "related_work": [
-    {"kind": "<one of: likely_fixed_by, blocked_by, duplicate_of, related_to, caused_by>",
+    {"kind": "<one of: likely_fixed_by, blocked_by, duplicate_of, related_to, caused_by, superseded_by>",
      "ref": "<owner/project#N or project#N>",
      "confidence": <0-100>,
      "note": "<short justification>"}
