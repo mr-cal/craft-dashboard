@@ -104,7 +104,7 @@ async def test_copilot_acp_client_complete_flow() -> None:
             "asyncio.create_subprocess_exec",
             new_callable=AsyncMock,
             return_value=mock_proc,
-        ),
+        ) as mock_exec,
     ):
         resp = await client.complete(
             model="gemini-3.8-flash",
@@ -119,6 +119,11 @@ async def test_copilot_acp_client_complete_flow() -> None:
         assert resp.total_tokens == 120
         assert resp.reasoning_tokens == 10
         assert resp.finish_reason == "end_turn"
+
+        env_passed = mock_exec.call_args.kwargs.get("env")
+        assert env_passed is not None
+        assert "GITHUB_TOKEN" not in env_passed
+        assert "GH_TOKEN" not in env_passed
 
     await client.close()
     mock_proc.terminate.assert_called_once()

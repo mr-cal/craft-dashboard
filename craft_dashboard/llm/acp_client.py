@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+import os
 import shutil
 import tempfile
 from typing import TYPE_CHECKING, Any
@@ -63,11 +65,21 @@ class CopilotACPClient:
 
             logger.info("Starting Copilot ACP process: %s", " ".join(self.copilot_cmd))
             try:
+                # Filter out GITHUB_TOKEN / GH_TOKEN when spawning gh copilot.
+                # If set (e.g. from repo .env for GitHub API collector), gh uses
+                # it instead of the user's stored OAuth credentials in hosts.yml,
+                # causing Copilot authentication to fail if that token lacks
+                # Copilot permissions.
+                spawn_env = dict(os.environ)
+                spawn_env.pop("GITHUB_TOKEN", None)
+                spawn_env.pop("GH_TOKEN", None)
+
                 self._proc = await asyncio.create_subprocess_exec(
                     *self.copilot_cmd,
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    env=spawn_env,
                 )
             except Exception as exc:
                 raise LLMUnavailableError(
@@ -326,12 +338,21 @@ class CopilotACPClient:
                 self._reader_task = None
 
             if self._proc is not None:
+                if self._proc.stdin is not None and not self._proc.stdin.is_closing():
+                    self._proc.stdin.close()
+                    with contextlib.suppress(OSError):
+                        await self._proc.stdin.wait_closed()
                 if self._proc.returncode is None:
                     try:
                         self._proc.terminate()
                         await asyncio.wait_for(self._proc.wait(), timeout=3.0)
                     except (TimeoutError, ProcessLookupError, OSError):
                         self._proc.kill()
+                        with contextlib.suppress(OSError):
+                            await self._proc.wait()
+                # Yield to the event loop so transport connection-lost callbacks can run
+                # while the event loop is still open
+                await asyncio.sleep(0.05)
                 self._proc = None
 
             for fut in self._pending_requests.values():
