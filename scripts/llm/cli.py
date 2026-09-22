@@ -129,30 +129,6 @@ def _handle_fatal_config_error(message: str) -> None:
 
 @cli.command(name="evaluate")
 @click.option(
-    "--server",
-    required=True,
-    envvar="EVAL_CLIENT_SERVER",
-    help="Base URL of craft-dashboard server [env: EVAL_CLIENT_SERVER]",
-)
-@click.option(
-    "--token",
-    required=True,
-    envvar="EVAL_API_TOKEN",
-    help="Eval API bearer token [env: EVAL_API_TOKEN]",
-)
-@click.option(
-    "--ca-cert",
-    default="",
-    envvar="LOCAL_LLM_CA_CERT",
-    help="PEM CA cert path for the local LLM TLS certificate [env: LOCAL_LLM_CA_CERT]",
-)
-@click.option(
-    "--server-ca-cert",
-    default="",
-    envvar="EVAL_CLIENT_SERVER_CA_CERT",
-    help="PEM CA cert path for the craft-dashboard server TLS certificate [env: EVAL_CLIENT_SERVER_CA_CERT]",
-)
-@click.option(
     "--interval",
     "poll_interval",
     default=30,
@@ -224,10 +200,6 @@ def _handle_fatal_config_error(message: str) -> None:
     help="Write detailed debug traces and LLM logs to .logs/ directory",
 )
 def evaluate_cmd(
-    server: str,
-    token: str,
-    ca_cert: str,
-    server_ca_cert: str,
     poll_interval: int,
     limit: int,
     project: str,
@@ -242,6 +214,24 @@ def evaluate_cmd(
     log: bool,
 ) -> None:
     """Run the continuous HTTP-only evaluation service against /api/eval/*."""
+    server = os.environ.get("EVAL_CLIENT_SERVER", "")
+    token = os.environ.get("EVAL_API_TOKEN", "")
+    missing_auth = [
+        name
+        for name, value in (
+            ("EVAL_CLIENT_SERVER", server),
+            ("EVAL_API_TOKEN", token),
+        )
+        if not value
+    ]
+    if missing_auth:
+        _handle_fatal_config_error(
+            f"Missing required environment variable(s): {', '.join(missing_auth)}. "
+            "Set them in your .env file."
+        )
+
+    ca_cert = os.environ.get("LOCAL_LLM_CA_CERT", "")
+    server_ca_cert = os.environ.get("EVAL_CLIENT_SERVER_CA_CERT", "")
     openrouter_api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if issue and not project:
         _handle_fatal_config_error("--issue requires --project")
@@ -251,7 +241,7 @@ def evaluate_cmd(
         if not expanded_server_ca.is_file():
             _handle_fatal_config_error(
                 f"Server CA certificate file not found: '{server_ca_cert}' (resolved to '{expanded_server_ca}'). "
-                "Check the --server-ca-cert option or EVAL_CLIENT_SERVER_CA_CERT in your .env file."
+                "Check EVAL_CLIENT_SERVER_CA_CERT in your .env file."
             )
 
     llm_backend = llm_backend.lower()
@@ -274,7 +264,7 @@ def evaluate_cmd(
             if not expanded_ca.is_file():
                 _handle_fatal_config_error(
                     f"CA certificate file not found: '{ca_cert}' (resolved to '{expanded_ca}'). "
-                    "Check the --ca-cert option or LOCAL_LLM_CA_CERT in your .env file."
+                    "Check LOCAL_LLM_CA_CERT in your .env file."
                 )
         llm_api_key = os.environ.get("LOCAL_LLM_API_KEY", "")
         model_summary = model_scoring = model

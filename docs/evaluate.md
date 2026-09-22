@@ -41,12 +41,12 @@ of the file. The command loads `.env` automatically.
 
 ### TLS certificates
 
-There are two separate TLS cert settings:
+There are two separate TLS cert settings, configured via environment variables in `.env`:
 
-| Variable | Flag | Purpose |
-|---|---|---|
-| `EVAL_CLIENT_SERVER_CA_CERT` | `--server-ca-cert` | CA cert to verify the **craft-dashboard server** |
-| `LOCAL_LLM_CA_CERT` | `--ca-cert` | CA cert to verify the **local LLM endpoint** |
+| Variable | Purpose |
+|---|---|
+| `EVAL_CLIENT_SERVER_CA_CERT` | CA cert to verify the **craft-dashboard server** |
+| `LOCAL_LLM_CA_CERT` | CA cert to verify the **local LLM endpoint** |
 
 ## Usage
 
@@ -54,18 +54,20 @@ Run the worker from the repository root:
 
 ```bash
 # Continuous evaluation through OpenRouter
-uv run scripts/run_llm.py evaluate --server https://craft-dashboard.name --token "$EVAL_API_TOKEN"
+uv run scripts/run_llm.py evaluate
 
-# Continuous evaluation through a local chat backend, with OpenRouter embeddings
+# Continuous evaluation through a local chat backend
 uv run scripts/run_llm.py evaluate \
-  --server https://craft-dashboard.name \
-  --token "$EVAL_API_TOKEN" \
   --llm-backend local \
   --project snapcraft \
   --concurrency 4
 
+# Continuous evaluation with Copilot CLI and Gemini 3.8 Flash
+COPILOT_ACP_MODEL=gemini-3.8-flash uv run scripts/run_llm.py evaluate \
+  --llm-backend copilot-acp
+
 # Bounded run for one project
-uv run scripts/run_llm.py evaluate --server http://localhost:8000 --token "$EVAL_API_TOKEN" --limit 10
+uv run scripts/run_llm.py evaluate --limit 10
 ```
 
 `--limit N` (aliased as `--max-evaluations N`, the name used in the deep-

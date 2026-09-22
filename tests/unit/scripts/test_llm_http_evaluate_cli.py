@@ -16,8 +16,10 @@ def test_help_lists_http_evaluate_options() -> None:
     result = runner.invoke(cli, ["evaluate", "--help"])
 
     assert result.exit_code == 0
-    assert "--server" in result.output
-    assert "--ca-cert" in result.output
+    assert "--server" not in result.output
+    assert "--token" not in result.output
+    assert "--ca-cert" not in result.output
+    assert "--server-ca-cert" not in result.output
     assert "--llm-backend" in result.output
     assert "--interval" in result.output
     assert "--concurrency" in result.output
@@ -27,6 +29,8 @@ def test_help_lists_http_evaluate_options() -> None:
 
 def test_evaluate_uses_http_worker_with_local_backend(monkeypatch) -> None:
     runner = CliRunner()
+    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
     monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
@@ -44,10 +48,6 @@ def test_evaluate_uses_http_worker_with_local_backend(monkeypatch) -> None:
         cli,
         [
             "evaluate",
-            "--server",
-            "http://localhost:8000",
-            "--token",
-            "test-token",
             "--llm-backend",
             "local",
             "--concurrency",
@@ -59,6 +59,8 @@ def test_evaluate_uses_http_worker_with_local_backend(monkeypatch) -> None:
 
     assert result.exit_code == 0
     run_loop.assert_called_once()
+    assert run_loop.call_args.kwargs["server"] == "http://localhost:8000"
+    assert run_loop.call_args.kwargs["token"] == "test-token"
     assert run_loop.call_args.kwargs["llm_backend"] == "local"
     assert run_loop.call_args.kwargs["concurrency"] == 4
     assert run_loop.call_args.kwargs["log"] is False
@@ -66,6 +68,8 @@ def test_evaluate_uses_http_worker_with_local_backend(monkeypatch) -> None:
 
 def test_evaluate_passes_log_flag(monkeypatch) -> None:
     runner = CliRunner()
+    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
     monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
@@ -83,10 +87,6 @@ def test_evaluate_passes_log_flag(monkeypatch) -> None:
         cli,
         [
             "evaluate",
-            "--server",
-            "http://localhost:8000",
-            "--token",
-            "test-token",
             "--llm-backend",
             "local",
             "--log",
@@ -103,6 +103,8 @@ def test_evaluate_local_backend_does_not_require_embedding_key(
     monkeypatch,
 ) -> None:
     runner = CliRunner()
+    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     monkeypatch.delenv("OPENROUTER_API_KEY_EMBEDDING", raising=False)
     monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
@@ -120,10 +122,6 @@ def test_evaluate_local_backend_does_not_require_embedding_key(
         cli,
         [
             "evaluate",
-            "--server",
-            "http://localhost:8000",
-            "--token",
-            "test-token",
             "--llm-backend",
             "local",
         ],
@@ -138,6 +136,8 @@ def test_evaluate_requires_openrouter_summary_model_for_openrouter_backend(
 ) -> None:
     """OPENROUTER_MODEL_SUMMARY must be set explicitly; no silent fallback."""
     runner = CliRunner()
+    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
     monkeypatch.delenv("OPENROUTER_MODEL_SUMMARY", raising=False)
@@ -153,10 +153,6 @@ def test_evaluate_requires_openrouter_summary_model_for_openrouter_backend(
         cli,
         [
             "evaluate",
-            "--server",
-            "http://localhost:8000",
-            "--token",
-            "test-token",
             "--llm-backend",
             "openrouter",
         ],
@@ -168,6 +164,8 @@ def test_evaluate_requires_openrouter_summary_model_for_openrouter_backend(
 
 def test_evaluate_uses_configured_openrouter_model(monkeypatch) -> None:
     runner = CliRunner()
+    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
     monkeypatch.setenv("OPENROUTER_MODEL_SUMMARY", "qwen/qwen3.8-27b")
@@ -184,10 +182,6 @@ def test_evaluate_uses_configured_openrouter_model(monkeypatch) -> None:
         cli,
         [
             "evaluate",
-            "--server",
-            "http://localhost:8000",
-            "--token",
-            "test-token",
             "--llm-backend",
             "openrouter",
         ],
@@ -202,6 +196,8 @@ def test_evaluate_uses_configured_openrouter_model(monkeypatch) -> None:
 @pytest.mark.parametrize("option_name", ["--limit", "--max-evaluations"])
 def test_evaluate_accepts_limit_option_spellings(monkeypatch, option_name: str) -> None:
     runner = CliRunner()
+    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
     monkeypatch.setenv("OPENROUTER_MODEL_SUMMARY", "qwen/qwen3.8-27b")
@@ -218,10 +214,6 @@ def test_evaluate_accepts_limit_option_spellings(monkeypatch, option_name: str) 
         cli,
         [
             "evaluate",
-            "--server",
-            "http://localhost:8000",
-            "--token",
-            "test-token",
             option_name,
             "20",
         ],
@@ -235,24 +227,21 @@ def test_evaluate_accepts_limit_option_spellings(monkeypatch, option_name: str) 
 def test_evaluate_missing_ca_cert_raises_usage_error(monkeypatch, tmp_path) -> None:
     """Missing local LLM CA certificate raises a clear UsageError."""
     runner = CliRunner()
+    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
     monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
     monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
     nonexistent = tmp_path / "missing.pem"
+    monkeypatch.setenv("LOCAL_LLM_CA_CERT", str(nonexistent))
 
     result = runner.invoke(
         cli,
         [
             "evaluate",
-            "--server",
-            "http://localhost:8000",
-            "--token",
-            "test-token",
             "--llm-backend",
             "local",
-            "--ca-cert",
-            str(nonexistent),
         ],
     )
 
@@ -266,26 +255,37 @@ def test_evaluate_missing_server_ca_cert_raises_usage_error(
 ) -> None:
     """Missing server CA certificate raises a clear UsageError."""
     runner = CliRunner()
+    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
     nonexistent = tmp_path / "missing_server.pem"
+    monkeypatch.setenv("EVAL_CLIENT_SERVER_CA_CERT", str(nonexistent))
 
     result = runner.invoke(
         cli,
         [
             "evaluate",
-            "--server",
-            "http://localhost:8000",
-            "--token",
-            "test-token",
-            "--server-ca-cert",
-            str(nonexistent),
         ],
     )
 
     assert result.exit_code != 0
     assert "Server CA certificate file not found" in result.output
     assert str(nonexistent) in result.output
+
+
+def test_evaluate_missing_server_or_token_raises_usage_error(monkeypatch) -> None:
+    """Missing EVAL_CLIENT_SERVER or EVAL_API_TOKEN raises a clear UsageError."""
+    runner = CliRunner()
+    monkeypatch.delenv("EVAL_CLIENT_SERVER", raising=False)
+    monkeypatch.delenv("EVAL_API_TOKEN", raising=False)
+
+    result = runner.invoke(cli, ["evaluate"])
+    assert result.exit_code != 0
+    assert (
+        "Missing required environment variable(s): EVAL_CLIENT_SERVER, EVAL_API_TOKEN"
+        in result.output
+    )
 
 
 def test_handle_fatal_config_error_sleeps_when_delay_positive(monkeypatch) -> None:
