@@ -3,6 +3,7 @@
 from typing import cast
 
 import pytest
+from craft_dashboard.llm.acp_client import CopilotACPClient
 from craft_dashboard.llm.client import (
     LLMClient,
     LLMResponse,
@@ -43,6 +44,7 @@ class TestLLMClientProtocol:
         [
             OpenRouterClient(api_key="test"),
             LocalLLMClient(),
+            CopilotACPClient(),
         ],
     )
     def test_clients_satisfy_protocol(self, client: object) -> None:

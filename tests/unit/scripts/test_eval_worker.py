@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from craft_dashboard.llm.acp_client import CopilotACPClient
 from craft_dashboard.llm.preflight import PreflightResult
 from scripts.llm import eval_worker
 
@@ -618,3 +619,17 @@ async def test_run_evaluate_loop_startup_quota_pause(
     pause_payload = http_client.post.await_args.kwargs["json"]
     assert pause_payload["reason"] == "quota"
     assert patched_runtime["evaluator"].evaluate.await_count == 0
+
+
+def test_create_llm_client_for_backend_copilot_acp() -> None:
+    """copilot-acp backend creates a CopilotACPClient instance."""
+    client = eval_worker.create_llm_client_for_backend(
+        llm_backend="copilot-acp",
+        openrouter_api_key="",
+        llm_url="",
+        llm_api_key="",
+        ca_cert="",
+        timeout=123.0,
+    )
+    assert isinstance(client, CopilotACPClient)
+    assert client.timeout == 123.0

@@ -129,3 +129,21 @@ class TestClearEvaluationsCommand:
         assert fake_session.execute_calls == []
         assert fake_session.committed is False
         engine.dispose.assert_awaited_once()
+
+
+class TestEvaluateCliCommand:
+    def test_copilot_acp_missing_model_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When --llm-backend copilot-acp is specified without COPILOT_ACP_MODEL, exit with error."""
+        monkeypatch.delenv("COPILOT_ACP_MODEL", raising=False)
+        monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+        monkeypatch.setenv("EVAL_API_TOKEN", "token")
+        monkeypatch.setenv("LLM_CONFIG_ERROR_DELAY_SECONDS", "0")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["evaluate", "--llm-backend", "copilot-acp"])
+        assert result.exit_code != 0
+        assert (
+            "Missing required environment variable: COPILOT_ACP_MODEL" in result.output
+        )

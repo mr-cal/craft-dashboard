@@ -204,7 +204,7 @@ def _handle_fatal_config_error(message: str) -> None:
 )
 @click.option(
     "--llm-backend",
-    type=click.Choice(["openrouter", "local"], case_sensitive=False),
+    type=click.Choice(["openrouter", "local", "copilot-acp"], case_sensitive=False),
     default="openrouter",
     show_default=True,
     help="Backend used for evaluation text generation",
@@ -277,6 +277,15 @@ def evaluate_cmd(
                     "Check the --ca-cert option or LOCAL_LLM_CA_CERT in your .env file."
                 )
         llm_api_key = os.environ.get("LOCAL_LLM_API_KEY", "")
+        model_summary = model_scoring = model
+    elif llm_backend == "copilot-acp":
+        ca_cert = ""
+        model = os.environ.get("COPILOT_ACP_MODEL", "")
+        if not model:
+            _handle_fatal_config_error(
+                "Missing required environment variable: COPILOT_ACP_MODEL. "
+                "Set it in your .env file or environment (for example COPILOT_ACP_MODEL=gemini-3.8-flash)."
+            )
         model_summary = model_scoring = model
     else:
         ca_cert = ""

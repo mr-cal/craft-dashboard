@@ -21,6 +21,7 @@ import httpx
 from craft_dashboard.config import load_config
 from craft_dashboard.git_mirrors.paths import clone_url_for, resolve_allowed_projects
 from craft_dashboard.git_mirrors.sync import sync_mirror
+from craft_dashboard.llm.acp_client import CopilotACPClient
 from craft_dashboard.llm.client import (
     LocalLLMClient,
     OpenRouterClient,
@@ -196,6 +197,8 @@ def create_llm_client_for_backend(
             ca_cert=ca_cert,
             timeout=timeout,
         )
+    if llm_backend == "copilot-acp":
+        return CopilotACPClient(timeout=timeout or 600.0)
     raise ValueError(f"Unsupported llm backend: {llm_backend}")
 
 
