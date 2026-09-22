@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from craft_dashboard.app import create_app
 from craft_dashboard.config import DashboardConfig
 from craft_dashboard.dependencies import get_db_session
@@ -33,7 +34,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Generator
     from pathlib import Path
 
     from fastapi import FastAPI
@@ -99,6 +100,7 @@ def _create_eval_app(test_db_session: AsyncSession) -> tuple[FastAPI, str]:
     app.state.settings = Settings()
     app.state.settings.mirror_dir = "/tmp/nonexistent-test-mirrors"
     app.state.settings.eval_api_token = _TEST_EVAL_TOKEN
+    app.state.settings.openrouter_api_key_embedding = "test-openrouter-key"
 
     async def _override() -> AsyncGenerator[AsyncSession, None]:
         yield test_db_session
@@ -958,6 +960,14 @@ class TestEvalNextPriorityOrdering:
 class TestEvalResultIntegration:
     """Integration tests for POST /api/eval/result."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_server_embeddings(self) -> Generator[None, None, None]:
+        with patch(
+            "craft_dashboard.routes.eval_api.EmbeddingClient.embed_batch",
+            new=AsyncMock(return_value=[[0.1] * 1024, [0.2] * 1024]),
+        ):
+            yield
+
     def test_submit_result_rejects_stale_hash(
         self, test_db_session: AsyncSession
     ) -> None:
@@ -976,8 +986,6 @@ class TestEvalResultIntegration:
                     "issue_id": 1,
                     "content_hash": "stale-hash",
                     "summary": "This summary is definitely long enough.",
-                    "summary_embedding": [0.1] * 1024,
-                    "search_embedding": [0.1] * 1024,
                     "scores": {
                         "impact": 10,
                         "complexity": 3,
@@ -1017,8 +1025,6 @@ class TestEvalResultIntegration:
                     "issue_id": 1,
                     "content_hash": current_hash,
                     "summary": "too short",
-                    "summary_embedding": [0.1] * 1024,
-                    "search_embedding": [0.1] * 1024,
                     "scores": {
                         "impact": 10,
                         "complexity": 3,
@@ -1088,8 +1094,6 @@ class TestEvalResultIntegration:
                     "completion_tokens": 40,
                     "model_used": "haiku",
                     "llm_backend": "local",
-                    "summary_embedding": [0.1] * 1024,
-                    "search_embedding": [0.1] * 1024,
                 },
             )
 
@@ -1159,8 +1163,6 @@ class TestEvalResultIntegration:
                     "suggested_action_reason": "The issue is actionable and still affects current builds.",
                     "model_used": "haiku",
                     "llm_backend": "local",
-                    "summary_embedding": [0.1] * 1024,
-                    "search_embedding": [0.1] * 1024,
                 },
             )
 
@@ -1215,8 +1217,6 @@ class TestEvalResultIntegration:
                     "completion_tokens": 40,
                     "model_used": "haiku",
                     "llm_backend": "local",
-                    "summary_embedding": [0.1] * 1024,
-                    "search_embedding": [0.1] * 1024,
                 },
             )
 
@@ -1260,8 +1260,6 @@ class TestEvalResultIntegration:
                     "completion_tokens": 20,
                     "model_used": "test-model",
                     "llm_backend": "openrouter",
-                    "summary_embedding": [0.1] * 1024,
-                    "search_embedding": [0.1] * 1024,
                 },
             )
 
@@ -1323,8 +1321,6 @@ class TestEvalResultIntegration:
                     "completion_tokens": 20,
                     "model_used": "test-model",
                     "llm_backend": "openrouter",
-                    "summary_embedding": [0.1] * 1024,
-                    "search_embedding": [0.1] * 1024,
                 },
             )
 
@@ -1381,8 +1377,6 @@ class TestEvalResultIntegration:
                     "completion_tokens": 20,
                     "model_used": "test-model",
                     "llm_backend": "openrouter",
-                    "summary_embedding": [0.1] * 1024,
-                    "search_embedding": [0.1] * 1024,
                 },
             )
 
@@ -1445,8 +1439,6 @@ class TestEvalResultIntegration:
                     "model_used": "haiku",
                     "llm_backend": "openrouter",
                     "cost_usd": 0.0042,
-                    "summary_embedding": [0.1] * 1024,
-                    "search_embedding": [0.1] * 1024,
                 },
             )
 
@@ -1463,10 +1455,10 @@ class TestEvalResultIntegration:
     def test_submit_result_stores_embedding(
         self, test_db_session: AsyncSession
     ) -> None:
-        """Submitted summary_embedding is persisted on the LLMEvaluation row.
+        """Server-computed summary_embedding is persisted on the LLMEvaluation row.
 
-        Submitted search_embedding is persisted on the Issue row, since it
-        describes the issue's content (title+body) rather than this
+        Server-computed search_embedding is persisted on the Issue row, since it
+        describes the issue content (title+body) rather than this
         particular evaluation.
         """
         project = make_project(id=1, name="snapcraft")
@@ -1482,13 +1474,19 @@ class TestEvalResultIntegration:
             issue.labels,
             issue.comments,
         )
-        embedding = [0.1] * 1024
-        search_embedding = [0.2] * 1024
+        summary_emb = [0.1] * 1024
+        search_emb = [0.2] * 1024
 
-        with TestClient(app) as client:
+        with (
+            patch(
+                "craft_dashboard.routes.eval_api.EmbeddingClient.embed_batch",
+                new=AsyncMock(return_value=[summary_emb, search_emb]),
+            ) as mock_embed,
+            TestClient(app) as client,
+        ):
             response = client.post(
                 "/api/eval/result",
-                headers={"Authorization": f"Bearer {token}"},
+                headers={"Authorization": "Bearer " + token},
                 json={
                     "issue_id": 1,
                     "content_hash": current_hash,
@@ -1506,23 +1504,28 @@ class TestEvalResultIntegration:
                     "completion_tokens": 40,
                     "model_used": "haiku",
                     "llm_backend": "local",
-                    "summary_embedding": embedding,
-                    "search_embedding": search_embedding,
                 },
             )
 
         assert response.status_code == 200
+        mock_embed.assert_awaited_once_with(
+            [
+                "Regression in pack step. Maintainers confirmed the regression is still reproducible.",
+                "Regression in pack step\n\nTest body",
+            ],
+            dimensions=1024,
+        )
 
         evaluations = asyncio.get_event_loop().run_until_complete(
             _all_evaluations(test_db_session)
         )
         assert len(evaluations) == 1
-        assert list(evaluations[0].summary_embedding) == embedding
+        assert list(evaluations[0].summary_embedding) == summary_emb
 
         refreshed_issue = asyncio.get_event_loop().run_until_complete(
             test_db_session.get(Issue, 1)
         )
-        assert list(refreshed_issue.search_embedding) == search_embedding
+        assert list(refreshed_issue.search_embedding) == search_emb
 
     def test_submit_result_replaces_evidence_paths_and_normalizes_repo_names(
         self, test_db_session: AsyncSession
@@ -1567,8 +1570,6 @@ class TestEvalResultIntegration:
                     "completion_tokens": 40,
                     "model_used": "haiku",
                     "llm_backend": "local",
-                    "summary_embedding": [0.1] * 1024,
-                    "search_embedding": [0.2] * 1024,
                     "evidence_paths": [
                         {"repo": "canonical/rockcraft", "path": "README.md"},
                         {"repo": "canonical/rockcraft", "path": "README.md"},
@@ -1609,8 +1610,6 @@ class TestEvalResultIntegration:
                     "suggested_action": "keep_open",
                     "suggested_action_reason": "reason",
                     "related_work": [],
-                    "summary_embedding": [0.0] * 1024,
-                    "search_embedding": [0.0] * 1024,
                 },
                 headers={"Authorization": "Bearer " + token},
             )
@@ -1658,8 +1657,6 @@ class TestEvalResultIntegration:
                             "note": "same traceback",
                         }
                     ],
-                    "summary_embedding": [0.0] * 1024,
-                    "search_embedding": [0.0] * 1024,
                 },
                 headers={"Authorization": "Bearer " + token},
             )
@@ -1720,8 +1717,6 @@ class TestEvalResultIntegration:
                         "model_name": "scoring-model",
                         "rounds_used": 1,
                     },
-                    "summary_embedding": [0.0] * 1024,
-                    "search_embedding": [0.0] * 1024,
                 },
                 headers={"Authorization": "Bearer " + token},
             )
@@ -1851,7 +1846,7 @@ class TestRelatedIssuesEndpoint:
         assert response.headers["content-type"].startswith("application/json")
         assert response.json() == {"detail": "Embedding service unavailable"}
 
-    def test_post_with_embedding_works_when_openrouter_key_is_unset(
+    def test_post_related_computes_embedding_server_side(
         self, test_db_session: AsyncSession
     ) -> None:
         project = make_project(id=1, name="rockcraft")
@@ -1859,7 +1854,7 @@ class TestRelatedIssuesEndpoint:
         asyncio.get_event_loop().run_until_complete(
             _seed_entities(test_db_session, project, source_issue)
         )
-        app, token = self._create_app_with_missing_openrouter_key(test_db_session)
+        app, token = self._create_app_with_openrouter_key(test_db_session)
         canned = [
             {
                 "id": 2,
@@ -1874,6 +1869,10 @@ class TestRelatedIssuesEndpoint:
         ]
 
         with (
+            patch(
+                "craft_dashboard.routes.eval_api.EmbeddingClient.embed",
+                new=AsyncMock(return_value=[0.2] * 1024),
+            ) as mock_embed,
             patch.object(
                 IssueRepository,
                 "find_related_by_summary_embedding",
@@ -1886,13 +1885,15 @@ class TestRelatedIssuesEndpoint:
                 json={
                     "issue_id": 1,
                     "query": "crash in the pull step handler",
-                    "embedding": [0.2] * 1024,
                 },
                 headers={"Authorization": "Bearer " + token},
             )
 
         assert response.status_code == 200
         assert response.json()["results"][0]["external_id"] == "2"
+        mock_embed.assert_awaited_once_with(
+            "crash in the pull step handler", dimensions=1024
+        )
         mock_find.assert_awaited_once()
         assert mock_find.call_args.kwargs["query_embedding"] == [0.2] * 1024
 

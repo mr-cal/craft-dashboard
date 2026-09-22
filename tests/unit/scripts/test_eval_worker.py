@@ -69,9 +69,7 @@ DEFAULT_KWARGS = {
     "stale_days": 0,
     "server_ca_cert": "",
     "verbose": False,
-    "embed_model": "openai/text-embedding-3-small",
     "openrouter_api_key": "test-openrouter-key",
-    "openrouter_api_key_embedding": "test-embedding-key",
     "concurrency": 1,
 }
 
@@ -113,7 +111,6 @@ def base_runtime() -> SimpleNamespace:
                 }
             )
         ),
-        embed_client=MagicMock(),
         http_client=SimpleNamespace(
             post=AsyncMock(return_value=httpx.Response(200, request=_DUMMY_REQUEST)),
             get=AsyncMock(return_value=httpx.Response(200, request=_DUMMY_REQUEST)),
@@ -177,10 +174,6 @@ def patched_runtime(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     llm_client.check_quota = AsyncMock()
     evaluator = MagicMock()
     evaluator.evaluate = AsyncMock(return_value=SAMPLE_EVALUATE_RESULT)
-    embed_client = MagicMock()
-    embed_client.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
-    embed_client.close = AsyncMock()
-    embed_client.check_quota = AsyncMock()
     sleep_mock = AsyncMock()
 
     mock_progress = MagicMock()
@@ -201,11 +194,6 @@ def patched_runtime(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "IssueEvaluator",
         MagicMock(return_value=evaluator),
     )
-    monkeypatch.setattr(
-        eval_worker,
-        "EmbeddingClient",
-        MagicMock(return_value=embed_client),
-    )
     monkeypatch.setattr(eval_worker, "_sleep_until_next_poll", sleep_mock)
     monkeypatch.setattr(eval_worker.signal, "signal", MagicMock())
     monkeypatch.setattr(eval_worker, "_start_keyboard_monitor", MagicMock())
@@ -219,7 +207,6 @@ def patched_runtime(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return {
         "llm_client": llm_client,
         "evaluator": evaluator,
-        "embed_client": embed_client,
         "sleep": sleep_mock,
         "progress": mock_progress,
     }
@@ -244,36 +231,23 @@ def _patch_http_client(
 
 
 @pytest.mark.asyncio
-async def test_run_evaluate_loop_posts_required_summary_embedding(
+async def test_run_evaluate_loop_posts_submission(
     monkeypatch: pytest.MonkeyPatch, patched_runtime: dict[str, Any]
 ) -> None:
     http_client = _patch_http_client(
         monkeypatch,
         get_responses=_with_status(
             _response(200, json=_make_issue()),
+            _RELATED_RESPONSE,
         ),
-        post_responses=[_RELATED_RESPONSE, httpx.Response(status_code=200)],
+        post_responses=[httpx.Response(status_code=200)],
     )
 
     await eval_worker.run_evaluate_loop(**DEFAULT_KWARGS)
 
-    eval_worker.EmbeddingClient.assert_called_once_with(
-        base_url="https://openrouter.ai/api/v1",
-        model="openai/text-embedding-3-small",
-        api_key="test-embedding-key",
-        ca_cert="",
-    )
-    patched_runtime["embed_client"].embed.assert_any_await(
-        "Test issue. This is a test summary for the issue evaluation.",
-        dimensions=1024,
-    )
-    patched_runtime["embed_client"].embed.assert_any_await(
-        "Test issue\n\nTest body content here for the issue",
-        dimensions=1024,
-    )
     posted = http_client.post.await_args.kwargs["json"]
-    assert posted["summary_embedding"] == [0.1, 0.2, 0.3]
-    assert posted["search_embedding"] == [0.1, 0.2, 0.3]
+    assert "summary_embedding" not in posted
+    assert "search_embedding" not in posted
     assert posted["llm_backend"] == "local"
     assert posted["cost_usd"] == SAMPLE_EVALUATE_RESULT["cost_usd"]
 
@@ -293,13 +267,13 @@ async def test_llm_quota_error_pauses_instead_of_crash_looping(
         monkeypatch,
         get_responses=_with_status(
             _response(200, json=_make_issue(external_id="100")),
+            _RELATED_RESPONSE,
             _response(200, json=_make_issue(external_id="100")),
+            _RELATED_RESPONSE,
         ),
         post_responses=[
-            _RELATED_RESPONSE,
             httpx.Response(status_code=200),  # /api/eval/release
             httpx.Response(status_code=200),  # /api/eval/quota-pause
-            _RELATED_RESPONSE,
             httpx.Response(status_code=200),  # /api/eval/result
         ],
     )
@@ -317,8 +291,8 @@ async def test_llm_quota_error_pauses_instead_of_crash_looping(
     # ... and the worker must have resumed and completed the retried issue
     # rather than getting stuck paused or crashing.
     assert patched_runtime["evaluator"].evaluate.await_count == 2
-    # Two _RELATED_RESPONSE posts, one release post, one quota pause post, and one final result post
-    assert http_client.post.await_count == 5
+    # One release post, one quota pause post, and one final result post
+    assert http_client.post.await_count == 3
     assert eval_worker.paused_state["paused"] is False
     # Backs off for a fixed 30 minutes, not "until tomorrow".
     assert eval_worker._QUOTA_BACKOFF_SECONDS == 30 * 60
@@ -344,12 +318,12 @@ async def test_run_evaluate_loop_uses_requested_concurrency(
         monkeypatch,
         get_responses=_with_status(
             _response(200, json=_make_issue(external_id="100")),
+            _RELATED_RESPONSE,
             _response(200, json=_make_issue(issue_id=43, external_id="101")),
+            _RELATED_RESPONSE,
         ),
         post_responses=[
-            _RELATED_RESPONSE,
             httpx.Response(status_code=200),
-            _RELATED_RESPONSE,
             httpx.Response(status_code=200),
         ],
     )
@@ -359,7 +333,7 @@ async def test_run_evaluate_loop_uses_requested_concurrency(
     )
 
     assert patched_runtime["evaluator"].evaluate.await_count == 2
-    assert http_client.post.await_count == 4
+    assert http_client.post.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -370,8 +344,9 @@ async def test_run_evaluate_loop_posts_serialized_evidence_paths(
         monkeypatch,
         get_responses=_with_status(
             _response(200, json=_make_issue()),
+            _RELATED_RESPONSE,
         ),
-        post_responses=[_RELATED_RESPONSE, httpx.Response(status_code=200)],
+        post_responses=[httpx.Response(status_code=200)],
     )
     patched_runtime["evaluator"].evaluate = AsyncMock(
         return_value={
@@ -398,10 +373,6 @@ async def test_run_evaluate_loop_posts_serialized_evidence_paths(
 async def test_evaluate_issue_passes_project_and_tool_ctx(
     monkeypatch: pytest.MonkeyPatch, base_runtime: SimpleNamespace
 ) -> None:
-    monkeypatch.setattr(eval_worker, "_embed_summary", AsyncMock(return_value=[0.1]))
-    monkeypatch.setattr(
-        eval_worker, "_embed_search_text", AsyncMock(return_value=[0.2])
-    )
     post_submission = AsyncMock(return_value=_response(200))
     monkeypatch.setattr(eval_worker, "_post_submission", post_submission)
 
@@ -426,6 +397,8 @@ async def test_evaluate_issue_passes_project_and_tool_ctx(
     submission = post_submission.await_args.kwargs["submission"]
     assert submission["related_work"] == []
     assert submission["transcript"] is None
+    assert "summary_embedding" not in submission
+    assert "search_embedding" not in submission
 
 
 @pytest.mark.asyncio
@@ -457,8 +430,6 @@ async def test_evaluate_issue_discards_on_validation_failure(
     invalid_result["scores"] = {"confidence": 50}
     base_runtime.evaluator.evaluate = AsyncMock(return_value=invalid_result)
 
-    embed_summary = AsyncMock()
-    monkeypatch.setattr(eval_worker, "_embed_summary", embed_summary)
     post_submission = AsyncMock()
     monkeypatch.setattr(eval_worker, "_post_submission", post_submission)
     release_claim = AsyncMock()
@@ -471,7 +442,6 @@ async def test_evaluate_issue_discards_on_validation_failure(
     )
 
     base_runtime.state.release.assert_awaited_once()
-    embed_summary.assert_not_called()
     post_submission.assert_not_called()
     release_claim.assert_awaited_once()
     assert release_claim.call_args.kwargs["reason"] == "evaluation_discarded"

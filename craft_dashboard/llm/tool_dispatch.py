@@ -18,8 +18,6 @@ from craft_dashboard.git_mirrors.reader import _SHA_RE
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from craft_dashboard.llm.embeddings import EmbeddingClient
-
 _GREP_HIT_MIN_FIELDS = 3
 #: Cap on how many matches grep_repo/git_log_search will return in a single
 #: call, across however many repos were searched. Both tools can otherwise
@@ -45,7 +43,6 @@ class ToolContext:
     issue_id: int
     default_project: str | None = None
     touched_paths: set[tuple[str, str]] = field(default_factory=set)
-    embed_client: EmbeddingClient | None = None
 
     def record_path(self, project: str, path: str) -> None:
         """Record a touched repo/path pair for reverse-index persistence."""
@@ -264,33 +261,13 @@ async def _dispatch_http_tool(
     """Call a server-side eval HTTP helper tool and return its JSON."""
     if name == "related_issues":
         query = str(arguments.get("query", ""))
-        embedding: list[float] | None = None
-        if ctx.embed_client is not None and query:
-            try:
-                embedding = await ctx.embed_client.embed(query, dimensions=1024)
-            except Exception as exc:  # noqa: BLE001
-                return json.dumps(
-                    {"results": [], "error": f"Error computing embedding: {exc}"}
-                )
-
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
-                if embedding is not None:
-                    response = await client.post(
-                        f"{ctx.eval_server_base_url}/api/eval/related",
-                        json={
-                            "issue_id": ctx.issue_id,
-                            "query": query,
-                            "embedding": embedding,
-                        },
-                        headers={"Authorization": "Bearer " + ctx.eval_api_token},
-                    )
-                else:
-                    response = await client.get(
-                        f"{ctx.eval_server_base_url}/api/eval/related",
-                        params={"issue_id": ctx.issue_id, "query": query},
-                        headers={"Authorization": "Bearer " + ctx.eval_api_token},
-                    )
+                response = await client.get(
+                    f"{ctx.eval_server_base_url}/api/eval/related",
+                    params={"issue_id": ctx.issue_id, "query": query},
+                    headers={"Authorization": "Bearer " + ctx.eval_api_token},
+                )
                 response.raise_for_status()
                 return json.dumps(response.json())
             except httpx.HTTPStatusError as exc:

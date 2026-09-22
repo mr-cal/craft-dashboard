@@ -22,11 +22,9 @@ from craft_dashboard.config import load_config
 from craft_dashboard.git_mirrors.paths import clone_url_for, resolve_allowed_projects
 from craft_dashboard.git_mirrors.sync import sync_mirror
 from craft_dashboard.llm.client import (
-    OPENROUTER_BASE_URL,
     LocalLLMClient,
     OpenRouterClient,
 )
-from craft_dashboard.llm.embeddings import EmbeddingClient
 from craft_dashboard.llm.evaluator import (
     EvaluationDiscarded,
     IssueEvaluator,
@@ -42,7 +40,6 @@ from craft_dashboard.llm.tool_dispatch import ToolContext
 from craft_dashboard.settings import Settings
 from rich.console import Console
 
-from scripts import backfill_search_embeddings
 from scripts.eval_timing import PHASE_EVALUATE, TimingHistory
 from scripts.llm.console import format_elapsed, make_progress, setup_rich_logging
 from scripts.llm.validation import LLMValidationError, validate_evaluation_result
@@ -123,7 +120,6 @@ class _Runtime:
         *,
         client: LLMClient,
         evaluator: IssueEvaluator,
-        embed_client: EmbeddingClient,
         http_client: httpx.AsyncClient,
         headers: dict[str, str],
         params: dict[str, Any],
@@ -142,7 +138,6 @@ class _Runtime:
     ) -> None:
         self.client = client
         self.evaluator = evaluator
-        self.embed_client = embed_client
         self.http_client = http_client
         self.headers = headers
         self.params = params
@@ -180,48 +175,6 @@ async def _release_and_maybe_stop(runtime: _Runtime) -> None:
     await runtime.state.release()
     if runtime.single_issue:
         shutdown_state["requested"] = True
-
-
-async def _embed_summary(
-    embed_client: EmbeddingClient,
-    *,
-    title: str,
-    summary: str,
-) -> list[float]:
-    """Compute the required summary embedding for a finished evaluation with retry."""
-    max_retries = 3
-    for attempt in range(1, max_retries + 1):
-        try:
-            return await embed_client.embed(f"{title}. {summary}", dimensions=1024)
-        except Exception as exc:
-            if attempt < max_retries and not isinstance(exc, LLMQuotaError):
-                logger.warning(
-                    "Embedding summary attempt %d/%d failed: %s; retrying in %ds...",
-                    attempt,
-                    max_retries,
-                    exc,
-                    2**attempt,
-                )
-                await asyncio.sleep(2**attempt)
-                continue
-            raise
-    raise RuntimeError("Unreachable")
-
-
-async def _embed_search_text(
-    embed_client: EmbeddingClient,
-    *,
-    title: str,
-    body: str | None,
-) -> list[float]:
-    """Compute the issue's search embedding (title+body) for semantic search.
-
-    Uses the same text shape as ``scripts/backfill_search_embeddings.py``
-    (``build_search_embedding_text``) so historical and ongoing embeddings
-    live in the same vector space.
-    """
-    text = backfill_search_embeddings.build_search_embedding_text(title, body)
-    return await embed_client.embed(text, dimensions=1024)
 
 
 def create_llm_client_for_backend(
@@ -626,7 +579,6 @@ async def _evaluate_issue(  # noqa: PLR0911
         eval_server_base_url=runtime.eval_server_base_url,
         eval_api_token=runtime.headers.get("Authorization", "").removeprefix("Bearer "),
         issue_id=issue_data["issue_id"],
-        embed_client=runtime.embed_client,
     )
 
     submitted = False
@@ -738,76 +690,6 @@ async def _evaluate_issue(  # noqa: PLR0911
             await _release_and_maybe_stop(runtime)
             return
 
-        runtime.progress.update(
-            runtime.overall_id,
-            description=f"[dim]{issue_ref} ({worker_name}):[/dim] embed…",
-        )
-        try:
-            embedding, embed_elapsed = await _timed(
-                _embed_summary(
-                    runtime.embed_client,
-                    title=issue_data["title"],
-                    summary=result["summary"],
-                )
-            )
-        except LLMQuotaError:
-            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-            release_reason = "quota_exhausted"
-            await runtime.state.release()
-            await _enter_quota_backoff(runtime)
-            return
-        except (httpx.TimeoutException, LLMTimeoutError) as exc:
-            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-            exc_name = type(exc).__name__
-            logger.error(  # noqa: TRY400
-                "%s: embedding failed: LLM request timed out (%s)",
-                issue_ref,
-                exc_name,
-            )
-            logger.debug("%s: embedding timeout traceback:", issue_ref, exc_info=True)
-            release_reason = "embedding_error"
-            await _release_and_maybe_stop(runtime)
-            return
-        except Exception:
-            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-            logger.exception("%s: embedding failed", issue_ref)
-            release_reason = "embedding_error"
-            await _release_and_maybe_stop(runtime)
-            return
-
-        try:
-            search_embedding = await _embed_search_text(
-                runtime.embed_client,
-                title=issue_data["title"],
-                body=issue_data.get("body"),
-            )
-        except LLMQuotaError:
-            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-            release_reason = "quota_exhausted"
-            await runtime.state.release()
-            await _enter_quota_backoff(runtime)
-            return
-        except (httpx.TimeoutException, LLMTimeoutError) as exc:
-            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-            exc_name = type(exc).__name__
-            logger.error(  # noqa: TRY400
-                "%s: search embedding failed: LLM request timed out (%s)",
-                issue_ref,
-                exc_name,
-            )
-            logger.debug(
-                "%s: search embedding timeout traceback:", issue_ref, exc_info=True
-            )
-            release_reason = "search_embedding_error"
-            await _release_and_maybe_stop(runtime)
-            return
-        except Exception:
-            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-            logger.exception("%s: search embedding failed", issue_ref)
-            release_reason = "search_embedding_error"
-            await _release_and_maybe_stop(runtime)
-            return
-
         submission: dict[str, Any] = {
             "issue_id": issue_data["issue_id"],
             "content_hash": result["issue_data_hash"],
@@ -821,8 +703,6 @@ async def _evaluate_issue(  # noqa: PLR0911
             "model_used": runtime.model,
             "llm_backend": runtime.llm_backend,
             "cost_usd": result["cost_usd"],
-            "summary_embedding": embedding,
-            "search_embedding": search_embedding,
             "related_work": result.get("related_work", []),
             "transcript": result.get("transcript"),
             "evidence_paths": _serialize_evidence_paths(result.get("tool_context")),
@@ -883,8 +763,7 @@ async def _evaluate_issue(  # noqa: PLR0911
     runtime.progress.console.print(
         f"[bold]{issue_ref}[/bold] — {action}"
         f"  [dim]{submission['prompt_tokens']} in / {submission['completion_tokens']} out"
-        f"  eval {_format_elapsed(evaluate_elapsed)}"
-        f"  embed {_format_elapsed(embed_elapsed)}[/dim]"
+        f"  eval {_format_elapsed(evaluate_elapsed)}[/dim]"
     )
 
     if runtime.issue_limit > 0 and completed >= runtime.issue_limit:
@@ -931,29 +810,11 @@ async def _run_issue_preflight(
 
     async def _check_related_endpoint() -> bool:
         query = (issue_data.get("title") or issue_ref)[:1000]
-        embedding: list[float] | None = None
-        if runtime.embed_client is not None and query:
-            try:
-                embedding = await runtime.embed_client.embed(query, dimensions=1024)
-            except Exception:
-                return False
-
-        if embedding is not None:
-            response = await runtime.http_client.post(
-                "/api/eval/related",
-                json={
-                    "issue_id": issue_data["issue_id"],
-                    "query": query,
-                    "embedding": embedding,
-                },
-                headers=runtime.headers,
-            )
-        else:
-            response = await runtime.http_client.get(
-                "/api/eval/related",
-                params={"issue_id": issue_data["issue_id"], "query": query},
-                headers=runtime.headers,
-            )
+        response = await runtime.http_client.get(
+            "/api/eval/related",
+            params={"issue_id": issue_data["issue_id"], "query": query},
+            headers=runtime.headers,
+        )
         return response.status_code == HTTP_OK
 
     result = await run_preflight(
@@ -1030,8 +891,6 @@ async def run_evaluate_loop(
     server_ca_cert: str,
     verbose: bool,
     openrouter_api_key: str,
-    openrouter_api_key_embedding: str = "",
-    embed_model: str = "openai/text-embedding-3-small",
     issue: str = "",
     concurrency: int = 10,
     log: bool = False,
@@ -1039,9 +898,8 @@ async def run_evaluate_loop(
     """Run the continuous HTTP evaluation worker against ``/api/eval/*``.
 
     Each worker coroutine independently polls ``GET /api/eval/next``, evaluates
-    the claimed issue via the selected chat backend, computes an OpenRouter
-    embedding for the resulting summary, and submits the finished payload to
-    ``POST /api/eval/result``. No direct database access is used.
+    the claimed issue via the selected chat backend, and submits the finished
+    payload to ``POST /api/eval/result``. No direct database access is used.
     """
     global _quota_paused  # noqa: PLW0603
     shutdown_state["requested"] = False
@@ -1090,12 +948,6 @@ async def run_evaluate_loop(
         client=llm_client,
         model_summary=model_summary,
         model_scoring=model_scoring,
-    )
-    embed_client = EmbeddingClient(
-        base_url=OPENROUTER_BASE_URL,
-        model=embed_model,
-        api_key=openrouter_api_key_embedding,
-        ca_cert="",
     )
 
     filter_parts = []
@@ -1189,36 +1041,6 @@ async def run_evaluate_loop(
                     await _sleep_until_next_poll(_QUOTA_BACKOFF_SECONDS)
                     paused_state["paused"] = False
 
-            while not shutdown_state["requested"] and hasattr(
-                embed_client, "check_quota"
-            ):
-                try:
-                    await embed_client.check_quota()
-                    break
-                except LLMQuotaError:
-                    logger.exception("Embedding client quota check failed")
-                    resume_at = datetime.now(tz=UTC) + timedelta(
-                        seconds=_QUOTA_BACKOFF_SECONDS
-                    )
-                    with contextlib.suppress(httpx.HTTPError):
-                        await http_client.post(
-                            "/api/eval/quota-pause",
-                            json={
-                                "resume_at": resume_at.isoformat(),
-                                "reason": "quota",
-                            },
-                            headers=headers,
-                        )
-                    if issue or limit > 0:
-                        return
-                    logger.info(
-                        "Pausing evaluation for %s due to embedding quota exhaustion...",
-                        _format_elapsed(_QUOTA_BACKOFF_SECONDS),
-                    )
-                    paused_state["paused"] = True
-                    await _sleep_until_next_poll(_QUOTA_BACKOFF_SECONDS)
-                    paused_state["paused"] = False
-
             if shutdown_state["requested"]:
                 return
 
@@ -1241,7 +1063,6 @@ async def run_evaluate_loop(
                 runtime = _Runtime(
                     client=llm_client,
                     evaluator=evaluator,
-                    embed_client=embed_client,
                     http_client=http_client,
                     headers=headers,
                     params=params,
@@ -1274,4 +1095,3 @@ async def run_evaluate_loop(
                     )
     finally:
         await llm_client.close()
-        await embed_client.close()

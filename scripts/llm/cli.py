@@ -207,13 +207,7 @@ def _handle_fatal_config_error(message: str) -> None:
     type=click.Choice(["openrouter", "local"], case_sensitive=False),
     default="openrouter",
     show_default=True,
-    help="Backend used for evaluation text generation; embeddings always use OpenRouter",
-)
-@click.option(
-    "--embed-model",
-    default="openai/text-embedding-3-small",
-    show_default=True,
-    help="OpenRouter embedding model for summary embeddings",
+    help="Backend used for evaluation text generation",
 )
 @click.option(
     "--verbose",
@@ -244,17 +238,11 @@ def evaluate_cmd(
     issue: str,
     concurrency: int,
     llm_backend: str,
-    embed_model: str,
     verbose: bool,
     log: bool,
 ) -> None:
     """Run the continuous HTTP-only evaluation service against /api/eval/*."""
     openrouter_api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    openrouter_api_key_embedding = os.environ.get("OPENROUTER_API_KEY_EMBEDDING", "")
-    if not openrouter_api_key_embedding:
-        _handle_fatal_config_error(
-            "OPENROUTER_API_KEY_EMBEDDING is required because evaluate always computes OpenRouter embeddings."
-        )
     if issue and not project:
         _handle_fatal_config_error("--issue requires --project")
 
@@ -328,8 +316,6 @@ def evaluate_cmd(
             server_ca_cert=server_ca_cert,
             verbose=verbose,
             openrouter_api_key=openrouter_api_key,
-            openrouter_api_key_embedding=openrouter_api_key_embedding,
-            embed_model=embed_model,
             issue=issue,
             concurrency=concurrency,
             log=log,

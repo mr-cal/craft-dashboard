@@ -22,9 +22,7 @@ The worker is HTTP-only: it never connects to PostgreSQL directly.
   subprocesses independently of eval concurrency, and the VPS sets
   `git grep --threads=1` to cap per-process RAM.
 - Uses `--llm-backend openrouter|local` for evaluation text generation.
-- Always computes embeddings through OpenRouter, even when `--llm-backend local`
-  is selected.
-- Always submits a non-null `summary_embedding`.
+- All embeddings are computed 100% server-side on submission; local evaluation workers do not require an embedding key or compute embeddings.
 - There is no separate `embed` command anymore.
 
 ## Prerequisites
@@ -32,9 +30,9 @@ The worker is HTTP-only: it never connects to PostgreSQL directly.
 - Python 3.12+
 - A clone of the `craft-dashboard` repository
 - An `EVAL_API_TOKEN` from the craft-dashboard server administrator
-- `OPENROUTER_API_KEY` (required for embeddings in all modes)
+- For `--llm-backend openrouter`: `OPENROUTER_API_KEY`
 - For `--llm-backend local`: an OpenAI-compatible local LLM endpoint plus
-  `LOCAL_LLM_URL` and `LOCAL_LLM_MODEL`
+  `LOCAL_LLM_URL` and `LOCAL_LLM_MODEL` (no OpenRouter embedding key needed)
 
 ## Setup
 
@@ -90,8 +88,8 @@ uv run scripts/run_llm.py evaluate --help
 Evaluation is pull-based:
 
 - `GET /api/eval/next` returns the next issue to evaluate,
-- `POST /api/eval/result` stores the finished evaluation together with its
-  OpenRouter embedding,
+- `POST /api/eval/result` stores the finished evaluation; the server computes the
+  summary and search embeddings via OpenRouter,
 - `GET /api/eval/status` reports queue progress,
 - the worker initiates every connection over HTTPS,
 - the server never opens an outbound connection to your machine or local LLM.

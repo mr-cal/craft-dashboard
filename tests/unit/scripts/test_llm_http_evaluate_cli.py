@@ -99,7 +99,7 @@ def test_evaluate_passes_log_flag(monkeypatch) -> None:
     assert run_loop.call_args.kwargs["poll_interval"] == 30
 
 
-def test_evaluate_requires_openrouter_api_key_embedding_even_for_local_backend(
+def test_evaluate_local_backend_does_not_require_embedding_key(
     monkeypatch,
 ) -> None:
     runner = CliRunner()
@@ -107,7 +107,9 @@ def test_evaluate_requires_openrouter_api_key_embedding_even_for_local_backend(
     monkeypatch.delenv("OPENROUTER_API_KEY_EMBEDDING", raising=False)
     monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
     monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
-    monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", AsyncMock())
+    monkeypatch.delenv("LOCAL_LLM_CA_CERT", raising=False)
+    run_loop = AsyncMock()
+    monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
 
     def _capture_run(coro):
         coro.close()
@@ -127,8 +129,8 @@ def test_evaluate_requires_openrouter_api_key_embedding_even_for_local_backend(
         ],
     )
 
-    assert result.exit_code != 0
-    assert "OPENROUTER_API_KEY_EMBEDDING" in result.output
+    assert result.exit_code == 0
+    run_loop.assert_called_once()
 
 
 def test_evaluate_requires_openrouter_summary_model_for_openrouter_backend(

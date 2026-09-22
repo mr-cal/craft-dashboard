@@ -103,7 +103,6 @@ class RelatedIssuesRequest(BaseModel):
 
     issue_id: int
     query: str = Field(default="", max_length=1000)
-    embedding: list[float] | None = None
 
 
 def _is_local_caller(key: str) -> bool:
@@ -295,16 +294,6 @@ class EvalResultSubmission(BaseModel):
     cost_usd: float | None = None
     related_work: list[dict[str, Any]] = Field(default_factory=list)
     transcript: dict[str, Any] | None = None
-    # Every evaluation includes an embedding — there is no more deferred
-    # embedding step, so this is required, not optional.
-    summary_embedding: list[float]
-    # Embedding of the issue's title+body (not the LLM summary), used for
-    # semantic issue search. Stored on Issue.search_embedding rather than
-    # LLMEvaluation, since it describes the issue's content, not this
-    # particular evaluation. Required for the same reason as
-    # summary_embedding above — computed unconditionally by the worker
-    # alongside the summary embedding.
-    search_embedding: list[float]
     evidence_paths: list[dict[str, str]] = Field(default_factory=list)
 
 
@@ -620,6 +609,41 @@ async def submit_result(
             )
         )
 
+    settings = request.app.state.settings
+    if not settings.openrouter_api_key_embedding:
+        raise HTTPException(
+            status_code=503,
+            detail="Embedding service unavailable",
+        )
+
+    summary_text = f"{issue.title}. {payload.summary}"
+    search_text = f"{issue.title}\n\n{issue.body or ''}"[:8000]
+
+    embed_client = EmbeddingClient(
+        base_url=OPENROUTER_BASE_URL,
+        model=settings.semantic_search_embedding_model,
+        api_key=settings.openrouter_api_key_embedding,
+        ca_cert="",
+    )
+    try:
+        try:
+            embeddings = await embed_client.embed_batch(
+                [summary_text, search_text], dimensions=1024
+            )
+            summary_embedding, search_embedding = embeddings[0], embeddings[1]
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Evaluation embedding failed for issue_id %d",
+                payload.issue_id,
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Embedding service unavailable",
+            ) from None
+    finally:
+        await embed_client.close()
+
     await session.execute(
         update(LLMEvaluation)
         .where(
@@ -628,7 +652,7 @@ async def submit_result(
         )
         .values(latest=False, eval_locked_until=None)
     )
-    issue.search_embedding = payload.search_embedding
+    issue.search_embedding = search_embedding
     eval_type = "summary" if issue.state in {"closed", "merged"} else "scoring"
     evaluation = LLMEvaluation(
         issue_id=payload.issue_id,
@@ -649,7 +673,7 @@ async def submit_result(
         evidence_generation=issue.evidence_generation,
         latest=True,
         eval_locked_until=datetime.now(tz=UTC) + _LOCK_TTL,
-        summary_embedding=payload.summary_embedding,
+        summary_embedding=summary_embedding,
     )
     session.add(evaluation)
     await session.flush()
@@ -733,39 +757,35 @@ async def _find_related_issues(
     authorization: str,
     issue_id: int,
     query: str,
-    embedding: list[float] | None,
     session: AsyncSession,
 ) -> dict[str, Any]:
     _require_eval_auth(request, authorization)
     settings = request.app.state.settings
-    if embedding is not None:
-        query_embedding = embedding
-    else:
-        if not settings.openrouter_api_key_embedding:
+    if not settings.openrouter_api_key_embedding:
+        raise HTTPException(
+            status_code=503,
+            detail="Embedding service unavailable",
+        )
+    embed_client = EmbeddingClient(
+        base_url=OPENROUTER_BASE_URL,
+        model=settings.semantic_search_embedding_model,
+        api_key=settings.openrouter_api_key_embedding,
+        ca_cert="",
+    )
+    try:
+        try:
+            query_embedding = await embed_client.embed(query, dimensions=1024)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Related-issues embedding failed for query",
+                exc_info=True,
+            )
             raise HTTPException(
                 status_code=503,
                 detail="Embedding service unavailable",
-            )
-        embed_client = EmbeddingClient(
-            base_url=OPENROUTER_BASE_URL,
-            model=settings.semantic_search_embedding_model,
-            api_key=settings.openrouter_api_key_embedding,
-            ca_cert="",
-        )
-        try:
-            try:
-                query_embedding = await embed_client.embed(query, dimensions=1024)
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Related-issues embedding failed for query",
-                    exc_info=True,
-                )
-                raise HTTPException(
-                    status_code=503,
-                    detail="Embedding service unavailable",
-                ) from None
-        finally:
-            await embed_client.close()
+            ) from None
+    finally:
+        await embed_client.close()
 
     repo = IssueRepository(session, filtered_issues=get_config(request).filtered_issues)
     results = await repo.find_related_by_summary_embedding(
@@ -785,13 +805,12 @@ async def related_issues_post(
     authorization: str = Header(default=""),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    """Return issues whose latest summary embeddings are closest to query or embedding."""
+    """Return issues whose latest summary embeddings are closest to query."""
     return await _find_related_issues(
         request,
         authorization=authorization,
         issue_id=payload.issue_id,
         query=payload.query,
-        embedding=payload.embedding,
         session=session,
     )
 
@@ -811,7 +830,6 @@ async def related_issues(
         authorization=authorization,
         issue_id=issue_id,
         query=query,
-        embedding=None,
         session=session,
     )
 
