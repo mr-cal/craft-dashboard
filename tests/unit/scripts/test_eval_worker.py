@@ -449,6 +449,35 @@ async def test_evaluate_issue_discards_on_tool_failure(
 
 
 @pytest.mark.asyncio
+async def test_evaluate_issue_discards_on_validation_failure(
+    monkeypatch: pytest.MonkeyPatch, base_runtime: SimpleNamespace
+) -> None:
+    invalid_result = deepcopy(SAMPLE_EVALUATE_RESULT)
+    # Remove required score keys to make validation fail
+    invalid_result["scores"] = {"confidence": 50}
+    base_runtime.evaluator.evaluate = AsyncMock(return_value=invalid_result)
+
+    embed_summary = AsyncMock()
+    monkeypatch.setattr(eval_worker, "_embed_summary", embed_summary)
+    post_submission = AsyncMock()
+    monkeypatch.setattr(eval_worker, "_post_submission", post_submission)
+    release_claim = AsyncMock()
+    monkeypatch.setattr(eval_worker, "_release_claim", release_claim)
+
+    await eval_worker._evaluate_issue(
+        base_runtime,
+        issue_data=_make_issue(repo_shas={"snapcraft": "a" * 40}),
+        worker_name="worker-1",
+    )
+
+    base_runtime.state.release.assert_awaited_once()
+    embed_summary.assert_not_called()
+    post_submission.assert_not_called()
+    release_claim.assert_awaited_once()
+    assert release_claim.call_args.kwargs["reason"] == "evaluation_discarded"
+
+
+@pytest.mark.asyncio
 async def test_worker_loop_skips_evaluate_when_preflight_blocks(
     monkeypatch: pytest.MonkeyPatch, base_runtime: SimpleNamespace
 ) -> None:

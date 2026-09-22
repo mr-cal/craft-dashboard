@@ -45,6 +45,7 @@ from rich.console import Console
 from scripts import backfill_search_embeddings
 from scripts.eval_timing import PHASE_EVALUATE, TimingHistory
 from scripts.llm.console import format_elapsed, make_progress, setup_rich_logging
+from scripts.llm.validation import LLMValidationError, validate_evaluation_result
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -710,6 +711,30 @@ async def _evaluate_issue(  # noqa: PLR0911
         if result is None:
             logger.warning("%s: content unchanged, skipping", issue_ref)
             release_reason = "content_unchanged"
+            await _release_and_maybe_stop(runtime)
+            return
+
+        validation_payload = {
+            "summary": result.get("summary"),
+            "scores": result.get("scores", {}),
+            "suggested_action": result.get("suggested_action"),
+            "suggested_action_reason": result.get("suggested_action_reason"),
+        }
+        try:
+            validate_evaluation_result(
+                validation_payload,
+                issue_type=issue_data.get("issue_type", "issue"),
+                state=normalized_state,
+            )
+        except LLMValidationError as exc:
+            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            logger.warning(
+                "%s: evaluation discarded (validation failed: %s); "
+                "releasing claim, submitting nothing",
+                issue_ref,
+                exc,
+            )
+            release_reason = "evaluation_discarded"
             await _release_and_maybe_stop(runtime)
             return
 

@@ -601,8 +601,29 @@ class IssueEvaluator:
             )
             raise EvaluationDiscarded(err_msg)
 
+        scores = parsed.get("scores")
+        if not isinstance(scores, dict):
+            err_msg = f"LLM evaluation response missing scores object: {response.content[:200]}"
+            logger.warning(
+                "Could not parse evaluation response for %s: %s", title, err_msg
+            )
+            raise EvaluationDiscarded(err_msg)
+
+        required_scores = {"actionability", "complexity", "impact"}
+        missing_scores = required_scores.difference(scores.keys())
+        if missing_scores:
+            missing_str = ", ".join(sorted(missing_scores))
+            err_msg = (
+                f"LLM evaluation missing required scores ({missing_str}): "
+                f"{response.content[:200]}"
+            )
+            logger.warning(
+                "Could not parse evaluation response for %s: %s", title, err_msg
+            )
+            raise EvaluationDiscarded(err_msg)
+
         summary = parsed["summary"]
-        scores = parsed.get("scores") or {}
+        scores = dict(scores)
         if "confidence" not in scores:
             scores["confidence"] = 50
 

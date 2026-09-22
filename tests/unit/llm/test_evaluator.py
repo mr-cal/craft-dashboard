@@ -619,7 +619,7 @@ class TestEvaluateIssue:
     async def test_evaluate_open_issue(self) -> None:
         """Open issues return summary + scores + action from a single LLM call."""
         mock_response = LLMResponse(
-            content='{"summary": "Crash on startup.", "scores": {"actionability": 20, "complexity": 40, "confidence": 80}, "suggested_action": "needs_triage", "suggested_action_reason": "No maintainer response."}',
+            content='{"summary": "Crash on startup.", "scores": {"actionability": 20, "complexity": 40, "impact": 50, "confidence": 80}, "suggested_action": "needs_triage", "suggested_action_reason": "No maintainer response."}',
             total_tokens=300,
             prompt_tokens=200,
             completion_tokens=100,
@@ -722,7 +722,7 @@ class TestEvaluateIssue:
     async def test_evaluate_confidence_defaults_to_50(self) -> None:
         """Missing confidence in scores defaults to 50."""
         mock_response = LLMResponse(
-            content='{"summary": "X", "scores": {"actionability": 10, "complexity": 20}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
+            content='{"summary": "X", "scores": {"actionability": 10, "complexity": 20, "impact": 30}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
             total_tokens=100,
             prompt_tokens=70,
             completion_tokens=30,
@@ -754,7 +754,7 @@ class TestEvaluateIssue:
     async def test_evaluate_passes_comments_to_prompt(self) -> None:
         """Comments are forwarded to the prompt builder."""
         mock_response = LLMResponse(
-            content='{"summary": "Regression.", "scores": {"actionability": 10, "complexity": 20, "confidence": 80}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
+            content='{"summary": "Regression.", "scores": {"actionability": 10, "complexity": 20, "impact": 30, "confidence": 80}, "suggested_action": "keep_open", "suggested_action_reason": "Active."}',
             total_tokens=50,
             prompt_tokens=30,
             completion_tokens=20,
@@ -867,6 +867,75 @@ class TestEvaluateIssue:
 
         assert "finish_reason='length'" in str(exc_info.value)
         assert "16384" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_evaluate_open_missing_scores_raises_evaluation_discarded(
+        self,
+    ) -> None:
+        """When an open issue evaluation is missing the scores object, evaluate() raises EvaluationDiscarded."""
+        mock_response = LLMResponse(
+            content='{"summary": "A salvaged summary without any scores."}',
+            total_tokens=50,
+            prompt_tokens=30,
+            completion_tokens=20,
+            model="test-model",
+        )
+        mock_client = MagicMock()
+        mock_client.complete = AsyncMock(return_value=mock_response)
+        evaluator = IssueEvaluator(
+            client=mock_client, model_summary="test-model", model_scoring="test-model"
+        )
+
+        with pytest.raises(EvaluationDiscarded) as exc_info:
+            await evaluator.evaluate(
+                title="snapcraft pack fails",
+                body="Failure details.",
+                issue_type="issue",
+                state="open",
+                labels=["bug"],
+                age_days=45,
+                last_activity_days=3,
+                author="jdoe-canonical",
+                is_maintainer=False,
+                comment_count=0,
+            )
+
+        assert "missing scores object" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_evaluate_open_missing_required_scores_raises_evaluation_discarded(
+        self,
+    ) -> None:
+        """When an open issue evaluation is missing a required score key, evaluate() raises EvaluationDiscarded."""
+        mock_response = LLMResponse(
+            content='{"summary": "Valid summary.", "scores": {"actionability": 50, "complexity": 30}}',
+            total_tokens=50,
+            prompt_tokens=30,
+            completion_tokens=20,
+            model="test-model",
+        )
+        mock_client = MagicMock()
+        mock_client.complete = AsyncMock(return_value=mock_response)
+        evaluator = IssueEvaluator(
+            client=mock_client, model_summary="test-model", model_scoring="test-model"
+        )
+
+        with pytest.raises(EvaluationDiscarded) as exc_info:
+            await evaluator.evaluate(
+                title="snapcraft pack fails",
+                body="Failure details.",
+                issue_type="issue",
+                state="open",
+                labels=["bug"],
+                age_days=45,
+                last_activity_days=3,
+                author="jdoe-canonical",
+                is_maintainer=False,
+                comment_count=0,
+            )
+
+        assert "missing required scores" in str(exc_info.value)
+        assert "impact" in str(exc_info.value)
 
 
 class TestComputeContentHash:
