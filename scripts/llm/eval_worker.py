@@ -14,6 +14,7 @@ import termios
 import threading
 import time
 import tty
+import urllib.parse
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -763,8 +764,16 @@ async def _evaluate_issue(  # noqa: PLR0911
         runtime.overall_id, advance=1, description="Evaluating issues"
     )
     action = submission.get("suggested_action") or "summary_only"
+    if runtime.eval_server_base_url:
+        quoted_project = urllib.parse.quote(issue_data["project_name"], safe="")
+        quoted_id = urllib.parse.quote(str(issue_data["external_id"]), safe="")
+        issue_url = f"{runtime.eval_server_base_url.rstrip('/')}/issues/{quoted_project}/{quoted_id}"
+        issue_label = f"[link={issue_url}][bold]{issue_ref}[/bold][/link]"
+    else:
+        issue_label = f"[bold]{issue_ref}[/bold]"
+
     runtime.progress.console.print(
-        f"[bold]{issue_ref}[/bold] — {action}"
+        f"{issue_label} — {action}"
         f"  [dim]{submission['prompt_tokens']} in / {submission['completion_tokens']} out"
         f"  eval {_format_elapsed(evaluate_elapsed)}[/dim]"
     )

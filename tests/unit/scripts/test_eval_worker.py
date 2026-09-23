@@ -400,6 +400,33 @@ async def test_evaluate_issue_passes_project_and_tool_ctx(
     assert submission["transcript"] is None
     assert "summary_embedding" not in submission
     assert "search_embedding" not in submission
+    printed_line = base_runtime.progress.console.print.call_args[0][0]
+    assert (
+        "[link=http://localhost:8000/issues/snapcraft/100][bold]snapcraft#100[/bold][/link]"
+        in printed_line
+    )
+
+
+@pytest.mark.asyncio
+async def test_evaluate_issue_hyperlinks_escapes_launchpad_project(
+    monkeypatch: pytest.MonkeyPatch, base_runtime: SimpleNamespace
+) -> None:
+    post_submission = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(eval_worker, "_post_submission", post_submission)
+
+    issue_data = _make_issue(
+        project_name="snapcraft (launchpad)",
+        external_id="1637946",
+    )
+    await eval_worker._evaluate_issue(
+        base_runtime, issue_data=issue_data, worker_name="worker-1"
+    )
+
+    printed_line = base_runtime.progress.console.print.call_args[0][0]
+    assert (
+        "[link=http://localhost:8000/issues/snapcraft%20%28launchpad%29/1637946]"
+        "[bold]snapcraft (launchpad)#1637946[/bold][/link]"
+    ) in printed_line
 
 
 @pytest.mark.asyncio
