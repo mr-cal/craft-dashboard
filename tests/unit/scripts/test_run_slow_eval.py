@@ -4,8 +4,14 @@ import logging
 import pathlib
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
-from scripts.run_slow_eval import _interruptible_sleep, build_command, main
+from scripts.run_slow_eval import (
+    _interruptible_sleep,
+    _run_evaluation_subprocess,
+    build_command,
+    main,
+)
 
 
 class TestBuildCommand:
@@ -26,6 +32,41 @@ class TestInterruptibleSleep:
         assert _interruptible_sleep(0.01) is True
 
 
+class TestRunEvaluationSubprocess:
+    def test_normal_run(self) -> None:
+        mock_proc = MagicMock()
+        mock_proc.wait.return_value = 0
+
+        with patch("subprocess.Popen", return_value=mock_proc):
+            retcode, interrupted = _run_evaluation_subprocess(["echo", "hi"])
+
+        assert retcode == 0
+        assert interrupted is False
+        assert mock_proc.wait.call_count == 1
+
+    def test_ctrl_c_waits_for_child(self) -> None:
+        mock_proc = MagicMock()
+        # First wait raises KeyboardInterrupt, second wait returns 0 (child finished)
+        mock_proc.wait.side_effect = [KeyboardInterrupt(), 0]
+
+        with patch("subprocess.Popen", return_value=mock_proc):
+            retcode, interrupted = _run_evaluation_subprocess(["echo", "hi"])
+
+        assert retcode == 0
+        assert interrupted is True
+        assert mock_proc.wait.call_count == 2
+
+    def test_double_ctrl_c_terminates_child(self) -> None:
+        mock_proc = MagicMock()
+        mock_proc.wait.side_effect = [KeyboardInterrupt(), KeyboardInterrupt(), 0]
+
+        with patch("subprocess.Popen", return_value=mock_proc):
+            with pytest.raises(KeyboardInterrupt):
+                _run_evaluation_subprocess(["echo", "hi"])
+
+        mock_proc.terminate.assert_called_once()
+
+
 class TestRunSlowEvalCLI:
     def test_min_delay_greater_than_max_delay(self) -> None:
         runner = CliRunner()
@@ -37,7 +78,6 @@ class TestRunSlowEvalCLI:
     def test_count_iterations_and_delays(self, caplog) -> None:
         caplog.set_level(logging.INFO)
         runner = CliRunner()
-        mock_proc = MagicMock(returncode=0)
         delays: list[float] = []
 
         def fake_sleep(duration: float) -> bool:
@@ -45,7 +85,10 @@ class TestRunSlowEvalCLI:
             return True
 
         with (
-            patch("subprocess.run", return_value=mock_proc) as mock_run,
+            patch(
+                "scripts.run_slow_eval._run_evaluation_subprocess",
+                return_value=(0, False),
+            ) as mock_run,
             patch("scripts.run_slow_eval._interruptible_sleep", side_effect=fake_sleep),
         ):
             result = runner.invoke(
@@ -70,12 +113,35 @@ class TestRunSlowEvalCLI:
             assert 10.0 <= delay <= 20.0
         assert "Target of 3 evaluation(s) reached." in caplog.text
 
-    def test_stop_on_error_terminates_early(self, caplog) -> None:
+    def test_ctrl_c_during_evaluation_stops_runner(self, caplog) -> None:
+        caplog.set_level(logging.INFO)
         runner = CliRunner()
-        mock_proc = MagicMock(returncode=1)
 
         with (
-            patch("subprocess.run", return_value=mock_proc) as mock_run,
+            patch(
+                "scripts.run_slow_eval._run_evaluation_subprocess",
+                return_value=(0, True),
+            ) as mock_run,
+            patch("scripts.run_slow_eval._interruptible_sleep") as mock_sleep,
+        ):
+            result = runner.invoke(
+                main,
+                ["--count", "5"],
+            )
+
+        assert result.exit_code == 0
+        assert mock_run.call_count == 1
+        mock_sleep.assert_not_called()
+        assert "Stopping paced runner. Completed: 1 evaluation(s)." in caplog.text
+
+    def test_stop_on_error_terminates_early(self, caplog) -> None:
+        runner = CliRunner()
+
+        with (
+            patch(
+                "scripts.run_slow_eval._run_evaluation_subprocess",
+                return_value=(1, False),
+            ) as mock_run,
             patch("scripts.run_slow_eval._interruptible_sleep") as mock_sleep,
         ):
             result = runner.invoke(
@@ -90,10 +156,12 @@ class TestRunSlowEvalCLI:
 
     def test_no_stop_on_error_continues(self) -> None:
         runner = CliRunner()
-        mock_proc = MagicMock(returncode=1)
 
         with (
-            patch("subprocess.run", return_value=mock_proc) as mock_run,
+            patch(
+                "scripts.run_slow_eval._run_evaluation_subprocess",
+                side_effect=[(1, False), (0, False), (0, False)],
+            ) as mock_run,
             patch("scripts.run_slow_eval._interruptible_sleep", return_value=True),
         ):
             result = runner.invoke(
@@ -102,21 +170,23 @@ class TestRunSlowEvalCLI:
             )
 
         assert result.exit_code == 0
-        assert mock_run.call_count == 2
+        assert mock_run.call_count == 3
 
-    def test_keyboard_interrupt_exits_cleanly(self, caplog) -> None:
+    def test_keyboard_interrupt_during_cooldown_exits_cleanly(self, caplog) -> None:
         caplog.set_level(logging.INFO)
         runner = CliRunner()
-        mock_proc = MagicMock(returncode=0)
 
         with (
-            patch("subprocess.run", return_value=mock_proc),
+            patch(
+                "scripts.run_slow_eval._run_evaluation_subprocess",
+                return_value=(0, False),
+            ),
             patch(
                 "scripts.run_slow_eval._interruptible_sleep",
-                side_effect=KeyboardInterrupt,
+                return_value=False,
             ),
         ):
             result = runner.invoke(main, ["--count", "5"])
 
         assert result.exit_code == 0
-        assert "Interrupted by user" in caplog.text
+        assert "Interrupted by user during cooldown." in caplog.text

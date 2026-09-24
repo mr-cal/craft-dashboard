@@ -40,6 +40,40 @@ def _interruptible_sleep(seconds: float) -> bool:
         time.sleep(min(0.5, remaining))
 
 
+def _run_evaluation_subprocess(cmd: list[str]) -> tuple[int, bool]:
+    """Run an evaluation subprocess, allowing graceful child shutdown on Ctrl+C.
+
+    Returns:
+        (returncode, interrupted): returncode of the child process, and a boolean
+        indicating whether a KeyboardInterrupt occurred.
+
+    """
+    proc = subprocess.Popen(cmd)
+    try:
+        returncode = proc.wait()
+    except KeyboardInterrupt:
+        logger.info(
+            "Ctrl+C received; waiting for current evaluation to gracefully finish..."
+        )
+        try:
+            returncode = proc.wait()
+        except KeyboardInterrupt:
+            logger.warning(
+                "Second Ctrl+C received; terminating evaluation immediately..."
+            )
+            proc.terminate()
+            try:
+                proc.wait(timeout=3.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            raise
+        else:
+            return returncode, True
+    else:
+        return returncode, False
+
+
 def build_command(
     run_llm_path: pathlib.Path,
     extra_args: list[str],
@@ -128,20 +162,25 @@ def main(
             logger.info("=== Starting evaluation %d%s ===", current_num, total_str)
 
             cmd = build_command(run_llm_path, extra_args)
-            result = subprocess.run(cmd, check=False)
+            returncode, interrupted = _run_evaluation_subprocess(cmd)
 
-            if result.returncode != 0:
-                logger.error(
-                    "Evaluation process exited with code %d.", result.returncode
-                )
+            if returncode != 0:
+                logger.error("Evaluation process exited with code %d.", returncode)
                 if stop_on_error:
                     logger.warning(
                         "Stopping due to error (stop-on-error is enabled). Completed: %d",
                         completed,
                     )
-                    sys.exit(result.returncode)
+                    sys.exit(returncode)
+            else:
+                completed += 1
 
-            completed += 1
+            if interrupted:
+                logger.info(
+                    "Evaluation process finished after Ctrl+C. Stopping paced runner. Completed: %d evaluation(s).",
+                    completed,
+                )
+                break
 
             if count > 0 and completed >= count:
                 logger.info("Target of %d evaluation(s) reached.", count)
@@ -153,9 +192,12 @@ def main(
                 completed,
                 sleep_duration,
             )
-            interrupted = not _interruptible_sleep(sleep_duration)
-            if interrupted:
-                logger.info("Sleep interrupted. Exiting.")
+            slept_completely = _interruptible_sleep(sleep_duration)
+            if not slept_completely:
+                logger.info(
+                    "Interrupted by user during cooldown. Completed: %d evaluation(s).",
+                    completed,
+                )
                 break
 
     except KeyboardInterrupt:
