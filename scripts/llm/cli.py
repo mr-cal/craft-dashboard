@@ -219,6 +219,12 @@ def _handle_fatal_config_error(message: str) -> None:
     type=click.FloatRange(min=0.0),
     help="Maximum delay in seconds between evaluations when --slow-eval is enabled.",
 )
+@click.option(
+    "--tool-delay",
+    default=None,
+    type=click.FloatRange(min=0.0),
+    help="Delay in seconds between intra-issue tool calling rounds (defaults to 7.0s when --slow-eval is enabled, 0.0s otherwise).",
+)
 def evaluate_cmd(
     poll_interval: int,
     limit: int,
@@ -235,6 +241,7 @@ def evaluate_cmd(
     slow_eval: bool,
     min_delay: float,
     max_delay: float,
+    tool_delay: float | None,
 ) -> None:
     """Run the continuous HTTP-only evaluation service against /api/eval/*."""
     if slow_eval:
@@ -243,6 +250,10 @@ def evaluate_cmd(
         if concurrency != 1:
             logger.info("--slow-eval forces concurrency=1 (was %d)", concurrency)
             concurrency = 1
+
+    actual_tool_delay = 7.0 if slow_eval else 0.0
+    if tool_delay is not None:
+        actual_tool_delay = tool_delay
 
     server = os.environ.get("EVAL_CLIENT_SERVER", "")
     token = os.environ.get("EVAL_API_TOKEN", "")
@@ -351,5 +362,6 @@ def evaluate_cmd(
             slow_eval=slow_eval,
             min_delay=min_delay,
             max_delay=max_delay,
+            tool_delay=actual_tool_delay,
         )
     )

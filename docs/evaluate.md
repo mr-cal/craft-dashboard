@@ -90,11 +90,11 @@ uv run scripts/run_llm.py evaluate --help
 To run evaluations slowly with randomized intervals (e.g. to emulate human developer pacing or stay within strict provider burst rate limits), use the `--slow-eval` flag on `run_llm.py evaluate`:
 
 ```bash
-# Evaluate with --slow-eval (forces concurrency=1 and applies 25-55s randomized delays)
+# Evaluate with --slow-eval (forces concurrency=1, 25-55s jitter between issues, and 7s pacing between tool rounds)
 uv run scripts/run_llm.py evaluate --slow-eval --limit 10
 
-# Customize the jitter delay range
-uv run scripts/run_llm.py evaluate --slow-eval --min-delay 30 --max-delay 60 --limit 10
+# Customize jitter and intra-issue tool delay
+uv run scripts/run_llm.py evaluate --slow-eval --min-delay 30 --max-delay 60 --tool-delay 10 --limit 10
 ```
 
 ## Architecture note

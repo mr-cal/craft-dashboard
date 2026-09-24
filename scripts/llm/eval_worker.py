@@ -931,6 +931,7 @@ async def run_evaluate_loop(
     slow_eval: bool = False,
     min_delay: float = 25.0,
     max_delay: float = 55.0,
+    tool_delay: float = 0.0,
 ) -> None:
     """Run the continuous HTTP evaluation worker against ``/api/eval/*``.
 
@@ -985,6 +986,7 @@ async def run_evaluate_loop(
         client=llm_client,
         model_summary=model_summary,
         model_scoring=model_scoring,
+        tool_call_delay=tool_delay,
     )
 
     filter_parts = []

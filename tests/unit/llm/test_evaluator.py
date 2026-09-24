@@ -467,6 +467,97 @@ class TestIssueEvaluatorToolLoop:
         assert len(result["transcript"]["rounds"]) == 20
 
     @pytest.mark.asyncio
+    async def test_tool_call_delay_paces_intra_issue_rounds(self) -> None:
+        loop_response = LLMResponse(
+            content="",
+            prompt_tokens=5,
+            completion_tokens=5,
+            total_tokens=10,
+            model="scoring-model",
+            tool_calls=[
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "repo_layout",
+                        "arguments": '{"project": "craft-parts"}',
+                    },
+                }
+            ],
+        )
+        final_response = LLMResponse(
+            content=json.dumps(
+                {
+                    "summary": "An open issue summary that is long enough to pass.",
+                    "scores": {
+                        "actionability": 70,
+                        "complexity": 10,
+                        "impact": 50,
+                        "confidence": 40,
+                    },
+                    "suggested_action": "needs_triage",
+                    "suggested_action_reason": "reason",
+                    "related_work": [],
+                }
+            ),
+            prompt_tokens=15,
+            completion_tokens=15,
+            total_tokens=30,
+            model="scoring-model",
+        )
+        mock_client = AsyncMock()
+        mock_client.complete.side_effect = [loop_response, final_response]
+
+        evaluator = IssueEvaluator(
+            client=mock_client,
+            model_summary="summary-model",
+            model_scoring="scoring-model",
+            tool_call_delay=7.5,
+        )
+        slept: list[float] = []
+
+        with (
+            patch(
+                "craft_dashboard.llm.evaluator.dispatch_tool_call",
+                new=AsyncMock(return_value="dir1\t3 files"),
+            ),
+            patch(
+                "craft_dashboard.llm.baseline.reader.repo_layout",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "craft_dashboard.llm.baseline.reader.grep_repo",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch(
+                "craft_dashboard.llm.baseline._dispatch_http_tool",
+                new=AsyncMock(return_value='{"results": []}'),
+            ),
+            patch(
+                "craft_dashboard.llm.evaluator.asyncio.sleep",
+                side_effect=slept.append,
+            ),
+        ):
+            await evaluator.evaluate(
+                title="t",
+                body="b",
+                issue_type="issue",
+                state="open",
+                labels=[],
+                age_days=1,
+                last_activity_days=1,
+                author="a",
+                is_maintainer=False,
+                comment_count=0,
+                project="craft-parts",
+                tool_ctx=_tool_ctx(),
+            )
+
+        assert mock_client.complete.call_count == 2
+        # Round 1 has no delay, round 2 was preceded by tool_call_delay
+        assert slept == [7.5]
+
+    @pytest.mark.asyncio
     async def test_tool_output_is_wrapped_in_untrusted_delimiters(self) -> None:
         tool_call_response = LLMResponse(
             content="",

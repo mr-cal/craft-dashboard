@@ -1,5 +1,6 @@
 """Issue and PR evaluator using LLM."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -341,6 +342,7 @@ class IssueEvaluator:
         client: LLMClient,
         model_summary: str = "google/gemini-flash-1.5",
         model_scoring: str = "google/gemini-flash-1.5",
+        tool_call_delay: float = 0.0,
     ) -> None:
         """Initialize the evaluator.
 
@@ -348,11 +350,13 @@ class IssueEvaluator:
             client: LLM completion client.
             model_summary: Model used for closed/merged summary-only calls.
             model_scoring: Model used for open-item scoring/tool-calling calls.
+            tool_call_delay: Delay in seconds to wait before subsequent tool-calling rounds.
 
         """
         self.client = client
         self.model_summary = model_summary
         self.model_scoring = model_scoring
+        self.tool_call_delay = tool_call_delay
         self._tool_ctx: ToolContext | None = None
 
     async def evaluate(
@@ -657,6 +661,13 @@ class IssueEvaluator:
         total_tokens = 0
 
         for _round_number in range(1, max_rounds + 1):
+            if _round_number > 1 and self.tool_call_delay > 0:
+                logger.debug(
+                    "Pacing intra-issue tool turns: sleeping %.1fs...",
+                    self.tool_call_delay,
+                )
+                await asyncio.sleep(self.tool_call_delay)
+
             logger.debug(
                 "Tool loop round %d/%d: calling %s (max_tokens=%d)...",
                 _round_number,
@@ -761,6 +772,13 @@ class IssueEvaluator:
             max_rounds,
             total_tokens,
         )
+        if self.tool_call_delay > 0:
+            logger.debug(
+                "Pacing intra-issue tool turns: sleeping %.1fs before final response...",
+                self.tool_call_delay,
+            )
+            await asyncio.sleep(self.tool_call_delay)
+
         messages.append(
             {
                 "role": "user",
