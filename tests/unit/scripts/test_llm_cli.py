@@ -2,9 +2,16 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
+import click
+import httpx
 import pytest
 from click.testing import CliRunner
-from scripts.llm.cli import _clear_main, cli
+from scripts.llm.cli import (
+    _clear_main,
+    _count_evaluations,
+    _delete_evaluations,
+    cli,
+)
 
 
 class TestClearEvaluationsCommand:
@@ -18,117 +25,88 @@ class TestClearEvaluationsCommand:
         assert "--yes" in result.output
 
     @pytest.mark.asyncio
-    async def test_clear_main_deletes_rows_without_storage_helpers(
-        self, monkeypatch
+    async def test_clear_main_missing_auth_raises(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        class _FakeResult:
-            rowcount = 3
+        monkeypatch.delenv("DASHBOARD_URL", raising=False)
+        monkeypatch.delenv("EVAL_API_TOKEN", raising=False)
+        monkeypatch.setenv("LLM_CONFIG_ERROR_DELAY_SECONDS", "0")
 
-        class _FakeSession:
-            def __init__(self) -> None:
-                self.scalar_calls = []
-                self.execute_calls = []
-                self.committed = False
+        with pytest.raises(click.UsageError, match="Missing required authentication"):
+            await _clear_main(project="", yes=True)
 
-            async def __aenter__(self):
-                return self
+    @pytest.mark.asyncio
+    async def test_clear_main_deletes_rows_via_api(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DASHBOARD_URL", "http://testserver")
+        monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
 
-            async def __aexit__(self, exc_type, exc, tb):
-                return False
-
-            async def scalar(self, query):
-                self.scalar_calls.append(query)
-                return 3
-
-            async def execute(self, query):
-                self.execute_calls.append(query)
-                return _FakeResult()
-
-            async def commit(self) -> None:
-                self.committed = True
-
-        class _FakeSessionFactory:
-            def __init__(self, session) -> None:
-                self._session = session
-
-            def __call__(self):
-                return self._session
-
-        fake_session = _FakeSession()
-        session_factory = _FakeSessionFactory(fake_session)
         confirm = MagicMock()
-        engine = MagicMock()
-        engine.dispose = AsyncMock()
-        monkeypatch.delattr("scripts.llm.cli.count_evaluations", raising=False)
-        monkeypatch.delattr("scripts.llm.cli._clear_evaluations", raising=False)
+        mock_count = AsyncMock(return_value=5)
+        mock_delete = AsyncMock(return_value=5)
+
         monkeypatch.setattr("scripts.llm.cli.click.confirm", confirm)
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_session_factory",
-            MagicMock(return_value=session_factory),
-        )
+        monkeypatch.setattr("scripts.llm.cli._count_evaluations", mock_count)
+        monkeypatch.setattr("scripts.llm.cli._delete_evaluations", mock_delete)
 
         await _clear_main(project="snapcraft", yes=False)
 
-        assert len(fake_session.scalar_calls) == 1
-        assert len(fake_session.execute_calls) == 1
+        mock_count.assert_awaited_once()
         confirm.assert_called_once()
-        assert fake_session.committed is True
-        engine.dispose.assert_awaited_once()
+        mock_delete.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_clear_main_skips_delete_when_no_evaluations(
-        self, monkeypatch
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        class _FakeSession:
-            def __init__(self) -> None:
-                self.execute_calls = []
-                self.committed = False
+        monkeypatch.setenv("DASHBOARD_URL", "http://testserver")
+        monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
 
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                return False
-
-            async def scalar(self, query):
-                return 0
-
-            async def execute(self, query):
-                self.execute_calls.append(query)
-                raise AssertionError("delete should not run")
-
-            async def commit(self) -> None:
-                self.committed = True
-
-        class _FakeSessionFactory:
-            def __init__(self, session) -> None:
-                self._session = session
-
-            def __call__(self):
-                return self._session
-
-        fake_session = _FakeSession()
-        engine = MagicMock()
-        engine.dispose = AsyncMock()
         confirm = MagicMock()
+        mock_count = AsyncMock(return_value=0)
+        mock_delete = AsyncMock()
+
         monkeypatch.setattr("scripts.llm.cli.click.confirm", confirm)
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_engine", MagicMock(return_value=engine)
-        )
-        monkeypatch.setattr(
-            "scripts.llm.cli.get_session_factory",
-            MagicMock(return_value=_FakeSessionFactory(fake_session)),
-        )
+        monkeypatch.setattr("scripts.llm.cli._count_evaluations", mock_count)
+        monkeypatch.setattr("scripts.llm.cli._delete_evaluations", mock_delete)
 
         await _clear_main(project="", yes=False)
 
+        mock_count.assert_awaited_once()
         confirm.assert_not_called()
-        assert fake_session.execute_calls == []
-        assert fake_session.committed is False
-        engine.dispose.assert_awaited_once()
+        mock_delete.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_count_and_delete_evaluations_http_requests(self) -> None:
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_get_resp = MagicMock()
+        mock_get_resp.json.return_value = {"count": 42}
+        mock_get_resp.raise_for_status = MagicMock()
+        mock_client.get.return_value = mock_get_resp
+
+        headers = {"Authorization": "Bearer tok"}
+        count = await _count_evaluations(mock_client, "rockcraft", headers)
+        assert count == 42
+        mock_client.get.assert_awaited_once_with(
+            "/api/eval/clear",
+            params={"project": "rockcraft"},
+            headers=headers,
+        )
+
+        mock_del_resp = MagicMock()
+        mock_del_resp.json.return_value = {"deleted": 42}
+        mock_del_resp.raise_for_status = MagicMock()
+        mock_client.request.return_value = mock_del_resp
+
+        deleted = await _delete_evaluations(mock_client, "rockcraft", headers)
+        assert deleted == 42
+        mock_client.request.assert_awaited_once_with(
+            "DELETE",
+            "/api/eval/clear",
+            params={"project": "rockcraft"},
+            headers=headers,
+        )
 
 
 class TestEvaluateCliCommand:

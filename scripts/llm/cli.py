@@ -9,13 +9,8 @@ import pathlib
 import time
 
 import click
-from craft_dashboard.database import get_engine, get_session_factory
-from craft_dashboard.models.issue import Issue
-from craft_dashboard.models.llm_evaluation import LLMEvaluation
-from craft_dashboard.models.project import Project
-from craft_dashboard.settings import Settings
+import httpx
 from dotenv import load_dotenv
-from sqlalchemy import delete, func, select
 
 from scripts.llm.eval_worker import run_evaluate_loop
 
@@ -28,47 +23,64 @@ logger = logging.getLogger(__name__)
 load_dotenv(pathlib.Path(__file__).resolve().parents[2] / ".env")
 
 
-async def _count_evaluations(session, project: str) -> int:
-    """Count stored LLM evaluations, optionally scoped to one project."""
-    if project:
-        query = (
-            select(func.count(LLMEvaluation.id))
-            .join(Issue, LLMEvaluation.issue_id == Issue.id)
-            .join(Project, Issue.project_id == Project.id)
-            .where(Project.name == project)
-        )
-    else:
-        query = select(func.count(LLMEvaluation.id))
-
-    return await session.scalar(query) or 0
+async def _count_evaluations(
+    http_client: httpx.AsyncClient, project: str, headers: dict[str, str]
+) -> int:
+    """Count stored LLM evaluations via HTTP API, optionally scoped to one project."""
+    params = {"project": project} if project else {}
+    resp = await http_client.get("/api/eval/clear", params=params, headers=headers)
+    resp.raise_for_status()
+    data = resp.json()
+    return int(data.get("count", 0))
 
 
-async def _delete_evaluations(session, project: str) -> int:
-    """Delete stored LLM evaluations, optionally scoped to one project."""
-    if project:
-        issue_ids = (
-            select(Issue.id)
-            .join(Project, Issue.project_id == Project.id)
-            .where(Project.name == project)
-        )
-        statement = delete(LLMEvaluation).where(LLMEvaluation.issue_id.in_(issue_ids))
-    else:
-        statement = delete(LLMEvaluation)
-
-    result = await session.execute(statement)
-    await session.commit()
-    return result.rowcount or 0
+async def _delete_evaluations(
+    http_client: httpx.AsyncClient, project: str, headers: dict[str, str]
+) -> int:
+    """Delete stored LLM evaluations via HTTP API, optionally scoped to one project."""
+    params = {"project": project} if project else {}
+    resp = await http_client.request(
+        "DELETE", "/api/eval/clear", params=params, headers=headers
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return int(data.get("deleted", 0))
 
 
 async def _clear_main(project: str, yes: bool) -> None:
-    """Confirm and clear stored LLM evaluations."""
-    settings = Settings()
-    engine = get_engine(settings.database_url)
-    session_factory = get_session_factory(engine)
+    """Confirm and clear stored LLM evaluations via HTTP API."""
+    server = os.environ.get("DASHBOARD_URL", "")
+    token = os.environ.get("EVAL_API_TOKEN", "")
+    missing_auth = [
+        name
+        for name, val in [("DASHBOARD_URL", server), ("EVAL_API_TOKEN", token)]
+        if not val
+    ]
+    if missing_auth:
+        _handle_fatal_config_error(
+            f"Missing required authentication environment variables: {', '.join(missing_auth)}. "
+            "Please ensure these are set in your environment or .env file."
+        )
 
+    server_ca_cert = os.environ.get("DASHBOARD_CA_CERT", "")
+    server_url = server.rstrip("/")
+    if server_ca_cert:
+        expanded_server_ca = pathlib.Path(server_ca_cert).expanduser()  # noqa: ASYNC240
+        if not expanded_server_ca.is_file():
+            raise FileNotFoundError(
+                f"Dashboard CA certificate file not found: '{server_ca_cert}' (resolved to '{expanded_server_ca}'). "
+                "Please check your DASHBOARD_CA_CERT configuration."
+            )
+        verify: bool | str = str(expanded_server_ca)
+    else:
+        verify = True
+
+    headers = {"Authorization": f"Bearer {token}"}
     try:
-        async with session_factory() as session:
-            count = await _count_evaluations(session, project)
+        async with httpx.AsyncClient(
+            base_url=server_url, timeout=30.0, verify=verify
+        ) as http_client:
+            count = await _count_evaluations(http_client, project, headers)
             if count == 0:
                 scope = f"for project '{project}'" if project else ""
                 logger.info("No evaluations found %s. Nothing to clear.", scope)
@@ -78,10 +90,16 @@ async def _clear_main(project: str, yes: bool) -> None:
             if not yes:
                 click.confirm(f"Delete {count:,} LLM evaluations {scope}?", abort=True)
 
-            deleted = await _delete_evaluations(session, project)
+            deleted = await _delete_evaluations(http_client, project, headers)
             logger.info("Cleared %d evaluations %s.", deleted, scope)
-    finally:
-        await engine.dispose()
+    except httpx.HTTPStatusError as exc:
+        raise click.ClickException(
+            f"Eval API request failed with status {exc.response.status_code}: {exc.response.text}"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise click.ClickException(
+            f"Failed to connect to dashboard server at {server_url}: {exc}"
+        ) from exc
 
 
 @click.group(invoke_without_command=True)

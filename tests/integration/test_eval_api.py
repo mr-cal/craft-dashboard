@@ -2492,3 +2492,79 @@ class TestNextIssueShaPinning:
         body = response.json()
         assert "snapcraft (launchpad)" in body["repo_shas"]
         assert len(body["repo_shas"]["snapcraft (launchpad)"]) == 40
+
+
+class TestClearEvaluationsEndpoint:
+    """Integration tests for GET, DELETE, and POST /api/eval/clear."""
+
+    def test_clear_requires_auth(self, test_db_session: AsyncSession) -> None:
+        app, _token = _create_eval_app(test_db_session)
+        with TestClient(app) as client:
+            assert client.get("/api/eval/clear").status_code == 401
+            assert client.delete("/api/eval/clear").status_code == 401
+            assert client.post("/api/eval/clear").status_code == 401
+
+    def test_clear_evaluations_all_and_scoped(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        project_snap = make_project(id=1, name="snapcraft")
+        project_rock = make_project(id=2, name="rockcraft")
+        issue1 = make_issue(id=1, project_id=1, external_id="101")
+        issue2 = make_issue(id=2, project_id=2, external_id="202")
+        eval1 = make_evaluation(id=1, issue_id=1, latest=True)
+        eval2 = make_evaluation(id=2, issue_id=2, latest=True)
+
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(
+                test_db_session,
+                project_snap,
+                project_rock,
+                issue1,
+                issue2,
+                eval1,
+                eval2,
+            )
+        )
+
+        app, token = _create_eval_app(test_db_session)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        with TestClient(app) as client:
+            # Check count for snapcraft only
+            resp = client.get(
+                "/api/eval/clear", params={"project": "snapcraft"}, headers=headers
+            )
+            assert resp.status_code == 200
+            assert resp.json() == {"count": 1, "project": "snapcraft"}
+
+            # Check total count across all projects
+            resp = client.get("/api/eval/clear", headers=headers)
+            assert resp.status_code == 200
+            assert resp.json() == {"count": 2, "project": None}
+
+            # Delete snapcraft evaluations only
+            resp = client.delete(
+                "/api/eval/clear", params={"project": "snapcraft"}, headers=headers
+            )
+            assert resp.status_code == 200
+            assert resp.json() == {"deleted": 1, "project": "snapcraft"}
+
+            # Remaining count should now be 1
+            resp = client.get("/api/eval/clear", headers=headers)
+            assert resp.status_code == 200
+            assert resp.json() == {"count": 1, "project": None}
+
+            # Delete remaining evaluations via POST
+            resp = client.post("/api/eval/clear", headers=headers)
+            assert resp.status_code == 200
+            assert resp.json() == {"deleted": 1, "project": None}
+
+            # Final count is 0
+            resp = client.get("/api/eval/clear", headers=headers)
+            assert resp.status_code == 200
+            assert resp.json() == {"count": 0, "project": None}
+
+        evals = asyncio.get_event_loop().run_until_complete(
+            _all_evaluations(test_db_session)
+        )
+        assert len(evals) == 0

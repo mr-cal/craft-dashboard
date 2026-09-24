@@ -1100,3 +1100,54 @@ async def get_projects(
     result = await session.execute(select(Project.name, Project.github_org))
     project_orgs = dict(result.tuples().all())
     return {"projects": project_orgs}
+
+
+@router.get("/clear")
+async def get_clear_evaluations_count(
+    request: Request,
+    *,
+    authorization: str = Header(default=""),
+    project: str = Query(default=""),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Return count of evaluations that would be cleared."""
+    _require_eval_auth(request, authorization)
+    if project:
+        query = (
+            select(func.count(LLMEvaluation.id))
+            .join(Issue, LLMEvaluation.issue_id == Issue.id)
+            .join(Project, Issue.project_id == Project.id)
+            .where(Project.name == project)
+        )
+    else:
+        query = select(func.count(LLMEvaluation.id))
+
+    count = await session.scalar(query) or 0
+    return {"count": count, "project": project or None}
+
+
+@router.delete("/clear")
+@router.post("/clear")
+async def clear_evaluations(
+    request: Request,
+    *,
+    authorization: str = Header(default=""),
+    project: str = Query(default=""),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Delete stored LLM evaluations, optionally scoped to a project."""
+    _require_eval_auth(request, authorization)
+    if project:
+        issue_ids = (
+            select(Issue.id)
+            .join(Project, Issue.project_id == Project.id)
+            .where(Project.name == project)
+        )
+        statement = delete(LLMEvaluation).where(LLMEvaluation.issue_id.in_(issue_ids))
+    else:
+        statement = delete(LLMEvaluation)
+
+    result = await session.execute(statement)
+    await session.commit()
+    deleted = getattr(result, "rowcount", 0) or 0
+    return {"deleted": deleted, "project": project or None}
