@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import pathlib
 from copy import deepcopy
@@ -124,6 +125,9 @@ def base_runtime() -> SimpleNamespace:
         state=SimpleNamespace(
             release=AsyncMock(),
             complete=AsyncMock(return_value=1),
+            record_failure=AsyncMock(return_value=1),
+            consecutive_failures=0,
+            lock=asyncio.Lock(),
         ),
         poll_interval=1,
         issue_limit=1,
@@ -140,6 +144,7 @@ def base_runtime() -> SimpleNamespace:
 def _reset_shutdown_state() -> None:
     eval_worker.shutdown_state["requested"] = False
     eval_worker.paused_state["paused"] = False
+    eval_worker._circuit_breaker_active = False
 
 
 _STATUS_RESPONSE = httpx.Response(
@@ -711,3 +716,126 @@ async def test_worker_loop_slow_eval_delays_between_issues(
     for call in sleep_mock.await_args_list:
         delay = call.args[0]
         assert 10.0 <= delay <= 20.0
+
+
+def test_format_error_body_extracts_nested_error_message() -> None:
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    openrouter_resp = httpx.Response(
+        404,
+        request=request,
+        headers={"content-type": "application/json"},
+        json={
+            "error": {
+                "message": "0 endpoints out of 1 requested are available.\nZDR violation",
+                "code": 404,
+            }
+        },
+    )
+    assert (
+        eval_worker._format_error_body(openrouter_resp)
+        == "0 endpoints out of 1 requested are available. ZDR violation"
+    )
+
+    detail_resp = httpx.Response(
+        400,
+        request=request,
+        headers={"content-type": "application/json"},
+        json={"detail": "Bad request detail"},
+    )
+    assert eval_worker._format_error_body(detail_resp) == "Bad request detail"
+
+
+@pytest.mark.asyncio
+async def test_evaluate_issue_handles_http_status_error_cleanly(
+    monkeypatch: pytest.MonkeyPatch,
+    base_runtime: SimpleNamespace,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    response = httpx.Response(
+        404,
+        request=request,
+        headers={"content-type": "application/json"},
+        json={"error": {"message": "ZDR policy restriction"}},
+    )
+    http_error = httpx.HTTPStatusError(
+        "404 Not Found", request=request, response=response
+    )
+    base_runtime.evaluator.evaluate = AsyncMock(side_effect=http_error)
+    release_claim = AsyncMock()
+    monkeypatch.setattr(eval_worker, "_release_claim", release_claim)
+
+    with caplog.at_level(logging.ERROR):
+        success = await eval_worker._evaluate_issue(
+            base_runtime,
+            issue_data=_make_issue(issue_id=42, repo_shas={"snapcraft": "a" * 40}),
+            worker_name="worker-1",
+        )
+
+    assert success is False
+    release_claim.assert_awaited_once_with(
+        base_runtime,
+        issue_id=42,
+        issue_ref="snapcraft#100",
+        reason="evaluation_error",
+    )
+    base_runtime.state.record_failure.assert_awaited_once()
+    assert any(
+        "HTTP 404" in record.message and "ZDR policy restriction" in record.message
+        for record in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_worker_loop_backs_off_on_evaluation_failure(
+    monkeypatch: pytest.MonkeyPatch, base_runtime: SimpleNamespace
+) -> None:
+    base_runtime.issue_limit = 1
+    base_runtime.state = SimpleNamespace(
+        reserve=AsyncMock(side_effect=[True, False]),
+        evaluated=0,
+    )
+    fetch_mock = AsyncMock(return_value=_make_issue(issue_id=42))
+    preflight_mock = AsyncMock(return_value=True)
+    eval_mock = AsyncMock(return_value=False)
+    sleep_mock = AsyncMock()
+
+    monkeypatch.setattr(eval_worker, "_fetch_next_issue", fetch_mock)
+    monkeypatch.setattr(eval_worker, "_run_issue_preflight", preflight_mock)
+    monkeypatch.setattr(eval_worker, "_evaluate_issue", eval_mock)
+    monkeypatch.setattr(eval_worker, "_sleep_until_next_poll", sleep_mock)
+
+    await eval_worker._worker_loop(
+        base_runtime, server_url="http://localhost:8000", worker_index=1
+    )
+
+    assert eval_mock.await_count == 1
+    sleep_mock.assert_awaited_once_with(eval_worker._FAILURE_BACKOFF_SECONDS)
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_trips_on_consecutive_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    base_runtime: SimpleNamespace,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    run_state = eval_worker._RunState(limit=10)
+    base_runtime.state = run_state
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr(eval_worker, "_sleep_until_next_poll", sleep_mock)
+
+    for _ in range(eval_worker._CONSECUTIVE_FAILURE_THRESHOLD - 1):
+        await eval_worker._handle_evaluation_failure(base_runtime)
+        assert not eval_worker.paused_state["paused"]
+
+    with caplog.at_level(logging.ERROR):
+        await eval_worker._handle_evaluation_failure(base_runtime)
+
+    sleep_mock.assert_awaited_once_with(eval_worker._CIRCUIT_BREAKER_PAUSE_SECONDS)
+    assert any("Circuit breaker tripped" in record.message for record in caplog.records)
+    assert run_state.consecutive_failures == 0
+
+    await run_state.record_failure()
+    assert run_state.consecutive_failures == 1
+    await run_state.complete(prompt_tokens=10, completion_tokens=10)
+    assert run_state.consecutive_failures == 0

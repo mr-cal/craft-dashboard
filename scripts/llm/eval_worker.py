@@ -87,6 +87,7 @@ class _RunState:
         self.evaluated = 0
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
+        self.consecutive_failures = 0
         self.lock = asyncio.Lock()
 
     async def reserve(self) -> bool:
@@ -106,10 +107,17 @@ class _RunState:
         async with self.lock:
             self.reserved = max(0, self.reserved - 1)
 
+    async def record_failure(self) -> int:
+        """Record one failed evaluation and return current consecutive failures."""
+        async with self.lock:
+            self.consecutive_failures += 1
+            return self.consecutive_failures
+
     async def complete(self, *, prompt_tokens: int, completion_tokens: int) -> int:
         """Record one successful evaluation and return the new total."""
         async with self.lock:
             self.evaluated += 1
+            self.consecutive_failures = 0
             self.total_prompt_tokens += prompt_tokens
             self.total_completion_tokens += completion_tokens
             return self.evaluated
@@ -222,10 +230,18 @@ def create_llm_client_for_backend(
 def _format_error_body(response: httpx.Response) -> str:
     """Return a compact, readable summary of a non-2xx response body."""
     content_type = response.headers.get("content-type", "")
-    if "json" in content_type:
+    text = response.text.strip()
+    if "json" in content_type or text.startswith(("{", "[")):
         try:
             data = response.json()
-            return str(data.get("detail", data))
+            raw: object = data
+            if isinstance(data, dict):
+                if "error" in data:
+                    err = data["error"]
+                    raw = err.get("message", err) if isinstance(err, dict) else err
+                elif "detail" in data:
+                    raw = data["detail"]
+            return " ".join(str(raw).strip().split())
         except ValueError:
             pass
     if "html" in content_type:
@@ -235,8 +251,12 @@ def _format_error_body(response: httpx.Response) -> str:
                 "server error; check the craft-dashboard logs)"
             )
         return f"(HTML response from {response.url} — is the server URL correct?)"
-    text = response.text.strip()
-    return (text[:_MAX_ERROR_BODY] + "…") if len(text) > _MAX_ERROR_BODY else text
+    collapsed = " ".join(text.split())
+    return (
+        (collapsed[:_MAX_ERROR_BODY] + "…")
+        if len(collapsed) > _MAX_ERROR_BODY
+        else collapsed
+    )
 
 
 def _serialize_evidence_paths(ctx: object | None) -> list[dict[str, str]]:
@@ -391,6 +411,62 @@ async def _enter_quota_backoff(runtime: _Runtime) -> None:
         _quota_paused = False
     if not shutdown_state["requested"]:
         logger.info("Quota backoff elapsed, resuming evaluation.")
+
+
+#: Delay before a worker re-polls after an individual evaluation failure.
+_FAILURE_BACKOFF_SECONDS = 5.0
+
+#: Number of consecutive evaluation failures across all workers before tripping the circuit breaker.
+_CONSECUTIVE_FAILURE_THRESHOLD = 5
+
+#: Duration to pause all workers when the circuit breaker trips.
+_CIRCUIT_BREAKER_PAUSE_SECONDS = 60.0
+
+_circuit_breaker_lock = asyncio.Lock()
+_circuit_breaker_active = False
+
+
+async def _enter_circuit_breaker(runtime: _Runtime, failures: int) -> None:
+    """Pause all workers for `_CIRCUIT_BREAKER_PAUSE_SECONDS` after consecutive failures."""
+    global _circuit_breaker_active  # noqa: PLW0603
+    async with _circuit_breaker_lock:
+        if _circuit_breaker_active:
+            return
+        _circuit_breaker_active = True
+
+    paused_state["paused"] = True
+    logger.error(
+        "Circuit breaker tripped: %d consecutive evaluation failures. "
+        "Pausing all workers for %s...",
+        failures,
+        _format_elapsed(_CIRCUIT_BREAKER_PAUSE_SECONDS),
+    )
+    runtime.progress.update(
+        runtime.overall_id,
+        description=f"[red]Circuit breaker: paused for {_format_elapsed(_CIRCUIT_BREAKER_PAUSE_SECONDS)}…[/red]",
+    )
+
+    await _sleep_until_next_poll(_CIRCUIT_BREAKER_PAUSE_SECONDS)
+
+    if hasattr(runtime.state, "consecutive_failures"):
+        async with runtime.state.lock:
+            runtime.state.consecutive_failures = 0
+
+    paused_state["paused"] = False
+    async with _circuit_breaker_lock:
+        _circuit_breaker_active = False
+    if not shutdown_state["requested"]:
+        logger.info("Circuit breaker pause elapsed, resuming evaluation.")
+
+
+async def _handle_evaluation_failure(runtime: _Runtime) -> None:
+    """Record an evaluation failure and trip the circuit breaker if threshold reached."""
+    if hasattr(runtime.state, "record_failure"):
+        failures = await runtime.state.record_failure()
+    else:
+        return
+    if failures >= _CONSECUTIVE_FAILURE_THRESHOLD:
+        await _enter_circuit_breaker(runtime, failures)
 
 
 async def _fetch_next_issue(
@@ -555,7 +631,7 @@ async def _evaluate_issue(  # noqa: PLR0911
     *,
     issue_data: dict[str, Any],
     worker_name: str,
-) -> None:
+) -> bool:
     """Evaluate one claimed issue, embed the summary, and submit the result."""
     local_hash = _compute_content_hash(
         issue_data["title"],
@@ -638,13 +714,14 @@ async def _evaluate_issue(  # noqa: PLR0911
             )
             release_reason = "evaluation_discarded"
             await _release_and_maybe_stop(runtime)
-            return
+            await _handle_evaluation_failure(runtime)
+            return False
         except LLMQuotaError:
             runtime.progress.update(runtime.overall_id, description="Evaluating issues")
             release_reason = "quota_exhausted"
             await runtime.state.release()
             await _enter_quota_backoff(runtime)
-            return
+            return False
         except (httpx.TimeoutException, LLMTimeoutError) as exc:
             runtime.progress.update(runtime.overall_id, description="Evaluating issues")
             exc_name = type(exc).__name__
@@ -657,7 +734,8 @@ async def _evaluate_issue(  # noqa: PLR0911
             logger.debug("%s: LLM timeout traceback:", issue_ref, exc_info=True)
             release_reason = "evaluation_error"
             await _release_and_maybe_stop(runtime)
-            return
+            await _handle_evaluation_failure(runtime)
+            return False
         except LLMUnavailableError as exc:
             runtime.progress.update(runtime.overall_id, description="Evaluating issues")
             logger.error(  # noqa: TRY400
@@ -669,23 +747,45 @@ async def _evaluate_issue(  # noqa: PLR0911
             logger.debug("%s: LLM unavailable traceback:", issue_ref, exc_info=True)
             release_reason = "evaluation_error"
             await _release_and_maybe_stop(runtime)
-            return
-        except Exception:
+            await _handle_evaluation_failure(runtime)
+            return False
+        except httpx.HTTPStatusError as exc:
             runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-            logger.exception(
-                "%s: evaluation failed after %s",
+            body_summary = _format_error_body(exc.response)
+            logger.error(  # noqa: TRY400
+                "%s: evaluation failed after %s: HTTP %d from %s — %s",
                 issue_ref,
                 _format_elapsed(time.monotonic() - started_at),
+                exc.response.status_code,
+                exc.response.url,
+                body_summary,
             )
+            logger.debug("%s: HTTP error traceback:", issue_ref, exc_info=True)
             release_reason = "evaluation_error"
             await _release_and_maybe_stop(runtime)
-            return
+            await _handle_evaluation_failure(runtime)
+            return False
+        except Exception as exc:
+            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            exc_name = type(exc).__name__
+            logger.error(  # noqa: TRY400
+                "%s: evaluation failed after %s: %s: %s",
+                issue_ref,
+                _format_elapsed(time.monotonic() - started_at),
+                exc_name,
+                exc,
+            )
+            logger.debug("%s: evaluation traceback:", issue_ref, exc_info=True)
+            release_reason = "evaluation_error"
+            await _release_and_maybe_stop(runtime)
+            await _handle_evaluation_failure(runtime)
+            return False
 
         if result is None:
             logger.warning("%s: content unchanged, skipping", issue_ref)
             release_reason = "content_unchanged"
             await _release_and_maybe_stop(runtime)
-            return
+            return True
 
         validation_payload = {
             "summary": result.get("summary"),
@@ -709,7 +809,8 @@ async def _evaluate_issue(  # noqa: PLR0911
             )
             release_reason = "evaluation_discarded"
             await _release_and_maybe_stop(runtime)
-            return
+            await _handle_evaluation_failure(runtime)
+            return False
 
         submission: dict[str, Any] = {
             "issue_id": issue_data["issue_id"],
@@ -741,13 +842,14 @@ async def _evaluate_issue(  # noqa: PLR0911
         if submit_response is None:
             release_reason = "submit_network_error"
             await _release_and_maybe_stop(runtime)
-            return
+            await _handle_evaluation_failure(runtime)
+            return False
 
         if submit_response.status_code == HTTP_CONFLICT:
             logger.warning("%s: content changed during evaluation, skipped", issue_ref)
             release_reason = "content_changed"
             await _release_and_maybe_stop(runtime)
-            return
+            return True
 
         if submit_response.status_code != HTTP_OK:
             logger.error(
@@ -759,7 +861,8 @@ async def _evaluate_issue(  # noqa: PLR0911
             )
             release_reason = f"submit_failed_{submit_response.status_code}"
             await _release_and_maybe_stop(runtime)
-            return
+            await _handle_evaluation_failure(runtime)
+            return False
 
         submitted = True
     finally:
@@ -798,6 +901,7 @@ async def _evaluate_issue(  # noqa: PLR0911
     if runtime.issue_limit > 0 and completed >= runtime.issue_limit:
         logger.info("Done: evaluated %d issues", runtime.issue_limit)
         shutdown_state["requested"] = True
+    return True
 
 
 async def _run_issue_preflight(
@@ -897,7 +1001,13 @@ async def _worker_loop(
             worker_name=worker_name,
         ):
             continue
-        await _evaluate_issue(runtime, issue_data=issue_data, worker_name=worker_name)
+        success = await _evaluate_issue(
+            runtime, issue_data=issue_data, worker_name=worker_name
+        )
+        if not success:
+            if not shutdown_state["requested"]:
+                await _sleep_until_next_poll(_FAILURE_BACKOFF_SECONDS)
+            continue
         if (
             runtime.slow_eval
             and not shutdown_state["requested"]
@@ -948,10 +1058,11 @@ async def run_evaluate_loop(
     the claimed issue via the selected chat backend, and submits the finished
     payload to ``POST /api/eval/result``. No direct database access is used.
     """
-    global _quota_paused  # noqa: PLW0603
+    global _circuit_breaker_active, _quota_paused  # noqa: PLW0603
     shutdown_state["requested"] = False
     paused_state["paused"] = False
     _quota_paused = False
+    _circuit_breaker_active = False
     signal.signal(signal.SIGINT, _signal_handler)
     console = Console()
     log_file = _setup_logging(verbose=verbose, console=console, log=log)
