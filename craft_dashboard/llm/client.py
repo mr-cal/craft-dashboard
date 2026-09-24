@@ -354,16 +354,22 @@ class OpenRouterClient:
         self,
         api_key: str,
         base_url: str = OPENROUTER_BASE_URL,
+        timeout: float = 600.0,
+        ca_cert: str = "",
     ) -> None:
         """Initialize the OpenRouter client.
 
         Args:
             api_key: OpenRouter API key.
             base_url: Base URL for the API.
+            timeout: Request timeout in seconds.
+            ca_cert: Optional custom CA certificate path.
 
         """
         self.api_key = api_key
         self.base_url = base_url
+        self.timeout = timeout
+        self.ca_cert = ca_cert
         self._http: httpx.AsyncClient | None = None
         # Optional hook invoked as (attempt_number, max_attempts) before each
         # retry attempt of complete(); lets callers surface retry progress.
@@ -373,7 +379,8 @@ class OpenRouterClient:
     def http(self) -> httpx.AsyncClient:
         """Return a persistent HTTP client, creating one if needed."""
         if self._http is None or self._http.is_closed:
-            self._http = httpx.AsyncClient(timeout=600.0)
+            verify: bool | str = self.ca_cert if self.ca_cert else True
+            self._http = httpx.AsyncClient(timeout=self.timeout, verify=verify)
         return self._http
 
     async def close(self) -> None:
