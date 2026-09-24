@@ -5,9 +5,9 @@ Usage:
     uv run scripts/benchmark_llm.py
 
 Reads server URL and optional credentials from .env:
-    LOCAL_LLM_URL (default: http://localhost:11434/v1)
-    LOCAL_LLM_API_KEY (optional bearer token)
-    LOCAL_LLM_CA_CERT (optional custom CA certificate file)
+    LLM_BASE_URL (e.g. http://localhost:11434/v1 or https://openrouter.ai/api/v1)
+    LLM_API_KEY (optional bearer token)
+    LLM_CA_CERT (optional custom CA certificate file)
 """
 
 from __future__ import annotations
@@ -22,9 +22,9 @@ from dotenv import load_dotenv
 
 load_dotenv(pathlib.Path(__file__).resolve().parent.parent / ".env")
 
-BASE_URL: str = os.environ.get("LOCAL_LLM_URL", "http://localhost:11434/v1").rstrip("/")
-API_KEY: str = os.environ.get("LOCAL_LLM_API_KEY", "")
-CA_CERT: str = os.environ.get("LOCAL_LLM_CA_CERT", "")
+BASE_URL: str = os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1").rstrip("/")
+API_KEY: str = os.environ.get("LLM_API_KEY", "")
+CA_CERT: str = os.environ.get("LLM_CA_CERT", "")
 
 
 def get_client() -> httpx.Client:

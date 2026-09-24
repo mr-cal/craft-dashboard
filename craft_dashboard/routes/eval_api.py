@@ -610,7 +610,7 @@ async def submit_result(
         )
 
     settings = request.app.state.settings
-    if not settings.openrouter_api_key_embedding:
+    if not settings.embedding_api_key:
         raise HTTPException(
             status_code=503,
             detail="Embedding service unavailable",
@@ -622,7 +622,7 @@ async def submit_result(
     embed_client = EmbeddingClient(
         base_url=OPENROUTER_BASE_URL,
         model=settings.semantic_search_embedding_model,
-        api_key=settings.openrouter_api_key_embedding,
+        api_key=settings.embedding_api_key,
         ca_cert="",
     )
     try:
@@ -761,7 +761,7 @@ async def _find_related_issues(
 ) -> dict[str, Any]:
     _require_eval_auth(request, authorization)
     settings = request.app.state.settings
-    if not settings.openrouter_api_key_embedding:
+    if not settings.embedding_api_key:
         raise HTTPException(
             status_code=503,
             detail="Embedding service unavailable",
@@ -769,7 +769,7 @@ async def _find_related_issues(
     embed_client = EmbeddingClient(
         base_url=OPENROUTER_BASE_URL,
         model=settings.semantic_search_embedding_model,
-        api_key=settings.openrouter_api_key_embedding,
+        api_key=settings.embedding_api_key,
         ca_cert="",
     )
     try:

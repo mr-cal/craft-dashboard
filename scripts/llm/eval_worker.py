@@ -188,25 +188,34 @@ async def _release_and_maybe_stop(runtime: _Runtime) -> None:
 
 def create_llm_client_for_backend(
     *,
-    llm_backend: str,
-    openrouter_api_key: str,
-    llm_url: str,
-    llm_api_key: str,
-    ca_cert: str,
+    llm_backend: str = "",
+    base_url: str = "",
+    api_key: str = "",
+    ca_cert: str = "",
     timeout: float | None = None,
+    openrouter_api_key: str = "",
+    llm_url: str = "",
+    llm_api_key: str = "",
 ) -> LLMClient:
     """Create the completion client for the selected backend."""
-    if llm_backend == "openrouter":
-        return OpenRouterClient(api_key=openrouter_api_key)
-    if llm_backend == "local":
+    resolved_url = (base_url or llm_url).rstrip("/")
+    resolved_api_key = api_key or llm_api_key or openrouter_api_key
+
+    if llm_backend == "copilot-acp":
+        return CopilotACPClient(timeout=timeout or 600.0)
+    if llm_backend == "openrouter" or "openrouter.ai" in resolved_url.lower():
+        return OpenRouterClient(
+            base_url=resolved_url if resolved_url else "https://openrouter.ai/api/v1",
+            api_key=resolved_api_key,
+            timeout=timeout,
+        )
+    if llm_backend == "local" or resolved_url:
         return LocalLLMClient(
-            base_url=llm_url.rstrip("/"),
-            api_key=llm_api_key,
+            base_url=resolved_url or "http://localhost:11434/v1",
+            api_key=resolved_api_key,
             ca_cert=ca_cert,
             timeout=timeout,
         )
-    if llm_backend == "copilot-acp":
-        return CopilotACPClient(timeout=timeout or 600.0)
     raise ValueError(f"Unsupported llm backend: {llm_backend}")
 
 
@@ -954,8 +963,8 @@ async def run_evaluate_loop(
         expanded_server_ca = pathlib.Path(server_ca_cert).expanduser()  # noqa: ASYNC240
         if not expanded_server_ca.is_file():
             raise FileNotFoundError(
-                f"Server CA certificate file not found: '{server_ca_cert}' (resolved to '{expanded_server_ca}'). "
-                "Please check your EVAL_CLIENT_SERVER_CA_CERT configuration."
+                f"Dashboard CA certificate file not found: '{server_ca_cert}' (resolved to '{expanded_server_ca}'). "
+                "Please check your DASHBOARD_CA_CERT configuration."
             )
         verify: bool | str = str(expanded_server_ca)
     else:
@@ -974,13 +983,14 @@ async def run_evaluate_loop(
     settings = Settings()
     config = load_config(settings.config_path)
 
+    llm_timeout = float(os.environ.get("LLM_TIMEOUT", "600.0"))
     llm_client = create_llm_client_for_backend(
         llm_backend=llm_backend,
         openrouter_api_key=openrouter_api_key,
         llm_url=llm_url,
         llm_api_key=llm_api_key,
         ca_cert=ca_cert,
-        timeout=settings.local_llm_timeout,
+        timeout=llm_timeout,
     )
     evaluator = IssueEvaluator(
         client=llm_client,

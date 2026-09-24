@@ -226,10 +226,10 @@ def commit_scanner_run(
             EmbeddingClient(
                 base_url=OPENROUTER_BASE_URL,
                 model=settings.semantic_search_embedding_model,
-                api_key=settings.openrouter_api_key_embedding,
+                api_key=settings.embedding_api_key,
                 ca_cert="",
             )
-            if settings.openrouter_api_key_embedding
+            if settings.embedding_api_key
             else None
         )
         try:

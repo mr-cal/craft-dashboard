@@ -29,14 +29,12 @@ The worker is HTTP-only: it never connects to PostgreSQL directly.
 
 - Python 3.12+
 - A clone of the `craft-dashboard` repository
-- An `EVAL_API_TOKEN` from the craft-dashboard server administrator
-- For `--llm-backend openrouter`: `OPENROUTER_API_KEY`
-- For `--llm-backend local`: an OpenAI-compatible local LLM endpoint plus
-  `LOCAL_LLM_URL` and `LOCAL_LLM_MODEL` (no OpenRouter embedding key needed)
+- `DASHBOARD_URL` and `EVAL_API_TOKEN` to connect to the craft-dashboard server
+- `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` (or split `LLM_MODEL_SUMMARY` / `LLM_MODEL_SCORING`)
 
 ## Setup
 
-Copy `.env.example` to `.env` and fill in the worker settings near the bottom
+Copy `.env.example` to `.env` and fill in the worker settings in Section 3
 of the file. The command loads `.env` automatically.
 
 ### TLS certificates
@@ -45,20 +43,19 @@ There are two separate TLS cert settings, configured via environment variables i
 
 | Variable | Purpose |
 |---|---|
-| `EVAL_CLIENT_SERVER_CA_CERT` | CA cert to verify the **craft-dashboard server** |
-| `LOCAL_LLM_CA_CERT` | CA cert to verify the **local LLM endpoint** |
+| `DASHBOARD_CA_CERT` | CA cert to verify the **craft-dashboard server** |
+| `LLM_CA_CERT` | CA cert to verify the **LLM endpoint** |
 
 ## Usage
 
 Run the worker from the repository root:
 
 ```bash
-# Continuous evaluation through OpenRouter
+# Continuous evaluation using configured LLM endpoint
 uv run scripts/run_llm.py evaluate
 
-# Continuous evaluation through a local chat backend
+# Continuous evaluation with higher concurrency
 uv run scripts/run_llm.py evaluate \
-  --llm-backend local \
   --project snapcraft \
   --concurrency 4
 

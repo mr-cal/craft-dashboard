@@ -139,28 +139,22 @@ Forum refresh: snapcraft — 18 topics updated across 23 categories
 Server-side LLM evaluation using OpenRouter. The `evaluate` entrypoint now runs
 as a continuous HTTP-polling service rather than a direct-DB batch job.
 
-**Prerequisites:** `OPENROUTER_API_KEY` in `.env`. In production, `.env` lives
+**Prerequisites:** `LLM_API_KEY` and `LLM_BASE_URL` in `.env`. In production, `.env` lives
 at `/opt/vps-infra/.env` on the VPS (see "Reloading .env in production" in
 [`docs/deployment.md`](deployment.md) for how to edit it and apply changes)
 — **after editing it you must restart the app container**
-(`podman restart vps-infra_craft-dashboard_1`) for changes like
-`OPENROUTER_MODEL_SUMMARY` / `OPENROUTER_MODEL_SCORING` to take effect; pydantic-settings only reads `.env` at
-process startup, so re-running `run_llm.py` against a container that hasn't
-been restarted will still see the old values.
+(`podman restart vps-infra_craft-dashboard_1`) for changes to take effect;
+pydantic-settings only reads `.env` at process startup, so re-running `run_llm.py`
+against a container that hasn't been restarted will still see the old values.
 
 The `scripts/` directory isn't a bind mount on the VPS — it's baked into the
 Docker image at build time and only exists at `/app/scripts` inside the
 `vps-infra_craft-dashboard_1` container. Always run it via `podman exec`
 (see the production example below), not as a host path.
 
-The models are set via the `OPENROUTER_MODEL_SUMMARY` and
-`OPENROUTER_MODEL_SCORING` env vars — there is no `--model` CLI flag. The
-current recommended Phase 5 bake-off winner for both is
-`qwen/qwen3.8-27b`. Pick any model slug from
-[openrouter.ai/models](https://openrouter.ai/models) (the site lists
-per-token pricing and context length for each); if you change it to
-something without pricing metadata, the cost estimate may be unavailable
-rather than silently showing $0.
+The models are set via the `LLM_MODEL` (or split `LLM_MODEL_SUMMARY` and
+`LLM_MODEL_SCORING`) env vars — you can also use `LLM_MODEL` to set both at once.
+Pick any model slug from your provider (e.g., [openrouter.ai/models](https://openrouter.ai/models)).
 
 ```
 # start the continuous evaluation service locally

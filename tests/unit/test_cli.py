@@ -59,20 +59,19 @@ class TestCLI:
     def test_commit_scanner_run_uses_embedding_key_without_fallback(
         self,
     ) -> None:
-        """The commit scanner strictly uses openrouter_api_key_embedding with no fallback."""
+        """The commit scanner strictly uses embedding_api_key."""
         runner = CliRunner()
         mock_scan = AsyncMock(return_value=[])
         mock_embedding_client = MagicMock()
 
-        # Case 1: Only openrouter_api_key is set (no embedding key).
-        # Must NOT fall back: embed_client should be None.
+        # Case 1: No embedding key.
+        # embed_client should be None.
         with (
             patch.dict(
                 "os.environ",
                 {
                     "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
-                    "OPENROUTER_API_KEY": "general-secret-key",
-                    "OPENROUTER_API_KEY_EMBEDDING": "",
+                    "EMBEDDING_API_KEY": "",
                 },
             ),
             patch(
@@ -91,8 +90,8 @@ class TestCLI:
             _, kwargs = mock_scan.call_args
             assert kwargs["embed_client"] is None
 
-        # Case 2: openrouter_api_key_embedding is set.
-        # Should initialize EmbeddingClient with openrouter_api_key_embedding.
+        # Case 2: EMBEDDING_API_KEY is set.
+        # Should initialize EmbeddingClient with EMBEDDING_API_KEY.
         mock_scan.reset_mock()
         mock_embedding_client.reset_mock()
         mock_client_instance = AsyncMock()
@@ -103,8 +102,7 @@ class TestCLI:
                 "os.environ",
                 {
                     "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
-                    "OPENROUTER_API_KEY": "general-secret-key",
-                    "OPENROUTER_API_KEY_EMBEDDING": "embed-secret-key",
+                    "EMBEDDING_API_KEY": "embed-secret-key",
                 },
             ),
             patch(

@@ -157,7 +157,7 @@ async def _run_semantic_search(
     *,
     filters: IssueFilters,
     existing_issue_ids: set[int],
-    openrouter_api_key_embedding: str,
+    embedding_api_key: str,
     embedding_model: str,
     top_n: int,
     similarity_threshold: float,
@@ -171,13 +171,13 @@ async def _run_semantic_search(
     a flaky OpenRouter call never breaks basic issue-list browsing.
     """
     query = filters.search.strip()
-    if not query or not openrouter_api_key_embedding:
+    if not query or not embedding_api_key:
         return []
 
     embed_client = EmbeddingClient(
         base_url=OPENROUTER_BASE_URL,
         model=embedding_model,
-        api_key=openrouter_api_key_embedding,
+        api_key=embedding_api_key,
         ca_cert="",
     )
     try:
@@ -208,7 +208,7 @@ async def _build_issue_context(
     filters: IssueFilters,
     scores: str,
     filtered_issues: dict[str, list[str]] | None = None,
-    openrouter_api_key_embedding: str = "",
+    embedding_api_key: str = "",
     semantic_search_embedding_model: str = "",
     semantic_search_top_n: int = 10,
     semantic_search_similarity_threshold: float = 0.70,
@@ -234,7 +234,7 @@ async def _build_issue_context(
             session,
             filters=filters,
             existing_issue_ids={issue.id for issue in result.issues},
-            openrouter_api_key_embedding=openrouter_api_key_embedding,
+            embedding_api_key=embedding_api_key,
             embedding_model=semantic_search_embedding_model,
             top_n=semantic_search_top_n,
             similarity_threshold=semantic_search_similarity_threshold,
@@ -346,7 +346,7 @@ async def issue_list(
         filters=filters,
         scores=scores,
         filtered_issues=get_config(request).filtered_issues,
-        openrouter_api_key_embedding=settings.openrouter_api_key_embedding,
+        embedding_api_key=settings.embedding_api_key,
         semantic_search_embedding_model=settings.semantic_search_embedding_model,
         semantic_search_top_n=settings.semantic_search_top_n,
         semantic_search_similarity_threshold=settings.semantic_search_similarity_threshold,
@@ -402,7 +402,7 @@ async def issue_table_partial(
         filters=filters,
         scores=scores,
         filtered_issues=get_config(request).filtered_issues,
-        openrouter_api_key_embedding=settings.openrouter_api_key_embedding,
+        embedding_api_key=settings.embedding_api_key,
         semantic_search_embedding_model=settings.semantic_search_embedding_model,
         semantic_search_top_n=settings.semantic_search_top_n,
         semantic_search_similarity_threshold=settings.semantic_search_similarity_threshold,

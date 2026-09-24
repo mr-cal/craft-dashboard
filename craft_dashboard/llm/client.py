@@ -24,7 +24,6 @@ from craft_dashboard.llm.exceptions import LLMQuotaError, LLMUnavailableError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from craft_dashboard.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -645,8 +644,3 @@ class LocalLLMClient:
         if result.reasoning:
             logger.debug("Thinking trace: %s", result.reasoning)
         return result
-
-
-def create_llm_client(settings: Settings) -> LLMClient:
-    """Create the server-side LLM client."""
-    return OpenRouterClient(api_key=settings.openrouter_api_key)

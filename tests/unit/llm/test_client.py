@@ -11,10 +11,8 @@ from craft_dashboard.llm.client import (
     LocalLLMClient,
     OpenRouterClient,
     _make_before_sleep_log,
-    create_llm_client,
 )
 from craft_dashboard.llm.exceptions import LLMQuotaError
-from craft_dashboard.settings import Settings
 
 
 class TestOpenRouterClient:
@@ -272,35 +270,6 @@ class TestBeforeSleepLog:
         assert (
             "HTTP retry (attempt 2/5): ConnectError: Connection refused" in caplog.text
         )
-
-
-class TestCreateLLMClient:
-    """Tests for the create_llm_client factory."""
-
-    def test_returns_openrouter_client(self, monkeypatch) -> None:
-        """create_llm_client always returns OpenRouterClient."""
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
-
-        client = create_llm_client(Settings())
-
-        assert isinstance(client, OpenRouterClient)
-
-    def test_ignores_removed_local_backend_environment_variables(
-        self, monkeypatch
-    ) -> None:
-        """Server-side client creation ignores removed local backend config."""
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
-        monkeypatch.setenv("LLM_BACKEND", "local")
-        monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
-        monkeypatch.setenv("LOCAL_LLM_API_KEY", "my-secret-token")
-        monkeypatch.setenv("LOCAL_LLM_CA_CERT", "/etc/ssl/local-llm/cert.pem")
-
-        client = create_llm_client(Settings())
-
-        assert isinstance(client, OpenRouterClient)
-        assert client.api_key == "sk-or-test"
 
 
 class TestLLMResponse:

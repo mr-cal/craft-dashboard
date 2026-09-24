@@ -100,7 +100,7 @@ def _create_eval_app(test_db_session: AsyncSession) -> tuple[FastAPI, str]:
     app.state.settings = Settings()
     app.state.settings.mirror_dir = "/tmp/nonexistent-test-mirrors"
     app.state.settings.eval_api_token = _TEST_EVAL_TOKEN
-    app.state.settings.openrouter_api_key_embedding = "test-openrouter-key"
+    app.state.settings.embedding_api_key = "test-openrouter-key"
 
     async def _override() -> AsyncGenerator[AsyncSession, None]:
         yield test_db_session
@@ -1743,18 +1743,18 @@ class TestEvalResultIntegration:
 class TestRelatedIssuesEndpoint:
     """Integration tests for GET /api/eval/related."""
 
-    def _create_app_with_openrouter_key(
+    def _create_app_with_embedding_key(
         self, test_db_session: AsyncSession
     ) -> tuple[FastAPI, str]:
         app, token = _create_eval_app(test_db_session)
-        app.state.settings.openrouter_api_key_embedding = "test-openrouter-key"
+        app.state.settings.embedding_api_key = "test-openrouter-key"
         return app, token
 
-    def _create_app_with_missing_openrouter_key(
+    def _create_app_with_missing_embedding_key(
         self, test_db_session: AsyncSession
     ) -> tuple[FastAPI, str]:
         app, token = _create_eval_app(test_db_session)
-        app.state.settings.openrouter_api_key_embedding = ""
+        app.state.settings.embedding_api_key = ""
         return app, token
 
     def test_returns_similar_issues(self, test_db_session: AsyncSession) -> None:
@@ -1763,7 +1763,7 @@ class TestRelatedIssuesEndpoint:
         asyncio.get_event_loop().run_until_complete(
             _seed_entities(test_db_session, project, source_issue)
         )
-        app, token = self._create_app_with_openrouter_key(test_db_session)
+        app, token = self._create_app_with_embedding_key(test_db_session)
         canned = [
             {
                 "id": 2,
@@ -1806,7 +1806,7 @@ class TestRelatedIssuesEndpoint:
         asyncio.get_event_loop().run_until_complete(
             _seed_entities(test_db_session, project, source_issue)
         )
-        app, token = self._create_app_with_openrouter_key(test_db_session)
+        app, token = self._create_app_with_embedding_key(test_db_session)
 
         with (
             patch(
@@ -1833,7 +1833,7 @@ class TestRelatedIssuesEndpoint:
         asyncio.get_event_loop().run_until_complete(
             _seed_entities(test_db_session, project, source_issue)
         )
-        app, token = self._create_app_with_missing_openrouter_key(test_db_session)
+        app, token = self._create_app_with_missing_embedding_key(test_db_session)
 
         with TestClient(app) as client:
             response = client.get(
@@ -1854,7 +1854,7 @@ class TestRelatedIssuesEndpoint:
         asyncio.get_event_loop().run_until_complete(
             _seed_entities(test_db_session, project, source_issue)
         )
-        app, token = self._create_app_with_openrouter_key(test_db_session)
+        app, token = self._create_app_with_embedding_key(test_db_session)
         canned = [
             {
                 "id": 2,

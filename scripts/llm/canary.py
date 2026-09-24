@@ -111,8 +111,8 @@ async def _run_one(
 @click.option(
     "--server",
     required=True,
-    envvar="EVAL_CLIENT_SERVER",
-    help="Base URL of craft-dashboard server [env: EVAL_CLIENT_SERVER]",
+    envvar="DASHBOARD_URL",
+    help="Base URL of craft-dashboard server [env: DASHBOARD_URL]",
 )
 @click.option(
     "--token",
@@ -130,20 +130,21 @@ async def _run_one(
 @click.option(
     "--model-summary",
     required=True,
-    envvar="OPENROUTER_MODEL_SUMMARY",
-    help="[env: OPENROUTER_MODEL_SUMMARY]",
+    envvar="LLM_MODEL_SUMMARY",
+    help="[env: LLM_MODEL_SUMMARY]",
 )
 @click.option(
     "--model-scoring",
     required=True,
-    envvar="OPENROUTER_MODEL_SCORING",
-    help="[env: OPENROUTER_MODEL_SCORING]",
+    envvar="LLM_MODEL_SCORING",
+    help="[env: LLM_MODEL_SCORING]",
 )
 @click.option(
     "--openrouter-api-key",
+    "openrouter_api_key",
     required=True,
-    envvar="OPENROUTER_API_KEY",
-    help="[env: OPENROUTER_API_KEY]",
+    envvar="LLM_API_KEY",
+    help="LLM API key [env: LLM_API_KEY]",
 )
 @click.option(
     "--llm-backend",

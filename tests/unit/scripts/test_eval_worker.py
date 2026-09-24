@@ -542,7 +542,9 @@ async def test_run_evaluate_loop_missing_server_ca_cert_raises(
     """run_evaluate_loop raises FileNotFoundError with helpful message when server_ca_cert does not exist."""
     nonexistent = tmp_path / "nonexistent_server_ca.pem"
     kwargs = {**DEFAULT_KWARGS, "server_ca_cert": str(nonexistent)}
-    with pytest.raises(FileNotFoundError, match="Server CA certificate file not found"):
+    with pytest.raises(
+        FileNotFoundError, match="Dashboard CA certificate file not found"
+    ):
         await eval_worker.run_evaluate_loop(**kwargs)
 
 

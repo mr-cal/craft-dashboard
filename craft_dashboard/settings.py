@@ -13,8 +13,7 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://localhost/craft_dashboard"
     github_token: str = ""
-    openrouter_api_key: str = ""
-    openrouter_api_key_embedding: str = ""
+    embedding_api_key: str = ""
     admin_token: str = ""
     debug: bool = False
     host: str = "127.0.0.1"
@@ -31,20 +30,6 @@ class Settings(BaseSettings):
     eval_transcript_retention_days: int = Field(default=30, ge=0)
     eval_daily_spend_cap_usd: float = 0.0
     """Auto-pause evaluation once today's summed cost_usd exceeds this many USD."""
-
-    # OpenRouter model settings, split per Phase 5's bake-off results: the
-    # closed-item summary path and the open-item scoring path can choose
-    # different models. No default: an unset model must fail loudly rather
-    # than silently falling back to some other provider's model.
-    openrouter_model_summary: str = ""
-    openrouter_model_scoring: str = ""
-
-    # Legacy local embedding model setting. The continuous `evaluate`
-    # worker now always uses OpenRouter embeddings instead.
-    local_llm_embedding_model: str = ""
-
-    # Timeout (seconds) for local LLM completion requests.
-    local_llm_timeout: float = 600.0
 
     # Related issues — shown on the issue detail page.
     related_issues_top_n: int = 10
@@ -120,18 +105,10 @@ class Settings(BaseSettings):
 
     @classmethod
     def validate_config(cls, settings: Settings) -> None:
-        """Validate derived configuration requirements for server-side evaluation."""
-        if not settings.openrouter_api_key:
+        """Validate derived configuration requirements."""
+        if not settings.embedding_api_key:
             raise ValueError(
-                "OPENROUTER_API_KEY is required for server-side evaluation"
-            )
-        if not settings.openrouter_model_summary:
-            raise ValueError(
-                "OPENROUTER_MODEL_SUMMARY is required for server-side evaluation"
-            )
-        if not settings.openrouter_model_scoring:
-            raise ValueError(
-                "OPENROUTER_MODEL_SCORING is required for server-side evaluation"
+                "EMBEDDING_API_KEY is required for server-side embedding generation"
             )
         _ = settings.config_path
 
@@ -147,6 +124,10 @@ class Settings(BaseSettings):
         if not self.eval_api_token:
             warnings.append(
                 "EVAL_API_TOKEN is not set. Eval API endpoints will reject all requests."
+            )
+        if not self.embedding_api_key:
+            warnings.append(
+                "EMBEDDING_API_KEY is not set. Semantic search and summary embeddings will fail."
             )
         return warnings
 

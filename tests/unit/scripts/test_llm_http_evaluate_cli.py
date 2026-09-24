@@ -20,22 +20,23 @@ def test_help_lists_http_evaluate_options() -> None:
     assert "--token" not in result.output
     assert "--ca-cert" not in result.output
     assert "--server-ca-cert" not in result.output
-    assert "--llm-backend" in result.output
     assert "--interval" in result.output
     assert "--concurrency" in result.output
     assert "--log" in result.output
     assert "continuous" in result.output.lower()
 
 
-def test_evaluate_uses_http_worker_with_local_backend(monkeypatch) -> None:
+def test_evaluate_runs_with_unified_llm_config(monkeypatch) -> None:
     runner = CliRunner()
-    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("DASHBOARD_URL", "http://localhost:8000")
     monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
-    monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
-    monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
-    monkeypatch.delenv("LOCAL_LLM_CA_CERT", raising=False)
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-api-key")
+    monkeypatch.setenv("LLM_MODEL", "local-model")
+    monkeypatch.delenv("LLM_MODEL_SUMMARY", raising=False)
+    monkeypatch.delenv("LLM_MODEL_SCORING", raising=False)
+    monkeypatch.delenv("LLM_CA_CERT", raising=False)
+    monkeypatch.delenv("DASHBOARD_CA_CERT", raising=False)
     run_loop = AsyncMock()
     monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
 
@@ -48,8 +49,6 @@ def test_evaluate_uses_http_worker_with_local_backend(monkeypatch) -> None:
         cli,
         [
             "evaluate",
-            "--llm-backend",
-            "local",
             "--concurrency",
             "4",
             "--interval",
@@ -61,20 +60,26 @@ def test_evaluate_uses_http_worker_with_local_backend(monkeypatch) -> None:
     run_loop.assert_called_once()
     assert run_loop.call_args.kwargs["server"] == "http://localhost:8000"
     assert run_loop.call_args.kwargs["token"] == "test-token"
-    assert run_loop.call_args.kwargs["llm_backend"] == "local"
+    assert run_loop.call_args.kwargs["llm_url"] == "http://localhost:11434/v1"
+    assert run_loop.call_args.kwargs["llm_api_key"] == "test-api-key"
+    assert run_loop.call_args.kwargs["model_summary"] == "local-model"
+    assert run_loop.call_args.kwargs["model_scoring"] == "local-model"
     assert run_loop.call_args.kwargs["concurrency"] == 4
+    assert run_loop.call_args.kwargs["poll_interval"] == 15
     assert run_loop.call_args.kwargs["log"] is False
 
 
 def test_evaluate_passes_log_flag(monkeypatch) -> None:
     runner = CliRunner()
-    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("DASHBOARD_URL", "http://localhost:8000")
     monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
-    monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
-    monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
-    monkeypatch.delenv("LOCAL_LLM_CA_CERT", raising=False)
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-api-key")
+    monkeypatch.setenv("LLM_MODEL", "local-model")
+    monkeypatch.delenv("LLM_MODEL_SUMMARY", raising=False)
+    monkeypatch.delenv("LLM_MODEL_SCORING", raising=False)
+    monkeypatch.delenv("LLM_CA_CERT", raising=False)
+    monkeypatch.delenv("DASHBOARD_CA_CERT", raising=False)
     run_loop = AsyncMock()
     monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
 
@@ -87,8 +92,6 @@ def test_evaluate_passes_log_flag(monkeypatch) -> None:
         cli,
         [
             "evaluate",
-            "--llm-backend",
-            "local",
             "--log",
         ],
     )
@@ -99,17 +102,15 @@ def test_evaluate_passes_log_flag(monkeypatch) -> None:
     assert run_loop.call_args.kwargs["poll_interval"] == 30
 
 
-def test_evaluate_local_backend_does_not_require_embedding_key(
-    monkeypatch,
-) -> None:
+def test_evaluate_supports_separate_summary_and_scoring_models(monkeypatch) -> None:
     runner = CliRunner()
-    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("DASHBOARD_URL", "http://localhost:8000")
     monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    monkeypatch.delenv("OPENROUTER_API_KEY_EMBEDDING", raising=False)
-    monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
-    monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
-    monkeypatch.delenv("LOCAL_LLM_CA_CERT", raising=False)
+    monkeypatch.setenv("LLM_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-api-key")
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.setenv("LLM_MODEL_SUMMARY", "summary-model")
+    monkeypatch.setenv("LLM_MODEL_SCORING", "scoring-model")
     run_loop = AsyncMock()
     monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
 
@@ -118,90 +119,24 @@ def test_evaluate_local_backend_does_not_require_embedding_key(
 
     monkeypatch.setattr("scripts.llm.cli.asyncio.run", _capture_run)
 
-    result = runner.invoke(
-        cli,
-        [
-            "evaluate",
-            "--llm-backend",
-            "local",
-        ],
-    )
+    result = runner.invoke(cli, ["evaluate"])
 
     assert result.exit_code == 0
     run_loop.assert_called_once()
-
-
-def test_evaluate_requires_openrouter_summary_model_for_openrouter_backend(
-    monkeypatch,
-) -> None:
-    """OPENROUTER_MODEL_SUMMARY must be set explicitly; no silent fallback."""
-    runner = CliRunner()
-    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
-    monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
-    monkeypatch.delenv("OPENROUTER_MODEL_SUMMARY", raising=False)
-    monkeypatch.setenv("OPENROUTER_MODEL_SCORING", "qwen/qwen3.8-27b")
-    monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", AsyncMock())
-
-    def _capture_run(coro):
-        coro.close()
-
-    monkeypatch.setattr("scripts.llm.cli.asyncio.run", _capture_run)
-
-    result = runner.invoke(
-        cli,
-        [
-            "evaluate",
-            "--llm-backend",
-            "openrouter",
-        ],
-    )
-
-    assert result.exit_code != 0
-    assert "OPENROUTER_MODEL_SUMMARY" in result.output
-
-
-def test_evaluate_uses_configured_openrouter_model(monkeypatch) -> None:
-    runner = CliRunner()
-    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
-    monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
-    monkeypatch.setenv("OPENROUTER_MODEL_SUMMARY", "qwen/qwen3.8-27b")
-    monkeypatch.setenv("OPENROUTER_MODEL_SCORING", "qwen/qwen3.8-27b")
-    run_loop = AsyncMock()
-    monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
-
-    def _capture_run(coro):
-        coro.close()
-
-    monkeypatch.setattr("scripts.llm.cli.asyncio.run", _capture_run)
-
-    result = runner.invoke(
-        cli,
-        [
-            "evaluate",
-            "--llm-backend",
-            "openrouter",
-        ],
-    )
-
-    assert result.exit_code == 0
-    run_loop.assert_called_once()
-    assert run_loop.call_args.kwargs["model_summary"] == "qwen/qwen3.8-27b"
-    assert run_loop.call_args.kwargs["model_scoring"] == "qwen/qwen3.8-27b"
+    assert run_loop.call_args.kwargs["model_summary"] == "summary-model"
+    assert run_loop.call_args.kwargs["model_scoring"] == "scoring-model"
 
 
 @pytest.mark.parametrize("option_name", ["--limit", "--max-evaluations"])
 def test_evaluate_accepts_limit_option_spellings(monkeypatch, option_name: str) -> None:
     runner = CliRunner()
-    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("DASHBOARD_URL", "http://localhost:8000")
     monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
-    monkeypatch.setenv("OPENROUTER_MODEL_SUMMARY", "qwen/qwen3.8-27b")
-    monkeypatch.setenv("OPENROUTER_MODEL_SCORING", "qwen/qwen3.8-27b")
+    monkeypatch.setenv("LLM_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-api-key")
+    monkeypatch.setenv("LLM_MODEL", "qwen/qwen3.8-27b")
+    monkeypatch.delenv("LLM_MODEL_SUMMARY", raising=False)
+    monkeypatch.delenv("LLM_MODEL_SCORING", raising=False)
     run_loop = AsyncMock()
     monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
 
@@ -224,66 +159,78 @@ def test_evaluate_accepts_limit_option_spellings(monkeypatch, option_name: str) 
     assert run_loop.call_args.kwargs["limit"] == 20
 
 
-def test_evaluate_missing_ca_cert_raises_usage_error(monkeypatch, tmp_path) -> None:
-    """Missing local LLM CA certificate raises a clear UsageError."""
+def test_evaluate_missing_llm_ca_cert_raises_usage_error(monkeypatch, tmp_path) -> None:
+    """Missing LLM CA certificate raises a clear UsageError."""
     runner = CliRunner()
-    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("DASHBOARD_URL", "http://localhost:8000")
     monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
-    monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
-    monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-api-key")
+    monkeypatch.setenv("LLM_MODEL", "local-model")
     nonexistent = tmp_path / "missing.pem"
-    monkeypatch.setenv("LOCAL_LLM_CA_CERT", str(nonexistent))
+    monkeypatch.setenv("LLM_CA_CERT", str(nonexistent))
 
-    result = runner.invoke(
-        cli,
-        [
-            "evaluate",
-            "--llm-backend",
-            "local",
-        ],
-    )
+    result = runner.invoke(cli, ["evaluate"])
 
     assert result.exit_code != 0
-    assert "CA certificate file not found" in result.output
+    assert "LLM CA certificate file not found" in result.output
     assert str(nonexistent) in result.output
 
 
-def test_evaluate_missing_server_ca_cert_raises_usage_error(
+def test_evaluate_missing_dashboard_ca_cert_raises_usage_error(
     monkeypatch, tmp_path
 ) -> None:
-    """Missing server CA certificate raises a clear UsageError."""
+    """Missing dashboard CA certificate raises a clear UsageError."""
     runner = CliRunner()
-    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("DASHBOARD_URL", "http://localhost:8000")
     monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-api-key")
+    monkeypatch.setenv("LLM_MODEL", "local-model")
     nonexistent = tmp_path / "missing_server.pem"
-    monkeypatch.setenv("EVAL_CLIENT_SERVER_CA_CERT", str(nonexistent))
+    monkeypatch.setenv("DASHBOARD_CA_CERT", str(nonexistent))
 
-    result = runner.invoke(
-        cli,
-        [
-            "evaluate",
-        ],
-    )
+    result = runner.invoke(cli, ["evaluate"])
 
     assert result.exit_code != 0
-    assert "Server CA certificate file not found" in result.output
+    assert "Dashboard CA certificate file not found" in result.output
     assert str(nonexistent) in result.output
 
 
-def test_evaluate_missing_server_or_token_raises_usage_error(monkeypatch) -> None:
-    """Missing EVAL_CLIENT_SERVER or EVAL_API_TOKEN raises a clear UsageError."""
+def test_evaluate_missing_dashboard_url_or_token_raises_usage_error(
+    monkeypatch,
+) -> None:
+    """Missing DASHBOARD_URL or EVAL_API_TOKEN raises a clear UsageError."""
     runner = CliRunner()
-    monkeypatch.delenv("EVAL_CLIENT_SERVER", raising=False)
+    monkeypatch.delenv("DASHBOARD_URL", raising=False)
     monkeypatch.delenv("EVAL_API_TOKEN", raising=False)
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-api-key")
+    monkeypatch.setenv("LLM_MODEL", "local-model")
 
     result = runner.invoke(cli, ["evaluate"])
     assert result.exit_code != 0
     assert (
-        "Missing required environment variable(s): EVAL_CLIENT_SERVER, EVAL_API_TOKEN"
+        "Missing required environment variable(s): DASHBOARD_URL, EVAL_API_TOKEN"
+        in result.output
+    )
+
+
+def test_evaluate_missing_llm_config_raises_usage_error(monkeypatch) -> None:
+    """Missing LLM_BASE_URL or LLM_API_KEY or LLM_MODEL raises a clear UsageError."""
+    runner = CliRunner()
+    monkeypatch.setenv("DASHBOARD_URL", "http://localhost:8000")
+    monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_MODEL_SUMMARY", raising=False)
+    monkeypatch.delenv("LLM_MODEL_SCORING", raising=False)
+
+    result = runner.invoke(cli, ["evaluate"])
+    assert result.exit_code != 0
+    assert (
+        "Missing required environment variable(s): LLM_BASE_URL, LLM_API_KEY, LLM_MODEL"
         in result.output
     )
 
@@ -297,7 +244,6 @@ def test_handle_fatal_config_error_sleeps_when_delay_positive(monkeypatch) -> No
 
     with pytest.raises(click.UsageError, match="test error"):
         _handle_fatal_config_error("test error")
-
     assert slept == [10.0]
 
 
@@ -316,13 +262,13 @@ def test_handle_fatal_config_error_no_sleep_when_delay_zero(monkeypatch) -> None
 
 def test_evaluate_slow_eval_options_and_concurrency(monkeypatch) -> None:
     runner = CliRunner()
-    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("DASHBOARD_URL", "http://localhost:8000")
     monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
-    monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
-    monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
-    monkeypatch.delenv("LOCAL_LLM_CA_CERT", raising=False)
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-api-key")
+    monkeypatch.setenv("LLM_MODEL", "local-model")
+    monkeypatch.delenv("LLM_CA_CERT", raising=False)
+    monkeypatch.delenv("DASHBOARD_CA_CERT", raising=False)
     run_loop = AsyncMock()
     monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
 
@@ -335,8 +281,6 @@ def test_evaluate_slow_eval_options_and_concurrency(monkeypatch) -> None:
         cli,
         [
             "evaluate",
-            "--llm-backend",
-            "local",
             "--slow-eval",
             "--min-delay",
             "10.5",
@@ -359,13 +303,13 @@ def test_evaluate_slow_eval_options_and_concurrency(monkeypatch) -> None:
 
 def test_evaluate_slow_eval_custom_tool_delay(monkeypatch) -> None:
     runner = CliRunner()
-    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("DASHBOARD_URL", "http://localhost:8000")
     monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
-    monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
-    monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
-    monkeypatch.delenv("LOCAL_LLM_CA_CERT", raising=False)
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-api-key")
+    monkeypatch.setenv("LLM_MODEL", "local-model")
+    monkeypatch.delenv("LLM_CA_CERT", raising=False)
+    monkeypatch.delenv("DASHBOARD_CA_CERT", raising=False)
     run_loop = AsyncMock()
     monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
 
@@ -378,8 +322,6 @@ def test_evaluate_slow_eval_custom_tool_delay(monkeypatch) -> None:
         cli,
         [
             "evaluate",
-            "--llm-backend",
-            "local",
             "--slow-eval",
             "--tool-delay",
             "12.5",
@@ -393,13 +335,13 @@ def test_evaluate_slow_eval_custom_tool_delay(monkeypatch) -> None:
 
 def test_evaluate_tool_delay_defaults_to_zero_without_slow_eval(monkeypatch) -> None:
     runner = CliRunner()
-    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("DASHBOARD_URL", "http://localhost:8000")
     monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
-    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
-    monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
-    monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
-    monkeypatch.delenv("LOCAL_LLM_CA_CERT", raising=False)
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-api-key")
+    monkeypatch.setenv("LLM_MODEL", "local-model")
+    monkeypatch.delenv("LLM_CA_CERT", raising=False)
+    monkeypatch.delenv("DASHBOARD_CA_CERT", raising=False)
     run_loop = AsyncMock()
     monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
 
@@ -412,8 +354,6 @@ def test_evaluate_tool_delay_defaults_to_zero_without_slow_eval(monkeypatch) -> 
         cli,
         [
             "evaluate",
-            "--llm-backend",
-            "local",
         ],
     )
 

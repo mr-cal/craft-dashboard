@@ -181,9 +181,8 @@ def _handle_fatal_config_error(message: str) -> None:
 @click.option(
     "--llm-backend",
     type=click.Choice(["openrouter", "local", "copilot-acp"], case_sensitive=False),
-    default="openrouter",
-    show_default=True,
-    help="Backend used for evaluation text generation",
+    default=None,
+    help="Optional backend override (auto-detected from LLM_BASE_URL or COPILOT_ACP_MODEL)",
 )
 @click.option(
     "--verbose",
@@ -255,12 +254,12 @@ def evaluate_cmd(
     if tool_delay is not None:
         actual_tool_delay = tool_delay
 
-    server = os.environ.get("EVAL_CLIENT_SERVER", "")
+    server = os.environ.get("DASHBOARD_URL", "")
     token = os.environ.get("EVAL_API_TOKEN", "")
     missing_auth = [
         name
         for name, value in (
-            ("EVAL_CLIENT_SERVER", server),
+            ("DASHBOARD_URL", server),
             ("EVAL_API_TOKEN", token),
         )
         if not value
@@ -271,9 +270,7 @@ def evaluate_cmd(
             "Set them in your .env file."
         )
 
-    ca_cert = os.environ.get("LOCAL_LLM_CA_CERT", "")
-    server_ca_cert = os.environ.get("EVAL_CLIENT_SERVER_CA_CERT", "")
-    openrouter_api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    server_ca_cert = os.environ.get("DASHBOARD_CA_CERT", "")
     if issue and not project:
         _handle_fatal_config_error("--issue requires --project")
 
@@ -281,36 +278,18 @@ def evaluate_cmd(
         expanded_server_ca = pathlib.Path(server_ca_cert).expanduser()
         if not expanded_server_ca.is_file():
             _handle_fatal_config_error(
-                f"Server CA certificate file not found: '{server_ca_cert}' (resolved to '{expanded_server_ca}'). "
-                "Check EVAL_CLIENT_SERVER_CA_CERT in your .env file."
+                f"Dashboard CA certificate file not found: '{server_ca_cert}' (resolved to '{expanded_server_ca}'). "
+                "Check DASHBOARD_CA_CERT in your .env file."
             )
 
-    llm_backend = llm_backend.lower()
+    llm_backend = (llm_backend or "").lower()
+    ca_cert = ""
     llm_url = ""
     llm_api_key = ""
-    if llm_backend == "local":
-        llm_url = os.environ.get("LOCAL_LLM_URL", "")
-        model = os.environ.get("LOCAL_LLM_MODEL", "")
-        missing = [
-            name
-            for name, value in (("LOCAL_LLM_URL", llm_url), ("LOCAL_LLM_MODEL", model))
-            if not value
-        ]
-        if missing:
-            _handle_fatal_config_error(
-                f"Missing required environment variable(s): {', '.join(missing)}. Set them in your .env file."
-            )
-        if ca_cert:
-            expanded_ca = pathlib.Path(ca_cert).expanduser()
-            if not expanded_ca.is_file():
-                _handle_fatal_config_error(
-                    f"CA certificate file not found: '{ca_cert}' (resolved to '{expanded_ca}'). "
-                    "Check LOCAL_LLM_CA_CERT in your .env file."
-                )
-        llm_api_key = os.environ.get("LOCAL_LLM_API_KEY", "")
-        model_summary = model_scoring = model
-    elif llm_backend == "copilot-acp":
-        ca_cert = ""
+    if llm_backend == "copilot-acp" or (
+        not llm_backend and os.environ.get("COPILOT_ACP_MODEL")
+    ):
+        llm_backend = "copilot-acp"
         model = os.environ.get("COPILOT_ACP_MODEL", "")
         if not model:
             _handle_fatal_config_error(
@@ -319,22 +298,42 @@ def evaluate_cmd(
             )
         model_summary = model_scoring = model
     else:
-        ca_cert = ""
-        model_summary = os.environ.get("OPENROUTER_MODEL_SUMMARY", "")
-        model_scoring = os.environ.get("OPENROUTER_MODEL_SCORING", "")
-        missing = [
-            name
-            for name, value in (
-                ("OPENROUTER_MODEL_SUMMARY", model_summary),
-                ("OPENROUTER_MODEL_SCORING", model_scoring),
-            )
-            if not value
-        ]
+        llm_url = os.environ.get("LLM_BASE_URL", "")
+        llm_api_key = os.environ.get("LLM_API_KEY", "")
+        single_model = os.environ.get("LLM_MODEL", "")
+        model_summary = os.environ.get("LLM_MODEL_SUMMARY", single_model)
+        model_scoring = os.environ.get("LLM_MODEL_SCORING", single_model)
+
+        missing = []
+        if not llm_url:
+            missing.append("LLM_BASE_URL")
+        if not llm_api_key:
+            missing.append("LLM_API_KEY")
+        if not model_summary and not model_scoring:
+            missing.append("LLM_MODEL")
+        elif not model_summary:
+            missing.append("LLM_MODEL_SUMMARY")
+        elif not model_scoring:
+            missing.append("LLM_MODEL_SCORING")
+
         if missing:
             _handle_fatal_config_error(
-                f"Missing required setting(s): {', '.join(missing)}. "
+                f"Missing required environment variable(s): {', '.join(missing)}. "
                 "Set them in your .env file."
             )
+
+        ca_cert = os.environ.get("LLM_CA_CERT", "")
+        if ca_cert:
+            expanded_ca = pathlib.Path(ca_cert).expanduser()
+            if not expanded_ca.is_file():
+                _handle_fatal_config_error(
+                    f"LLM CA certificate file not found: '{ca_cert}' (resolved to '{expanded_ca}'). "
+                    "Check LLM_CA_CERT in your .env file."
+                )
+
+        llm_backend = "openrouter" if "openrouter.ai" in llm_url.lower() else "local"
+
+    openrouter_api_key = llm_api_key if llm_backend == "openrouter" else ""
 
     asyncio.run(
         run_evaluate_loop(

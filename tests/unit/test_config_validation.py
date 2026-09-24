@@ -10,36 +10,12 @@ from craft_dashboard.settings import Settings
 class TestSettingsValidation:
     """Tests for Settings validation helpers."""
 
-    def test_openrouter_backend_requires_api_key(self, monkeypatch) -> None:
-        """OpenRouter settings require an API key when validated."""
+    def test_requires_embedding_api_key(self, monkeypatch) -> None:
+        """Server settings require an embedding API key when validated."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-        settings = Settings(openrouter_api_key="")
+        settings = Settings(embedding_api_key="")
 
-        with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
-            Settings.validate_config(settings)
-
-    def test_openrouter_backend_requires_scoring_model(self, monkeypatch) -> None:
-        """OpenRouter settings require an explicit scoring model; no silent default."""
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-        settings = Settings(
-            openrouter_api_key="sk-test",
-            openrouter_model_summary="qwen/qwen3.6-35b-a3b",
-            openrouter_model_scoring="",
-        )
-
-        with pytest.raises(ValueError, match="OPENROUTER_MODEL_SCORING"):
-            Settings.validate_config(settings)
-
-    def test_openrouter_backend_requires_summary_model(self, monkeypatch) -> None:
-        """OpenRouter settings require an explicit summary model; no silent default."""
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-        settings = Settings(
-            openrouter_api_key="sk-test",
-            openrouter_model_summary="",
-            openrouter_model_scoring="qwen/qwen3.6-35b-a3b",
-        )
-
-        with pytest.raises(ValueError, match="OPENROUTER_MODEL_SUMMARY"):
+        with pytest.raises(ValueError, match="EMBEDDING_API_KEY"):
             Settings.validate_config(settings)
 
     def test_validate_config_rejects_missing_config_file(self, monkeypatch) -> None:
@@ -47,12 +23,10 @@ class TestSettingsValidation:
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         settings = Settings(
             config_file="missing-config.toml",
-            openrouter_api_key="sk-test",
-            openrouter_model_summary="qwen/qwen3.6-35b-a3b",
-            openrouter_model_scoring="qwen/qwen3.6-35b-a3b",
+            embedding_api_key="sk-test",
         )
 
-        with pytest.raises(ValueError, match="config_file"):
+        with pytest.raises(ValueError, match="config_file does not exist"):
             Settings.validate_config(settings)
 
     def test_validate_config_accepts_existing_config_file(self, monkeypatch) -> None:
@@ -60,9 +34,7 @@ class TestSettingsValidation:
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         settings = Settings(
             config_file="craft-dashboard.toml",
-            openrouter_api_key="sk-test",
-            openrouter_model_summary="qwen/qwen3.6-35b-a3b",
-            openrouter_model_scoring="qwen/qwen3.6-35b-a3b",
+            embedding_api_key="sk-test",
         )
 
         Settings.validate_config(settings)

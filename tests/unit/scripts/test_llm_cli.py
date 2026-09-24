@@ -137,7 +137,7 @@ class TestEvaluateCliCommand:
     ) -> None:
         """When --llm-backend copilot-acp is specified without COPILOT_ACP_MODEL, exit with error."""
         monkeypatch.delenv("COPILOT_ACP_MODEL", raising=False)
-        monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+        monkeypatch.setenv("DASHBOARD_URL", "http://localhost:8000")
         monkeypatch.setenv("EVAL_API_TOKEN", "token")
         monkeypatch.setenv("LLM_CONFIG_ERROR_DELAY_SECONDS", "0")
 

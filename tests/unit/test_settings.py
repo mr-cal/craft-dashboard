@@ -1,7 +1,5 @@
 """Tests for application settings."""
 
-from pathlib import Path
-
 import pytest
 from craft_dashboard.settings import Settings
 
@@ -27,8 +25,7 @@ class TestSettings:
         """Settings load from environment variables."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://db:5432/dashboard")
         monkeypatch.setenv("GITHUB_TOKEN", _EXPECTED_GITHUB_TOKEN)
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test123")
-        monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "sk-or-embed456")
+        monkeypatch.setenv("EMBEDDING_API_KEY", "sk-or-embed456")
         monkeypatch.setenv("ADMIN_TOKEN", _EXPECTED_ADMIN_TOKEN)
         monkeypatch.setenv("DEBUG", "true")
 
@@ -36,68 +33,32 @@ class TestSettings:
 
         assert settings.database_url == "postgresql+asyncpg://db:5432/dashboard"
         assert settings.github_token == _EXPECTED_GITHUB_TOKEN
-        assert settings.openrouter_api_key == "sk-or-test123"
-        assert settings.openrouter_api_key_embedding == "sk-or-embed456"
+        assert settings.embedding_api_key == "sk-or-embed456"
         assert settings.admin_token == _EXPECTED_ADMIN_TOKEN
         assert settings.debug is True
-
-    def test_openrouter_models_are_loaded_from_fields(self, monkeypatch) -> None:
-        """Summary and scoring model fields are stored independently."""
-        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
-
-        settings = Settings(
-            openrouter_model_summary="google/gemini-2.5-flash",
-            openrouter_model_scoring="qwen/qwen3.6-35b-a3b",
-        )
-
-        assert settings.openrouter_model_summary == "google/gemini-2.5-flash"
-        assert settings.openrouter_model_scoring == "qwen/qwen3.6-35b-a3b"
-
-    def test_mirror_dir_defaults_to_cache_dir(self, monkeypatch) -> None:
-        monkeypatch.delenv("CRAFT_DASHBOARD_MIRROR_DIR", raising=False)
-        settings = Settings(_env_file=None)
-        assert settings.mirror_dir == "~/.cache/craft-dashboard/mirrors"
-
-    def test_mirror_dir_reads_prefixed_env_var(self, monkeypatch) -> None:
-        monkeypatch.setenv("CRAFT_DASHBOARD_MIRROR_DIR", "/opt/vps-infra/mirrors")
-        settings = Settings(_env_file=None)
-        assert settings.mirror_dir == "/opt/vps-infra/mirrors"
-        assert settings.mirror_dir_path == Path("/opt/vps-infra/mirrors")
-
-    def test_git_concurrency_defaults_to_two(self, monkeypatch) -> None:
-        monkeypatch.delenv("CRAFT_DASHBOARD_GIT_CONCURRENCY", raising=False)
-        settings = Settings(_env_file=None)
-        assert settings.git_concurrency == 2
-
-    def test_git_concurrency_reads_prefixed_env_var(self, monkeypatch) -> None:
-        monkeypatch.setenv("CRAFT_DASHBOARD_GIT_CONCURRENCY", "1")
-        settings = Settings(_env_file=None)
-        assert settings.git_concurrency == 1
-
-    def test_commit_scanner_settings_have_defaults(self, monkeypatch) -> None:
-        monkeypatch.delenv("COMMIT_SCANNER_TOP_K", raising=False)
-        monkeypatch.delenv("COMMIT_SCANNER_SIMILARITY_THRESHOLD", raising=False)
-        monkeypatch.delenv(
-            "COMMIT_SCANNER_DAILY_INVALIDATION_WARN_THRESHOLD", raising=False
-        )
-        settings = Settings(_env_file=None)
-        assert settings.commit_scanner_top_k == 10
-        assert settings.commit_scanner_similarity_threshold == 0.70
-        assert settings.commit_scanner_daily_invalidation_warn_threshold == 200
-
-    def test_commit_scanner_settings_read_from_env(self, monkeypatch) -> None:
-        monkeypatch.setenv("COMMIT_SCANNER_TOP_K", "25")
-        monkeypatch.setenv("COMMIT_SCANNER_SIMILARITY_THRESHOLD", "0.55")
-        monkeypatch.setenv("COMMIT_SCANNER_DAILY_INVALIDATION_WARN_THRESHOLD", "321")
-        settings = Settings(_env_file=None)
-        assert settings.commit_scanner_top_k == 25
-        assert settings.commit_scanner_similarity_threshold == 0.55
-        assert settings.commit_scanner_daily_invalidation_warn_threshold == 321
 
     def test_ignores_removed_local_llm_environment_variables(self, monkeypatch) -> None:
         """Removed local LLM env vars no longer appear in server settings."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         monkeypatch.setenv("LLM_BACKEND", "local")
+        monkeypatch.setenv("LOCAL_LLM_URL", "http://192.168.1.10:11434/v1")
+        monkeypatch.setenv("LOCAL_LLM_SUMMARY_MODEL", "qwen2.5")
+        monkeypatch.setenv("LOCAL_LLM_EVALUATION_MODEL", "llama3.2")
+        monkeypatch.setenv("LOCAL_LLM_API_KEY", "my-bearer-token")
+        monkeypatch.setenv("LOCAL_LLM_CA_CERT", "/etc/ssl/local-llm/cert.pem")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test123")
+        monkeypatch.setenv("OPENROUTER_MODEL_SUMMARY", "test-model")
+
+        settings = Settings()
+
+        assert not hasattr(settings, "llm_backend")
+        assert not hasattr(settings, "local_llm_url")
+        assert not hasattr(settings, "local_llm_summary_model")
+        assert not hasattr(settings, "local_llm_evaluation_model")
+        assert not hasattr(settings, "local_llm_api_key")
+        assert not hasattr(settings, "local_llm_ca_cert")
+        assert not hasattr(settings, "openrouter_api_key")
+        assert not hasattr(settings, "openrouter_model_summary")
         monkeypatch.setenv("LOCAL_LLM_URL", "http://192.168.1.10:11434/v1")
         monkeypatch.setenv("LOCAL_LLM_SUMMARY_MODEL", "qwen2.5")
         monkeypatch.setenv("LOCAL_LLM_EVALUATION_MODEL", "llama3.2")
@@ -121,6 +82,7 @@ class TestSettings:
         monkeypatch.delenv("ADMIN_TOKEN", raising=False)
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         monkeypatch.delenv("EVAL_API_TOKEN", raising=False)
+        monkeypatch.delenv("EMBEDDING_API_KEY", raising=False)
 
         settings = Settings(_env_file=None)
 
@@ -128,6 +90,7 @@ class TestSettings:
             "ADMIN_TOKEN is not set. Admin endpoints will reject all requests.",
             "GITHUB_TOKEN is not set. Data collection will fail.",
             "EVAL_API_TOKEN is not set. Eval API endpoints will reject all requests.",
+            "EMBEDDING_API_KEY is not set. Semantic search and summary embeddings will fail.",
         ]
 
     def test_validate_required_secrets_returns_empty_list_when_tokens_present(
@@ -138,6 +101,7 @@ class TestSettings:
         monkeypatch.setenv("ADMIN_TOKEN", _EXPECTED_ADMIN_TOKEN)
         monkeypatch.setenv("GITHUB_TOKEN", _EXPECTED_GITHUB_TOKEN)
         monkeypatch.setenv("EVAL_API_TOKEN", "eval-token")
+        monkeypatch.setenv("EMBEDDING_API_KEY", "embed-key")
 
         settings = Settings()
 
@@ -150,6 +114,7 @@ class TestValidateRequiredSecrets:
         monkeypatch.setenv("ADMIN_TOKEN", "secret")
         monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
         monkeypatch.setenv("EVAL_API_TOKEN", "eval-token")
+        monkeypatch.setenv("EMBEDDING_API_KEY", "embed-key")
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         settings = Settings()
         assert settings.validate_required_secrets() == []
@@ -159,30 +124,32 @@ class TestValidateRequiredSecrets:
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://localhost/test")
         monkeypatch.setenv("ADMIN_TOKEN", "")
         monkeypatch.setenv("GITHUB_TOKEN", "")
+        monkeypatch.setenv("EMBEDDING_API_KEY", "")
         settings = Settings(_env_file=None, eval_api_token="")
         warnings = settings.validate_required_secrets()
-        assert len(warnings) == 3
+        assert len(warnings) == 4
         assert any("ADMIN_TOKEN" in warning for warning in warnings)
         assert any("GITHUB_TOKEN" in warning for warning in warnings)
         assert any("EVAL_API_TOKEN" in warning for warning in warnings)
+        assert any("EMBEDDING_API_KEY" in warning for warning in warnings)
 
 
 class TestEmbeddingSettings:
     """Tests for embedding and related-issues settings."""
 
     def test_embedding_settings_have_defaults(self, monkeypatch) -> None:
-        monkeypatch.delenv("LOCAL_LLM_EMBEDDING_MODEL", raising=False)
+        monkeypatch.delenv("EMBEDDING_API_KEY", raising=False)
         s = Settings(_env_file=None)
-        assert s.local_llm_embedding_model == ""
+        assert s.embedding_api_key == ""
         assert s.related_issues_top_n == 10
         assert s.related_issues_similarity_threshold == 0.70
 
     def test_embedding_settings_read_from_env(self, monkeypatch) -> None:
-        monkeypatch.setenv("LOCAL_LLM_EMBEDDING_MODEL", "nomic-embed-text")
+        monkeypatch.setenv("EMBEDDING_API_KEY", "sk-embed-key")
         monkeypatch.setenv("RELATED_ISSUES_TOP_N", "5")
         monkeypatch.setenv("RELATED_ISSUES_SIMILARITY_THRESHOLD", "0.80")
         s = Settings(_env_file=None)
-        assert s.local_llm_embedding_model == "nomic-embed-text"
+        assert s.embedding_api_key == "sk-embed-key"
         assert s.related_issues_top_n == 5
         assert s.related_issues_similarity_threshold == 0.80
 

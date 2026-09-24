@@ -52,13 +52,18 @@ EVAL_API_TOKEN=<a random string for /api/eval/*>
 Evaluation settings:
 
 ```
-OPENROUTER_API_KEY=<your key>
+EMBEDDING_API_KEY=<your key>
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=<your key>
+LLM_MODEL_SUMMARY=stealth/space-bunny-alpha
+LLM_MODEL_SCORING=stealth/space-bunny-alpha
 ```
 
 - `EVAL_API_TOKEN` is required for the pull-based eval API (`/api/eval/*`).
-- `OPENROUTER_API_KEY` is required for the continuous server-side
-  `run_llm.py evaluate` service.
-- Continuous and local-backend HTTP evaluation is documented in `docs/evaluate.md`.
+- `EMBEDDING_API_KEY` is required for server-side semantic search and summary embeddings.
+- `LLM_*` variables configure the evaluation worker container (`llm-evaluate`).
+- Both containers read from the single `/opt/vps-infra/.env` file.
+- Evaluation configuration is documented in `docs/evaluate.md`.
 
 See `.env.example` for all available settings.
 
