@@ -312,3 +312,72 @@ def test_handle_fatal_config_error_no_sleep_when_delay_zero(monkeypatch) -> None
         _handle_fatal_config_error("test error")
 
     assert slept == []
+
+
+def test_evaluate_slow_eval_options_and_concurrency(monkeypatch) -> None:
+    runner = CliRunner()
+    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
+    monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
+    monkeypatch.delenv("LOCAL_LLM_CA_CERT", raising=False)
+    run_loop = AsyncMock()
+    monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
+
+    def _capture_run(coro):
+        coro.close()
+
+    monkeypatch.setattr("scripts.llm.cli.asyncio.run", _capture_run)
+
+    result = runner.invoke(
+        cli,
+        [
+            "evaluate",
+            "--llm-backend",
+            "local",
+            "--slow-eval",
+            "--min-delay",
+            "10.5",
+            "--max-delay",
+            "30.0",
+            "--concurrency",
+            "4",
+        ],
+    )
+
+    assert result.exit_code == 0
+    run_loop.assert_called_once()
+    assert run_loop.call_args.kwargs["slow_eval"] is True
+    assert run_loop.call_args.kwargs["min_delay"] == 10.5
+    assert run_loop.call_args.kwargs["max_delay"] == 30.0
+    # Concurrency forced to 1 with --slow-eval
+    assert run_loop.call_args.kwargs["concurrency"] == 1
+
+
+def test_evaluate_slow_eval_invalid_delay_range(monkeypatch) -> None:
+    runner = CliRunner()
+    monkeypatch.setenv("EVAL_CLIENT_SERVER", "http://localhost:8000")
+    monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY_EMBEDDING", "test-embedding-key")
+    monkeypatch.setenv("LOCAL_LLM_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "local-model")
+
+    result = runner.invoke(
+        cli,
+        [
+            "evaluate",
+            "--llm-backend",
+            "local",
+            "--slow-eval",
+            "--min-delay",
+            "60",
+            "--max-delay",
+            "20",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--min-delay cannot be greater than --max-delay" in result.output

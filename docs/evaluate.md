@@ -87,14 +87,14 @@ uv run scripts/run_llm.py evaluate --help
 
 ### Paced evaluations (rate-limit safe)
 
-To run evaluations slowly with randomized intervals (e.g. to emulate human developer pacing or stay within strict provider burst rate limits), use `scripts/run_slow_eval.py`:
+To run evaluations slowly with randomized intervals (e.g. to emulate human developer pacing or stay within strict provider burst rate limits), use the `--slow-eval` flag on `run_llm.py evaluate`:
 
 ```bash
-# Evaluate 10 issues with 25-55s randomized delays between each
-uv run scripts/run_slow_eval.py --count 10 --min-delay 25 --max-delay 55
+# Evaluate with --slow-eval (forces concurrency=1 and applies 25-55s randomized delays)
+uv run scripts/run_llm.py evaluate --slow-eval --limit 10
 
-# Forward any backend or project options
-uv run scripts/run_slow_eval.py --count 5 --llm-backend local --project snapcraft
+# Customize the jitter delay range
+uv run scripts/run_llm.py evaluate --slow-eval --min-delay 30 --max-delay 60 --limit 10
 ```
 
 ## Architecture note

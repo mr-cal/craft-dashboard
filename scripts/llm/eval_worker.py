@@ -7,6 +7,7 @@ import contextlib
 import logging
 import os
 import pathlib
+import secrets
 import select
 import signal
 import sys
@@ -137,6 +138,9 @@ class _Runtime:
         allowed_projects: dict[str, str],
         eval_server_base_url: str,
         single_issue: bool = False,
+        slow_eval: bool = False,
+        min_delay: float = 25.0,
+        max_delay: float = 55.0,
     ) -> None:
         self.client = client
         self.evaluator = evaluator
@@ -154,6 +158,9 @@ class _Runtime:
         self.mirror_dir = mirror_dir
         self.allowed_projects = allowed_projects
         self.eval_server_base_url = eval_server_base_url
+        self.slow_eval = slow_eval
+        self.min_delay = min_delay
+        self.max_delay = max_delay
         #: True for a single-target ``--issue ... --force`` run (e.g. the
         #: canary script). In that mode there is only ever one issue to
         #: evaluate, and a claimed-then-discarded/failed/skipped issue is
@@ -287,11 +294,12 @@ def _days_since(value: str | None) -> int:
     return max(0, (datetime.now(tz=UTC) - timestamp).days)
 
 
-async def _sleep_until_next_poll(seconds: int) -> None:
-    remaining = seconds
+async def _sleep_until_next_poll(seconds: float) -> None:
+    remaining = float(seconds)
     while remaining > 0 and not shutdown_state["requested"]:
-        await asyncio.sleep(min(1, remaining))
-        remaining -= 1
+        step = min(0.5, remaining)
+        await asyncio.sleep(step)
+        remaining -= step
 
 
 #: How long to pause every worker after an LLM quota/payment error, before
@@ -881,6 +889,20 @@ async def _worker_loop(
         ):
             continue
         await _evaluate_issue(runtime, issue_data=issue_data, worker_name=worker_name)
+        if (
+            runtime.slow_eval
+            and not shutdown_state["requested"]
+            and (
+                runtime.issue_limit <= 0
+                or runtime.state.evaluated < runtime.issue_limit
+            )
+        ):
+            delay = secrets.SystemRandom().uniform(runtime.min_delay, runtime.max_delay)
+            runtime.progress.update(
+                runtime.overall_id,
+                description=f"[dim]Pacing delay: sleeping {delay:.1f}s…[/dim]",
+            )
+            await _sleep_until_next_poll(delay)
 
 
 async def run_evaluate_loop(
@@ -906,6 +928,9 @@ async def run_evaluate_loop(
     issue: str = "",
     concurrency: int = 10,
     log: bool = False,
+    slow_eval: bool = False,
+    min_delay: float = 25.0,
+    max_delay: float = 55.0,
 ) -> None:
     """Run the continuous HTTP evaluation worker against ``/api/eval/*``.
 
@@ -1089,6 +1114,9 @@ async def run_evaluate_loop(
                     mirror_dir=settings.mirror_dir_path,
                     allowed_projects=allowed_projects,
                     eval_server_base_url=server_url,
+                    slow_eval=slow_eval,
+                    min_delay=min_delay,
+                    max_delay=max_delay,
                 )
                 await asyncio.gather(
                     *(

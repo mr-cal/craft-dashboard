@@ -660,3 +660,52 @@ def test_create_llm_client_for_backend_copilot_acp() -> None:
     )
     assert isinstance(client, CopilotACPClient)
     assert client.timeout == 123.0
+
+
+@pytest.mark.asyncio
+async def test_sleep_until_next_poll_respects_shutdown(monkeypatch) -> None:
+    eval_worker.shutdown_state["requested"] = False
+    slept = []
+
+    async def mock_sleep(duration: float) -> None:
+        slept.append(duration)
+        eval_worker.shutdown_state["requested"] = True
+
+    monkeypatch.setattr(eval_worker.asyncio, "sleep", mock_sleep)
+
+    await eval_worker._sleep_until_next_poll(10.0)
+    assert len(slept) == 1
+    assert slept[0] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_worker_loop_slow_eval_delays_between_issues(
+    monkeypatch: pytest.MonkeyPatch, base_runtime: SimpleNamespace
+) -> None:
+    base_runtime.slow_eval = True
+    base_runtime.min_delay = 10.0
+    base_runtime.max_delay = 20.0
+    base_runtime.issue_limit = 2
+    base_runtime.state = SimpleNamespace(
+        reserve=AsyncMock(side_effect=[True, True, False]),
+        evaluated=1,
+    )
+    fetch_mock = AsyncMock(return_value=_make_issue(issue_id=42))
+    preflight_mock = AsyncMock(return_value=True)
+    eval_mock = AsyncMock()
+    sleep_mock = AsyncMock()
+
+    monkeypatch.setattr(eval_worker, "_fetch_next_issue", fetch_mock)
+    monkeypatch.setattr(eval_worker, "_run_issue_preflight", preflight_mock)
+    monkeypatch.setattr(eval_worker, "_evaluate_issue", eval_mock)
+    monkeypatch.setattr(eval_worker, "_sleep_until_next_poll", sleep_mock)
+
+    await eval_worker._worker_loop(
+        base_runtime, server_url="http://localhost:8000", worker_index=1
+    )
+
+    assert eval_mock.await_count == 2
+    assert sleep_mock.await_count == 2
+    for call in sleep_mock.await_args_list:
+        delay = call.args[0]
+        assert 10.0 <= delay <= 20.0

@@ -199,6 +199,26 @@ def _handle_fatal_config_error(message: str) -> None:
     default=False,
     help="Write detailed debug traces and LLM logs to .logs/ directory",
 )
+@click.option(
+    "--slow-eval",
+    is_flag=True,
+    default=False,
+    help="Run evaluations at a slow, human-like pace with randomized cooldown delays (enforces concurrency=1).",
+)
+@click.option(
+    "--min-delay",
+    default=25.0,
+    show_default=True,
+    type=click.FloatRange(min=0.0),
+    help="Minimum delay in seconds between evaluations when --slow-eval is enabled.",
+)
+@click.option(
+    "--max-delay",
+    default=55.0,
+    show_default=True,
+    type=click.FloatRange(min=0.0),
+    help="Maximum delay in seconds between evaluations when --slow-eval is enabled.",
+)
 def evaluate_cmd(
     poll_interval: int,
     limit: int,
@@ -212,8 +232,18 @@ def evaluate_cmd(
     llm_backend: str,
     verbose: bool,
     log: bool,
+    slow_eval: bool,
+    min_delay: float,
+    max_delay: float,
 ) -> None:
     """Run the continuous HTTP-only evaluation service against /api/eval/*."""
+    if slow_eval:
+        if min_delay > max_delay:
+            _handle_fatal_config_error("--min-delay cannot be greater than --max-delay")
+        if concurrency != 1:
+            logger.info("--slow-eval forces concurrency=1 (was %d)", concurrency)
+            concurrency = 1
+
     server = os.environ.get("EVAL_CLIENT_SERVER", "")
     token = os.environ.get("EVAL_API_TOKEN", "")
     missing_auth = [
@@ -318,5 +348,8 @@ def evaluate_cmd(
             issue=issue,
             concurrency=concurrency,
             log=log,
+            slow_eval=slow_eval,
+            min_delay=min_delay,
+            max_delay=max_delay,
         )
     )
