@@ -1,5 +1,6 @@
 """Stats routes for dependencies, releases, and trends."""
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -178,80 +179,15 @@ async def releases_page(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
-    """Render the releases table showing the latest release per project+branch."""
+    """Render the unified releases page showing release cadence across applications, libraries, and other projects, plus hotfix tracking."""
     templates: Jinja2Templates = request.app.state.templates
+    config = get_config(request)
+    service = DashboardService(session)
+    cadence = await service.get_all_repos_release_cadence(config)
 
-    from datetime import UTC, datetime
-
-    latest_release = (
-        select(func.max(Release.id).label("id"))
-        .group_by(Release.project_id, Release.branch)
-        .subquery()
-    )
-
-    result = await session.execute(
-        select(
-            Project.name.label("project_name"),
-            Release.branch,
-            Release.version,
-            Release.released_at,
-            Release.metadata_,
-        )
-        .join(Project, Release.project_id == Project.id)
-        .join(latest_release, Release.id == latest_release.c.id)
-        .where(Project.category == "application")
-        .order_by(Project.display_order, Release.branch)
-    )
-
-    releases = []
-    for row in result:
-        days_ago = None
-        if row.released_at:
-            released = (
-                row.released_at.replace(tzinfo=UTC)
-                if row.released_at.tzinfo is None
-                else row.released_at
-            )
-            days_ago = (datetime.now(tz=UTC) - released).days
-        commits_since_tag = None
-        if row.metadata_:
-            commits_since_tag = row.metadata_.get("commits_since_tag")
-        releases.append(
-            {
-                "project_name": row.project_name,
-                "branch": row.branch or "main",
-                "version": row.version,
-                "released_at": row.released_at,
-                "days_ago": days_ago,
-                "commits_since_tag": commits_since_tag,
-            }
-        )
-
-    # Only show the latest minor version per major version per project.
-    # e.g. if charmcraft has branches hotfix/4.0, hotfix/4.1, hotfix/4.2,
-    # only show hotfix/4.2.
-    filtered: list[dict[str, object]] = []
-    # Group by (project, major_version)
-    best: dict[tuple[str, str], dict[str, object]] = {}
-    non_versioned: list[dict[str, object]] = []
-    for rel in releases:
-        branch = str(rel["branch"])
-        version_str = branch.removeprefix("hotfix/")
-        parts = version_str.split(".")
-        min_version_parts = 2
-        if len(parts) >= min_version_parts and parts[0].isdigit():
-            major = parts[0]
-            group_key = (str(rel["project_name"]), major)
-            existing = best.get(group_key)
-            if existing is None or _version_key(version_str) > _version_key(
-                str(existing["branch"]).removeprefix("hotfix/")
-            ):
-                best[group_key] = rel
-        else:
-            non_versioned.append(rel)
-    filtered = non_versioned + list(best.values())
-    # Sort by project name then branch
-    filtered.sort(key=lambda r: (str(r["project_name"]), str(r["branch"])))
+    application_cadence = [r for r in cadence if r["category"] == "Application"]
+    library_cadence = [r for r in cadence if r["category"] == "Library"]
+    other_cadence = [r for r in cadence if r["category"] == "Other"]
 
     # --- Hotfixes table: ALL hotfix/* branches, ALL project categories ---
     hotfix_latest = (
@@ -308,7 +244,13 @@ async def releases_page(
     return templates.TemplateResponse(
         request,
         "stats/releases.html",
-        {"releases": filtered, "hotfixes": hotfixes},
+        {
+            "application_cadence": application_cadence,
+            "library_cadence": library_cadence,
+            "other_cadence": other_cadence,
+            "all_cadence": cadence,
+            "hotfixes": hotfixes,
+        },
     )
 
 
@@ -317,17 +259,8 @@ async def cadence_page(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
-    """Render the release cadence page showing all repositories ordered by least-recent release."""
-    templates: Jinja2Templates = request.app.state.templates
-    config = get_config(request)
-    service = DashboardService(session)
-    cadence = await service.get_all_repos_release_cadence(config)
-
-    return templates.TemplateResponse(
-        request,
-        "stats/cadence.html",
-        {"cadence": cadence},
-    )
+    """Render the release cadence / releases page."""
+    return await releases_page(request, session)
 
 
 @router.get("/trends", response_class=HTMLResponse)

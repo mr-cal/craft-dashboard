@@ -200,3 +200,9 @@ class TestFormatAgeDays:
         assert _format_age_days(715) == "2y"
         assert _format_age_days(882) == "2.4y"
         assert _format_age_days(3804) == "10.4y"
+
+    def test_use_days_flag(self) -> None:
+        assert _format_age_days(0, use_days=True) == "0 days"
+        assert _format_age_days(24, use_days=True) == "24 days"
+        assert _format_age_days(365, use_days=True) == "1 years"
+        assert _format_age_days(882, use_days=True) == "2.4 years"

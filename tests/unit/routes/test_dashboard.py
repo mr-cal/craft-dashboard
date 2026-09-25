@@ -122,8 +122,8 @@ class TestDashboardIndex:
         assert "All-time volume" in response.text
         assert "Apps with least-recent releases" in response.text
         assert "Aging contributor PRs" in response.text
-        assert "Needs triage" in response.text
-        assert "Quick-wins radar" in response.text
+        assert "Need triage" in response.text
+        assert "Quick wins" in response.text
         assert "Project health &amp; navigation" in response.text
 
 

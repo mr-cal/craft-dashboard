@@ -35,14 +35,20 @@ class TestColorRules:
     """Test the threshold color helper functions."""
 
     def test_triage_badge_color_rules(self) -> None:
-        # > 20% is red
+        # < 5 untriaged is always green, even if small total open
+        assert compute_triage_badge_color(1, 3) == "green"
+        assert compute_triage_badge_color(4, 4) == "green"
+        assert compute_triage_badge_color(1, 100) == "green"
+        # >= 25 untriaged is unconditionally red even if ratio is low
+        assert compute_triage_badge_color(25, 200) == "red"
+        assert compute_triage_badge_color(30, 500) == "red"
+        # >= 5 untriaged with ratio > 20% is red
+        assert compute_triage_badge_color(6, 20) == "red"
         assert compute_triage_badge_color(21, 100) == "red"
-        # > 10% and <= 20% is yellow
+        # >= 5 and < 25 with ratio <= 20% is yellow
+        assert compute_triage_badge_color(5, 50) == "yellow"
         assert compute_triage_badge_color(15, 100) == "yellow"
         assert compute_triage_badge_color(20, 100) == "yellow"
-        # <= 10% is green
-        assert compute_triage_badge_color(10, 100) == "green"
-        assert compute_triage_badge_color(1, 100) == "green"
         # 0 or negative is neutral
         assert compute_triage_badge_color(0, 100) == "neutral"
         assert compute_triage_badge_color(5, 0) == "neutral"

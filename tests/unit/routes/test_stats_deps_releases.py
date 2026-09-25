@@ -318,7 +318,7 @@ class TestReleasesPage:
         response = test_client.get("/stats/releases")
 
         assert response.status_code == 200
-        assert "<td>15</td>" in response.text
+        assert "15" in response.text
 
     def test_releases_empty_db(self, test_client: TestClient) -> None:
         response = test_client.get("/stats/releases")
@@ -517,11 +517,11 @@ class TestCadencePage:
         response = test_client.get("/stats/cadence")
 
         assert response.status_code == 200
-        assert "Release Cadence" in response.text
+        assert "Releases" in response.text
         assert "snapcraft" in response.text
         assert "craft-parts" in response.text
         assert "8.3.1" in response.text
-        assert 'href="/stats/cadence"' in response.text
+        assert 'href="/stats/releases"' in response.text
         assert "Actions" not in response.text
 
     def test_cadence_shows_fallback_for_unreleased(

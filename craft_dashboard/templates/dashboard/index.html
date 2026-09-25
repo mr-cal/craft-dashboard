@@ -12,14 +12,17 @@
   <!-- PR Velocity & Response -->
   <div class="col-3">
     <div class="p-card kpi-card">
-      <h3 class="p-card__title">Open PR age &amp; response</h3>
+      <div class="kpi-card__header">
+        <h3 class="p-card__title u-no-margin--bottom">Open PR age &amp; response</h3>
+        <a href="/issues?state=open&issue_type=pull_request&sort=age_desc" class="p-link--soft kpi-card__nav-link">View more &rarr;</a>
+      </div>
       <div class="kpi-card__subtitle">
         Average age of open pull requests and wait time for initial maintainer response
       </div>
       <div class="kpi-metric-row">
-        <span class="kpi-metric-label">Contributor:</span>
+        <span class="kpi-metric-label">Age of PRs from contributors:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ metrics.velocity.contributor_avg_age | format_age_days if metrics.velocity.contributor_avg_age is not none else "—" }}</span>
+          <span class="kpi-main-val">{{ metrics.velocity.contributor_avg_age | format_age_days(use_days=true) if metrics.velocity.contributor_avg_age is not none else "—" }}</span>
           <a href="/issues?state=open&issue_type=pull_request&author_role=contributor&sort=age_desc"
              class="p-chip is-dense kpi-chip" title="View open contributor PRs">
             {{ metrics.velocity.contributor_count }} open
@@ -27,9 +30,9 @@
         </div>
       </div>
       <div class="kpi-metric-row">
-        <span class="kpi-metric-label">1st Response:</span>
+        <span class="kpi-metric-label">Time to 1st response for contributors:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ (metrics.velocity.first_response_avg_days | format_age_days) ~ " wait" if metrics.velocity.first_response_avg_days is not none else "—" }}</span>
+          <span class="kpi-main-val">{{ (metrics.velocity.first_response_avg_days | format_age_days(use_days=true)) ~ " wait" if metrics.velocity.first_response_avg_days is not none else "—" }}</span>
           <a href="/issues?state=open&issue_type=pull_request&author_role=contributor&action=needs_review"
              class="p-chip is-dense kpi-chip" title="Contributor PRs awaiting first maintainer review">
             {{ metrics.velocity.first_response_waiting_count }} unreviewed
@@ -37,17 +40,14 @@
         </div>
       </div>
       <div class="kpi-metric-row">
-        <span class="kpi-metric-label">Overall:</span>
+        <span class="kpi-metric-label">Age of all PRs:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ metrics.velocity.overall_avg_age | format_age_days if metrics.velocity.overall_avg_age is not none else "—" }}</span>
+          <span class="kpi-main-val">{{ metrics.velocity.overall_avg_age | format_age_days(use_days=true) if metrics.velocity.overall_avg_age is not none else "—" }}</span>
           <a href="/issues?state=open&issue_type=pull_request&sort=age_desc"
              class="p-chip is-dense kpi-chip" title="View all open PRs">
             {{ metrics.velocity.overall_count }} open
           </a>
         </div>
-      </div>
-      <div class="kpi-card__footer">
-        <a href="/issues?state=open&issue_type=pull_request&sort=age_desc" class="p-link--soft">View more &rarr;</a>
       </div>
     </div>
   </div>
@@ -55,26 +55,26 @@
   <!-- Resolution Throughput -->
   <div class="col-3">
     <div class="p-card kpi-card">
-      <h3 class="p-card__title">Resolution throughput</h3>
+      <div class="kpi-card__header">
+        <h3 class="p-card__title u-no-margin--bottom">Resolution throughput</h3>
+        <a href="/stats/trends" class="p-link--soft kpi-card__nav-link">View more &rarr;</a>
+      </div>
       <div class="kpi-card__subtitle">
         Issues and pull requests resolved in the past 30 days and past year
       </div>
       <div class="kpi-metric-row">
-        <span class="kpi-metric-label">Last 30d:</span>
+        <span class="kpi-metric-label">Last 30 days:</span>
         <div class="kpi-metric-values">
           <span class="kpi-main-val">{{ "{:,}".format(metrics.throughput.total_30d) }}</span>
           <span class="kpi-sub-text">({{ "{:,}".format(metrics.throughput.issues_30d) }} issues, {{ "{:,}".format(metrics.throughput.prs_30d) }} PRs)</span>
         </div>
       </div>
       <div class="kpi-metric-row">
-        <span class="kpi-metric-label">Last 365d:</span>
+        <span class="kpi-metric-label">Last year:</span>
         <div class="kpi-metric-values">
           <span class="kpi-main-val">{{ "{:,}".format(metrics.throughput.total_365d) }}</span>
           <span class="kpi-sub-text">({{ "{:,}".format(metrics.throughput.issues_365d) }} issues, {{ "{:,}".format(metrics.throughput.prs_365d) }} PRs)</span>
         </div>
-      </div>
-      <div class="kpi-card__footer">
-        <a href="/stats/trends" class="p-link--soft">View more &rarr;</a>
       </div>
     </div>
   </div>
@@ -82,9 +82,12 @@
   <!-- Untriaged Backlog -->
   <div class="col-3">
     <div class="p-card kpi-card">
-      <h3 class="p-card__title">Untriaged backlog</h3>
+      <div class="kpi-card__header">
+        <h3 class="p-card__title u-no-margin--bottom">Untriaged backlog</h3>
+        <a href="/issues?state=open&action=needs_triage" class="p-link--soft kpi-card__nav-link">View more &rarr;</a>
+      </div>
       <div class="kpi-card__subtitle">
-        Open items awaiting initial maintainer assessment
+        Open items needing maintainer triage
       </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">Issues:</span>
@@ -106,16 +109,16 @@
           <span class="kpi-sub-text">(<span class="{% if metrics.untriaged.prs_30d_new > 0 %}kpi-delta--positive{% elif metrics.untriaged.prs_30d_new < 0 %}kpi-delta--negative{% endif %}">+{{ metrics.untriaged.prs_30d_new }}</span> in 30d)</span>
         </div>
       </div>
-      <div class="kpi-card__footer">
-        <a href="/issues?state=open&action=needs_triage" class="p-link--soft">View more &rarr;</a>
-      </div>
     </div>
   </div>
 
   <!-- All-Time Volume -->
   <div class="col-3">
     <div class="p-card kpi-card">
-      <h3 class="p-card__title">All-time volume</h3>
+      <div class="kpi-card__header">
+        <h3 class="p-card__title u-no-margin--bottom">All-time volume</h3>
+        <a href="/stats/trends" class="p-link--soft kpi-card__nav-link">View more &rarr;</a>
+      </div>
       <div class="kpi-card__subtitle">
         Cumulative open and closed work across all repositories
       </div>
@@ -140,9 +143,6 @@
           <span class="kpi-sub-text">work items (<span class="kpi-delta--positive">+{{ "{:,}".format(metrics.volume.total_30d_closed) }}</span> 30d)</span>
         </div>
       </div>
-      <div class="kpi-card__footer">
-        <a href="/stats/trends" class="p-link--soft">View more &rarr;</a>
-      </div>
     </div>
   </div>
 </div>
@@ -154,7 +154,7 @@
     <div class="p-card spotlight-card">
       <div class="spotlight-header">
         <h3 class="p-card__title u-no-margin--bottom">Apps with least-recent releases</h3>
-        <a href="/stats/cadence" class="p-link--soft spotlight-nav-link">View all in Cadence &rarr;</a>
+        <a href="/stats/releases" class="p-link--soft spotlight-nav-link">View all in Releases &rarr;</a>
       </div>
       <table class="p-table--default table-fixed u-no-margin--bottom">
         <colgroup>
@@ -264,7 +264,7 @@
   <div class="col-6">
     <div class="p-card spotlight-card">
       <div class="spotlight-header">
-        <h3 class="p-card__title u-no-margin--bottom">Needs triage (top 5 oldest)</h3>
+        <h3 class="p-card__title u-no-margin--bottom">Need triage (oldest)</h3>
         <a href="/issues?state=open&issue_type=issue&action=needs_triage"
            class="p-link--soft spotlight-nav-link">View all untriaged issues &rarr;</a>
       </div>
@@ -313,7 +313,7 @@
   <div class="col-6">
     <div class="p-card spotlight-card">
       <div class="spotlight-header">
-        <h3 class="p-card__title u-no-margin--bottom">Quick-wins radar</h3>
+        <h3 class="p-card__title u-no-margin--bottom">Quick wins</h3>
         <a href="/issues?state=open&quick_win_min=50&sort=quick_win_desc"
            class="p-link--soft spotlight-nav-link">View all quick wins &rarr;</a>
       </div>

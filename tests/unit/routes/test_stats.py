@@ -8,9 +8,20 @@ from craft_dashboard.routes.stats import _version_key
 from fastapi.testclient import TestClient
 
 
+class _EmptyStatsResult:
+    def all(self):
+        return []
+
+    def scalars(self):
+        return self
+
+    def __iter__(self):
+        return iter([])
+
+
 class _EmptyStatsSession:
     async def execute(self, _query):
-        return []
+        return _EmptyStatsResult()
 
 
 class _TrendStatsSession:

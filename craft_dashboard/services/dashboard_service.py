@@ -161,23 +161,34 @@ class HomepageMetrics(TypedDict):
     other_projects: list[ProjectHealthRow]
 
 
+TRIAGE_GREEN_COUNT_THRESHOLD = 5
+TRIAGE_BACKLOG_RED_CAP = 25
 TRIAGE_RED_RATIO_THRESHOLD = 0.20
-TRIAGE_YELLOW_RATIO_THRESHOLD = 0.10
 RELEASE_RED_DAYS_THRESHOLD = 60
 RELEASE_YELLOW_DAYS_THRESHOLD = 30
 QUICK_WIN_MIN_SCORE = 50
 
 
 def compute_triage_badge_color(untriaged: int, total_open: int) -> str:
-    """Return badge color for untriaged proportion."""
+    """Return badge color for untriaged backlog.
+
+    Rules:
+    - If total_open <= 0 or untriaged <= 0: "neutral"
+    - If untriaged < 5: "green" (projects with 1-4 untriaged issues are healthy)
+    - If untriaged >= 25: "red" (unconditional backlog cap)
+    - If ratio (untriaged / total_open) > 0.20: "red"
+    - Otherwise: "yellow"
+    """
     if total_open <= 0 or untriaged <= 0:
         return "neutral"
+    if untriaged < TRIAGE_GREEN_COUNT_THRESHOLD:
+        return "green"
+    if untriaged >= TRIAGE_BACKLOG_RED_CAP:
+        return "red"
     ratio = untriaged / total_open
     if ratio > TRIAGE_RED_RATIO_THRESHOLD:
         return "red"
-    if ratio > TRIAGE_YELLOW_RATIO_THRESHOLD:
-        return "yellow"
-    return "green"
+    return "yellow"
 
 
 def compute_release_badge_color(days_ago: int | None) -> str:
@@ -848,24 +859,25 @@ class DashboardService:
             .where(Project.category != "aggregate")
             .order_by(Release.released_at.desc().nullslast())
         )
-        rel_rows = (await self.session.execute(rel_q)).all()
+        rel_exec = await self.session.execute(rel_q)
+        rel_rows = rel_exec.all() if hasattr(rel_exec, "all") else list(rel_exec)
 
         latest_rel_by_project: dict[int, Any] = {}
         for row in rel_rows:
-            if row.project_id not in latest_rel_by_project:
+            if hasattr(row, "project_id") and row.project_id not in latest_rel_by_project:
                 latest_rel_by_project[row.project_id] = row
 
-        all_projects = (
-            (
-                await self.session.execute(
-                    select(Project)
-                    .where(Project.category != "aggregate")
-                    .order_by(Project.display_order)
-                )
-            )
-            .scalars()
-            .all()
+        proj_exec = await self.session.execute(
+            select(Project)
+            .where(Project.category != "aggregate")
+            .order_by(Project.display_order)
         )
+        if hasattr(proj_exec, "scalars"):
+            all_projects = proj_exec.scalars().all()
+        elif hasattr(proj_exec, "all"):
+            all_projects = proj_exec.all()
+        else:
+            all_projects = list(proj_exec)
 
         category_labels = {
             "application": "Application",

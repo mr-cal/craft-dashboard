@@ -5,12 +5,8 @@
          href="/stats/trends">Trends</a>
     </div>
     <div class="p-tabs__item" role="presentation">
-      <a class="p-tabs__link {% if request.url.path == '/stats/releases' %}is-active{% endif %}"
+      <a class="p-tabs__link {% if request.url.path in ['/stats/releases', '/stats/cadence'] %}is-active{% endif %}"
          href="/stats/releases">Releases</a>
-    </div>
-    <div class="p-tabs__item" role="presentation">
-      <a class="p-tabs__link {% if request.url.path == '/stats/cadence' %}is-active{% endif %}"
-         href="/stats/cadence">Cadence</a>
     </div>
     <div class="p-tabs__item" role="presentation">
       <a class="p-tabs__link {% if request.url.path == '/stats/dependencies' %}is-active{% endif %}"

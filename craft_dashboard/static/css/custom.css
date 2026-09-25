@@ -988,6 +988,21 @@ a.kpi-main-val:hover {
   color: var(--app-text-muted);
 }
 
+.kpi-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.35rem;
+}
+
+.kpi-card__nav-link {
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  margin-left: 0.5rem;
+}
+
 .kpi-card__footer {
   margin-top: auto;
   padding-top: 0.75rem;

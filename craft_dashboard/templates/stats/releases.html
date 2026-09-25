@@ -3,38 +3,85 @@
 {% block content %}
 {% include "stats/partials/tabs.html" %}
 
-<div class="row--25-75">
-  <div class="col">
+<div class="row" style="margin-bottom: 1.5rem;">
+  <div class="col-12">
     <h2>Releases</h2>
-    <p>Latest release for each application and branch, with commits landed since.</p>
+    <p class="p-text--default">
+      Release cadence across tracked applications, libraries, and tools, plus active maintenance and hotfix branches.
+    </p>
+  </div>
+</div>
+
+<!-- APPLICATIONS -->
+<div class="row--25-75" style="margin-bottom: 2.5rem;">
+  <div class="col">
+    <h3>Applications</h3>
+    <p class="p-text--muted">Core pack and build tools for snaps, charms, rocks, and debs.</p>
+    {% set app_red = application_cadence | selectattr("badge_color", "equalto", "red") | list | length %}
+    {% set app_yellow = application_cadence | selectattr("badge_color", "equalto", "yellow") | list | length %}
+    {% set app_green = application_cadence | selectattr("badge_color", "equalto", "green") | list | length %}
+    <div style="margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.35rem;">
+      <span class="p-text--small"><strong>{{ application_cadence | length }}</strong> tracked</span>
+      {% if app_green > 0 %}<div><span class="dash-pill dash-pill--green">{{ app_green }} fresh</span></div>{% endif %}
+      {% if app_yellow > 0 %}<div><span class="dash-pill dash-pill--yellow">{{ app_yellow }} attention</span></div>{% endif %}
+      {% if app_red > 0 %}<div><span class="dash-pill dash-pill--red">{{ app_red }} overdue</span></div>{% endif %}
+    </div>
   </div>
   <div class="col">
-    <table>
+    <table data-sortable class="p-table--sortable table-fixed u-no-margin--bottom">
+      <colgroup>
+        <col style="width: 25%;">
+        <col style="width: 20%;">
+        <col style="width: 20%;">
+        <col style="width: 18%;">
+        <col style="width: 17%;">
+      </colgroup>
       <thead>
         <tr>
-          <th>Application</th>
-          <th>Branch</th>
-          <th>Tag</th>
-          <th>Released (days ago)</th>
-          <th>Commits Since Tag</th>
+          <th>Repository</th>
+          <th>Latest Tag</th>
+          <th>Latest release date</th>
+          <th>Cadence</th>
+          <th>Commits since release</th>
         </tr>
       </thead>
       <tbody>
-        {% for rel in releases %}
+        {% for row in application_cadence %}
         <tr>
-          <td>{{ rel.project_name }}</td>
-          <td>{{ rel.branch or "main" }}</td>
-          <td><code>{{ rel.version }}</code></td>
-          <td>
-            {% if rel.released_at %}
-            {{ rel.released_at.strftime("%Y-%m-%d") }} ({{ rel.days_ago if rel.days_ago is not none else "-" }})
-            {% else %}-{% endif %}
+          <td class="text-truncate" title="{{ row.full_name }}">
+            <a href="https://github.com/{{ row.full_name }}" target="_blank" rel="noopener noreferrer">
+              <strong>{{ row.name }}</strong>
+              <i class="p-icon--external-link is-light" style="font-size: 0.8rem; vertical-align: middle;"></i>
+            </a>
           </td>
-          <td>{% if rel.commits_since_tag is not none %}{{ rel.commits_since_tag }}{% else %}-{% endif %}</td>
+          <td class="text-truncate">
+            {% if row.is_fallback %}
+            <span class="dash-pill dash-pill--neutral"><em>{{ row.latest_version }}</em></span>
+            {% else %}
+            <code>{{ row.latest_version }}</code>
+            {% endif %}
+          </td>
+          <td>{{ row.released_at_str }}</td>
+          <td>
+            {% if row.days_ago is not none %}
+            <span class="dash-pill dash-pill--{{ row.badge_color }}" title="{{ row.days_ago }} days ago">
+              {{ row.days_ago | format_age_days }} ago
+            </span>
+            {% else %}
+            <span class="p-text--muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.commits_since is not none %}
+            {{ row.commits_since }}
+            {% else %}
+            <span class="p-text--muted">—</span>
+            {% endif %}
+          </td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="5">No release data available yet.</td>
+          <td colspan="5">There are no application releases tracked yet.</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -42,41 +89,208 @@
   </div>
 </div>
 
-<div class="row--25-75">
+<!-- LIBRARIES -->
+<div class="row--25-75" style="margin-bottom: 2.5rem;">
   <div class="col">
-    <h2>Hotfixes</h2>
-    <p>All <code>hotfix/*</code> branches across every project, including libraries.</p>
+    <h3>Libraries</h3>
+    <p class="p-text--muted">Shared craft libraries powering application CLI, parts, and platforms.</p>
+    {% set lib_red = library_cadence | selectattr("badge_color", "equalto", "red") | list | length %}
+    {% set lib_yellow = library_cadence | selectattr("badge_color", "equalto", "yellow") | list | length %}
+    {% set lib_green = library_cadence | selectattr("badge_color", "equalto", "green") | list | length %}
+    <div style="margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.35rem;">
+      <span class="p-text--small"><strong>{{ library_cadence | length }}</strong> tracked</span>
+      {% if lib_green > 0 %}<div><span class="dash-pill dash-pill--green">{{ lib_green }} fresh</span></div>{% endif %}
+      {% if lib_yellow > 0 %}<div><span class="dash-pill dash-pill--yellow">{{ lib_yellow }} attention</span></div>{% endif %}
+      {% if lib_red > 0 %}<div><span class="dash-pill dash-pill--red">{{ lib_red }} overdue</span></div>{% endif %}
+    </div>
   </div>
   <div class="col">
-    <table>
+    <table data-sortable class="p-table--sortable table-fixed u-no-margin--bottom">
+      <colgroup>
+        <col style="width: 25%;">
+        <col style="width: 20%;">
+        <col style="width: 20%;">
+        <col style="width: 18%;">
+        <col style="width: 17%;">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Repository</th>
+          <th>Latest Tag</th>
+          <th>Latest release date</th>
+          <th>Cadence</th>
+          <th>Commits since release</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in library_cadence %}
+        <tr>
+          <td class="text-truncate" title="{{ row.full_name }}">
+            <a href="https://github.com/{{ row.full_name }}" target="_blank" rel="noopener noreferrer">
+              <strong>{{ row.name }}</strong>
+              <i class="p-icon--external-link is-light" style="font-size: 0.8rem; vertical-align: middle;"></i>
+            </a>
+          </td>
+          <td class="text-truncate">
+            {% if row.is_fallback %}
+            <span class="dash-pill dash-pill--neutral"><em>{{ row.latest_version }}</em></span>
+            {% else %}
+            <code>{{ row.latest_version }}</code>
+            {% endif %}
+          </td>
+          <td>{{ row.released_at_str }}</td>
+          <td>
+            {% if row.days_ago is not none %}
+            <span class="dash-pill dash-pill--{{ row.badge_color }}" title="{{ row.days_ago }} days ago">
+              {{ row.days_ago | format_age_days }} ago
+            </span>
+            {% else %}
+            <span class="p-text--muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.commits_since is not none %}
+            {{ row.commits_since }}
+            {% else %}
+            <span class="p-text--muted">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5">There are no library releases tracked yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- OTHER -->
+<div class="row--25-75" style="margin-bottom: 2.5rem;">
+  <div class="col">
+    <h3>Other</h3>
+    <p class="p-text--muted">Auxiliary tools, deployment actions, and services.</p>
+    {% set oth_red = other_cadence | selectattr("badge_color", "equalto", "red") | list | length %}
+    {% set oth_yellow = other_cadence | selectattr("badge_color", "equalto", "yellow") | list | length %}
+    {% set oth_green = other_cadence | selectattr("badge_color", "equalto", "green") | list | length %}
+    <div style="margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.35rem;">
+      <span class="p-text--small"><strong>{{ other_cadence | length }}</strong> tracked</span>
+      {% if oth_green > 0 %}<div><span class="dash-pill dash-pill--green">{{ oth_green }} fresh</span></div>{% endif %}
+      {% if oth_yellow > 0 %}<div><span class="dash-pill dash-pill--yellow">{{ oth_yellow }} attention</span></div>{% endif %}
+      {% if oth_red > 0 %}<div><span class="dash-pill dash-pill--red">{{ oth_red }} overdue</span></div>{% endif %}
+    </div>
+  </div>
+  <div class="col">
+    <table data-sortable class="p-table--sortable table-fixed u-no-margin--bottom">
+      <colgroup>
+        <col style="width: 25%;">
+        <col style="width: 20%;">
+        <col style="width: 20%;">
+        <col style="width: 18%;">
+        <col style="width: 17%;">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Repository</th>
+          <th>Latest Tag</th>
+          <th>Latest release date</th>
+          <th>Cadence</th>
+          <th>Commits since release</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in other_cadence %}
+        <tr>
+          <td class="text-truncate" title="{{ row.full_name }}">
+            <a href="https://github.com/{{ row.full_name }}" target="_blank" rel="noopener noreferrer">
+              <strong>{{ row.name }}</strong>
+              <i class="p-icon--external-link is-light" style="font-size: 0.8rem; vertical-align: middle;"></i>
+            </a>
+          </td>
+          <td class="text-truncate">
+            {% if row.is_fallback %}
+            <span class="dash-pill dash-pill--neutral"><em>{{ row.latest_version }}</em></span>
+            {% else %}
+            <code>{{ row.latest_version }}</code>
+            {% endif %}
+          </td>
+          <td>{{ row.released_at_str }}</td>
+          <td>
+            {% if row.days_ago is not none %}
+            <span class="dash-pill dash-pill--{{ row.badge_color }}" title="{{ row.days_ago }} days ago">
+              {{ row.days_ago | format_age_days }} ago
+            </span>
+            {% else %}
+            <span class="p-text--muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.commits_since is not none %}
+            {{ row.commits_since }}
+            {% else %}
+            <span class="p-text--muted">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5">There are no other project releases tracked yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- HOTFIXES -->
+<div class="row--25-75" style="margin-bottom: 2.5rem;">
+  <div class="col">
+    <h3>Hotfixes</h3>
+    <p class="p-text--muted">All <code>hotfix/*</code> branches across every project, including libraries.</p>
+  </div>
+  <div class="col">
+    <table class="table-fixed u-no-margin--bottom">
+      <colgroup>
+        <col style="width: 24%;">
+        <col style="width: 18%;">
+        <col style="width: 16%;">
+        <col style="width: 16%;">
+        <col style="width: 13%;">
+        <col style="width: 13%;">
+      </colgroup>
       <thead>
         <tr>
           <th>Project</th>
           <th>Branch</th>
           <th>Tag</th>
-          <th>Released (days ago)</th>
-          <th>Commits Since Tag</th>
+          <th>Latest release date</th>
+          <th>Commits since release</th>
           <th data-tooltip="Safe to delete when the branch tag also exists on main and there are no extra commits on the branch since that tag." tabindex="0">Safe to Delete?</th>
         </tr>
       </thead>
       <tbody>
         {% for hf in hotfixes %}
         <tr>
-          <td>{{ hf.project_name }}</td>
-          <td>{{ hf.branch }}</td>
+          <td><strong>{{ hf.project_name }}</strong></td>
+          <td><code>{{ hf.branch }}</code></td>
           <td><code>{{ hf.version }}</code></td>
           <td>
             {% if hf.released_at %}
-            {{ hf.released_at.strftime("%Y-%m-%d") }} ({{ hf.days_ago if hf.days_ago is not none else "-" }})
+            {{ hf.released_at.strftime("%Y-%m-%d") }}
             {% else %}-{% endif %}
           </td>
           <td>{% if hf.commits_since_tag is not none %}{{ hf.commits_since_tag }}{% else %}-{% endif %}</td>
           {% if hf.safe_to_delete is none %}
           <td>-</td>
           {% elif hf.safe_to_delete %}
-          <td data-tooltip="Yes — the tag exists on main and there are no unreleased commits on this branch." tabindex="0">Yes</td>
+          <td data-tooltip="Yes — the tag exists on main and there are no unreleased commits on this branch." tabindex="0">
+            <span class="dash-pill dash-pill--green">Yes</span>
+          </td>
           {% else %}
-          <td data-tooltip="No — either the tag has not been merged into main or there are unreleased commits on this branch." tabindex="0">No</td>
+          <td data-tooltip="No — either the tag has not been merged into main or there are unreleased commits on this branch." tabindex="0">
+            <span class="dash-pill dash-pill--red">No</span>
+          </td>
           {% endif %}
         </tr>
         {% else %}
@@ -88,4 +302,7 @@
     </table>
   </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/table-sort.js"></script>
 {% endblock %}

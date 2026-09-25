@@ -99,10 +99,10 @@ class TestReleasesPage:
         response = test_client.get("/stats/releases")
         assert response.status_code == 200
 
-    def test_non_application_project_not_shown(
+    def test_library_project_shown_in_libraries_section(
         self, test_client: TestClient, test_db_session: AsyncSession
     ) -> None:
-        """Releases for non-application projects must not appear on the page."""
+        """Releases for library projects appear in the library section on the merged releases page."""
 
         async def _seed() -> None:
             p = Project(
@@ -128,7 +128,7 @@ class TestReleasesPage:
 
         response = test_client.get("/stats/releases")
         assert response.status_code == 200
-        assert "2.0.0-library" not in response.text
+        assert "2.0.0-library" in response.text
 
     def test_latest_release_per_project_branch_is_shown(
         self, test_client: TestClient, test_db_session: AsyncSession
