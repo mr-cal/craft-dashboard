@@ -627,7 +627,7 @@ async def submit_result(
     )
     try:
         try:
-            embeddings = await embed_client.embed_batch(
+            embeddings, embed_tokens = await embed_client.embed_batch_with_usage(
                 [summary_text, search_text], dimensions=1024
             )
             summary_embedding, search_embedding = embeddings[0], embeddings[1]
@@ -666,6 +666,7 @@ async def submit_result(
         tokens_used=payload.tokens_used,
         prompt_tokens=payload.prompt_tokens,
         completion_tokens=payload.completion_tokens,
+        embedding_tokens=embed_tokens,
         llm_backend=payload.llm_backend,
         cost_usd=payload.cost_usd,
         evaluated_at=datetime.now(tz=UTC),

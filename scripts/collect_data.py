@@ -635,7 +635,12 @@ async def _collect_github(
                         _format_duration(time.monotonic() - snapshot_started_at),
                     )
                     async with session_factory() as ok_session:
-                        await record_open_poll_success(project_id, "github", ok_session)
+                        await record_open_poll_success(
+                            project_id,
+                            "github",
+                            ok_session,
+                            issues_collected=open_collected,
+                        )
                 except Exception as exc:
                     logger.exception(
                         "Failed to collect open GitHub issues for %s", project_name
@@ -748,7 +753,12 @@ async def _collect_github(
                 )
 
                 await update_refresh_schedule(
-                    project_id, "github", config.refresh_interval_days, session
+                    project_id,
+                    "github",
+                    config.refresh_interval_days,
+                    session,
+                    duration_seconds=time.monotonic() - project_started_at,
+                    issues_collected=issues_collected,
                 )
                 await _upsert_collection_watermark(session, project_id, "github")
                 logger.info(
@@ -867,6 +877,8 @@ async def _collect_launchpad(
                     "launchpad",
                     config.refresh_interval_days,
                     session,
+                    duration_seconds=time.monotonic() - bugs_started_at,
+                    issues_collected=bug_count,
                 )
             except Exception as exc:
                 logger.exception("Failed to collect Launchpad data for %s", lp_name)

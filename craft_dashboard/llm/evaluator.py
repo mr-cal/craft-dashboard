@@ -659,6 +659,9 @@ class IssueEvaluator:
         rounds: list[dict[str, Any]] = []
         rounds_completed = 0
         total_tokens = 0
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        total_cost_usd: float | None = None
 
         for _round_number in range(1, max_rounds + 1):
             if _round_number > 1 and self.tool_call_delay > 0:
@@ -683,6 +686,10 @@ class IssueEvaluator:
                 tool_choice="auto",
             )
             total_tokens += response.total_tokens
+            total_prompt_tokens += response.prompt_tokens
+            total_completion_tokens += response.completion_tokens
+            if response.cost_usd is not None:
+                total_cost_usd = (total_cost_usd or 0.0) + response.cost_usd
 
             if response.reasoning:
                 logger.debug(
@@ -698,6 +705,10 @@ class IssueEvaluator:
                     response.completion_tokens,
                     response.finish_reason,
                 )
+                response.total_tokens = total_tokens
+                response.prompt_tokens = total_prompt_tokens
+                response.completion_tokens = total_completion_tokens
+                response.cost_usd = total_cost_usd
                 return (
                     _parse_evaluation_response(response.content),
                     response,
@@ -795,6 +806,16 @@ class IssueEvaluator:
             tool_choice="none",
             response_format={"type": "json_object"},
         )
+        total_tokens += response.total_tokens
+        total_prompt_tokens += response.prompt_tokens
+        total_completion_tokens += response.completion_tokens
+        if response.cost_usd is not None:
+            total_cost_usd = (total_cost_usd or 0.0) + response.cost_usd
+
+        response.total_tokens = total_tokens
+        response.prompt_tokens = total_prompt_tokens
+        response.completion_tokens = total_completion_tokens
+        response.cost_usd = total_cost_usd
         return (
             _parse_evaluation_response(response.content),
             response,

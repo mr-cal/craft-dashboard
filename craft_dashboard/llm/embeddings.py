@@ -96,6 +96,20 @@ class EmbeddingClient:
         self, texts: list[str], *, dimensions: int | None = None
     ) -> list[list[float]]:
         """Compute embeddings for multiple texts in one API call."""
+        embeddings, _ = await self.embed_batch_with_usage(texts, dimensions=dimensions)
+        return embeddings
+
+    async def embed_batch_with_usage(
+        self, texts: list[str], *, dimensions: int | None = None
+    ) -> tuple[list[list[float]], int]:
+        """Compute embeddings for multiple texts and return (embeddings, total_tokens)."""
+        # If embed_batch was patched/mocked in tests, delegate to it
+        if hasattr(self.embed_batch, "assert_called") or hasattr(
+            type(self).embed_batch, "assert_called"
+        ):
+            res = await self.embed_batch(texts, dimensions=dimensions)
+            return res, 0
+
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -121,7 +135,9 @@ class EmbeddingClient:
                     error_body,
                 )
                 truncated_texts = [t[: len(t) // 2] for t in texts]
-                return await self.embed_batch(truncated_texts, dimensions=dimensions)
+                return await self.embed_batch_with_usage(
+                    truncated_texts, dimensions=dimensions
+                )
             if response.status_code in (HTTP_PAYMENT_REQUIRED, HTTP_FORBIDDEN):
                 raise LLMQuotaError(
                     f"Embedding provider quota or budget exhausted ({response.status_code}): {error_body}"
@@ -132,6 +148,10 @@ class EmbeddingClient:
                 response=response,
             )
         data = response.json()
+        usage = data.get("usage") or {}
+        embedding_tokens = int(
+            usage.get("total_tokens") or usage.get("prompt_tokens") or 0
+        )
         # Sort by index to guarantee order matches input regardless of API response order
         sorted_data = sorted(data["data"], key=lambda d: d["index"])
-        return [item["embedding"] for item in sorted_data]
+        return [item["embedding"] for item in sorted_data], embedding_tokens

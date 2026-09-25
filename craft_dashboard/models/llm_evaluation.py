@@ -74,6 +74,7 @@ class LLMEvaluation(Base):
     tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    embedding_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Actual billed USD cost for this evaluation call, as reported by
     # OpenRouter (LLMResponse.cost_usd, sourced from usage.cost). None for
     # backends that don't report cost (e.g. the local LLM server).

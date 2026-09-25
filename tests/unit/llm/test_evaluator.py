@@ -646,6 +646,90 @@ class TestIssueEvaluatorToolLoop:
         assert "ignore previous instructions" in tool_messages[-1]["content"]
 
     @pytest.mark.asyncio
+    async def test_tool_loop_accumulates_tokens_across_rounds(self) -> None:
+        """Token counts and cost across all tool rounds are summed in the result."""
+        tool_call_response = LLMResponse(
+            content="",
+            prompt_tokens=100,
+            completion_tokens=20,
+            total_tokens=120,
+            cost_usd=0.001,
+            model="scoring-model",
+            tool_calls=[
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "grep_repo", "arguments": "{}"},
+                }
+            ],
+        )
+        final_response = LLMResponse(
+            content=json.dumps(
+                {
+                    "summary": "Multi-round summary.",
+                    "scores": {
+                        "actionability": 70,
+                        "complexity": 10,
+                        "impact": 10,
+                        "confidence": 10,
+                    },
+                    "suggested_action": "needs_triage",
+                    "suggested_action_reason": "reason",
+                }
+            ),
+            prompt_tokens=200,
+            completion_tokens=50,
+            total_tokens=250,
+            cost_usd=0.002,
+            model="scoring-model",
+        )
+        mock_client = AsyncMock()
+        mock_client.complete.side_effect = [tool_call_response, final_response]
+        evaluator = IssueEvaluator(
+            client=mock_client,
+            model_summary="summary-model",
+            model_scoring="scoring-model",
+        )
+        with (
+            patch(
+                "craft_dashboard.llm.evaluator.dispatch_tool_call",
+                new=AsyncMock(return_value="matched 1 line"),
+            ),
+            patch(
+                "craft_dashboard.llm.baseline.reader.repo_layout",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "craft_dashboard.llm.baseline.reader.grep_repo",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch(
+                "craft_dashboard.llm.baseline._dispatch_http_tool",
+                new=AsyncMock(return_value='{"results": []}'),
+            ),
+        ):
+            result = await evaluator.evaluate(
+                title="t",
+                body="b",
+                issue_type="issue",
+                state="open",
+                labels=[],
+                age_days=1,
+                last_activity_days=1,
+                author="a",
+                is_maintainer=False,
+                comment_count=0,
+                project="craft-parts",
+                tool_ctx=_tool_ctx(),
+            )
+
+        assert result is not None
+        assert result["prompt_tokens"] == 300
+        assert result["completion_tokens"] == 70
+        assert result["tokens_used"] == 370
+        assert result["cost_usd"] == pytest.approx(0.003)
+
+    @pytest.mark.asyncio
     async def test_tool_failure_after_preflight_discards(self) -> None:
         tool_call_response = LLMResponse(
             content="",

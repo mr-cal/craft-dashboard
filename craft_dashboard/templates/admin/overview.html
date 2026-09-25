@@ -7,7 +7,7 @@
 <div class="row--25-75">
   <div class="col">
     <h3>System status</h3>
-    <p>Collection and evaluation run history. Click any row to see which issues were collected.</p>
+    <p>Live status and GitHub API budgets.</p>
   </div>
   <div class="col">
     <div
@@ -48,13 +48,128 @@
         <p class="status-detail">Oldest (up next): {{ system_status.most_overdue_full_refresh | local_datetime("Unknown") }}</p>
         {% if system_status.full_refresh_failing_count %}
         <p class="status-detail">
-          <a href="/admin/schedule">{{ system_status.full_refresh_failing_count }} project{{ "s" if system_status.full_refresh_failing_count != 1 else "" }} currently failing &rarr;</a>
+          <a href="#refresh-schedule">{{ system_status.full_refresh_failing_count }} project{{ "s" if system_status.full_refresh_failing_count != 1 else "" }} currently failing &darr;</a>
         </p>
         {% else %}
         <p class="status-detail">No projects currently failing</p>
         {% endif %}
       </div>
     </div>
+  </div>
+</div>
+
+<hr class="p-rule" />
+
+<div class="row--25-75" id="refresh-schedule">
+  <div class="col">
+    <h3>Refresh schedule</h3>
+    <p>
+      Open issues are refreshed on every run (every 10 minutes). Separately,
+      an hourly rotation picks exactly one project/source pair — whichever
+      has gone longest without a full refresh (open + closed issues) — and
+      fully refreshes it. This table shows that rotation order: the top row
+      is up next.
+    </p>
+  </div>
+  <div class="col">
+    {% if project_refresh_list %}
+    <table>
+      <thead>
+        <tr>
+          <th>Project</th>
+          <th>Source</th>
+          <th>Last open poll</th>
+          <th>Last full refresh</th>
+          <th>Next full refresh</th>
+          <th>Failures</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in project_refresh_list %}
+        <tr>
+          <td><strong>{{ entry.project }}</strong></td>
+          <td>{{ entry.source }}</td>
+          <td style="font-size: 0.875rem;">
+            {% if entry.last_open_poll_at %}
+              {{ entry.last_open_poll_at | local_datetime }}
+              {% if entry.last_open_poll_issues_collected is not none %}
+              <span style="color: var(--app-text-muted);">({{ entry.last_open_poll_issues_collected }} issues)</span>
+              {% endif %}
+            {% else %}
+              <span style="color: var(--app-text-muted);">—</span>
+            {% endif %}
+          </td>
+          <td style="font-size: 0.875rem;">
+            {% if entry.last_refreshed_at %}
+              {% set h = entry.hours_since_last %}
+              {{ entry.last_refreshed_at | local_datetime }}
+              <span style="color: var(--app-text-muted);">
+                {% if h is not none and h == 0 %}
+                  (less than 1 hour ago)
+                {% elif h is not none and h == 1 %}
+                  (1 hour ago)
+                {% elif h is not none and h < 48 %}
+                  ({{ h }} hours ago)
+                {% else %}
+                  ({{ entry.days_since_last }} days ago)
+                {% endif %}
+                {% if entry.last_full_refresh_issues_collected is not none %}
+                  &bull; {{ entry.last_full_refresh_issues_collected }} issues
+                {% endif %}
+                {% if entry.last_full_refresh_duration_seconds is not none %}
+                  &bull; {{ entry.last_full_refresh_duration_seconds | format_duration }}
+                {% endif %}
+              </span>
+            {% else %}
+              <span style="color: var(--app-text-muted);">never</span>
+            {% endif %}
+          </td>
+          <td style="font-size: 0.875rem;">
+            {{ entry.next_refresh_at | local_datetime }}
+            <span style="color: var(--app-text-muted);">
+              {% if loop.first %}
+                (up next)
+              {% elif entry.next_refresh_hours == 1 %}
+                (in ~1 hour)
+              {% else %}
+                (in ~{{ entry.next_refresh_hours }} hours)
+              {% endif %}
+            </span>
+          </td>
+          <td style="font-size: 0.875rem;">
+            {% if entry.consecutive_failures > 0 or entry.open_poll_consecutive_failures > 0 %}
+              {% if entry.consecutive_failures > 0 %}
+              <span style="color: var(--color-error, #c0392b);" title="Full refresh: {{ entry.last_error or 'error' }}">
+                Full: {{ entry.consecutive_failures }}
+              </span>
+              {% endif %}
+              {% if entry.open_poll_consecutive_failures > 0 %}
+              <span style="color: var(--app-caution, #e67e22);" title="Open poll: {{ entry.open_poll_last_error or 'error' }}">
+                Poll: {{ entry.open_poll_consecutive_failures }}
+              </span>
+              {% endif %}
+            {% else %}
+              <span style="color: var(--color-success, #27ae60);">0</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="font-size: 0.875rem; color: var(--app-text-muted);">No refresh schedule data. Run a collection first.</p>
+    {% endif %}
+  </div>
+</div>
+
+<hr class="p-rule" />
+
+<div class="row--25-75">
+  <div class="col">
+    <h3>Run history &amp; activity</h3>
+    <p>Collection run history and recent issue activity. Click any row to see which issues were collected.</p>
+  </div>
+  <div class="col">
     {% if collection_runs %}
     <table style="margin-top: 1rem;">
       <thead>

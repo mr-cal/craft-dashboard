@@ -190,6 +190,7 @@ class TestAdminService:
             "tokens": 420,
             "prompt_tokens": 270,
             "completion_tokens": 150,
+            "embedding_tokens": 0,
         }
 
     async def test_get_token_stats_filters_to_recent_days(
@@ -208,6 +209,7 @@ class TestAdminService:
             "tokens": 120,
             "prompt_tokens": 70,
             "completion_tokens": 50,
+            "embedding_tokens": 0,
         }
 
     async def test_get_seven_day_token_stats_uses_seven_day_window(
@@ -226,6 +228,7 @@ class TestAdminService:
             "tokens": 120,
             "prompt_tokens": 70,
             "completion_tokens": 50,
+            "embedding_tokens": 0,
         }
 
     async def test_get_project_refresh_list_orders_by_rotation_ascending(

@@ -25,6 +25,7 @@
           <th>Total Tokens</th>
           <th>Input Tokens</th>
           <th>Output Tokens</th>
+          <th>Embedding Tokens</th>
           <th>Avg Tokens per Eval</th>
         </tr>
       </thead>
@@ -34,6 +35,7 @@
           <td>{{ "{:,}".format(recent_tokens) }}</td>
           <td>{{ "{:,}".format(recent_prompt_tokens) }}</td>
           <td>{{ "{:,}".format(recent_completion_tokens) }}</td>
+          <td>{{ "{:,}".format(recent_embedding_tokens) }}</td>
           <td>{{ "{:,.0f}".format(recent_tokens / recent_evaluations) if recent_evaluations > 0 else "N/A" }}</td>
         </tr>
       </tbody>
@@ -46,6 +48,7 @@
           <th>Total Tokens</th>
           <th>Input Tokens</th>
           <th>Output Tokens</th>
+          <th>Embedding Tokens</th>
           <th>Avg Tokens per Eval</th>
         </tr>
       </thead>
@@ -55,6 +58,7 @@
           <td>{{ "{:,}".format(total_tokens) }}</td>
           <td>{{ "{:,}".format(total_prompt_tokens) }}</td>
           <td>{{ "{:,}".format(total_completion_tokens) }}</td>
+          <td>{{ "{:,}".format(total_embedding_tokens) }}</td>
           <td>{{ "{:,.0f}".format(total_tokens / total_evaluations) if total_evaluations > 0 else "N/A" }}</td>
         </tr>
       </tbody>

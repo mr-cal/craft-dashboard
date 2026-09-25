@@ -8,6 +8,7 @@ from craft_dashboard.collectors.scheduler import (
     is_due_for_refresh,
     record_open_poll_success,
     record_refresh_error,
+    update_refresh_schedule,
 )
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.refresh_schedule import RefreshSchedule
@@ -227,7 +228,9 @@ class TestRecordOpenPollSuccess:
         )
         await test_db_session.commit()
 
-        await record_open_poll_success(5, "github", test_db_session)
+        await record_open_poll_success(
+            5, "github", test_db_session, issues_collected=42
+        )
 
         result = await test_db_session.execute(
             select(RefreshSchedule).where(RefreshSchedule.project_id == 5)
@@ -237,6 +240,8 @@ class TestRecordOpenPollSuccess:
         assert schedule.open_poll_last_error is None
         assert schedule.consecutive_failures == 3
         assert schedule.last_error == "full refresh broke"
+        assert schedule.last_open_poll_issues_collected == 42
+        assert schedule.last_open_poll_at is not None
 
     async def test_noop_when_no_schedule_row_exists(self, test_db_session) -> None:
         """No row to update — should not raise or create one."""
@@ -246,3 +251,24 @@ class TestRecordOpenPollSuccess:
             select(RefreshSchedule).where(RefreshSchedule.project_id == 12345)
         )
         assert result.scalar_one_or_none() is None
+
+    async def test_update_refresh_schedule_records_metrics(
+        self, test_db_session
+    ) -> None:
+        """update_refresh_schedule persists duration and issue counts."""
+        with patch("sqlalchemy.dialects.postgresql.insert", side_effect=sqlite_insert):
+            await update_refresh_schedule(
+                10,
+                "github",
+                7,
+                test_db_session,
+                duration_seconds=12.5,
+                issues_collected=100,
+            )
+
+        result = await test_db_session.execute(
+            select(RefreshSchedule).where(RefreshSchedule.project_id == 10)
+        )
+        schedule = result.scalar_one()
+        assert schedule.last_full_refresh_duration_seconds == 12.5
+        assert schedule.last_full_refresh_issues_collected == 100

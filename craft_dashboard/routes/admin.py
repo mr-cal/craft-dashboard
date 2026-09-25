@@ -135,7 +135,7 @@ async def admin_overview_page(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
-    """Render the admin Overview tab: system status, collection runs, recent activity."""
+    """Render the admin Ingestion tab: system status, project refresh schedule, collection runs, recent activity."""
     templates: Jinja2Templates = request.app.state.templates
 
     admin_service = AdminService(session)
@@ -156,6 +156,7 @@ async def admin_overview_page(
         api_budget = None
     next_expected_fetch = await admin_service.get_next_expected_fetch()
     system_status = await admin_service.get_system_status()
+    project_refresh_list = await admin_service.get_project_refresh_list()
 
     return templates.TemplateResponse(
         request,
@@ -169,6 +170,7 @@ async def admin_overview_page(
             "api_budget": api_budget,
             "next_expected_fetch": next_expected_fetch,
             "system_status": system_status,
+            "project_refresh_list": project_refresh_list,
         },
     )
 
@@ -209,10 +211,12 @@ async def admin_evaluations_page(
             "total_tokens": lifetime_stats["tokens"],
             "total_prompt_tokens": lifetime_stats["prompt_tokens"],
             "total_completion_tokens": lifetime_stats["completion_tokens"],
+            "total_embedding_tokens": lifetime_stats.get("embedding_tokens", 0),
             "recent_evaluations": recent_stats["evaluations"],
             "recent_tokens": recent_stats["tokens"],
             "recent_prompt_tokens": recent_stats["prompt_tokens"],
             "recent_completion_tokens": recent_stats["completion_tokens"],
+            "recent_embedding_tokens": recent_stats.get("embedding_tokens", 0),
             "llm_service_status": llm_service_status,
             "llm_recent_evaluations": llm_recent_evaluations,
             "llm_recent_evaluations_offset": 0,
@@ -232,17 +236,8 @@ async def admin_schedule_page(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> HTMLResponse:
-    """Render the admin Refresh Schedule tab: the hourly rotation order."""
-    templates: Jinja2Templates = request.app.state.templates
-
-    admin_service = AdminService(session)
-    project_refresh_list = await admin_service.get_project_refresh_list()
-
-    return templates.TemplateResponse(
-        request,
-        "admin/schedule.html",
-        {"project_refresh_list": project_refresh_list},
-    )
+    """Render the admin Ingestion tab (formerly Refresh Schedule)."""
+    return await admin_overview_page(request, session=session)
 
 
 @router.get("/recent-activity", response_class=HTMLResponse)

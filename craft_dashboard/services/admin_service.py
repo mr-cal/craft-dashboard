@@ -44,6 +44,7 @@ class TokenStats(TypedDict):
     tokens: int
     prompt_tokens: int
     completion_tokens: int
+    embedding_tokens: int
 
 
 class ProjectRefreshEntry(TypedDict):
@@ -71,6 +72,10 @@ class ProjectRefreshEntry(TypedDict):
     # ``craft_dashboard.collectors.scheduler.record_refresh_error``).
     open_poll_consecutive_failures: int
     open_poll_last_error: str | None
+    last_open_poll_at: datetime | None
+    last_open_poll_issues_collected: int | None
+    last_full_refresh_issues_collected: int | None
+    last_full_refresh_duration_seconds: float | None
 
 
 class CollectionRunSummary(TypedDict):
@@ -267,6 +272,7 @@ class AdminService:
             func.sum(LLMEvaluation.tokens_used).label("tokens"),
             func.sum(LLMEvaluation.prompt_tokens).label("prompt_tokens"),
             func.sum(LLMEvaluation.completion_tokens).label("completion_tokens"),
+            func.sum(LLMEvaluation.embedding_tokens).label("embedding_tokens"),
         )
         if days is not None:
             query = query.where(
@@ -279,6 +285,7 @@ class AdminService:
             "tokens": row.tokens or 0,
             "prompt_tokens": row.prompt_tokens or 0,
             "completion_tokens": row.completion_tokens or 0,
+            "embedding_tokens": row.embedding_tokens or 0,
         }
 
     async def get_lifetime_token_stats(self) -> TokenStats:
@@ -309,6 +316,10 @@ class AdminService:
                 RefreshSchedule.last_error,
                 RefreshSchedule.open_poll_consecutive_failures,
                 RefreshSchedule.open_poll_last_error,
+                RefreshSchedule.last_open_poll_at,
+                RefreshSchedule.last_open_poll_issues_collected,
+                RefreshSchedule.last_full_refresh_issues_collected,
+                RefreshSchedule.last_full_refresh_duration_seconds,
             )
             .join(RefreshSchedule, RefreshSchedule.project_id == Project.id)
             .where(Project.category != "aggregate")
@@ -346,6 +357,10 @@ class AdminService:
                     "last_error": row.last_error,
                     "open_poll_consecutive_failures": row.open_poll_consecutive_failures,
                     "open_poll_last_error": row.open_poll_last_error,
+                    "last_open_poll_at": _ensure_utc(row.last_open_poll_at),
+                    "last_open_poll_issues_collected": row.last_open_poll_issues_collected,
+                    "last_full_refresh_issues_collected": row.last_full_refresh_issues_collected,
+                    "last_full_refresh_duration_seconds": row.last_full_refresh_duration_seconds,
                 }
             )
         return entries

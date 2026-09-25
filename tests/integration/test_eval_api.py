@@ -1527,6 +1527,59 @@ class TestEvalResultIntegration:
         )
         assert list(refreshed_issue.search_embedding) == search_emb
 
+    def test_submit_result_stores_embedding_tokens(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        """Embedding token usage is persisted on the LLMEvaluation row."""
+        project = make_project(id=1, name="snapcraft")
+        issue = make_issue(id=1, project_id=1, title="Regression in pack step")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+        current_hash = _compute_content_hash(
+            issue.title,
+            issue.body,
+            issue.state,
+            issue.labels,
+            issue.comments,
+        )
+
+        with (
+            patch(
+                "craft_dashboard.routes.eval_api.EmbeddingClient.embed_batch_with_usage",
+                new=AsyncMock(return_value=([[0.1] * 1024, [0.2] * 1024], 55)),
+            ),
+            TestClient(app) as client,
+        ):
+            response = client.post(
+                "/api/eval/result",
+                headers={"Authorization": "Bearer " + token},
+                json={
+                    "issue_id": 1,
+                    "content_hash": current_hash,
+                    "summary": "Maintainers confirmed the regression is still reproducible.",
+                    "scores": {
+                        "impact": 35,
+                        "complexity": 55,
+                        "actionability": 60,
+                        "confidence": 70,
+                    },
+                    "suggested_action": "keep_open",
+                    "suggested_action_reason": "The issue is actionable.",
+                    "tokens_used": 120,
+                    "model_used": "haiku",
+                    "llm_backend": "openrouter",
+                },
+            )
+
+        assert response.status_code == 200
+        evaluations = asyncio.get_event_loop().run_until_complete(
+            _all_evaluations(test_db_session)
+        )
+        assert len(evaluations) == 1
+        assert evaluations[0].embedding_tokens == 55
+
     def test_submit_result_replaces_evidence_paths_and_normalizes_repo_names(
         self, test_db_session: AsyncSession
     ) -> None:

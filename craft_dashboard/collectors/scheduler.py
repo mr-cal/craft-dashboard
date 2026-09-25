@@ -97,6 +97,9 @@ async def update_refresh_schedule(
     source: str,
     interval_days: int,
     session: AsyncSession,
+    *,
+    duration_seconds: float | None = None,
+    issues_collected: int | None = None,
 ) -> None:
     """Mark a project as successfully refreshed and schedule the next refresh.
 
@@ -107,6 +110,8 @@ async def update_refresh_schedule(
         source: The data source ('github' or 'launchpad').
         interval_days: Days until next refresh.
         session: An async SQLAlchemy session.
+        duration_seconds: Optional duration of this full refresh run in seconds.
+        issues_collected: Optional count of issues collected in this full refresh.
 
     """
     from sqlalchemy.dialects.postgresql import (
@@ -126,6 +131,8 @@ async def update_refresh_schedule(
         next_refresh_at=now + timedelta(days=interval_days),
         last_error=None,
         consecutive_failures=0,
+        last_full_refresh_duration_seconds=duration_seconds,
+        last_full_refresh_issues_collected=issues_collected,
     )
     stmt = stmt.on_conflict_do_update(
         index_elements=["project_id", "source"],
@@ -134,6 +141,8 @@ async def update_refresh_schedule(
             "next_refresh_at": now + timedelta(days=interval_days),
             "last_error": None,
             "consecutive_failures": 0,
+            "last_full_refresh_duration_seconds": duration_seconds,
+            "last_full_refresh_issues_collected": issues_collected,
         },
     )
     await session.execute(stmt)
@@ -239,6 +248,8 @@ async def record_open_poll_success(
     project_id: int,
     source: str,
     session: AsyncSession,
+    *,
+    issues_collected: int | None = None,
 ) -> None:
     """Clear the open-poll failure counter after a successful open-issue poll.
 
@@ -254,12 +265,18 @@ async def record_open_poll_success(
         RefreshSchedule,
     )
 
+    now = datetime.now(tz=UTC)
     await session.execute(
         update(RefreshSchedule)
         .where(
             RefreshSchedule.project_id == project_id,
             RefreshSchedule.source == source,
         )
-        .values(open_poll_last_error=None, open_poll_consecutive_failures=0)
+        .values(
+            open_poll_last_error=None,
+            open_poll_consecutive_failures=0,
+            last_open_poll_at=now,
+            last_open_poll_issues_collected=issues_collected,
+        )
     )
     await session.commit()

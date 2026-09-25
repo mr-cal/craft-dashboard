@@ -2,7 +2,15 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from craft_dashboard.models.base import Base
@@ -38,6 +46,18 @@ class RefreshSchedule(Base):
     open_poll_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     open_poll_consecutive_failures: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0
+    )
+    last_open_poll_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_open_poll_issues_collected: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    last_full_refresh_issues_collected: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    last_full_refresh_duration_seconds: Mapped[float | None] = mapped_column(
+        Float, nullable=True
     )
 
     def __repr__(self) -> str:
