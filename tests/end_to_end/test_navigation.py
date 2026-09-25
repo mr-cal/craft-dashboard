@@ -52,6 +52,7 @@ class TestNavigation:
             "/issues",
             "/stats/trends",
             "/stats/releases",
+            "/stats/cadence",
             "/stats/dependencies",
         ]
         for page_path in pages:

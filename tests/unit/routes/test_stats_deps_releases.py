@@ -96,13 +96,14 @@ def _release(
     *,
     version: str = "8.3.1",
     branch: str = "stable",
+    released_at: datetime | None = None,
     metadata_: dict | None = None,
 ) -> Release:
     return Release(
         project_id=project_id,
         version=version,
         branch=branch,
-        released_at=datetime(2024, 5, 1, tzinfo=UTC),
+        released_at=released_at or datetime(2024, 5, 1, tzinfo=UTC),
         is_hotfix=False,
         metadata_=metadata_ or {},
     )
@@ -490,3 +491,56 @@ class TestHotfixesSection:
 
         assert response.status_code == 200
         assert "No hotfix branches" in response.text
+
+
+class TestCadencePage:
+    def test_cadence_page_renders_table_and_tabs(
+        self, test_client: TestClient, test_db_session: AsyncSession
+    ) -> None:
+        async def _seed() -> None:
+            p1 = _project("snapcraft", category="application")
+            p2 = _project("craft-parts", category="library")
+            test_db_session.add_all([p1, p2])
+            await test_db_session.flush()
+            test_db_session.add(
+                _release(
+                    p1.id,
+                    version="8.3.1",
+                    released_at=datetime(2025, 1, 1, tzinfo=UTC),
+                    metadata_={"commits_since_tag": 5},
+                )
+            )
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = test_client.get("/stats/cadence")
+
+        assert response.status_code == 200
+        assert "Release Cadence" in response.text
+        assert "snapcraft" in response.text
+        assert "craft-parts" in response.text
+        assert "8.3.1" in response.text
+        assert 'href="/stats/cadence"' in response.text
+        assert "Actions" not in response.text
+
+    def test_cadence_shows_fallback_for_unreleased(
+        self, test_client: TestClient, test_db_session: AsyncSession
+    ) -> None:
+        test_client.app.state.config.initial_release_dates = {
+            "debcraft": "2025-06-02T10:36:08-03:00"
+        }
+
+        async def _seed() -> None:
+            p = _project("debcraft", category="application")
+            test_db_session.add(p)
+            await test_db_session.commit()
+
+        asyncio.get_event_loop().run_until_complete(_seed())
+
+        response = test_client.get("/stats/cadence")
+
+        assert response.status_code == 200
+        assert "debcraft" in response.text
+        assert "(unreleased)" in response.text
+        assert "2025-06-02" in response.text

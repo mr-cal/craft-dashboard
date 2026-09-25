@@ -1,88 +1,407 @@
 {% extends "base.html" %}
-{% macro stat_card(value, label, change=None) %}
-<div class="col-4">
-  <div class="p-card--highlighted" style="text-align:center;">
-    <p class="p-heading--2">
-      {{ value }}
-      {% if change is not none %}
-      <span style="font-size:0.6em;color:{% if change > 0 %}#c7162b{% elif change < 0 %}#28a745{% else %}#666{% endif %};">
-        ({{ "+%d"|format(change) if change >= 0 else change }})
-      </span>
-      {% endif %}
-    </p>
-    <p>{{ label }}</p>
-  </div>
-</div>
-{% endmacro %}
 {% block title %}Dashboard - craft-dashboard{% endblock %}
 {% block content %}
-<h2>Dashboard</h2>
-
-<div class="row" style="margin-bottom: 1.5rem;">
-  {{ stat_card(project_count, "Projects") }}
-  {{ stat_card(open_issues, "Open issues (30 day change)", issue_change) }}
-  {{ stat_card(open_prs, "Open PRs (30 day change)", pr_change) }}
+<div class="row">
+  <div class="col-12">
+    <h2>Operational Dashboard</h2>
+  </div>
 </div>
 
-{% set applications = projects | selectattr("category", "equalto", "application") | list %}
-{% set libraries = projects | selectattr("category", "equalto", "library") | list %}
-{% set other = projects | rejectattr("category", "in", ["application", "library"]) | list %}
+<!-- TOP KPI CARDS -->
+<div class="row" style="margin-bottom: 2rem;">
+  <!-- PR Velocity -->
+  <div class="col-3">
+    <div class="p-card kpi-card">
+      <h3 class="p-card__title">PR Velocity</h3>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">Contributor:</span>
+        <div class="kpi-metric-values">
+          <span class="kpi-main-val">{{ metrics.velocity.contributor_avg_age ~ "d" if metrics.velocity.contributor_avg_age is not none else "—" }}</span>
+          <a href="/issues?state=open&issue_type=pull_request&author_role=contributor&sort=age_desc"
+             class="p-chip is-dense kpi-chip" title="View open contributor PRs">
+            {{ metrics.velocity.contributor_count }} open
+          </a>
+        </div>
+      </div>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">Overall:</span>
+        <div class="kpi-metric-values">
+          <span class="kpi-main-val">{{ metrics.velocity.overall_avg_age ~ "d" if metrics.velocity.overall_avg_age is not none else "—" }}</span>
+          <a href="/issues?state=open&issue_type=pull_request&sort=age_desc"
+             class="p-chip is-dense kpi-chip" title="View all open PRs">
+            {{ metrics.velocity.overall_count }} open
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
 
-{% macro project_table(items) %}
-<table data-sortable>
+  <!-- Resolution Throughput -->
+  <div class="col-3">
+    <div class="p-card kpi-card">
+      <h3 class="p-card__title">Resolution Throughput</h3>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">Last 30d:</span>
+        <div class="kpi-metric-values">
+          <span class="kpi-main-val">{{ metrics.throughput.total_30d }}</span>
+          <span class="kpi-sub-text">({{ metrics.throughput.issues_30d }} issues · {{ metrics.throughput.prs_30d }} PRs)</span>
+        </div>
+      </div>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">Last 365d:</span>
+        <div class="kpi-metric-values">
+          <span class="kpi-main-val">{{ metrics.throughput.total_365d }}</span>
+          <span class="kpi-sub-text">({{ metrics.throughput.issues_365d }} issues · {{ metrics.throughput.prs_365d }} PRs)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Untriaged Backlog -->
+  <div class="col-3">
+    <div class="p-card kpi-card">
+      <h3 class="p-card__title">Untriaged Backlog</h3>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">Issues:</span>
+        <div class="kpi-metric-values">
+          <a href="/issues?state=open&issue_type=issue&action=needs_triage"
+             class="kpi-main-val kpi-link" title="Open untriaged issues">
+            {{ metrics.untriaged.issues_count }}
+          </a>
+          <span class="kpi-sub-text">(+{{ metrics.untriaged.issues_30d_new }} in 30d)</span>
+        </div>
+      </div>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">PRs:</span>
+        <div class="kpi-metric-values">
+          <a href="/issues?state=open&issue_type=pull_request&action=needs_review"
+             class="kpi-main-val kpi-link" title="Open untriaged PRs">
+            {{ metrics.untriaged.prs_count }}
+          </a>
+          <span class="kpi-sub-text">(+{{ metrics.untriaged.prs_30d_new }} in 30d)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- All-Time Volume -->
+  <div class="col-3">
+    <div class="p-card kpi-card">
+      <h3 class="p-card__title">All-Time Volume</h3>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">Issues:</span>
+        <div class="kpi-metric-values">
+          <span class="kpi-main-val">{{ metrics.volume.open_issues }} open</span>
+          <span class="kpi-sub-text">/ {{ metrics.volume.closed_issues }} closed (+{{ metrics.volume.issues_30d_closed }} 30d)</span>
+        </div>
+      </div>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">PRs:</span>
+        <div class="kpi-metric-values">
+          <span class="kpi-main-val">{{ metrics.volume.open_prs }} open</span>
+          <span class="kpi-sub-text">/ {{ metrics.volume.closed_prs }} closed (+{{ metrics.volume.prs_30d_closed }} 30d)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 2x2 OPERATIONAL SPOTLIGHTS -->
+<div class="row" style="margin-bottom: 2rem;">
+  <!-- ROW 1 LEFT: Apps with Least-Recent Releases -->
+  <div class="col-6">
+    <div class="p-card spotlight-card">
+      <div class="spotlight-header">
+        <h3 class="p-card__title u-no-margin--bottom">Apps with Least-Recent Releases</h3>
+        <a href="/stats/cadence" class="p-link--soft spotlight-nav-link">View all in Cadence &rarr;</a>
+      </div>
+      <table class="p-table--default u-no-margin--bottom">
+        <thead>
+          <tr>
+            <th>Application</th>
+            <th>Tag</th>
+            <th>Released</th>
+            <th>Cadence</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for app in metrics.least_recent_apps %}
+          <tr>
+            <td>
+              <a href="/issues?project={{ app.project_name }}&state=open"><strong>{{ app.project_name }}</strong></a>
+            </td>
+            <td>
+              {% if app.is_fallback %}
+              <span class="p-text--muted"><em>(unreleased)</em></span>
+              {% else %}
+              <code>{{ app.version }}</code>
+              {% endif %}
+            </td>
+            <td>
+              {% if app.released_at %}
+              {{ app.released_at.strftime("%Y-%m-%d") }}
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if app.days_ago is not none %}
+              <span class="cadence-badge cadence-badge--{{ app.badge_color }}">
+                {{ app.days_ago }}d ago
+              </span>
+              {% else %}
+              <span class="p-text--muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="4">No application releases tracked yet.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ROW 1 RIGHT: Aging Contributor PRs (Attention Needed) -->
+  <div class="col-6">
+    <div class="p-card spotlight-card">
+      <div class="spotlight-header">
+        <h3 class="p-card__title u-no-margin--bottom">Aging Contributor PRs (Attention Needed)</h3>
+        <a href="/issues?state=open&issue_type=pull_request&author_role=contributor&sort=age_desc"
+           class="p-link--soft spotlight-nav-link">View all contributor PRs &rarr;</a>
+      </div>
+      <table class="p-table--default u-no-margin--bottom">
+        <thead>
+          <tr>
+            <th>PR</th>
+            <th>Author</th>
+            <th>Title</th>
+            <th>Age</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for pr in metrics.aging_prs %}
+          <tr>
+            <td style="white-space: nowrap;">
+              <span class="p-chip is-dense">{{ pr.project_name }}</span>
+              <a href="{{ pr.url or ('/issues?project=' ~ pr.project_name ~ '&search=' ~ pr.external_id) }}"
+                 target="_blank" rel="noopener noreferrer">
+                #{{ pr.external_id }}
+              </a>
+            </td>
+            <td>{{ pr.author or "—" }}</td>
+            <td class="spotlight-title" title="{{ pr.title }}">
+              <a href="{{ pr.url or ('/issues?project=' ~ pr.project_name ~ '&search=' ~ pr.external_id) }}"
+                 target="_blank" rel="noopener noreferrer">
+                {{ pr.title }}
+              </a>
+            </td>
+            <td style="white-space: nowrap;">
+              <span class="cadence-badge cadence-badge--red">{{ pr.days_old }}d</span>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="4">No open contributor PRs found.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="row" style="margin-bottom: 2rem;">
+  <!-- ROW 2 LEFT: Needs Triage (Top 5 Oldest Untriaged Issues) -->
+  <div class="col-6">
+    <div class="p-card spotlight-card">
+      <div class="spotlight-header">
+        <h3 class="p-card__title u-no-margin--bottom">Needs Triage (Top 5 Oldest)</h3>
+        <a href="/issues?state=open&issue_type=issue&action=needs_triage"
+           class="p-link--soft spotlight-nav-link">View all untriaged issues &rarr;</a>
+      </div>
+      <table class="p-table--default u-no-margin--bottom">
+        <thead>
+          <tr>
+            <th>Issue</th>
+            <th>Author</th>
+            <th>Title</th>
+            <th>Age</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for issue in metrics.needs_triage_issues %}
+          <tr>
+            <td style="white-space: nowrap;">
+              <span class="p-chip is-dense">{{ issue.project_name }}</span>
+              <a href="{{ issue.url or ('/issues?project=' ~ issue.project_name ~ '&search=' ~ issue.external_id) }}"
+                 target="_blank" rel="noopener noreferrer">
+                #{{ issue.external_id }}
+              </a>
+            </td>
+            <td>{{ issue.author or "—" }}</td>
+            <td class="spotlight-title" title="{{ issue.title }}">
+              <a href="{{ issue.url or ('/issues?project=' ~ issue.project_name ~ '&search=' ~ issue.external_id) }}"
+                 target="_blank" rel="noopener noreferrer">
+                {{ issue.title }}
+              </a>
+            </td>
+            <td style="white-space: nowrap;">
+              <span class="cadence-badge cadence-badge--yellow">{{ issue.days_old }}d</span>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="4">All open issues are triaged!</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ROW 2 RIGHT: Quick-Wins Radar (Top 5 High Impact / Low Complexity) -->
+  <div class="col-6">
+    <div class="p-card spotlight-card">
+      <div class="spotlight-header">
+        <h3 class="p-card__title u-no-margin--bottom">Quick-Wins Radar</h3>
+        <a href="/issues?state=open&quick_win_min=50&sort=quick_win_desc"
+           class="p-link--soft spotlight-nav-link">View all quick wins &rarr;</a>
+      </div>
+      <table class="p-table--default u-no-margin--bottom">
+        <thead>
+          <tr>
+            <th>Issue</th>
+            <th>Title</th>
+            <th>Quick-Win Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for qw in metrics.quick_wins %}
+          <tr>
+            <td style="white-space: nowrap;">
+              <span class="p-chip is-dense">{{ qw.project_name }}</span>
+              <a href="{{ qw.url or ('/issues?project=' ~ qw.project_name ~ '&search=' ~ qw.external_id) }}"
+                 target="_blank" rel="noopener noreferrer">
+                #{{ qw.external_id }}
+              </a>
+            </td>
+            <td class="spotlight-title" title="{{ qw.title }}">
+              <a href="{{ qw.url or ('/issues?project=' ~ qw.project_name ~ '&search=' ~ qw.external_id) }}"
+                 target="_blank" rel="noopener noreferrer">
+                {{ qw.title }}
+              </a>
+            </td>
+            <td style="white-space: nowrap;">
+              <span class="quick-win-pill">
+                Score {{ qw.quick_win }}
+              </span>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="3">No quick-win candidates currently scored &ge; 50.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- LOWER SECTION: PROJECT HEALTH & QUICK-NAV DIRECTORY -->
+<div class="row">
+  <div class="col-12">
+    <h3>Project Health &amp; Navigation</h3>
+    <p class="p-text--default">
+      Direct overview and 1-click filter shortcuts across all tracked craft applications and core libraries.
+    </p>
+  </div>
+</div>
+
+{% macro render_health_table(project_list) %}
+<table class="p-table--default project-health-table u-no-margin--bottom">
   <thead>
     <tr>
-      <th>Project</th>
+      <th style="width: 25%;">Project</th>
       <th>Open Issues</th>
       <th>Open PRs</th>
+      <th>Untriaged Backlog</th>
+      <th>Latest Release</th>
     </tr>
   </thead>
   <tbody>
-    {% for project in items %}
+    {% for p in project_list %}
     <tr>
-      <td><a href="/issues?project={{ project.name }}">{{ project.name }}</a></td>
-      <td>{{ project.open_issues }}</td>
-      <td>{{ project.open_prs }}</td>
+      <td>
+        <a href="/issues?project={{ p.name }}&state=open" class="project-name-link">
+          <strong>{{ p.name }}</strong>
+        </a>
+        <a href="https://github.com/{{ p.github_org }}/{{ p.name }}"
+           target="_blank" rel="noopener noreferrer" class="p-link--soft"
+           title="View {{ p.name }} on GitHub">
+          <i class="p-icon--external-link is-light" style="font-size: 0.8rem; margin-left: 0.25rem;"></i>
+        </a>
+      </td>
+      <td>
+        <a href="/issues?project={{ p.name }}&issue_type=issue&state=open"
+           class="p-chip is-dense nav-chip" title="Filter open issues">
+          {{ p.open_issues }} issues
+        </a>
+      </td>
+      <td>
+        <a href="/issues?project={{ p.name }}&issue_type=pull_request&state=open"
+           class="p-chip is-dense nav-chip" title="Filter open PRs">
+          {{ p.open_prs }} PRs
+        </a>
+      </td>
+      <td>
+        <a href="/issues?project={{ p.name }}&action=needs_triage"
+           class="health-triage-badge health-triage-badge--{{ p.triage_badge_color }}"
+           title="Filter untriaged backlog">
+          {{ p.untriaged_count }} untriaged ({{ p.untriaged_pct }}%)
+        </a>
+      </td>
+      <td>
+        <a href="/stats/releases" class="health-release-badge health-release-badge--{{ p.release_badge_color }}"
+           title="View releases">
+          {% if p.latest_release_version %}
+          <code>{{ p.latest_release_version }}</code>
+          {% if p.latest_release_days_ago is not none %}
+          <span class="p-text--muted">({{ p.latest_release_days_ago }}d ago)</span>
+          {% endif %}
+          {% else %}
+          <span class="p-text--muted"><em>(none)</em></span>
+          {% endif %}
+        </a>
+      </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
 {% endmacro %}
 
-{% if applications %}
-<div class="row--25-75">
+<div class="row--25-75" style="margin-bottom: 1.5rem;">
   <div class="col">
-    <h3>Applications</h3>
+    <h4>Applications</h4>
+    <p class="p-text--muted">Pack and build tools for snaps, charms, rocks, and debs.</p>
   </div>
   <div class="col">
-    {{ project_table(applications) }}
+    {{ render_health_table(metrics.application_projects) }}
   </div>
 </div>
-<hr class="p-rule" />
-{% endif %}
 
-{% if libraries %}
-<div class="row--25-75">
-  <div class="col">
-    <h3>Libraries</h3>
-  </div>
-  <div class="col">
-    {{ project_table(libraries) }}
-  </div>
-</div>
 <hr class="p-rule" />
-{% endif %}
 
-{% if other %}
-<div class="row--25-75">
+<div class="row--25-75" style="margin-bottom: 1.5rem;">
   <div class="col">
-    <h3>Other</h3>
+    <h4>Core Libraries &amp; Tools</h4>
+    <p class="p-text--muted">Shared grammar, parts, providers, store, and cli engines.</p>
   </div>
   <div class="col">
-    {{ project_table(other) }}
+    {{ render_health_table(metrics.library_projects + metrics.other_projects) }}
   </div>
 </div>
-{% endif %}
 {% endblock %}
 {% block scripts %}
 <script src="/static/js/table-sort.js"></script>

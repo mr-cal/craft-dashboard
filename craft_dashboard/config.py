@@ -60,6 +60,7 @@ class DashboardConfig(BaseModel):
     launchpad_maintainers: list[str] = Field(default_factory=list)
     bots: list[str] = Field(default_factory=list)
     hotfix_min_versions: dict[str, str] = Field(default_factory=dict)
+    initial_release_dates: dict[str, str] = Field(default_factory=dict)
     filtered_issues: dict[str, list[str]] = Field(default_factory=dict)
     forums: dict[str, ForumConfig] = Field(default_factory=dict)
 
@@ -120,6 +121,8 @@ def load_config(config_path: Path) -> DashboardConfig:
     # Handle nested sections
     if "hotfix_min_versions" in normalized:
         normalized["hotfix_min_versions"] = dict(normalized["hotfix_min_versions"])
+    if "initial_release_dates" in normalized:
+        normalized["initial_release_dates"] = dict(normalized["initial_release_dates"])
     if "schedule" in normalized and isinstance(normalized["schedule"], dict):
         schedule = normalized.pop("schedule")
         normalized["schedule_days"] = schedule.get("days", [])

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Release Cadence - craft-dashboard{% endblock %}
+{% block content %}
+{% include "stats/partials/tabs.html" %}
+
+<div class="row">
+  <div class="col-12">
+    <h2>Release Cadence</h2>
+    <p class="p-text--default">
+      Release freshness across all tracked repositories, ordered by least-recent release.
+      For unreleased repositories with a known start date, cadence is tracked from initial repository commit.
+    </p>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-12">
+    <table data-sortable class="p-table--sortable u-no-margin--bottom">
+      <thead>
+        <tr>
+          <th>Repository</th>
+          <th>Category</th>
+          <th>Latest Release Tag</th>
+          <th>Release Date</th>
+          <th>Days Since Release</th>
+          <th>Commits Since Release</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in cadence %}
+        <tr>
+          <td>
+            <a href="https://github.com/{{ row.full_name }}" target="_blank" rel="noopener noreferrer">
+              {{ row.full_name }}
+              <i class="p-icon--external-link is-light" style="font-size: 0.8rem; vertical-align: middle;"></i>
+            </a>
+          </td>
+          <td>
+            <span class="p-chip">{{ row.category }}</span>
+          </td>
+          <td>
+            {% if row.is_fallback %}
+            <span class="p-text--muted"><em>(unreleased)</em></span>
+            {% else %}
+            <code>{{ row.latest_version }}</code>
+            {% endif %}
+          </td>
+          <td>{{ row.released_at_str }}</td>
+          <td>
+            {% if row.days_ago is not none %}
+            <span class="cadence-badge cadence-badge--{{ row.badge_color }}">
+              {{ row.days_ago }}d ago
+            </span>
+            {% else %}
+            <span class="p-text--muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.commits_since is not none %}
+            {{ row.commits_since }}
+            {% else %}
+            <span class="p-text--muted">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6">No repository cadence data available.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/table-sort.js"></script>
+{% endblock %}

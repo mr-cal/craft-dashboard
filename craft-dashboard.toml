@@ -121,6 +121,12 @@ charmcraft = "3.0"
 snapcraft = "8.0"
 rockcraft = "1.15"
 
+# Initial release or repository start dates for unreleased projects (or projects
+# without a GitHub release tag) to measure release cadence from their inception.
+# debcraft's initial commit excluding starbase landed on 2025-06-02T10:36:08-03:00.
+[initial-release-dates]
+debcraft = "2025-06-02T10:36:08-03:00"
+
 # Forums to track for the Engagement > Forum Activity page. Every forum is
 # always tracked in full (all categories) — see
 # plans/33-forum-activity-tracker.md for why no per-forum category scoping

@@ -3,6 +3,7 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
 import pytest
 from craft_dashboard.app import create_app
@@ -34,12 +35,26 @@ async def _noop_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
 
+class _EmptyScalars:
+    def all(self):
+        return []
+
+
 class _EmptyResult:
     def scalars(self):
-        return []
+        return _EmptyScalars()
 
     def scalar(self):
         return None
+
+    def all(self):
+        return []
+
+    def one(self):
+        m = MagicMock()
+        m.total = 0
+        m.new_30d = 0
+        return m
 
     def __iter__(self):
         return iter(())
@@ -53,9 +68,11 @@ class _DashboardSession:
         self.count_idx = 0
 
     async def scalar(self, _query):
-        val = self.counts[self.count_idx]
-        self.count_idx += 1
-        return val
+        if self.count_idx < len(self.counts):
+            val = self.counts[self.count_idx]
+            self.count_idx += 1
+            return val
+        return 0
 
     async def execute(self, _query):
         return _EmptyResult()
@@ -79,10 +96,10 @@ class TestDashboardIndex:
 
             assert response.status_code == 200
             assert "text/html" in response.headers["content-type"]
-            assert "Dashboard" in response.text
+            assert "Operational Dashboard" in response.text
 
     def test_index_includes_landmarks_and_stat_cards(self) -> None:
-        """GET / includes page landmarks and summary stat cards."""
+        """GET / includes page landmarks and operational KPI cards."""
         app = create_app()
         app.router.lifespan_context = _noop_lifespan
 
@@ -99,10 +116,15 @@ class TestDashboardIndex:
         assert 'aria-label="Mobile menu"' in response.text
         assert 'role="main"' in response.text
         assert 'role="contentinfo"' in response.text
-        assert response.text.count('class="p-card--highlighted"') == 3
-        assert "Projects" in response.text
-        assert "Open issues" in response.text
-        assert "Open PRs" in response.text
+        assert "PR Velocity" in response.text
+        assert "Resolution Throughput" in response.text
+        assert "Untriaged Backlog" in response.text
+        assert "All-Time Volume" in response.text
+        assert "Apps with Least-Recent Releases" in response.text
+        assert "Aging Contributor PRs" in response.text
+        assert "Needs Triage" in response.text
+        assert "Quick-Wins Radar" in response.text
+        assert "Project Health &amp; Navigation" in response.text
 
 
 class TestDashboardIndexWithData:

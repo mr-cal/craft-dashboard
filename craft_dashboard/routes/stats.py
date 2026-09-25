@@ -18,6 +18,7 @@ from craft_dashboard.models.snapshot import Snapshot
 from craft_dashboard.repositories.issue_repository import (
     _build_excluded_issues_condition,
 )
+from craft_dashboard.services.dashboard_service import DashboardService
 
 if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
@@ -308,6 +309,24 @@ async def releases_page(
         request,
         "stats/releases.html",
         {"releases": filtered, "hotfixes": hotfixes},
+    )
+
+
+@router.get("/cadence", response_class=HTMLResponse)
+async def cadence_page(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> HTMLResponse:
+    """Render the release cadence page showing all repositories ordered by least-recent release."""
+    templates: Jinja2Templates = request.app.state.templates
+    config = get_config(request)
+    service = DashboardService(session)
+    cadence = await service.get_all_repos_release_cadence(config)
+
+    return templates.TemplateResponse(
+        request,
+        "stats/cadence.html",
+        {"cadence": cadence},
     )
 
 

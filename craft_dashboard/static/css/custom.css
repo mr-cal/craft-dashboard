@@ -892,3 +892,253 @@ table {
   margin-bottom: 0.75rem;
   padding: 0.5rem 0.75rem;
 }
+
+/* ==========================================================================
+   Operational Dashboard & Cadence Styles
+   ========================================================================== */
+
+.kpi-card {
+  min-height: 10.5rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  padding: 1rem;
+  background: var(--app-surface);
+}
+
+.kpi-card .p-card__title {
+  margin-bottom: 0.85rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--app-text);
+  border-bottom: 1px solid var(--app-border-strong);
+  padding-bottom: 0.35rem;
+}
+
+.kpi-metric-row {
+  margin-bottom: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.kpi-metric-row:last-child {
+  margin-bottom: 0;
+}
+
+.kpi-metric-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--app-text-muted);
+}
+
+.kpi-metric-values {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.kpi-main-val {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--app-text);
+}
+
+a.kpi-main-val:hover {
+  color: #0066cc;
+  text-decoration: underline;
+}
+
+.kpi-sub-text {
+  font-size: 0.8rem;
+  color: var(--app-text-muted);
+}
+
+.kpi-chip {
+  text-decoration: none;
+  cursor: pointer;
+  background: var(--app-chip-background);
+  color: var(--app-chip-text);
+}
+
+.kpi-chip:hover {
+  background: #0066cc;
+  color: #fff;
+}
+
+.spotlight-card {
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  padding: 1rem;
+  background: var(--app-surface);
+  height: 100%;
+}
+
+.spotlight-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.75rem;
+}
+
+.spotlight-nav-link {
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.spotlight-title {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cadence-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.cadence-badge--green {
+  background-color: #e6f4ea;
+  color: #137333;
+  border: 1px solid #ceead6;
+}
+
+.cadence-badge--yellow {
+  background-color: #fef7e0;
+  color: #b06000;
+  border: 1px solid #fce8b2;
+}
+
+.cadence-badge--red {
+  background-color: #fce8e6;
+  color: #c5221f;
+  border: 1px solid #fad2cf;
+}
+
+.health-triage-badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.health-triage-badge--green,
+.health-triage-badge--neutral {
+  background-color: var(--app-surface-muted);
+  color: var(--app-text-muted);
+  border: 1px solid var(--app-border);
+}
+
+.health-triage-badge--yellow {
+  background-color: #fef7e0;
+  color: #b06000;
+  border: 1px solid #fce8b2;
+}
+
+.health-triage-badge--red {
+  background-color: #fce8e6;
+  color: #c5221f;
+  border: 1px solid #fad2cf;
+}
+
+.health-release-badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  text-decoration: none;
+}
+
+.health-release-badge--green {
+  background-color: #e6f4ea;
+  color: #137333;
+  border: 1px solid #ceead6;
+}
+
+.health-release-badge--yellow {
+  background-color: #fef7e0;
+  color: #b06000;
+  border: 1px solid #fce8b2;
+}
+
+.health-release-badge--red {
+  background-color: #fce8e6;
+  color: #c5221f;
+  border: 1px solid #fad2cf;
+}
+
+.health-release-badge--neutral {
+  background-color: var(--app-surface-muted);
+  color: var(--app-text-muted);
+  border: 1px solid var(--app-border);
+}
+
+.quick-win-pill {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background-color: #f3e8ff;
+  color: #6b21a8;
+  border: 1px solid #e9d5ff;
+}
+
+.nav-chip {
+  text-decoration: none;
+}
+
+.project-name-link {
+  text-decoration: none;
+  color: inherit;
+}
+
+.project-name-link:hover {
+  text-decoration: underline;
+  color: #0066cc;
+}
+
+/* Dark mode adjustments for badges and pills */
+html.is-dark-theme .cadence-badge--green,
+html.is-dark-theme .health-release-badge--green {
+  background-color: #143522;
+  color: #6ddf8d;
+  border-color: #1e5634;
+}
+
+html.is-dark-theme .cadence-badge--yellow,
+html.is-dark-theme .health-triage-badge--yellow,
+html.is-dark-theme .health-release-badge--yellow {
+  background-color: #3b2a0c;
+  color: #ffd166;
+  border-color: #594013;
+}
+
+html.is-dark-theme .cadence-badge--red,
+html.is-dark-theme .health-triage-badge--red,
+html.is-dark-theme .health-release-badge--red {
+  background-color: #3a151b;
+  color: #ff6b7a;
+  border-color: #5c202a;
+}
+
+html.is-dark-theme .quick-win-pill {
+  background-color: #2e1a47;
+  color: #d8b4fe;
+  border-color: #4c2875;
+}
+
