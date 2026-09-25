@@ -160,9 +160,12 @@
     </div>
     <script>
       (function () {
-        const labels = {{ llm_queue_depth_history | map(attribute="captured_at") | map("string") | list | tojson }};
+        const rawTimestamps = {{ llm_queue_depth_history | map(attribute="captured_at") | map("string") | list | tojson }};
+        const labels = rawTimestamps.map(function (ts) {
+          const d = new Date(ts);
+          return isNaN(d) ? ts.slice(0, 10) : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        });
         const pending = {{ llm_queue_depth_history | map(attribute="pending_count") | list | tojson }};
-        const totalOpen = {{ llm_queue_depth_history | map(attribute="total_open") | list | tojson }};
         new Chart(document.getElementById("queue-depth-chart"), {
           type: "line",
           data: {
@@ -173,16 +176,6 @@
                 data: pending,
                 borderColor: "#c7162b",
                 backgroundColor: "rgba(199, 22, 43, 0.1)",
-                yAxisID: "y",
-                tension: 0.2,
-                pointRadius: 0,
-              },
-              {
-                label: "Total open",
-                data: totalOpen,
-                borderColor: "#0e8420",
-                backgroundColor: "rgba(14, 132, 32, 0.1)",
-                yAxisID: "y1",
                 tension: 0.2,
                 pointRadius: 0,
               },
@@ -192,22 +185,24 @@
             responsive: true,
             maintainAspectRatio: false,
             interaction: { mode: "index", intersect: false },
+            plugins: {
+              tooltip: {
+                callbacks: {
+                  title: function (items) {
+                    if (!items.length) return "";
+                    const d = new Date(rawTimestamps[items[0].dataIndex]);
+                    return isNaN(d) ? rawTimestamps[items[0].dataIndex] : d.toLocaleString();
+                  },
+                },
+              },
+            },
             scales: {
               x: { ticks: { maxTicksLimit: 8 } },
               y: {
                 type: "linear",
                 display: true,
-                position: "left",
                 beginAtZero: true,
                 title: { display: true, text: "Pending" },
-              },
-              y1: {
-                type: "linear",
-                display: true,
-                position: "right",
-                beginAtZero: true,
-                title: { display: true, text: "Total open" },
-                grid: { drawOnChartArea: false },
               },
             },
           },

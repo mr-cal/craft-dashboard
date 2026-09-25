@@ -597,6 +597,33 @@ class TestQueueDepthSnapshot:
         assert len(rows) == 1
         assert rows[0].total_open == 2
 
+    def test_snapshot_pending_count_includes_open_and_closed_issues(
+        self, test_db_session: AsyncSession, monkeypatch
+    ) -> None:
+        """The snapshot pending_count includes both open and closed issues needing evaluation."""
+        monkeypatch.setattr(eval_api, "_last_queue_snapshot_at", None)
+        project = make_project(id=1, name="snapcraft")
+        open_issue = make_issue(id=1, project_id=1, external_id="1", state="open")
+        closed_issue = make_issue(id=2, project_id=1, external_id="2", state="closed")
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, open_issue, closed_issue)
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/eval/next", headers={"Authorization": "Bearer " + token}
+            )
+
+        assert response.status_code == 200
+        snapshots = asyncio.get_event_loop().run_until_complete(
+            test_db_session.execute(select(EvalQueueSnapshot))
+        )
+        rows = list(snapshots.scalars())
+        assert len(rows) == 1
+        # Both open_issue and closed_issue are unevaluated, so both count as pending
+        assert rows[0].pending_count == 2
+
 
 class TestEvalNextPriorityOrdering:
     """Priority ordering tests for GET /api/eval/next."""

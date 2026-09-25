@@ -221,44 +221,16 @@ async def _maybe_record_queue_snapshot(
         )
     )
 
-    # Mirrors `eval_status`'s default (open_only=True, force=False,
-    # incomplete=False, stale_days=0) pending-count branch — the
-    # steady-state queue depth, which is what's meaningful to chart over
-    # time. Duplicated rather than shared because `eval_status` is
-    # parameterized for ad hoc queries the snapshot doesn't need.
-    latest_evaluation = aliased(LLMEvaluation)
+    # Count all pending issues across both open and closed states that need evaluation.
     pending_query = (
-        select(Issue.id)
-        .join(Project, Issue.project_id == Project.id)
-        .outerjoin(
-            latest_evaluation,
-            (latest_evaluation.issue_id == Issue.id) & latest_evaluation.latest,
+        build_pending_evaluation_query(
+            open_only=False,
+            filtered_issues=filtered_issues,
+            now=now,
+            for_update=False,
         )
-        .where(Issue.state == "open")
-    )
-    if excl is not None:
-        pending_query = pending_query.where(excl)
-    expected_version = expected_version_sql_expr()
-    old_version = or_(
-        latest_evaluation.eval_version.is_(None),
-        latest_evaluation.eval_version != expected_version,
-    )
-    old_version_unlocked = old_version & or_(
-        latest_evaluation.eval_locked_until.is_(None),
-        latest_evaluation.eval_locked_until <= now,
-    )
-    pending_query = pending_query.where(
-        or_(
-            latest_evaluation.id.is_(None),
-            old_version_unlocked,
-            (
-                (latest_evaluation.model_name == "pending")
-                & or_(
-                    latest_evaluation.eval_locked_until.is_(None),
-                    latest_evaluation.eval_locked_until <= now,
-                )
-            ),
-        )
+        .with_only_columns(Issue.id)
+        .order_by(None)
     )
     pending = await session.scalar(
         select(func.count()).select_from(pending_query.subquery())

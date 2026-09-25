@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from sqlalchemy.sql import Select
 
 
-def build_pending_evaluation_query(
+def build_pending_evaluation_query(  # noqa: PLR0913
     *,
     project: str = "",
     open_only: bool = True,
@@ -39,6 +39,7 @@ def build_pending_evaluation_query(
     external_id: str = "",
     filtered_issues: dict[str, list[str]] | None = None,
     now: datetime | None = None,
+    for_update: bool = True,
 ) -> Select[tuple[Issue, str, LLMEvaluation | None]]:
     """Build a query returning the single highest-priority pending issue.
 
@@ -64,6 +65,7 @@ def build_pending_evaluation_query(
             project).
         filtered_issues: Per-project issue numbers to exclude entirely.
         now: Override "now" for locking/staleness comparisons (tests).
+        for_update: Apply FOR UPDATE SKIP LOCKED on Issue rows when true.
 
     Returns:
         A ``Select`` yielding ``(Issue, project_name, latest_evaluation)``
@@ -199,6 +201,7 @@ def build_pending_evaluation_query(
     # to ``latest_evaluation``, which may have no matching row (never
     # evaluated) — only ``Issue`` rows always exist to lock. SQLite (used in
     # tests) silently ignores ``with_for_update``.
-    query = query.with_for_update(skip_locked=True, of=Issue)
+    if for_update:
+        query = query.with_for_update(skip_locked=True, of=Issue)
 
     return cast("Select[tuple[Issue, str, LLMEvaluation | None]]", query)
