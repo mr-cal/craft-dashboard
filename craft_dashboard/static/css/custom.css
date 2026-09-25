@@ -988,6 +988,16 @@ a.kpi-main-val:hover {
   color: var(--app-text-muted);
 }
 
+.kpi-card__footer {
+  margin-top: auto;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--app-border-strong);
+}
+
+.kpi-card__footer a {
+  font-size: 0.85rem;
+}
+
 .kpi-delta--positive {
   color: #137333;
   font-weight: 600;

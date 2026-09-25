@@ -116,15 +116,15 @@ class TestDashboardIndex:
         assert 'aria-label="Mobile menu"' in response.text
         assert 'role="main"' in response.text
         assert 'role="contentinfo"' in response.text
-        assert "Open PR Age &amp; Response" in response.text
-        assert "Resolution Throughput" in response.text
-        assert "Untriaged Backlog" in response.text
-        assert "All-Time Volume" in response.text
-        assert "Apps with Least-Recent Releases" in response.text
-        assert "Aging Contributor PRs" in response.text
-        assert "Needs Triage" in response.text
-        assert "Quick-Wins Radar" in response.text
-        assert "Project Health &amp; Navigation" in response.text
+        assert "Open PR age &amp; response" in response.text
+        assert "Resolution throughput" in response.text
+        assert "Untriaged backlog" in response.text
+        assert "All-time volume" in response.text
+        assert "Apps with least-recent releases" in response.text
+        assert "Aging contributor PRs" in response.text
+        assert "Needs triage" in response.text
+        assert "Quick-wins radar" in response.text
+        assert "Project health &amp; navigation" in response.text
 
 
 class TestDashboardIndexWithData:

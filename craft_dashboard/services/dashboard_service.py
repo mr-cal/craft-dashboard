@@ -788,9 +788,21 @@ class DashboardService:
                 "show_release": p.name not in config.hide_releases,
             }
 
-            if p.category == "application":
+            cat = p.category
+            if config.craft_applications and p.name in config.craft_applications:
+                cat = "application"
+            elif config.craft_libraries and p.name in config.craft_libraries:
+                cat = "library"
+            elif (
+                config.craft_other
+                and p.name in config.craft_other
+                or p.name == "snapcraft (launchpad)"
+            ):
+                cat = "other"
+
+            if cat == "application":
                 application_projects.append(row_data)
-            elif p.category == "library":
+            elif cat == "library":
                 library_projects.append(row_data)
             else:
                 other_projects.append(row_data)
@@ -858,6 +870,7 @@ class DashboardService:
         category_labels = {
             "application": "Application",
             "library": "Library",
+            "other": "Other",
         }
 
         cadence_rows: list[RepoCadenceRow] = []
@@ -867,6 +880,18 @@ class DashboardService:
 
             rel = latest_rel_by_project.get(p.id)
             fallback_dt = _parse_fallback_date(config.initial_release_dates.get(p.name))
+
+            cat = p.category
+            if config.craft_applications and p.name in config.craft_applications:
+                cat = "application"
+            elif config.craft_libraries and p.name in config.craft_libraries:
+                cat = "library"
+            elif (
+                config.craft_other
+                and p.name in config.craft_other
+                or p.name == "snapcraft (launchpad)"
+            ):
+                cat = "other"
 
             version = "(unreleased)"
             released_at = None
@@ -904,7 +929,7 @@ class DashboardService:
                     "name": p.name,
                     "full_name": f"{p.github_org or 'canonical'}/{p.name}",
                     "github_org": p.github_org or "canonical",
-                    "category": category_labels.get(p.category, p.category.title()),
+                    "category": category_labels.get(cat, cat.title()),
                     "latest_version": version,
                     "released_at": released_at,
                     "released_at_str": released_at_str,

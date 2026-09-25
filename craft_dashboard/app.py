@@ -125,6 +125,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 _DURATION_MINUTE = 60
 _DURATION_HOUR = 3600
+_DAYS_PER_YEAR = 365.0
 
 
 def _format_duration_seconds(seconds: float) -> str:
@@ -137,6 +138,22 @@ def _format_duration_seconds(seconds: float) -> str:
         return f"{minutes}m {secs}s"
     hours, mins = divmod(minutes, _DURATION_MINUTE)
     return f"{hours}h {mins}m {secs}s"
+
+
+def _format_age_days(days: float | None) -> str:
+    """Format elapsed days into human-readable compact string (e.g. '42d', '1.2y', '10.4y')."""
+    if days is None:
+        return "—"
+    try:
+        d = float(days)
+    except (ValueError, TypeError):
+        return "—"
+    if d < _DAYS_PER_YEAR:
+        return f"{int(round(d))}d"
+    years = round(d / _DAYS_PER_YEAR, 1)
+    if years == int(years):
+        return f"{int(years)}y"
+    return f"{years}y"
 
 
 def _ref_external_url(ref: str | None) -> str | None:
@@ -242,6 +259,7 @@ def create_app() -> FastAPI:
     template_globals["cache_bust"] = _startup_ts
     templates.env.filters["urlencode_path"] = lambda s: _url_quote(str(s), safe="")
     templates.env.filters["format_duration"] = _format_duration_seconds
+    templates.env.filters["format_age_days"] = _format_age_days
     templates.env.filters["local_datetime"] = _local_datetime
     templates.env.filters["ref_external_url"] = _ref_external_url
     app.state.templates = templates

@@ -6,7 +6,13 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from craft_dashboard.app import JSONFormatter, _ref_external_url, create_app, lifespan
+from craft_dashboard.app import (
+    JSONFormatter,
+    _format_age_days,
+    _ref_external_url,
+    create_app,
+    lifespan,
+)
 from craft_dashboard.settings import Settings
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -175,3 +181,22 @@ class TestRefExternalUrl:
         assert _ref_external_url("") is None
         assert _ref_external_url("invalid-no-hash") is None
         assert _ref_external_url("#123") is None
+
+
+class TestFormatAgeDays:
+    """Tests for _format_age_days template filter."""
+
+    def test_none_and_invalid(self) -> None:
+        assert _format_age_days(None) == "—"
+        assert _format_age_days("invalid") == "—"
+
+    def test_under_a_year(self) -> None:
+        assert _format_age_days(0) == "0d"
+        assert _format_age_days(24) == "24d"
+        assert _format_age_days(364) == "364d"
+
+    def test_over_a_year(self) -> None:
+        assert _format_age_days(365) == "1y"
+        assert _format_age_days(715) == "2y"
+        assert _format_age_days(882) == "2.4y"
+        assert _format_age_days(3804) == "10.4y"

@@ -45,6 +45,7 @@ class DashboardConfig(BaseModel):
 
     craft_applications: list[str] = Field(default_factory=list)
     craft_libraries: list[str] = Field(default_factory=list)
+    craft_other: list[str] = Field(default_factory=list)
     craft_projects: list[str] = Field(default_factory=list)
     #: Projects that aren't themselves a craft-application, but consume/wrap
     #: several of them (e.g. "snapcraft-rocks" builds rock images that

@@ -5,33 +5,39 @@
 
 <div class="row">
   <div class="col-12">
-    <h2>Release Cadence</h2>
+    <h2>Release cadence</h2>
     <p class="p-text--default">
-      Release freshness across all tracked repositories, ordered by least-recent release.
+      Release freshness across tracked repositories, ordered by least-recent release.
       For unreleased repositories with a known start date, cadence is tracked from initial repository commit.
     </p>
   </div>
 </div>
 
+{% set red_count = cadence | selectattr("badge_color", "equalto", "red") | list | length %}
+{% set yellow_count = cadence | selectattr("badge_color", "equalto", "yellow") | list | length %}
+{% set green_count = cadence | selectattr("badge_color", "equalto", "green") | list | length %}
+{% set fallback_count = cadence | selectattr("is_fallback") | list | length %}
+
 <div class="row">
-  <div class="col-12">
+  <!-- 75% MAIN CADENCE TABLE -->
+  <div class="col-9">
     <table data-sortable class="p-table--sortable table-fixed u-no-margin--bottom">
       <colgroup>
-        <col style="width: 26%;">
-        <col style="width: 15%;">
-        <col style="width: 19%;">
+        <col style="width: 25%;">
+        <col style="width: 14%;">
+        <col style="width: 18%;">
         <col style="width: 16%;">
-        <col style="width: 12%;">
-        <col style="width: 12%;">
+        <col style="width: 14%;">
+        <col style="width: 13%;">
       </colgroup>
       <thead>
         <tr>
           <th>Repository</th>
           <th>Category</th>
-          <th>Latest Release Tag</th>
+          <th>Latest Tag</th>
           <th>Release Date</th>
-          <th>Days Since Release</th>
-          <th>Commits Since Release</th>
+          <th>Cadence</th>
+          <th>Commits Ahead</th>
         </tr>
       </thead>
       <tbody>
@@ -39,12 +45,12 @@
         <tr>
           <td class="text-truncate" title="{{ row.full_name }}">
             <a href="https://github.com/{{ row.full_name }}" target="_blank" rel="noopener noreferrer">
-              <strong>{{ row.full_name }}</strong>
+              <strong>{{ row.name }}</strong>
               <i class="p-icon--external-link is-light" style="font-size: 0.8rem; vertical-align: middle;"></i>
             </a>
           </td>
           <td>
-            <span class="p-chip">{{ row.category }}</span>
+            <span class="p-chip is-dense">{{ row.category }}</span>
           </td>
           <td class="text-truncate">
             {% if row.is_fallback %}
@@ -56,8 +62,8 @@
           <td>{{ row.released_at_str }}</td>
           <td>
             {% if row.days_ago is not none %}
-            <span class="dash-pill dash-pill--{{ row.badge_color }}">
-              {{ row.days_ago }}d ago
+            <span class="dash-pill dash-pill--{{ row.badge_color }}" title="{{ row.days_ago }} days ago">
+              {{ row.days_ago | format_age_days }} ago
             </span>
             {% else %}
             <span class="p-text--muted">—</span>
@@ -78,6 +84,56 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+
+  <!-- 25% SIDEBAR SUMMARY & GUIDELINES -->
+  <div class="col-3">
+    <div class="p-card spotlight-card" style="margin-bottom: 1.5rem;">
+      <h4 class="p-card__title" style="margin-bottom: 0.75rem;">Summary</h4>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">Tracked:</span>
+        <div class="kpi-metric-values">
+          <span class="kpi-main-val">{{ cadence | length }}</span>
+          <span class="kpi-sub-text">repositories</span>
+        </div>
+      </div>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">Fresh (&le;30d):</span>
+        <div class="kpi-metric-values">
+          <span class="dash-pill dash-pill--green">{{ green_count }} repos</span>
+        </div>
+      </div>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">Warning (31&ndash;60d):</span>
+        <div class="kpi-metric-values">
+          <span class="dash-pill dash-pill--yellow">{{ yellow_count }} repos</span>
+        </div>
+      </div>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">Stale (&gt;60d):</span>
+        <div class="kpi-metric-values">
+          <span class="dash-pill dash-pill--red">{{ red_count }} repos</span>
+        </div>
+      </div>
+      {% if fallback_count > 0 %}
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">Fallback / Unreleased:</span>
+        <div class="kpi-metric-values">
+          <span class="dash-pill dash-pill--neutral">{{ fallback_count }} repos</span>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="p-card spotlight-card">
+      <h4 class="p-card__title" style="margin-bottom: 0.75rem;">Thresholds</h4>
+      <p class="p-text--small u-no-margin--bottom" style="line-height: 1.4; color: var(--app-text-muted);">
+        <strong style="color: #137333;">&le; 30 days:</strong> Fresh<br />
+        <strong style="color: #b06000;">31&ndash;60 days:</strong> Attention needed<br />
+        <strong style="color: #c5221f;">&gt; 60 days:</strong> Release overdue<br />
+        <strong style="color: var(--app-text-muted);">Unreleased:</strong> Tracked from initial commit
+      </p>
+    </div>
   </div>
 </div>
 {% endblock %}

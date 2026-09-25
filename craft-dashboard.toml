@@ -17,6 +17,15 @@ craft-libraries = [
     "craft-store",
 ]
 
+craft-other = [
+    "snapcraft-rocks",
+    "craft-actions",
+    "fetch-service",
+    "starbase",
+    "starflow",
+    "craft-artifacts",
+]
+
 craft-projects = [
     "charmcraft",
     "imagecraft",
@@ -58,6 +67,7 @@ hide-releases = [
     "snapcraft (launchpad)",
     "starbase",
     "snapcraft-rocks",
+    "starflow",
 ]
 
 # Commit-scanner tuning (env-overridable via Settings):
