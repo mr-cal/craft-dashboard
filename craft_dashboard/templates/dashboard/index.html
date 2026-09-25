@@ -3,16 +3,21 @@
 {% block content %}
 <div class="row">
   <div class="col-12">
-    <h2>Operational Dashboard</h2>
+    <h2>Dashboard</h2>
   </div>
 </div>
 
 <!-- TOP KPI CARDS -->
-<div class="row" style="margin-bottom: 2rem;">
-  <!-- PR Velocity -->
+<div class="row kpi-deck" style="margin-bottom: 2rem;">
+  <!-- PR Velocity & Response -->
   <div class="col-3">
     <div class="p-card kpi-card">
-      <h3 class="p-card__title">PR Velocity</h3>
+      <h3 class="p-card__title">
+        <a href="/issues?state=open&issue_type=pull_request&sort=age_desc">Open PR Age &amp; Response</a>
+      </h3>
+      <div class="kpi-card__subtitle">
+        Average age of open pull requests and wait time for initial maintainer response
+      </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">Contributor:</span>
         <div class="kpi-metric-values">
@@ -20,6 +25,16 @@
           <a href="/issues?state=open&issue_type=pull_request&author_role=contributor&sort=age_desc"
              class="p-chip is-dense kpi-chip" title="View open contributor PRs">
             {{ metrics.velocity.contributor_count }} open
+          </a>
+        </div>
+      </div>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">1st Response:</span>
+        <div class="kpi-metric-values">
+          <span class="kpi-main-val">{{ metrics.velocity.first_response_avg_days ~ "d wait" if metrics.velocity.first_response_avg_days is not none else "—" }}</span>
+          <a href="/issues?state=open&issue_type=pull_request&author_role=contributor&action=needs_review"
+             class="p-chip is-dense kpi-chip" title="Contributor PRs awaiting first maintainer review">
+            {{ metrics.velocity.first_response_waiting_count }} unreviewed
           </a>
         </div>
       </div>
@@ -39,19 +54,24 @@
   <!-- Resolution Throughput -->
   <div class="col-3">
     <div class="p-card kpi-card">
-      <h3 class="p-card__title">Resolution Throughput</h3>
+      <h3 class="p-card__title">
+        <a href="/stats/trends">Resolution Throughput</a>
+      </h3>
+      <div class="kpi-card__subtitle">
+        Issues and pull requests resolved in the past 30 days and past year
+      </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">Last 30d:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ metrics.throughput.total_30d }}</span>
-          <span class="kpi-sub-text">({{ metrics.throughput.issues_30d }} issues · {{ metrics.throughput.prs_30d }} PRs)</span>
+          <span class="kpi-main-val">{{ "{:,}".format(metrics.throughput.total_30d) }}</span>
+          <span class="kpi-sub-text">({{ "{:,}".format(metrics.throughput.issues_30d) }} issues, {{ "{:,}".format(metrics.throughput.prs_30d) }} PRs)</span>
         </div>
       </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">Last 365d:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ metrics.throughput.total_365d }}</span>
-          <span class="kpi-sub-text">({{ metrics.throughput.issues_365d }} issues · {{ metrics.throughput.prs_365d }} PRs)</span>
+          <span class="kpi-main-val">{{ "{:,}".format(metrics.throughput.total_365d) }}</span>
+          <span class="kpi-sub-text">({{ "{:,}".format(metrics.throughput.issues_365d) }} issues, {{ "{:,}".format(metrics.throughput.prs_365d) }} PRs)</span>
         </div>
       </div>
     </div>
@@ -60,25 +80,30 @@
   <!-- Untriaged Backlog -->
   <div class="col-3">
     <div class="p-card kpi-card">
-      <h3 class="p-card__title">Untriaged Backlog</h3>
+      <h3 class="p-card__title">
+        <a href="/issues?state=open&action=needs_triage">Untriaged Backlog</a>
+      </h3>
+      <div class="kpi-card__subtitle">
+        Open items awaiting initial maintainer assessment
+      </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">Issues:</span>
         <div class="kpi-metric-values">
           <a href="/issues?state=open&issue_type=issue&action=needs_triage"
-             class="kpi-main-val kpi-link" title="Open untriaged issues">
-            {{ metrics.untriaged.issues_count }}
+             class="kpi-main-val" title="Open untriaged issues">
+            {{ "{:,}".format(metrics.untriaged.issues_count) }}
           </a>
-          <span class="kpi-sub-text">(+{{ metrics.untriaged.issues_30d_new }} in 30d)</span>
+          <span class="kpi-sub-text">(<span class="{% if metrics.untriaged.issues_30d_new > 0 %}kpi-delta--positive{% elif metrics.untriaged.issues_30d_new < 0 %}kpi-delta--negative{% endif %}">+{{ metrics.untriaged.issues_30d_new }}</span> in 30d)</span>
         </div>
       </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">PRs:</span>
         <div class="kpi-metric-values">
           <a href="/issues?state=open&issue_type=pull_request&action=needs_review"
-             class="kpi-main-val kpi-link" title="Open untriaged PRs">
-            {{ metrics.untriaged.prs_count }}
+             class="kpi-main-val" title="Open untriaged PRs">
+            {{ "{:,}".format(metrics.untriaged.prs_count) }}
           </a>
-          <span class="kpi-sub-text">(+{{ metrics.untriaged.prs_30d_new }} in 30d)</span>
+          <span class="kpi-sub-text">(<span class="{% if metrics.untriaged.prs_30d_new > 0 %}kpi-delta--positive{% elif metrics.untriaged.prs_30d_new < 0 %}kpi-delta--negative{% endif %}">+{{ metrics.untriaged.prs_30d_new }}</span> in 30d)</span>
         </div>
       </div>
     </div>
@@ -87,19 +112,31 @@
   <!-- All-Time Volume -->
   <div class="col-3">
     <div class="p-card kpi-card">
-      <h3 class="p-card__title">All-Time Volume</h3>
+      <h3 class="p-card__title">
+        <a href="/stats/trends">All-Time Volume</a>
+      </h3>
+      <div class="kpi-card__subtitle">
+        Cumulative open and closed work across all repositories
+      </div>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">Combined Total:</span>
+        <div class="kpi-metric-values">
+          <span class="kpi-main-val">{{ "{:,}".format(metrics.volume.total_items) }}</span>
+          <span class="kpi-sub-text">work items (<span class="kpi-delta--positive">+{{ "{:,}".format(metrics.volume.total_30d_closed) }}</span> 30d)</span>
+        </div>
+      </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">Issues:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ metrics.volume.open_issues }} open</span>
-          <span class="kpi-sub-text">/ {{ metrics.volume.closed_issues }} closed (+{{ metrics.volume.issues_30d_closed }} 30d)</span>
+          <span class="kpi-main-val">{{ "{:,}".format(metrics.volume.open_issues) }} open</span>
+          <span class="kpi-sub-text">/ {{ "{:,}".format(metrics.volume.closed_issues) }} closed (<span class="kpi-delta--positive">+{{ "{:,}".format(metrics.volume.issues_30d_closed) }}</span> 30d)</span>
         </div>
       </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">PRs:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ metrics.volume.open_prs }} open</span>
-          <span class="kpi-sub-text">/ {{ metrics.volume.closed_prs }} closed (+{{ metrics.volume.prs_30d_closed }} 30d)</span>
+          <span class="kpi-main-val">{{ "{:,}".format(metrics.volume.open_prs) }} open</span>
+          <span class="kpi-sub-text">/ {{ "{:,}".format(metrics.volume.closed_prs) }} closed (<span class="kpi-delta--positive">+{{ "{:,}".format(metrics.volume.prs_30d_closed) }}</span> 30d)</span>
         </div>
       </div>
     </div>
@@ -115,7 +152,13 @@
         <h3 class="p-card__title u-no-margin--bottom">Apps with Least-Recent Releases</h3>
         <a href="/stats/cadence" class="p-link--soft spotlight-nav-link">View all in Cadence &rarr;</a>
       </div>
-      <table class="p-table--default u-no-margin--bottom">
+      <table class="p-table--default table-fixed u-no-margin--bottom">
+        <colgroup>
+          <col style="width: 34%;">
+          <col style="width: 22%;">
+          <col style="width: 22%;">
+          <col style="width: 22%;">
+        </colgroup>
         <thead>
           <tr>
             <th>Application</th>
@@ -127,12 +170,12 @@
         <tbody>
           {% for app in metrics.least_recent_apps %}
           <tr>
-            <td>
+            <td class="text-truncate" title="{{ app.project_name }}">
               <a href="/issues?project={{ app.project_name }}&state=open"><strong>{{ app.project_name }}</strong></a>
             </td>
-            <td>
+            <td class="text-truncate">
               {% if app.is_fallback %}
-              <span class="p-text--muted"><em>(unreleased)</em></span>
+              <span class="dash-pill dash-pill--neutral"><em>{{ app.version }}</em></span>
               {% else %}
               <code>{{ app.version }}</code>
               {% endif %}
@@ -144,7 +187,7 @@
             </td>
             <td>
               {% if app.days_ago is not none %}
-              <span class="cadence-badge cadence-badge--{{ app.badge_color }}">
+              <span class="dash-pill dash-pill--{{ app.badge_color }}">
                 {{ app.days_ago }}d ago
               </span>
               {% else %}
@@ -170,7 +213,13 @@
         <a href="/issues?state=open&issue_type=pull_request&author_role=contributor&sort=age_desc"
            class="p-link--soft spotlight-nav-link">View all contributor PRs &rarr;</a>
       </div>
-      <table class="p-table--default u-no-margin--bottom">
+      <table class="p-table--default table-fixed u-no-margin--bottom">
+        <colgroup>
+          <col style="width: 32%;">
+          <col style="width: 20%;">
+          <col style="width: 34%;">
+          <col style="width: 14%;">
+        </colgroup>
         <thead>
           <tr>
             <th>PR</th>
@@ -182,22 +231,21 @@
         <tbody>
           {% for pr in metrics.aging_prs %}
           <tr>
-            <td style="white-space: nowrap;">
-              <span class="p-chip is-dense">{{ pr.project_name }}</span>
+            <td class="text-truncate" title="{{ pr.project_name }} #{{ pr.external_id }}">
               <a href="{{ pr.url or ('/issues?project=' ~ pr.project_name ~ '&search=' ~ pr.external_id) }}"
                  target="_blank" rel="noopener noreferrer">
-                #{{ pr.external_id }}
+                <strong>{{ pr.project_name }}</strong> #{{ pr.external_id }}
               </a>
             </td>
-            <td>{{ pr.author or "—" }}</td>
-            <td class="spotlight-title" title="{{ pr.title }}">
+            <td class="text-truncate" title="{{ pr.author or '—' }}">{{ pr.author or "—" }}</td>
+            <td class="text-truncate" title="{{ pr.title }}">
               <a href="{{ pr.url or ('/issues?project=' ~ pr.project_name ~ '&search=' ~ pr.external_id) }}"
                  target="_blank" rel="noopener noreferrer">
                 {{ pr.title }}
               </a>
             </td>
-            <td style="white-space: nowrap;">
-              <span class="cadence-badge cadence-badge--red">{{ pr.days_old }}d</span>
+            <td>
+              <span class="dash-pill dash-pill--red">{{ pr.days_old }}d</span>
             </td>
           </tr>
           {% else %}
@@ -220,7 +268,13 @@
         <a href="/issues?state=open&issue_type=issue&action=needs_triage"
            class="p-link--soft spotlight-nav-link">View all untriaged issues &rarr;</a>
       </div>
-      <table class="p-table--default u-no-margin--bottom">
+      <table class="p-table--default table-fixed u-no-margin--bottom">
+        <colgroup>
+          <col style="width: 32%;">
+          <col style="width: 20%;">
+          <col style="width: 34%;">
+          <col style="width: 14%;">
+        </colgroup>
         <thead>
           <tr>
             <th>Issue</th>
@@ -232,22 +286,21 @@
         <tbody>
           {% for issue in metrics.needs_triage_issues %}
           <tr>
-            <td style="white-space: nowrap;">
-              <span class="p-chip is-dense">{{ issue.project_name }}</span>
+            <td class="text-truncate" title="{{ issue.project_name }} #{{ issue.external_id }}">
               <a href="{{ issue.url or ('/issues?project=' ~ issue.project_name ~ '&search=' ~ issue.external_id) }}"
                  target="_blank" rel="noopener noreferrer">
-                #{{ issue.external_id }}
+                <strong>{{ issue.project_name }}</strong> #{{ issue.external_id }}
               </a>
             </td>
-            <td>{{ issue.author or "—" }}</td>
-            <td class="spotlight-title" title="{{ issue.title }}">
+            <td class="text-truncate" title="{{ issue.author or '—' }}">{{ issue.author or "—" }}</td>
+            <td class="text-truncate" title="{{ issue.title }}">
               <a href="{{ issue.url or ('/issues?project=' ~ issue.project_name ~ '&search=' ~ issue.external_id) }}"
                  target="_blank" rel="noopener noreferrer">
                 {{ issue.title }}
               </a>
             </td>
-            <td style="white-space: nowrap;">
-              <span class="cadence-badge cadence-badge--yellow">{{ issue.days_old }}d</span>
+            <td>
+              <span class="dash-pill dash-pill--yellow">{{ issue.days_old }}d</span>
             </td>
           </tr>
           {% else %}
@@ -268,7 +321,12 @@
         <a href="/issues?state=open&quick_win_min=50&sort=quick_win_desc"
            class="p-link--soft spotlight-nav-link">View all quick wins &rarr;</a>
       </div>
-      <table class="p-table--default u-no-margin--bottom">
+      <table class="p-table--default table-fixed u-no-margin--bottom">
+        <colgroup>
+          <col style="width: 32%;">
+          <col style="width: 48%;">
+          <col style="width: 20%;">
+        </colgroup>
         <thead>
           <tr>
             <th>Issue</th>
@@ -279,21 +337,20 @@
         <tbody>
           {% for qw in metrics.quick_wins %}
           <tr>
-            <td style="white-space: nowrap;">
-              <span class="p-chip is-dense">{{ qw.project_name }}</span>
+            <td class="text-truncate" title="{{ qw.project_name }} #{{ qw.external_id }}">
               <a href="{{ qw.url or ('/issues?project=' ~ qw.project_name ~ '&search=' ~ qw.external_id) }}"
                  target="_blank" rel="noopener noreferrer">
-                #{{ qw.external_id }}
+                <strong>{{ qw.project_name }}</strong> #{{ qw.external_id }}
               </a>
             </td>
-            <td class="spotlight-title" title="{{ qw.title }}">
+            <td class="text-truncate" title="{{ qw.title }}">
               <a href="{{ qw.url or ('/issues?project=' ~ qw.project_name ~ '&search=' ~ qw.external_id) }}"
                  target="_blank" rel="noopener noreferrer">
                 {{ qw.title }}
               </a>
             </td>
-            <td style="white-space: nowrap;">
-              <span class="quick-win-pill">
+            <td>
+              <span class="dash-pill dash-pill--purple">
                 Score {{ qw.quick_win }}
               </span>
             </td>
@@ -320,10 +377,17 @@
 </div>
 
 {% macro render_health_table(project_list) %}
-<table class="p-table--default project-health-table u-no-margin--bottom">
+<table class="p-table--default table-fixed project-health-table u-no-margin--bottom">
+  <colgroup>
+    <col style="width: 26%;">
+    <col style="width: 17%;">
+    <col style="width: 17%;">
+    <col style="width: 21%;">
+    <col style="width: 19%;">
+  </colgroup>
   <thead>
     <tr>
-      <th style="width: 25%;">Project</th>
+      <th>Project</th>
       <th>Open Issues</th>
       <th>Open PRs</th>
       <th>Untriaged Backlog</th>
@@ -333,7 +397,7 @@
   <tbody>
     {% for p in project_list %}
     <tr>
-      <td>
+      <td class="text-truncate" title="{{ p.name }}">
         <a href="/issues?project={{ p.name }}&state=open" class="project-name-link">
           <strong>{{ p.name }}</strong>
         </a>
@@ -350,30 +414,38 @@
         </a>
       </td>
       <td>
+        {% if p.show_prs %}
         <a href="/issues?project={{ p.name }}&issue_type=pull_request&state=open"
            class="p-chip is-dense nav-chip" title="Filter open PRs">
           {{ p.open_prs }} PRs
         </a>
+        {% else %}
+        <span class="p-text--muted">—</span>
+        {% endif %}
       </td>
       <td>
         <a href="/issues?project={{ p.name }}&action=needs_triage"
-           class="health-triage-badge health-triage-badge--{{ p.triage_badge_color }}"
+           class="dash-pill dash-pill--{{ p.triage_badge_color }}"
            title="Filter untriaged backlog">
           {{ p.untriaged_count }} untriaged ({{ p.untriaged_pct }}%)
         </a>
       </td>
       <td>
-        <a href="/stats/releases" class="health-release-badge health-release-badge--{{ p.release_badge_color }}"
+        {% if p.show_release %}
+        <a href="/stats/releases" class="dash-pill dash-pill--{{ p.release_badge_color }}"
            title="View releases">
           {% if p.latest_release_version %}
           <code>{{ p.latest_release_version }}</code>
           {% if p.latest_release_days_ago is not none %}
-          <span class="p-text--muted">({{ p.latest_release_days_ago }}d ago)</span>
+          <span>({{ p.latest_release_days_ago }}d ago)</span>
           {% endif %}
           {% else %}
-          <span class="p-text--muted"><em>(none)</em></span>
+          <span><em>(none)</em></span>
           {% endif %}
         </a>
+        {% else %}
+        <span class="p-text--muted">—</span>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}

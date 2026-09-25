@@ -15,7 +15,15 @@
 
 <div class="row">
   <div class="col-12">
-    <table data-sortable class="p-table--sortable u-no-margin--bottom">
+    <table data-sortable class="p-table--sortable table-fixed u-no-margin--bottom">
+      <colgroup>
+        <col style="width: 26%;">
+        <col style="width: 15%;">
+        <col style="width: 19%;">
+        <col style="width: 16%;">
+        <col style="width: 12%;">
+        <col style="width: 12%;">
+      </colgroup>
       <thead>
         <tr>
           <th>Repository</th>
@@ -29,18 +37,18 @@
       <tbody>
         {% for row in cadence %}
         <tr>
-          <td>
+          <td class="text-truncate" title="{{ row.full_name }}">
             <a href="https://github.com/{{ row.full_name }}" target="_blank" rel="noopener noreferrer">
-              {{ row.full_name }}
+              <strong>{{ row.full_name }}</strong>
               <i class="p-icon--external-link is-light" style="font-size: 0.8rem; vertical-align: middle;"></i>
             </a>
           </td>
           <td>
             <span class="p-chip">{{ row.category }}</span>
           </td>
-          <td>
+          <td class="text-truncate">
             {% if row.is_fallback %}
-            <span class="p-text--muted"><em>(unreleased)</em></span>
+            <span class="dash-pill dash-pill--neutral"><em>{{ row.latest_version }}</em></span>
             {% else %}
             <code>{{ row.latest_version }}</code>
             {% endif %}
@@ -48,7 +56,7 @@
           <td>{{ row.released_at_str }}</td>
           <td>
             {% if row.days_ago is not none %}
-            <span class="cadence-badge cadence-badge--{{ row.badge_color }}">
+            <span class="dash-pill dash-pill--{{ row.badge_color }}">
               {{ row.days_ago }}d ago
             </span>
             {% else %}

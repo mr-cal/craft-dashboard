@@ -22,12 +22,14 @@ if TYPE_CHECKING:
 
 
 class PRVelocity(TypedDict):
-    """PR Velocity metrics for contributor and overall open PRs."""
+    """PR Velocity and response metrics for contributor and overall open PRs."""
 
     contributor_count: int
-    contributor_avg_age: float | None
+    contributor_avg_age: int | None
+    first_response_waiting_count: int
+    first_response_avg_days: int | None
     overall_count: int
-    overall_avg_age: float | None
+    overall_avg_age: int | None
 
 
 class ResolutionThroughput(TypedDict):
@@ -59,6 +61,8 @@ class VolumeStats(TypedDict):
     open_prs: int
     closed_prs: int
     prs_30d_closed: int
+    total_items: int
+    total_30d_closed: int
 
 
 class AppReleaseSpotlight(TypedDict):
@@ -114,12 +118,14 @@ class ProjectHealthRow(TypedDict):
     category: str
     open_issues: int
     open_prs: int
+    show_prs: bool
     untriaged_count: int
     untriaged_pct: float
     triage_badge_color: str
     latest_release_version: str | None
     latest_release_days_ago: int | None
     release_badge_color: str
+    show_release: bool
 
 
 class RepoCadenceRow(TypedDict):
@@ -196,6 +202,20 @@ def _parse_fallback_date(date_str: str | None) -> datetime | None:
         return None
 
 
+def _int_or_zero(val: object) -> int:
+    """Safely convert a value to int, defaulting to 0."""
+    if isinstance(val, int):
+        return val
+    if isinstance(val, float):
+        return int(val)
+    if isinstance(val, str):
+        try:
+            return int(val)
+        except ValueError:
+            return 0
+    return 0
+
+
 class DashboardService:
     """Service for computing dashboard KPI metrics, spotlights, and release cadence."""
 
@@ -225,13 +245,15 @@ class DashboardService:
             or 0
         )
 
-        # 2. PR Velocity
+        # 2. PR Velocity and First Response
         pr_query = (
             select(
                 Issue.id,
                 Issue.created_at,
                 Issue.author_is_maintainer,
                 Issue.author_is_bot,
+                Issue.metadata_,
+                Issue.comments,
             )
             .join(Project, Issue.project_id == Project.id)
             .where(
@@ -244,8 +266,11 @@ class DashboardService:
             pr_query = pr_query.where(excl)
         pr_rows = (await self.session.execute(pr_query)).all()
 
-        contrib_ages: list[float] = []
-        overall_ages: list[float] = []
+        maintainers_set = set(config.maintainers + config.launchpad_maintainers)
+        contrib_ages: list[int] = []
+        overall_ages: list[int] = []
+        waiting_ages: list[int] = []
+
         for row in pr_rows:
             if row.created_at is not None:
                 created = (
@@ -253,21 +278,39 @@ class DashboardService:
                     if row.created_at.tzinfo
                     else row.created_at.replace(tzinfo=UTC)
                 )
-                age_days = max(0.0, (now - created).total_seconds() / 86400.0)
+                age_days = max(0, (now - created).days)
                 overall_ages.append(age_days)
                 if not row.author_is_maintainer and not row.author_is_bot:
                     contrib_ages.append(age_days)
+                    comments = row.comments or []
+                    has_maintainer_response = any(
+                        isinstance(c, dict) and c.get("author") in maintainers_set
+                        for c in comments
+                    )
+                    review_count = (
+                        (row.metadata_ or {}).get("review_count", 0)
+                        if isinstance(row.metadata_, dict)
+                        else 0
+                    )
+                    if not has_maintainer_response and review_count == 0:
+                        waiting_ages.append(age_days)
 
         velocity: PRVelocity = {
             "contributor_count": len(contrib_ages),
             "contributor_avg_age": (
-                round(sum(contrib_ages) / len(contrib_ages), 1)
+                int(round(sum(contrib_ages) / len(contrib_ages)))
                 if contrib_ages
+                else None
+            ),
+            "first_response_waiting_count": len(waiting_ages),
+            "first_response_avg_days": (
+                int(round(sum(waiting_ages) / len(waiting_ages)))
+                if waiting_ages
                 else None
             ),
             "overall_count": len(overall_ages),
             "overall_avg_age": (
-                round(sum(overall_ages) / len(overall_ages), 1)
+                int(round(sum(overall_ages) / len(overall_ages)))
                 if overall_ages
                 else None
             ),
@@ -278,7 +321,7 @@ class DashboardService:
             select(Issue.issue_type, func.count(Issue.id))
             .join(Project, Issue.project_id == Project.id)
             .where(
-                Issue.state == "closed",
+                Issue.state.in_(["closed", "merged"]),
                 Issue.closed_at >= thirty_days_ago,
                 Project.category != "aggregate",
             )
@@ -294,7 +337,7 @@ class DashboardService:
             select(Issue.issue_type, func.count(Issue.id))
             .join(Project, Issue.project_id == Project.id)
             .where(
-                Issue.state == "closed",
+                Issue.state.in_(["closed", "merged"]),
                 Issue.closed_at >= one_year_ago,
                 Project.category != "aggregate",
             )
@@ -378,10 +421,10 @@ class DashboardService:
         u_prs_res = (await self.session.execute(untriaged_prs_base)).one()
 
         untriaged: UntriagedBacklog = {
-            "issues_count": u_issues_res.total or 0,
-            "issues_30d_new": u_issues_res.new_30d or 0,
-            "prs_count": u_prs_res.total or 0,
-            "prs_30d_new": u_prs_res.new_30d or 0,
+            "issues_count": _int_or_zero(getattr(u_issues_res, "total", 0)),
+            "issues_30d_new": _int_or_zero(getattr(u_issues_res, "new_30d", 0)),
+            "prs_count": _int_or_zero(getattr(u_prs_res, "total", 0)),
+            "prs_30d_new": _int_or_zero(getattr(u_prs_res, "new_30d", 0)),
         }
 
         # 5. All-Time Volume
@@ -403,13 +446,24 @@ class DashboardService:
         for itype, st, cnt in vol_rows:
             counts_map[(itype, st)] = cnt
 
+        open_issues = counts_map.get(("issue", "open"), 0)
+        closed_issues = counts_map.get(("issue", "closed"), 0)
+        open_prs = counts_map.get(("pull_request", "open"), 0)
+        closed_prs = counts_map.get(("pull_request", "closed"), 0) + counts_map.get(
+            ("pull_request", "merged"), 0
+        )
+        total_items = open_issues + closed_issues + open_prs + closed_prs
+        total_30d_closed = issues_30d + prs_30d
+
         volume: VolumeStats = {
-            "open_issues": counts_map.get(("issue", "open"), 0),
-            "closed_issues": counts_map.get(("issue", "closed"), 0),
+            "open_issues": open_issues,
+            "closed_issues": closed_issues,
             "issues_30d_closed": issues_30d,
-            "open_prs": counts_map.get(("pull_request", "open"), 0),
-            "closed_prs": counts_map.get(("pull_request", "closed"), 0),
+            "open_prs": open_prs,
+            "closed_prs": closed_prs,
             "prs_30d_closed": prs_30d,
+            "total_items": total_items,
+            "total_30d_closed": total_30d_closed,
         }
 
         # 6. Releases across projects
@@ -451,7 +505,7 @@ class DashboardService:
         # Build AppReleaseSpotlight (Apps with least-recent releases)
         app_spotlights: list[AppReleaseSpotlight] = []
         for p in all_projects:
-            if p.category == "application":
+            if p.category == "application" and p.name not in config.hide_releases:
                 rel = latest_rel_by_project.get(p.id)
                 fallback_dt = _parse_fallback_date(
                     config.initial_release_dates.get(p.name)
@@ -475,14 +529,18 @@ class DashboardService:
                     )
                 elif fallback_dt is not None:
                     days_ago = max(0, (now - fallback_dt).days)
+                    version_tag = config.initial_release_tags.get(
+                        p.name, "(unreleased)"
+                    )
+                    is_fallback = version_tag == "(unreleased)"
                     app_spotlights.append(
                         {
                             "project_name": p.name,
-                            "version": "(unreleased)",
+                            "version": version_tag,
                             "released_at": fallback_dt,
                             "days_ago": days_ago,
                             "badge_color": compute_release_badge_color(days_ago),
-                            "is_fallback": True,
+                            "is_fallback": is_fallback,
                         }
                     )
                 else:
@@ -711,7 +769,7 @@ class DashboardService:
                 )
                 days_ago = max(0, (now - r_dt).days)
             elif fallback_dt is not None:
-                rel_ver = "(unreleased)"
+                rel_ver = config.initial_release_tags.get(p.name, "(unreleased)")
                 days_ago = max(0, (now - fallback_dt).days)
 
             row_data: ProjectHealthRow = {
@@ -720,12 +778,14 @@ class DashboardService:
                 "category": p.category,
                 "open_issues": op_issues,
                 "open_prs": op_prs,
+                "show_prs": p.name not in config.hide_prs,
                 "untriaged_count": u_count,
                 "untriaged_pct": u_pct,
                 "triage_badge_color": compute_triage_badge_color(u_count, tot_open),
                 "latest_release_version": rel_ver,
                 "latest_release_days_ago": days_ago,
                 "release_badge_color": compute_release_badge_color(days_ago),
+                "show_release": p.name not in config.hide_releases,
             }
 
             if p.category == "application":
@@ -802,6 +862,9 @@ class DashboardService:
 
         cadence_rows: list[RepoCadenceRow] = []
         for p in all_projects:
+            if p.name in config.hide_releases:
+                continue
+
             rel = latest_rel_by_project.get(p.id)
             fallback_dt = _parse_fallback_date(config.initial_release_dates.get(p.name))
 
@@ -825,8 +888,13 @@ class DashboardService:
                 if rel.metadata_ and isinstance(rel.metadata_, dict):
                     commits_since = rel.metadata_.get("commits_since_tag")
             elif fallback_dt is not None:
-                is_fallback = True
-                version = "(unreleased)"
+                tag = config.initial_release_tags.get(p.name)
+                if tag and tag != "(unreleased)":
+                    version = tag
+                    is_fallback = False
+                else:
+                    version = "(unreleased)"
+                    is_fallback = True
                 released_at = fallback_dt
                 days_ago = max(0, (now - fallback_dt).days)
                 released_at_str = fallback_dt.strftime("%Y-%m-%d")

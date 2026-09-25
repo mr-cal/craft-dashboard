@@ -96,7 +96,7 @@ class TestDashboardIndex:
 
             assert response.status_code == 200
             assert "text/html" in response.headers["content-type"]
-            assert "Operational Dashboard" in response.text
+            assert "<h2>Dashboard</h2>" in response.text
 
     def test_index_includes_landmarks_and_stat_cards(self) -> None:
         """GET / includes page landmarks and operational KPI cards."""
@@ -116,7 +116,7 @@ class TestDashboardIndex:
         assert 'aria-label="Mobile menu"' in response.text
         assert 'role="main"' in response.text
         assert 'role="contentinfo"' in response.text
-        assert "PR Velocity" in response.text
+        assert "Open PR Age &amp; Response" in response.text
         assert "Resolution Throughput" in response.text
         assert "Untriaged Backlog" in response.text
         assert "All-Time Volume" in response.text

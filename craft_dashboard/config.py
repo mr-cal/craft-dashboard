@@ -61,6 +61,9 @@ class DashboardConfig(BaseModel):
     bots: list[str] = Field(default_factory=list)
     hotfix_min_versions: dict[str, str] = Field(default_factory=dict)
     initial_release_dates: dict[str, str] = Field(default_factory=dict)
+    initial_release_tags: dict[str, str] = Field(default_factory=dict)
+    hide_prs: list[str] = Field(default_factory=list)
+    hide_releases: list[str] = Field(default_factory=list)
     filtered_issues: dict[str, list[str]] = Field(default_factory=dict)
     forums: dict[str, ForumConfig] = Field(default_factory=dict)
 
@@ -123,6 +126,8 @@ def load_config(config_path: Path) -> DashboardConfig:
         normalized["hotfix_min_versions"] = dict(normalized["hotfix_min_versions"])
     if "initial_release_dates" in normalized:
         normalized["initial_release_dates"] = dict(normalized["initial_release_dates"])
+    if "initial_release_tags" in normalized:
+        normalized["initial_release_tags"] = dict(normalized["initial_release_tags"])
     if "schedule" in normalized and isinstance(normalized["schedule"], dict):
         schedule = normalized.pop("schedule")
         normalized["schedule_days"] = schedule.get("days", [])

@@ -48,6 +48,18 @@ craft-consumers = ["snapcraft-rocks"]
 
 refresh-interval-days = 7
 
+# Projects where open PRs should not be displayed on the dashboard
+hide-prs = [
+    "snapcraft (launchpad)",
+]
+
+# Projects where releases should not be displayed on the dashboard or cadence
+hide-releases = [
+    "snapcraft (launchpad)",
+    "starbase",
+    "snapcraft-rocks",
+]
+
 # Commit-scanner tuning (env-overridable via Settings):
 # COMMIT_SCANNER_TOP_K = 10
 # COMMIT_SCANNER_SIMILARITY_THRESHOLD = 0.70
@@ -124,8 +136,20 @@ rockcraft = "1.15"
 # Initial release or repository start dates for unreleased projects (or projects
 # without a GitHub release tag) to measure release cadence from their inception.
 # debcraft's initial commit excluding starbase landed on 2025-06-02T10:36:08-03:00.
+# craft-actions latest git tag v0.1.1 was on 2026-07-10T19:29:33Z.
+# fetch-service latest git tag 0.17.1 was on 2026-09-16T13:15:57Z.
+# craft-artifacts initial commit was on 2023-01-20T00:03:09Z.
+# starflow initial commit was on 2024-09-19T14:59:42Z.
 [initial-release-dates]
 debcraft = "2025-06-02T10:36:08-03:00"
+craft-actions = "2026-07-10T19:29:33Z"
+fetch-service = "2026-09-16T13:15:57Z"
+craft-artifacts = "2023-01-20T00:03:09Z"
+starflow = "2024-09-19T14:59:42Z"
+
+[initial-release-tags]
+craft-actions = "v0.1.1"
+fetch-service = "0.17.1"
 
 # Forums to track for the Engagement > Forum Activity page. Every forum is
 # always tracked in full (all categories) — see

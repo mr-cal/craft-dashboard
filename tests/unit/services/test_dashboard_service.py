@@ -244,17 +244,22 @@ class TestDashboardService:
         await test_db_session.commit()
 
         config = DashboardConfig(
-            initial_release_dates={"debcraft": "2025-06-02T10:36:08-03:00"}
+            initial_release_dates={"debcraft": "2025-06-02T10:36:08-03:00"},
+            initial_release_tags={"debcraft": "(unreleased)"},
+            hide_prs=["debcraft"],
+            hide_releases=["craft-parts"],
         )
         service = DashboardService(test_db_session)
 
         metrics = await service.get_homepage_metrics(config, now=now)
 
-        # Check PR Velocity
+        # Check PR Velocity & Response
         assert metrics["velocity"]["contributor_count"] == 1
-        assert metrics["velocity"]["contributor_avg_age"] == 20.0
+        assert metrics["velocity"]["contributor_avg_age"] == 20
+        assert metrics["velocity"]["first_response_waiting_count"] == 1
+        assert metrics["velocity"]["first_response_avg_days"] == 20
         assert metrics["velocity"]["overall_count"] == 2
-        assert metrics["velocity"]["overall_avg_age"] == 15.0
+        assert metrics["velocity"]["overall_avg_age"] == 15
 
         # Check Throughput
         assert metrics["throughput"]["issues_30d"] == 1
@@ -275,6 +280,8 @@ class TestDashboardService:
         assert metrics["volume"]["closed_issues"] == 1
         assert metrics["volume"]["open_prs"] == 2
         assert metrics["volume"]["closed_prs"] == 2
+        assert metrics["volume"]["total_items"] == 7
+        assert metrics["volume"]["total_30d_closed"] == 2
 
         # Check Least-Recent Apps
         app_names = [a["project_name"] for a in metrics["least_recent_apps"]]
@@ -306,9 +313,9 @@ class TestDashboardService:
         assert len(metrics["application_projects"]) == 2
         assert len(metrics["library_projects"]) == 1
 
-        # Check Cadence
+        # Check Cadence (craft-parts is hidden via hide_releases)
         cadence = await service.get_all_repos_release_cadence(config, now=now)
-        assert len(cadence) == 3
+        assert len(cadence) == 2
         # debcraft is unreleased from June 2025 (~480 days ago), should be first
         assert cadence[0]["name"] == "debcraft"
         assert cadence[0]["latest_version"] == "(unreleased)"
