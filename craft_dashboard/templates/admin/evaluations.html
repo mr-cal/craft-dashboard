@@ -151,9 +151,8 @@
   <div class="col-12">
     <h3>Eval queue depth over time</h3>
     <p>
-      Pending issues (queued for evaluation), sampled from worker polls of
-      <code>/api/eval/next</code>. Only accumulates while some worker
-      (in-cluster or remote) is actively polling.
+      Pending issues waiting for evaluation, sampled when workers poll
+      <code>/api/eval/next</code>. Only records data while an evaluation worker is actively running.
     </p>
     {% if llm_queue_depth_history %}
     <div style="position: relative; width: 100%; height: 320px;">
@@ -247,14 +246,9 @@
     {% endif %}
     {% endif %}
     <p>
-      Issues invalidated (evidence_generation bumped) per day by the commit
-      scanner, broken out by which signal fired: an exact cross-repo
-      reference, a changed evidence path, a semantic commit match, a
-      same-repo bare <code>#N</code> reference, or a cross-source
-      <code>LP: #N</code> Launchpad reference. Note: an issue matched by two
-      signals in one pass is counted in both buckets but bumped once, so the
-      stacked total overstates unique invalidations — the rolling total above
-      is the honest headline.
+      Issues marked for re-evaluation per day by commit scanner signal type.
+      Because an issue can match multiple signals in a single pass, the chart
+      stacks signal matches, while the headline total above counts unique issues.
     </p>
     {% if commit_scan_history %}
     {% set total_inval = commit_scan_history | sum(attribute="qualified_ref") + commit_scan_history | sum(attribute="path") + commit_scan_history | sum(attribute="semantic") + commit_scan_history | sum(attribute="bare_ref") + commit_scan_history | sum(attribute="launchpad") %}
