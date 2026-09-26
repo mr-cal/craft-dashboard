@@ -431,6 +431,55 @@ class TestPaginatedReleasesAndBranches:
         assert [r["tagName"] for r in releases] == ["v3.0.0"]
         assert requester.graphql_query.call_count == 1
 
+    def test_falls_back_to_semver_git_tags_when_no_release_entity(self) -> None:
+        requester = MagicMock()
+        requester.graphql_query.return_value = (
+            {},
+            {
+                "data": {
+                    "rateLimit": {"cost": 2, "remaining": 4995, "resetAt": None},
+                    "repository": {
+                        "releases": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [
+                                _release_node("7.5.8", "2024-10-25T00:00:00Z"),
+                            ],
+                        },
+                        "refs": {"nodes": [{"name": "hotfix/7.5"}]},
+                        "tags": {
+                            "nodes": [
+                                {
+                                    "name": "7.5.9",
+                                    "target": {"committedDate": "2025-09-05T20:51:48Z"},
+                                },
+                                {
+                                    "name": "v1.2.3",
+                                    "target": {
+                                        "tagger": {"date": "2025-08-01T10:00:00Z"}
+                                    },
+                                },
+                                {
+                                    "name": "v1",  # non-semver should be skipped
+                                    "target": {"committedDate": "2025-07-01T00:00:00Z"},
+                                },
+                                {
+                                    "name": "7.5.9-rc1",  # prerelease suffix skipped
+                                    "target": {"committedDate": "2025-09-01T00:00:00Z"},
+                                },
+                            ]
+                        },
+                    },
+                }
+            },
+        )
+
+        releases, branch_names = paginated_releases_and_branches(
+            requester, owner="canonical", name="repo", known_since=None
+        )
+
+        assert [r["tagName"] for r in releases] == ["7.5.8", "7.5.9", "v1.2.3"]
+        assert branch_names == ["hotfix/7.5"]
+
 
 class TestClassifyPrReviewStatus:
     def test_changes_requested_wins_over_approval(self) -> None:
@@ -762,5 +811,6 @@ class TestNodeLimits:
 
         assert _extract_pagination_arguments(_RELEASES_AND_BRANCHES_QUERY) == [
             ("releases", "first", 20),
+            ("refs", "first", 100),
             ("refs", "first", 100),
         ]

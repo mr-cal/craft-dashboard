@@ -26,10 +26,13 @@ class PRVelocity(TypedDict):
 
     contributor_count: int
     contributor_avg_age: int | None
+    contributor_avg_delta: int | None
     first_response_waiting_count: int
     first_response_avg_days: int | None
+    first_response_avg_delta: int | None
     overall_count: int
     overall_avg_age: int | None
+    overall_avg_delta: int | None
 
 
 class ResolutionThroughput(TypedDict):
@@ -41,6 +44,8 @@ class ResolutionThroughput(TypedDict):
     issues_365d: int
     prs_365d: int
     total_365d: int
+    total_monthly_avg: int
+    total_monthly_delta: int
 
 
 class UntriagedBacklog(TypedDict):
@@ -58,11 +63,14 @@ class VolumeStats(TypedDict):
     open_issues: int
     closed_issues: int
     issues_30d_closed: int
+    open_issues_30d: int
     open_prs: int
     closed_prs: int
     prs_30d_closed: int
+    open_prs_30d: int
     total_items: int
     total_30d_closed: int
+    open_total_30d: int
 
 
 class AppReleaseSpotlight(TypedDict):
@@ -306,23 +314,139 @@ class DashboardService:
                     if not has_maintainer_response and review_count == 0:
                         waiting_ages.append(age_days)
 
+        velocity_contrib_avg = (
+            int(round(sum(contrib_ages) / len(contrib_ages))) if contrib_ages else None
+        )
+        velocity_waiting_avg = (
+            int(round(sum(waiting_ages) / len(waiting_ages))) if waiting_ages else None
+        )
+        velocity_overall_avg = (
+            int(round(sum(overall_ages) / len(overall_ages))) if overall_ages else None
+        )
+
+        # Compute 12-month baseline of open PR age and response times across 12 monthly checkpoints
+        pr_history_query = (
+            select(
+                Issue.id,
+                Issue.created_at,
+                Issue.closed_at,
+                Issue.author_is_maintainer,
+                Issue.author_is_bot,
+                Issue.comments,
+            )
+            .join(Project, Issue.project_id == Project.id)
+            .where(
+                Issue.issue_type == "pull_request",
+                Project.category != "aggregate",
+                or_(
+                    Issue.state == "open",
+                    Issue.closed_at >= one_year_ago,
+                ),
+            )
+        )
+        if excl is not None:
+            pr_history_query = pr_history_query.where(excl)
+        pr_history_rows = (await self.session.execute(pr_history_query)).all()
+
+        checkpoints = [now - timedelta(days=30 * i) for i in range(1, 13)]
+        hist_contrib_avgs: list[float] = []
+        hist_waiting_avgs: list[float] = []
+        hist_overall_avgs: list[float] = []
+
+        for cp in checkpoints:
+            cp_contrib: list[int] = []
+            cp_waiting: list[int] = []
+            cp_overall: list[int] = []
+            for prow in pr_history_rows:
+                p_created = (
+                    prow.created_at
+                    if prow.created_at and prow.created_at.tzinfo
+                    else prow.created_at.replace(tzinfo=UTC)
+                    if prow.created_at
+                    else None
+                )
+                p_closed = (
+                    prow.closed_at
+                    if prow.closed_at and prow.closed_at.tzinfo
+                    else prow.closed_at.replace(tzinfo=UTC)
+                    if prow.closed_at
+                    else None
+                )
+                if (
+                    p_created is not None
+                    and p_created <= cp
+                    and (p_closed is None or p_closed > cp)
+                ):
+                    age = max(0, (cp - p_created).days)
+                    cp_overall.append(age)
+                    if not prow.author_is_maintainer and not prow.author_is_bot:
+                        cp_contrib.append(age)
+                        comments = prow.comments or []
+                        has_resp = False
+                        for c in comments:
+                            if (
+                                isinstance(c, dict)
+                                and c.get("author") in maintainers_set
+                            ):
+                                c_time = c.get("created_at")
+                                try:
+                                    if (
+                                        c_time
+                                        and datetime.fromisoformat(c_time).astimezone(
+                                            UTC
+                                        )
+                                        <= cp
+                                    ):
+                                        has_resp = True
+                                        break
+                                except (ValueError, TypeError):
+                                    has_resp = True
+                                    break
+                        if not has_resp:
+                            cp_waiting.append(age)
+            if cp_contrib:
+                hist_contrib_avgs.append(sum(cp_contrib) / len(cp_contrib))
+            if cp_waiting:
+                hist_waiting_avgs.append(sum(cp_waiting) / len(cp_waiting))
+            if cp_overall:
+                hist_overall_avgs.append(sum(cp_overall) / len(cp_overall))
+
+        contributor_12m_avg = (
+            sum(hist_contrib_avgs) / len(hist_contrib_avgs)
+            if hist_contrib_avgs
+            else None
+        )
+        waiting_12m_avg = (
+            sum(hist_waiting_avgs) / len(hist_waiting_avgs)
+            if hist_waiting_avgs
+            else None
+        )
+        overall_12m_avg = (
+            sum(hist_overall_avgs) / len(hist_overall_avgs)
+            if hist_overall_avgs
+            else None
+        )
+
         velocity: PRVelocity = {
             "contributor_count": len(contrib_ages),
-            "contributor_avg_age": (
-                int(round(sum(contrib_ages) / len(contrib_ages)))
-                if contrib_ages
+            "contributor_avg_age": velocity_contrib_avg,
+            "contributor_avg_delta": (
+                velocity_contrib_avg - int(round(contributor_12m_avg))
+                if velocity_contrib_avg is not None and contributor_12m_avg is not None
                 else None
             ),
             "first_response_waiting_count": len(waiting_ages),
-            "first_response_avg_days": (
-                int(round(sum(waiting_ages) / len(waiting_ages)))
-                if waiting_ages
+            "first_response_avg_days": velocity_waiting_avg,
+            "first_response_avg_delta": (
+                velocity_waiting_avg - int(round(waiting_12m_avg))
+                if velocity_waiting_avg is not None and waiting_12m_avg is not None
                 else None
             ),
             "overall_count": len(overall_ages),
-            "overall_avg_age": (
-                int(round(sum(overall_ages) / len(overall_ages)))
-                if overall_ages
+            "overall_avg_age": velocity_overall_avg,
+            "overall_avg_delta": (
+                velocity_overall_avg - int(round(overall_12m_avg))
+                if velocity_overall_avg is not None and overall_12m_avg is not None
                 else None
             ),
         }
@@ -365,13 +489,20 @@ class DashboardService:
         issues_365d = tp_365_rows.get("issue", 0)
         prs_365d = tp_365_rows.get("pull_request", 0)
 
+        total_30d = issues_30d + prs_30d
+        total_365d = issues_365d + prs_365d
+        total_monthly_avg = int(round(total_365d / 12)) if total_365d > 0 else 0
+        total_monthly_delta = total_30d - total_monthly_avg
+
         throughput: ResolutionThroughput = {
             "issues_30d": issues_30d,
             "prs_30d": prs_30d,
-            "total_30d": issues_30d + prs_30d,
+            "total_30d": total_30d,
             "issues_365d": issues_365d,
             "prs_365d": prs_365d,
-            "total_365d": issues_365d + prs_365d,
+            "total_365d": total_365d,
+            "total_monthly_avg": total_monthly_avg,
+            "total_monthly_delta": total_monthly_delta,
         }
 
         # 4. Untriaged Queues with 30-day change
@@ -466,15 +597,41 @@ class DashboardService:
         total_items = open_issues + closed_issues + open_prs + closed_prs
         total_30d_closed = issues_30d + prs_30d
 
+        # Newly opened in the last 30 days
+        open_30d_q = (
+            select(
+                Issue.issue_type,
+                func.count(Issue.id),
+            )
+            .join(Project, Issue.project_id == Project.id)
+            .where(
+                Issue.state == "open",
+                Issue.created_at >= thirty_days_ago,
+                Project.category != "aggregate",
+            )
+        )
+        if excl is not None:
+            open_30d_q = open_30d_q.where(excl)
+        open_30d_q = open_30d_q.group_by(Issue.issue_type)
+        open_30d_rows = {
+            row[0]: row[1] for row in (await self.session.execute(open_30d_q)).all()
+        }
+        open_issues_30d = open_30d_rows.get("issue", 0)
+        open_prs_30d = open_30d_rows.get("pull_request", 0)
+        open_total_30d = open_issues_30d + open_prs_30d
+
         volume: VolumeStats = {
             "open_issues": open_issues,
             "closed_issues": closed_issues,
             "issues_30d_closed": issues_30d,
+            "open_issues_30d": open_issues_30d,
             "open_prs": open_prs,
             "closed_prs": closed_prs,
             "prs_30d_closed": prs_30d,
+            "open_prs_30d": open_prs_30d,
             "total_items": total_items,
             "total_30d_closed": total_30d_closed,
+            "open_total_30d": open_total_30d,
         }
 
         # 6. Releases across projects
@@ -864,7 +1021,10 @@ class DashboardService:
 
         latest_rel_by_project: dict[int, Any] = {}
         for row in rel_rows:
-            if hasattr(row, "project_id") and row.project_id not in latest_rel_by_project:
+            if (
+                hasattr(row, "project_id")
+                and row.project_id not in latest_rel_by_project
+            ):
                 latest_rel_by_project[row.project_id] = row
 
         proj_exec = await self.session.execute(

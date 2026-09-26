@@ -274,6 +274,8 @@ class TestDashboardService:
         assert metrics["throughput"]["issues_365d"] == 1
         assert metrics["throughput"]["prs_365d"] == 2
         assert metrics["throughput"]["total_365d"] == 3
+        assert metrics["throughput"]["total_monthly_avg"] == 0  # round(3 / 12) = 0
+        assert metrics["throughput"]["total_monthly_delta"] == 2  # 2 - 0 = 2
 
         # Check Untriaged Backlog
         assert metrics["untriaged"]["issues_count"] == 1
@@ -288,6 +290,9 @@ class TestDashboardService:
         assert metrics["volume"]["closed_prs"] == 2
         assert metrics["volume"]["total_items"] == 7
         assert metrics["volume"]["total_30d_closed"] == 2
+        assert metrics["volume"]["open_issues_30d"] == 2
+        assert metrics["volume"]["open_prs_30d"] == 2
+        assert metrics["volume"]["open_total_30d"] == 4
 
         # Check Least-Recent Apps
         app_names = [a["project_name"] for a in metrics["least_recent_apps"]]

@@ -23,6 +23,12 @@
         <span class="kpi-metric-label">Age of PRs from contributors:</span>
         <div class="kpi-metric-values">
           <span class="kpi-main-val">{{ metrics.velocity.contributor_avg_age | format_age_days(use_days=true) if metrics.velocity.contributor_avg_age is not none else "—" }}</span>
+          {% if metrics.velocity.contributor_avg_delta is not none and metrics.velocity.contributor_avg_delta != 0 %}
+          <span class="{% if metrics.velocity.contributor_avg_delta < 0 %}kpi-delta--positive{% else %}kpi-delta--negative{% endif %}"
+                title="Current average of {{ metrics.velocity.contributor_avg_age }} days vs 12-month monthly average baseline ({{ '+' if metrics.velocity.contributor_avg_delta > 0 else '' }}{{ metrics.velocity.contributor_avg_delta }} days)"
+                data-tooltip="Current average of {{ metrics.velocity.contributor_avg_age }} days vs 12-month monthly average baseline ({{ '+' if metrics.velocity.contributor_avg_delta > 0 else '' }}{{ metrics.velocity.contributor_avg_delta }} days)"
+                tabindex="0">({{ '+' if metrics.velocity.contributor_avg_delta > 0 else '' }}{{ metrics.velocity.contributor_avg_delta }}d)</span>
+          {% endif %}
           <a href="/issues?state=open&issue_type=pull_request&author_role=contributor&sort=age_desc"
              class="p-chip is-dense kpi-chip" title="View open contributor PRs">
             {{ metrics.velocity.contributor_count }} open
@@ -33,6 +39,12 @@
         <span class="kpi-metric-label">Time to 1st response for contributors:</span>
         <div class="kpi-metric-values">
           <span class="kpi-main-val">{{ (metrics.velocity.first_response_avg_days | format_age_days(use_days=true)) ~ " wait" if metrics.velocity.first_response_avg_days is not none else "—" }}</span>
+          {% if metrics.velocity.first_response_avg_delta is not none and metrics.velocity.first_response_avg_delta != 0 %}
+          <span class="{% if metrics.velocity.first_response_avg_delta < 0 %}kpi-delta--positive{% else %}kpi-delta--negative{% endif %}"
+                title="Current average wait of {{ metrics.velocity.first_response_avg_days }} days vs 12-month monthly average baseline ({{ '+' if metrics.velocity.first_response_avg_delta > 0 else '' }}{{ metrics.velocity.first_response_avg_delta }} days)"
+                data-tooltip="Current average wait of {{ metrics.velocity.first_response_avg_days }} days vs 12-month monthly average baseline ({{ '+' if metrics.velocity.first_response_avg_delta > 0 else '' }}{{ metrics.velocity.first_response_avg_delta }} days)"
+                tabindex="0">({{ '+' if metrics.velocity.first_response_avg_delta > 0 else '' }}{{ metrics.velocity.first_response_avg_delta }}d)</span>
+          {% endif %}
           <a href="/issues?state=open&issue_type=pull_request&author_role=contributor&action=needs_review"
              class="p-chip is-dense kpi-chip" title="Contributor PRs awaiting first maintainer review">
             {{ metrics.velocity.first_response_waiting_count }} unreviewed
@@ -43,6 +55,12 @@
         <span class="kpi-metric-label">Age of all PRs:</span>
         <div class="kpi-metric-values">
           <span class="kpi-main-val">{{ metrics.velocity.overall_avg_age | format_age_days(use_days=true) if metrics.velocity.overall_avg_age is not none else "—" }}</span>
+          {% if metrics.velocity.overall_avg_delta is not none and metrics.velocity.overall_avg_delta != 0 %}
+          <span class="{% if metrics.velocity.overall_avg_delta < 0 %}kpi-delta--positive{% else %}kpi-delta--negative{% endif %}"
+                title="Current average of {{ metrics.velocity.overall_avg_age }} days vs 12-month monthly average baseline ({{ '+' if metrics.velocity.overall_avg_delta > 0 else '' }}{{ metrics.velocity.overall_avg_delta }} days)"
+                data-tooltip="Current average of {{ metrics.velocity.overall_avg_age }} days vs 12-month monthly average baseline ({{ '+' if metrics.velocity.overall_avg_delta > 0 else '' }}{{ metrics.velocity.overall_avg_delta }} days)"
+                tabindex="0">({{ '+' if metrics.velocity.overall_avg_delta > 0 else '' }}{{ metrics.velocity.overall_avg_delta }}d)</span>
+          {% endif %}
           <a href="/issues?state=open&issue_type=pull_request&sort=age_desc"
              class="p-chip is-dense kpi-chip" title="View all open PRs">
             {{ metrics.velocity.overall_count }} open
@@ -66,6 +84,12 @@
         <span class="kpi-metric-label">Last 30 days:</span>
         <div class="kpi-metric-values">
           <span class="kpi-main-val">{{ "{:,}".format(metrics.throughput.total_30d) }}</span>
+          {% if metrics.throughput.total_monthly_delta is defined and metrics.throughput.total_monthly_delta is not none and metrics.throughput.total_monthly_delta != 0 %}
+          <span class="{% if metrics.throughput.total_monthly_delta > 0 %}kpi-delta--positive{% else %}kpi-delta--negative{% endif %}"
+                title="{{ metrics.throughput.total_30d }} resolved in last 30 days vs 12-month monthly average pace ({{ '{:,}'.format(metrics.throughput.total_365d) }}/yr ÷ 12 = {{ '{:,}'.format(metrics.throughput.total_monthly_avg) }}/mo)"
+                data-tooltip="{{ metrics.throughput.total_30d }} resolved in last 30 days vs 12-month monthly average pace ({{ '{:,}'.format(metrics.throughput.total_365d) }}/yr ÷ 12 = {{ '{:,}'.format(metrics.throughput.total_monthly_avg) }}/mo)"
+                tabindex="0">({{ '+' if metrics.throughput.total_monthly_delta > 0 else '' }}{{ metrics.throughput.total_monthly_delta }}/mo)</span>
+          {% endif %}
           <span class="kpi-sub-text">({{ "{:,}".format(metrics.throughput.issues_30d) }} issues, {{ "{:,}".format(metrics.throughput.prs_30d) }} PRs)</span>
         </div>
       </div>
@@ -123,24 +147,24 @@
         Cumulative open and closed work across all repositories
       </div>
       <div class="kpi-metric-row">
-        <span class="kpi-metric-label">PRs:</span>
-        <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ "{:,}".format(metrics.volume.open_prs) }} open</span>
-          <span class="kpi-sub-text">/ {{ "{:,}".format(metrics.volume.closed_prs) }} closed (<span class="kpi-delta--positive">+{{ "{:,}".format(metrics.volume.prs_30d_closed) }}</span> 30d)</span>
-        </div>
-      </div>
-      <div class="kpi-metric-row">
         <span class="kpi-metric-label">Issues:</span>
         <div class="kpi-metric-values">
           <span class="kpi-main-val">{{ "{:,}".format(metrics.volume.open_issues) }} open</span>
-          <span class="kpi-sub-text">/ {{ "{:,}".format(metrics.volume.closed_issues) }} closed (<span class="kpi-delta--positive">+{{ "{:,}".format(metrics.volume.issues_30d_closed) }}</span> 30d)</span>
+          <span class="kpi-sub-text">(<span class="{% if metrics.volume.open_issues_30d > 0 %}kpi-delta--positive{% elif metrics.volume.open_issues_30d < 0 %}kpi-delta--negative{% endif %}">+{{ "{:,}".format(metrics.volume.open_issues_30d) }}</span> in 30d) / {{ "{:,}".format(metrics.volume.closed_issues) }} closed</span>
+        </div>
+      </div>
+      <div class="kpi-metric-row">
+        <span class="kpi-metric-label">PRs:</span>
+        <div class="kpi-metric-values">
+          <span class="kpi-main-val">{{ "{:,}".format(metrics.volume.open_prs) }} open</span>
+          <span class="kpi-sub-text">(<span class="{% if metrics.volume.open_prs_30d > 0 %}kpi-delta--positive{% elif metrics.volume.open_prs_30d < 0 %}kpi-delta--negative{% endif %}">+{{ "{:,}".format(metrics.volume.open_prs_30d) }}</span> in 30d) / {{ "{:,}".format(metrics.volume.closed_prs) }} closed</span>
         </div>
       </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">Combined Total:</span>
         <div class="kpi-metric-values">
           <span class="kpi-main-val">{{ "{:,}".format(metrics.volume.total_items) }}</span>
-          <span class="kpi-sub-text">work items (<span class="kpi-delta--positive">+{{ "{:,}".format(metrics.volume.total_30d_closed) }}</span> 30d)</span>
+          <span class="kpi-sub-text">work items (<span class="kpi-delta--positive">+{{ "{:,}".format(metrics.volume.open_total_30d) }}</span> in 30d)</span>
         </div>
       </div>
     </div>

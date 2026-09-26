@@ -16,7 +16,6 @@
 <div class="row--25-75" style="margin-bottom: 2.5rem;">
   <div class="col">
     <h3>Applications</h3>
-    <p class="p-text--muted">Core pack and build tools for snaps, charms, rocks, and debs.</p>
     {% set app_red = application_cadence | selectattr("badge_color", "equalto", "red") | list | length %}
     {% set app_yellow = application_cadence | selectattr("badge_color", "equalto", "yellow") | list | length %}
     {% set app_green = application_cadence | selectattr("badge_color", "equalto", "green") | list | length %}
@@ -93,7 +92,6 @@
 <div class="row--25-75" style="margin-bottom: 2.5rem;">
   <div class="col">
     <h3>Libraries</h3>
-    <p class="p-text--muted">Shared craft libraries powering application CLI, parts, and platforms.</p>
     {% set lib_red = library_cadence | selectattr("badge_color", "equalto", "red") | list | length %}
     {% set lib_yellow = library_cadence | selectattr("badge_color", "equalto", "yellow") | list | length %}
     {% set lib_green = library_cadence | selectattr("badge_color", "equalto", "green") | list | length %}
@@ -170,7 +168,6 @@
 <div class="row--25-75" style="margin-bottom: 2.5rem;">
   <div class="col">
     <h3>Other</h3>
-    <p class="p-text--muted">Auxiliary tools, deployment actions, and services.</p>
     {% set oth_red = other_cadence | selectattr("badge_color", "equalto", "red") | list | length %}
     {% set oth_yellow = other_cadence | selectattr("badge_color", "equalto", "yellow") | list | length %}
     {% set oth_green = other_cadence | selectattr("badge_color", "equalto", "green") | list | length %}
@@ -247,7 +244,6 @@
 <div class="row--25-75" style="margin-bottom: 2.5rem;">
   <div class="col">
     <h3>Hotfixes</h3>
-    <p class="p-text--muted">All <code>hotfix/*</code> branches across every project, including libraries.</p>
   </div>
   <div class="col">
     <table class="table-fixed u-no-margin--bottom">

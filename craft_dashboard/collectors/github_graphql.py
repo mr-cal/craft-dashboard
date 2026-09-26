@@ -7,6 +7,7 @@ the data so callers can track the GraphQL budget without an extra request.
 """
 
 import logging
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -111,9 +112,44 @@ query($owner: String!, $name: String!, $after: String) {
     refs(refPrefix: "refs/heads/", query: "hotfix/", first: 100) {
       nodes { name }
     }
+    tags: refs(refPrefix: "refs/tags/", first: 100, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) {
+      nodes {
+        name
+        target {
+          ... on Tag {
+            tagger { date }
+            target {
+              ... on Commit {
+                committedDate
+              }
+            }
+          }
+          ... on Commit {
+            committedDate
+          }
+        }
+      }
+    }
   }
 }
 """
+
+_SEMVER_TAG_REGEX = re.compile(r"^v?\d+\.\d+\.\d+$")
+
+
+def _extract_tag_date(target: dict[str, Any] | None) -> str | None:
+    """Extract an ISO timestamp string from a git tag GraphQL target."""
+    if not target or not isinstance(target, dict):
+        return None
+    tagger = target.get("tagger")
+    if isinstance(tagger, dict) and tagger.get("date"):
+        return str(tagger["date"])
+    if target.get("committedDate"):
+        return str(target["committedDate"])
+    nested_target = target.get("target")
+    if isinstance(nested_target, dict) and nested_target.get("committedDate"):
+        return str(nested_target["committedDate"])
+    return None
 
 
 # Cap any GraphQL error summary we log/raise ourselves. Without this,
@@ -361,6 +397,7 @@ def paginated_releases_and_branches(
     after: str | None = None
     releases: list[dict[str, Any]] = []
     branch_names: list[str] = []
+    raw_tag_nodes: list[dict[str, Any]] = []
     first_page = True
 
     while True:
@@ -382,7 +419,10 @@ def paginated_releases_and_branches(
         )
         repo = data["repository"]
         if first_page:
-            branch_names = [ref["name"] for ref in repo["refs"]["nodes"]]
+            branch_names = [
+                ref["name"] for ref in (repo.get("refs") or {}).get("nodes", [])
+            ]
+            raw_tag_nodes = (repo.get("tags") or {}).get("nodes", [])
             first_page = False
 
         page = repo["releases"]
@@ -399,8 +439,38 @@ def paginated_releases_and_branches(
             releases.append(node)
 
         if reached_known or not page["pageInfo"]["hasNextPage"]:
-            return releases, branch_names
+            break
         after = page["pageInfo"]["endCursor"]
+
+    # Fall back to git tags for releases missing a formal GitHub release entity.
+    # Restrict strictly to 'X.Y.Z' or 'vX.Y.Z' syntax.
+    existing_tags = {r["tagName"] for r in releases}
+    for tag in raw_tag_nodes:
+        tag_name = tag.get("name")
+        if not tag_name or not _SEMVER_TAG_REGEX.match(tag_name):
+            continue
+        if tag_name in existing_tags:
+            continue
+        tag_date = _extract_tag_date(tag.get("target"))
+        created_at = _parse_graphql_datetime(tag_date)
+        if (
+            known_since is not None
+            and created_at is not None
+            and created_at <= known_since
+        ):
+            continue
+        releases.append(
+            {
+                "tagName": tag_name,
+                "isPrerelease": False,
+                "isDraft": False,
+                "createdAt": tag_date,
+                "publishedAt": tag_date,
+            }
+        )
+        existing_tags.add(tag_name)
+
+    return releases, branch_names
 
 
 def classify_pr_review_status(reviews: list[dict[str, Any]]) -> tuple[str, int]:

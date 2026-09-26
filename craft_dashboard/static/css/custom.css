@@ -1023,6 +1023,12 @@ a.kpi-main-val:hover {
   font-weight: 600;
 }
 
+.kpi-delta--positive[data-tooltip],
+.kpi-delta--negative[data-tooltip] {
+  cursor: help;
+  text-decoration: underline dotted 1px;
+}
+
 .kpi-chip {
   text-decoration: none;
   cursor: pointer;
