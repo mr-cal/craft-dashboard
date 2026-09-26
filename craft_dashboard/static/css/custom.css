@@ -898,14 +898,28 @@ table {
    ========================================================================== */
 
 .kpi-deck {
-  display: flex;
-  flex-wrap: wrap;
-  row-gap: 1.5rem;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.5rem;
+  width: 100%;
+}
+
+@media (max-width: 1024px) {
+  .kpi-deck {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .kpi-deck {
+    grid-template-columns: 1fr;
+  }
 }
 
 .kpi-deck > [class*="col-"] {
   display: flex;
   flex-direction: column;
+  width: 100%;
 }
 
 .kpi-card {
@@ -1052,27 +1066,19 @@ a.kpi-main-val:hover {
   overflow: visible;
 }
 
-.dashboard-container {
-  padding-left: 2rem;
-  padding-right: 2rem;
-  max-width: 100%;
-}
-
-.dashboard-container .row {
-  max-width: 100%;
-}
-
 .kpi-card [data-tooltip]::after {
   max-width: 340px;
   min-width: 180px;
   z-index: 500;
 }
 
+.kpi-deck > div:first-child [data-tooltip]::after,
 .kpi-deck > .col-3:first-child [data-tooltip]::after {
   left: 0;
   transform: translateX(0);
 }
 
+.kpi-deck > div:last-child [data-tooltip]::after,
 .kpi-deck > .col-3:last-child [data-tooltip]::after {
   left: auto;
   right: 0;

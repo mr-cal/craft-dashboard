@@ -1,15 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Dashboard - craft-dashboard{% endblock %}
-{% block layout %}
-<div class="p-strip u-no-padding--top dashboard-container">
-  <div class="row u-no-margin--top">
-    <div class="col-12">
-      <h2>Dashboard</h2>
-    </div>
+{% block content %}
+<div class="row" style="margin-bottom: 1.5rem;">
+  <div class="col-12">
+    <h2>Dashboard</h2>
   </div>
+</div>
 
-  <!-- TOP KPI CARDS -->
-  <div class="row kpi-deck" style="margin-bottom: 2rem;">
+<!-- TOP KPI CARDS -->
+<div class="kpi-deck" style="margin-bottom: 2rem;">
   <!-- PR Velocity & Response -->
   <div class="col-3">
     <div class="p-card kpi-card">
@@ -524,7 +523,6 @@
   <div class="col">
     {{ render_health_table(metrics.other_projects) }}
   </div>
-</div>
 </div>
 {% endblock %}
 {% block scripts %}
