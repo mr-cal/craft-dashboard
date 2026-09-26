@@ -290,9 +290,19 @@ class TestDashboardService:
         assert metrics["volume"]["closed_prs"] == 2
         assert metrics["volume"]["total_items"] == 7
         assert metrics["volume"]["total_30d_closed"] == 2
+        assert metrics["volume"]["created_issues_30d"] == 3
+        assert metrics["volume"]["created_prs_30d"] == 3
+        assert metrics["volume"]["net_open_issues_30d"] == 2
+        assert metrics["volume"]["net_open_prs_30d"] == 2
         assert metrics["volume"]["open_issues_30d"] == 2
         assert metrics["volume"]["open_prs_30d"] == 2
         assert metrics["volume"]["open_total_30d"] == 4
+        assert metrics["volume"]["net_open_total_30d"] == 4
+
+        # Check Velocity Baselines
+        assert "contributor_avg_baseline" in metrics["velocity"]
+        assert "first_response_avg_baseline" in metrics["velocity"]
+        assert "overall_avg_baseline" in metrics["velocity"]
 
         # Check Least-Recent Apps
         app_names = [a["project_name"] for a in metrics["least_recent_apps"]]

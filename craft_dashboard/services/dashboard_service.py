@@ -27,12 +27,15 @@ class PRVelocity(TypedDict):
     contributor_count: int
     contributor_avg_age: int | None
     contributor_avg_delta: int | None
+    contributor_avg_baseline: int | None
     first_response_waiting_count: int
     first_response_avg_days: int | None
     first_response_avg_delta: int | None
+    first_response_avg_baseline: int | None
     overall_count: int
     overall_avg_age: int | None
     overall_avg_delta: int | None
+    overall_avg_baseline: int | None
 
 
 class ResolutionThroughput(TypedDict):
@@ -64,13 +67,19 @@ class VolumeStats(TypedDict):
     closed_issues: int
     issues_30d_closed: int
     open_issues_30d: int
+    created_issues_30d: int
+    net_open_issues_30d: int
     open_prs: int
     closed_prs: int
     prs_30d_closed: int
     open_prs_30d: int
+    created_prs_30d: int
+    net_open_prs_30d: int
     total_items: int
     total_30d_closed: int
     open_total_30d: int
+    created_total_30d: int
+    net_open_total_30d: int
 
 
 class AppReleaseSpotlight(TypedDict):
@@ -427,28 +436,44 @@ class DashboardService:
             else None
         )
 
+        velocity_contrib_baseline = (
+            int(round(contributor_12m_avg)) if contributor_12m_avg is not None else None
+        )
+        velocity_waiting_baseline = (
+            int(round(waiting_12m_avg)) if waiting_12m_avg is not None else None
+        )
+        velocity_overall_baseline = (
+            int(round(overall_12m_avg)) if overall_12m_avg is not None else None
+        )
+
         velocity: PRVelocity = {
             "contributor_count": len(contrib_ages),
             "contributor_avg_age": velocity_contrib_avg,
             "contributor_avg_delta": (
-                velocity_contrib_avg - int(round(contributor_12m_avg))
-                if velocity_contrib_avg is not None and contributor_12m_avg is not None
+                velocity_contrib_avg - velocity_contrib_baseline
+                if velocity_contrib_avg is not None
+                and velocity_contrib_baseline is not None
                 else None
             ),
+            "contributor_avg_baseline": velocity_contrib_baseline,
             "first_response_waiting_count": len(waiting_ages),
             "first_response_avg_days": velocity_waiting_avg,
             "first_response_avg_delta": (
-                velocity_waiting_avg - int(round(waiting_12m_avg))
-                if velocity_waiting_avg is not None and waiting_12m_avg is not None
+                velocity_waiting_avg - velocity_waiting_baseline
+                if velocity_waiting_avg is not None
+                and velocity_waiting_baseline is not None
                 else None
             ),
+            "first_response_avg_baseline": velocity_waiting_baseline,
             "overall_count": len(overall_ages),
             "overall_avg_age": velocity_overall_avg,
             "overall_avg_delta": (
-                velocity_overall_avg - int(round(overall_12m_avg))
-                if velocity_overall_avg is not None and overall_12m_avg is not None
+                velocity_overall_avg - velocity_overall_baseline
+                if velocity_overall_avg is not None
+                and velocity_overall_baseline is not None
                 else None
             ),
+            "overall_avg_baseline": velocity_overall_baseline,
         }
 
         # 3. Resolution Throughput
@@ -597,41 +622,51 @@ class DashboardService:
         total_items = open_issues + closed_issues + open_prs + closed_prs
         total_30d_closed = issues_30d + prs_30d
 
-        # Newly opened in the last 30 days
-        open_30d_q = (
+        # Created in the last 30 days
+        created_30d_q = (
             select(
                 Issue.issue_type,
                 func.count(Issue.id),
             )
             .join(Project, Issue.project_id == Project.id)
             .where(
-                Issue.state == "open",
                 Issue.created_at >= thirty_days_ago,
                 Project.category != "aggregate",
             )
         )
         if excl is not None:
-            open_30d_q = open_30d_q.where(excl)
-        open_30d_q = open_30d_q.group_by(Issue.issue_type)
-        open_30d_rows = {
-            row[0]: row[1] for row in (await self.session.execute(open_30d_q)).all()
+            created_30d_q = created_30d_q.where(excl)
+        created_30d_q = created_30d_q.group_by(Issue.issue_type)
+        created_30d_rows = {
+            row[0]: row[1] for row in (await self.session.execute(created_30d_q)).all()
         }
-        open_issues_30d = open_30d_rows.get("issue", 0)
-        open_prs_30d = open_30d_rows.get("pull_request", 0)
-        open_total_30d = open_issues_30d + open_prs_30d
+        created_issues_30d = created_30d_rows.get("issue", 0)
+        created_prs_30d = created_30d_rows.get("pull_request", 0)
+        created_total_30d = created_issues_30d + created_prs_30d
+
+        # Net change in open volume: created in 30d - closed in 30d
+        net_open_issues_30d = created_issues_30d - issues_30d
+        net_open_prs_30d = created_prs_30d - prs_30d
+        net_open_total_30d = created_total_30d - total_30d_closed
 
         volume: VolumeStats = {
             "open_issues": open_issues,
             "closed_issues": closed_issues,
             "issues_30d_closed": issues_30d,
-            "open_issues_30d": open_issues_30d,
+            "open_issues_30d": net_open_issues_30d,
+            "created_issues_30d": created_issues_30d,
+            "net_open_issues_30d": net_open_issues_30d,
             "open_prs": open_prs,
             "closed_prs": closed_prs,
             "prs_30d_closed": prs_30d,
-            "open_prs_30d": open_prs_30d,
+            "open_prs_30d": net_open_prs_30d,
+            "created_prs_30d": created_prs_30d,
+            "net_open_prs_30d": net_open_prs_30d,
             "total_items": total_items,
             "total_30d_closed": total_30d_closed,
-            "open_total_30d": open_total_30d,
+            "open_total_30d": net_open_total_30d,
+            "created_total_30d": created_total_30d,
+            "net_open_total_30d": net_open_total_30d,
         }
 
         # 6. Releases across projects

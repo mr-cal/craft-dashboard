@@ -918,6 +918,7 @@ table {
   padding: 1.25rem 1rem 1rem 1rem;
   background: var(--app-surface);
   box-shadow: var(--app-shadow);
+  overflow: visible;
 }
 
 .kpi-card .p-card__title {
@@ -1048,6 +1049,34 @@ a.kpi-main-val:hover {
   background: var(--app-surface);
   box-shadow: var(--app-shadow);
   height: 100%;
+  overflow: visible;
+}
+
+.dashboard-container {
+  padding-left: 2rem;
+  padding-right: 2rem;
+  max-width: 100%;
+}
+
+.dashboard-container .row {
+  max-width: 100%;
+}
+
+.kpi-card [data-tooltip]::after {
+  max-width: 340px;
+  min-width: 180px;
+  z-index: 500;
+}
+
+.kpi-deck > .col-3:first-child [data-tooltip]::after {
+  left: 0;
+  transform: translateX(0);
+}
+
+.kpi-deck > .col-3:last-child [data-tooltip]::after {
+  left: auto;
+  right: 0;
+  transform: translateX(0);
 }
 
 .spotlight-header {
