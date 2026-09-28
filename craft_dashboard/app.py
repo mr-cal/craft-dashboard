@@ -197,6 +197,14 @@ def _local_datetime(value: datetime | str | None, empty: str = "—") -> str:
     )
 
 
+def _urlencode_project_path(s: object) -> str:
+    """Encode path segments for URLs, mapping known aliases to clean slugs."""
+    val = str(s)
+    if val == "snapcraft (launchpad)":
+        return "snapcraft-launchpad"
+    return _url_quote(val, safe="")
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -258,7 +266,7 @@ def create_app() -> FastAPI:
     _startup_ts = str(int(datetime.now(tz=UTC).timestamp()))
     template_globals = cast(dict[str, object], templates.env.globals)
     template_globals["cache_bust"] = _startup_ts
-    templates.env.filters["urlencode_path"] = lambda s: _url_quote(str(s), safe="")
+    templates.env.filters["urlencode_path"] = _urlencode_project_path
     templates.env.filters["format_duration"] = _format_duration_seconds
     templates.env.filters["format_age_days"] = _format_age_days
     templates.env.filters["local_datetime"] = _local_datetime

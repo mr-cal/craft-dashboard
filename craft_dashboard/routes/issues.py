@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException
 
@@ -122,6 +122,32 @@ def _parse_per_page(value: str) -> int:
         return DEFAULT_PER_PAGE
 
 
+def _normalize_project_param(project: str) -> str:
+    """Map URL slug back to the database project name."""
+    if project == "snapcraft-launchpad":
+        return "snapcraft (launchpad)"
+    return project
+
+
+def _is_legacy_launchpad_project(project: str) -> bool:
+    """Return True if project represents the un-slugified Launchpad name."""
+    cleaned = (
+        project.replace("%20", " ").replace("%28", "(").replace("%29", ")").strip()
+    )
+    return cleaned == "snapcraft (launchpad)"
+
+
+def _normalize_project_filter(project_param: str) -> str:
+    """Normalize project query filter so slug or DB name can be used."""
+    if not project_param:
+        return ""
+    parts = [p.strip() for p in project_param.split(",")]
+    normalized = [
+        "snapcraft (launchpad)" if p == "snapcraft-launchpad" else p for p in parts
+    ]
+    return ",".join(normalized)
+
+
 def _build_issue_filters(
     *,
     project: str,
@@ -138,7 +164,7 @@ def _build_issue_filters(
 ) -> IssueFilters:
     """Build normalized issue filters from route query parameters."""
     return IssueFilters(
-        project=project,
+        project=_normalize_project_filter(project),
         source=source,
         state=state,
         issue_type=issue_type,
@@ -329,7 +355,7 @@ async def issue_list(
     effective_per_page = _normalize_per_page(_parse_per_page(per_page))
 
     filters = IssueFilters(
-        project=project,
+        project=_normalize_project_filter(project),
         source=source,
         state=state,
         issue_type=issue_type,
@@ -385,7 +411,7 @@ async def issue_table_partial(
     effective_per_page = _normalize_per_page(_parse_per_page(per_page))
 
     filters = IssueFilters(
-        project=project,
+        project=_normalize_project_filter(project),
         source=source,
         state=state,
         issue_type=issue_type,
@@ -421,19 +447,26 @@ async def issue_detail(
     project: str,
     number: str,
     session: AsyncSession = Depends(get_db_session),
-) -> HTMLResponse:
+) -> Response:
     """Render the issue detail page with evaluation history and related issues."""
+    if _is_legacy_launchpad_project(project):
+        redirect_url = f"/issues/snapcraft-launchpad/{number}"
+        if request.url.query:
+            redirect_url += f"?{request.url.query}"
+        return RedirectResponse(url=redirect_url, status_code=308)
+
+    db_project = _normalize_project_param(project)
     templates: Jinja2Templates = request.app.state.templates
     settings = request.app.state.settings
     repo = IssueRepository(session, filtered_issues=get_config(request).filtered_issues)
-    issue = await repo.get_issue_detail(project, number)
+    issue = await repo.get_issue_detail(db_project, number)
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
 
     evaluation_history = cast(list[dict[str, Any]], issue["evaluation_history"])
     current_evaluation = evaluation_history[0] if evaluation_history else None
 
-    activity_history = await repo.get_issue_activity_history(project, number)
+    activity_history = await repo.get_issue_activity_history(db_project, number)
     link_repo = IssueLinkRepository(session)
     related_links = await link_repo.get_latest_links_for_issue(issue["id"])
 

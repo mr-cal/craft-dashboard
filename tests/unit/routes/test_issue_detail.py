@@ -161,6 +161,70 @@ class TestIssueDetailRoute:
         assert response.status_code == 200
         assert "https://bugs.launchpad.net/craft-parts/+bug/321" in response.text
 
+    def test_snapcraft_launchpad_redirects_to_slug(
+        self, test_client: TestClient
+    ) -> None:
+        response = test_client.get(
+            "/issues/snapcraft%20%28launchpad%29/1876370",
+            follow_redirects=False,
+        )
+        assert response.status_code == 308
+        assert response.headers["location"] == "/issues/snapcraft-launchpad/1876370"
+
+    def test_snapcraft_launchpad_slug_renders_with_db_name(
+        self, test_client: TestClient
+    ) -> None:
+        detail = dict(
+            _DETAIL,
+            project_name="snapcraft (launchpad)",
+            source="launchpad",
+            external_id="1876370",
+        )
+        with patch.object(
+            IssueRepository,
+            "get_issue_detail",
+            AsyncMock(return_value=detail),
+        ) as get_detail:
+            response = test_client.get("/issues/snapcraft-launchpad/1876370")
+
+        assert response.status_code == 200
+        get_detail.assert_awaited_once_with("snapcraft (launchpad)", "1876370")
+        assert "<dd>snapcraft (launchpad)</dd>" in response.text
+        assert "https://bugs.launchpad.net/snapcraft/+bug/1876370" in response.text
+
+    def test_issue_list_slugifies_snapcraft_launchpad_url(
+        self, test_client: TestClient
+    ) -> None:
+        issue = IssueView(
+            id=102,
+            project_name="snapcraft (launchpad)",
+            source="launchpad",
+            external_id="1876370",
+            title="Snapcraft LP bug",
+            author="contributor",
+            issue_type="issue",
+            state="open",
+            url="https://bugs.launchpad.net/snapcraft/+bug/1876370",
+            summary="Snapcraft launchpad bug summary.",
+            suggested_action="needs_triage",
+            suggested_action_reason="Needs triage.",
+            scores={"actionability": 0.8},
+        )
+        result = IssueQueryResult(issues=[issue], total_count=1, total_pages=1, page=1)
+
+        with (
+            patch.object(IssueRepository, "search", AsyncMock(return_value=result)),
+            patch.object(
+                IssueRepository,
+                "get_project_names",
+                AsyncMock(return_value=["snapcraft (launchpad)"]),
+            ),
+        ):
+            response = test_client.get("/issues")
+
+        assert response.status_code == 200
+        assert 'href="/issues/snapcraft-launchpad/1876370"' in response.text
+
     def test_issue_detail_renders_activity_history(
         self, test_client: TestClient
     ) -> None:

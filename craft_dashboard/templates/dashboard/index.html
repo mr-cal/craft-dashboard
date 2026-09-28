@@ -290,7 +290,7 @@
           {% for pr in metrics.aging_prs %}
           <tr>
             <td class="text-truncate" title="{{ pr.project_name }} #{{ pr.external_id }}">
-              <a href="/issues/{{ pr.project_name }}/{{ pr.external_id }}">
+              <a href="/issues/{{ pr.project_name | urlencode_path }}/{{ pr.external_id }}">
                 <strong>{{ pr.project_name }}</strong> #{{ pr.external_id }}
               </a>
             </td>
@@ -341,7 +341,7 @@
           {% for issue in metrics.needs_triage_issues %}
           <tr>
             <td class="text-truncate" title="{{ issue.project_name }} #{{ issue.external_id }}">
-              <a href="/issues/{{ issue.project_name }}/{{ issue.external_id }}">
+              <a href="/issues/{{ issue.project_name | urlencode_path }}/{{ issue.external_id }}">
                 <strong>{{ issue.project_name }}</strong> #{{ issue.external_id }}
               </a>
             </td>
@@ -388,7 +388,7 @@
           {% for qw in metrics.quick_wins %}
           <tr>
             <td class="text-truncate" title="{{ qw.project_name }} #{{ qw.external_id }}">
-              <a href="/issues/{{ qw.project_name }}/{{ qw.external_id }}">
+              <a href="/issues/{{ qw.project_name | urlencode_path }}/{{ qw.external_id }}">
                 <strong>{{ qw.project_name }}</strong> #{{ qw.external_id }}
               </a>
             </td>
