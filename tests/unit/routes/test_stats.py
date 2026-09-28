@@ -15,6 +15,9 @@ class _EmptyStatsResult:
     def scalars(self):
         return self
 
+    def scalar(self):
+        return None
+
     def __iter__(self):
         return iter([])
 
@@ -22,6 +25,12 @@ class _EmptyStatsResult:
 class _EmptyStatsSession:
     async def execute(self, _query):
         return _EmptyStatsResult()
+
+    async def scalars(self, _query):
+        return _EmptyStatsResult()
+
+    async def scalar(self, _query):
+        return None
 
 
 class _TrendStatsSession:
@@ -61,6 +70,18 @@ class TestStatsRoutes:
 
         assert response.status_code == 200
 
+    def test_triage_page(self) -> None:
+        """GET /stats/triage returns HTML."""
+        app = create_app()
+        app.dependency_overrides[get_db_session] = _override_empty_stats_db_session
+
+        with TestClient(app) as client:
+            response = client.get("/stats/triage")
+
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert "Triage" in response.text
+
     def test_trends_page(self) -> None:
         """GET /stats/trends returns accessible HTML with loading state."""
         app = create_app()
@@ -89,18 +110,9 @@ class TestStatsRoutes:
             'aria-label="Bar chart showing issues closed per week for selected projects"'
             in response.text
         )
-        assert (
-            'aria-label="Bar chart showing current open issues and PRs per project"'
-            in response.text
-        )
-        assert (
-            'aria-label="Bar chart showing median issue and PR age in days per project"'
-            in response.text
-        )
-        assert (
-            'aria-label="Bar chart showing issues and PRs closed in the last year per project"'
-            in response.text
-        )
+        assert 'id="snapshot-table"' in response.text
+        assert "Annual delivery &amp; project state" in response.text
+        assert 'name="trend-projects"' in response.text
 
     def test_stats_index_redirects(self) -> None:
         """GET /stats redirects to /stats/dependencies."""

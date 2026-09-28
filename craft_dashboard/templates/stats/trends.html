@@ -69,6 +69,30 @@
         </div>
       </div>
 
+      <!-- Projects Filter -->
+      <div class="filter-group">
+        <label>Projects</label>
+        <div class="multiselect" data-name="trend-projects" data-hidden="trend-projects-hidden">
+          <div class="multiselect__input-wrap" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-label="Select projects">
+            <span class="multiselect__placeholder">All projects</span>
+            <div class="multiselect__chips"></div>
+          </div>
+          <div class="multiselect__dropdown u-hide">
+            <div class="multiselect__options" role="listbox">
+              <label class="multiselect__option" role="option">
+                <input type="checkbox" value="all-projects" checked /> All projects
+              </label>
+              {% for p in project_names %}
+              <label class="multiselect__option" role="option">
+                <input type="checkbox" value="{{ p }}" checked /> {{ p }}
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+          <input type="hidden" id="trend-projects-hidden" name="trend-projects" value="all-projects,{{ project_names | join(',') }}" />
+        </div>
+      </div>
+
       <!-- Date Range -->
       <div class="filter-group">
         <label>Date Range</label>
@@ -103,11 +127,7 @@
     </div>
   </div>
   <div class="row">
-    <div class="col-3">
-      <h4 class="p-heading--5">Projects</h4>
-      <div id="open-issues-checkboxes"></div>
-    </div>
-    <div class="col-9">
+    <div class="col-12">
       <canvas id="issues-chart" role="img" aria-label="Line chart showing open issues over time for selected projects" style="width:100%;height:400px;"></canvas>
     </div>
   </div>
@@ -123,11 +143,7 @@
     </div>
   </div>
   <div class="row">
-    <div class="col-3">
-      <h4 class="p-heading--5">Projects</h4>
-      <div id="median-age-checkboxes"></div>
-    </div>
-    <div class="col-9">
+    <div class="col-12">
       <canvas id="median-age-chart" role="img" aria-label="Line chart showing median issue age over time for selected projects" style="width:100%;height:400px;"></canvas>
     </div>
   </div>
@@ -143,11 +159,7 @@
     </div>
   </div>
   <div class="row">
-    <div class="col-3">
-      <h4 class="p-heading--5">Projects</h4>
-      <div id="closed-checkboxes"></div>
-    </div>
-    <div class="col-9">
+    <div class="col-12">
       <canvas id="closed-chart" role="img" aria-label="Bar chart showing issues closed per week for selected projects" style="width:100%;height:400px;"></canvas>
     </div>
   </div>
@@ -155,27 +167,59 @@
 
 <div class="row"><hr class="p-rule" /></div>
 
-<!-- Project snapshot (current state) -->
+<!-- Annual delivery & project state -->
 <div class="p-strip">
   <div class="row">
     <div class="col-12">
-      <h3 class="p-heading--4">Project snapshot (current state)</h3>
+      <h3 class="p-heading--4">Annual delivery &amp; project state</h3>
     </div>
   </div>
-  <div class="row">
-    <div class="col-3">
-      <h4 class="p-heading--5">Projects</h4>
-      <div id="snapshot-checkboxes"></div>
+  <div class="row--25-75">
+    <div class="col">
+      <div id="snapshot-summary" style="display: flex; flex-direction: column; gap: 1rem; margin-top: 0.5rem;">
+        <div>
+          <span class="p-text--small">Closed in last year</span>
+          <div id="snap-closed-year-total" style="font-size: 1.4rem; font-weight: 700;">—</div>
+          <span id="snap-closed-year-breakdown" class="p-text--small p-text--muted"></span>
+        </div>
+        <div>
+          <span class="p-text--small">Current open backlog</span>
+          <div id="snap-open-total" style="font-size: 1.2rem; font-weight: 600;">—</div>
+          <span id="snap-open-breakdown" class="p-text--small p-text--muted"></span>
+        </div>
+        <div>
+          <span class="p-text--small">Current median age</span>
+          <div id="snap-median-age" style="font-size: 1.2rem; font-weight: 600;">—</div>
+          <span id="snap-median-breakdown" class="p-text--small p-text--muted"></span>
+        </div>
+      </div>
     </div>
-    <div class="col-9">
-      <h5 class="p-heading--5">Open issues & PRs</h5>
-      <canvas id="snapshot-open-chart" role="img" aria-label="Bar chart showing current open issues and PRs per project" style="width:100%;"></canvas>
-
-      <h5 class="p-heading--5" style="margin-top:2rem;">Median age (days)</h5>
-      <canvas id="snapshot-age-chart" role="img" aria-label="Bar chart showing median issue and PR age in days per project" style="width:100%;"></canvas>
-
-      <h5 class="p-heading--5" style="margin-top:2rem;">Closed in last year</h5>
-      <canvas id="snapshot-closed-chart" role="img" aria-label="Bar chart showing issues and PRs closed in the last year per project" style="width:100%;"></canvas>
+    <div class="col">
+      <div class="u-table-container">
+        <table data-sortable class="p-table--sortable table-fixed u-no-margin--bottom" id="snapshot-table">
+          <colgroup>
+            <col style="width: 25%;">
+            <col style="width: 15%;">
+            <col style="width: 15%;">
+            <col style="width: 15%;">
+            <col style="width: 15%;">
+            <col style="width: 15%;">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Repository</th>
+              <th class="u-align--right">Closed (Year)</th>
+              <th class="u-align--right">Open Issues</th>
+              <th class="u-align--right">Open PRs</th>
+              <th class="u-align--right">Issue Age</th>
+              <th class="u-align--right">PR Age</th>
+            </tr>
+          </thead>
+          <tbody id="snapshot-table-body">
+            <!-- Populated and filtered via trends.js -->
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
@@ -183,5 +227,6 @@
 
 {% block scripts %}
 <script src="/static/js/multiselect.js"></script>
+<script src="/static/js/table-sort.js"></script>
 <script type="module" src="/static/js/trends.js?v={{ cache_bust }}"></script>
 {% endblock %}

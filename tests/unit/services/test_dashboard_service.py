@@ -341,3 +341,19 @@ class TestDashboardService:
         assert cadence[0]["name"] == "debcraft"
         assert cadence[0]["latest_version"] == "(unreleased)"
         assert cadence[0]["released_at_str"] == "2025-06-02"
+
+        # Check Triage and Responsiveness data
+        triage_data = await service.get_triage_and_responsiveness_data(config, now=now)
+        assert "velocity" in triage_data
+        assert triage_data["velocity"]["first_response_waiting_count"] == 1
+        assert len(triage_data["awaiting_prs"]) == 1
+        assert triage_data["awaiting_prs"][0]["external_id"] == "101"
+        assert triage_data["awaiting_prs"][0]["project_name"] == "snapcraft"
+        assert triage_data["awaiting_prs"][0]["days_waiting"] == 20
+
+        assert len(triage_data["application_projects"]) == 2
+        assert len(triage_data["library_projects"]) == 1
+        assert "action_counts" in triage_data
+        assert triage_data["total_open"] == 4  # 2 open issues + 2 open PRs
+        assert triage_data["evaluated_count"] == 4
+        assert triage_data["healthy_project_count"] >= 1

@@ -49,8 +49,7 @@ _FETCH_CHART_DATA_SCRIPT = """\
 
     // Collect data from all charts
     const result = {};
-    for (const id of ['issues-chart', 'median-age-chart', 'closed-chart',
-                       'snapshot-open-chart', 'snapshot-age-chart', 'snapshot-closed-chart']) {
+    for (const id of ['issues-chart', 'median-age-chart', 'closed-chart']) {
       const canvas = await page.$(`#${id}`);
       if (!canvas) { result[id] = null; continue; }
       result[id] = await page.evaluate((c) => {
@@ -67,6 +66,22 @@ _FETCH_CHART_DATA_SCRIPT = """\
         };
       }, canvas);
     }
+
+    // Collect data from the Annual Delivery & Project State table
+    result.snapshot_table = await page.evaluate(() => {
+      const rows = document.querySelectorAll('#snapshot-table tbody tr');
+      return Array.from(rows).map(r => {
+        const cells = r.querySelectorAll('td');
+        return {
+          project: cells[0]?.textContent.trim(),
+          closedIssues: cells[1]?.textContent.trim(),
+          closedPrs: cells[2]?.textContent.trim(),
+          closedTotal: cells[3]?.textContent.trim(),
+          openBacklog: cells[4]?.textContent.trim(),
+          medianAge: cells[5]?.textContent.trim(),
+        };
+      });
+    });
 
     console.log(JSON.stringify(result));
 """
@@ -131,21 +146,18 @@ class TestViewCombinations:
         bots: bool,
         desc: str,
     ) -> None:
-        """Each view combination should render all charts with data."""
+        """Each view combination should render all charts and snapshot table with data."""
         data = _get_chart_data(
             seeded_url,
             maintainers=maintainers,
             contributors=contributors,
             bots=bots,
         )
-        # All 6 charts should exist
+        # All 3 line charts should exist
         for chart_id in [
             "issues-chart",
             "median-age-chart",
             "closed-chart",
-            "snapshot-open-chart",
-            "snapshot-age-chart",
-            "snapshot-closed-chart",
         ]:
             assert data.get(chart_id) is not None, f"{chart_id} missing for view {desc}"
 
@@ -155,18 +167,12 @@ class TestViewCombinations:
             assert len(chart["labels"]) > 0, f"{chart_id} has no labels"
             assert len(chart["datasets"]) > 0, f"{chart_id} has no datasets"
 
-        # Snapshot charts should have data
-        for chart_id in [
-            "snapshot-open-chart",
-            "snapshot-age-chart",
-            "snapshot-closed-chart",
-        ]:
-            chart = data[chart_id]
-            assert len(chart["labels"]) > 0, f"{chart_id} has no labels"
-            assert len(chart["datasets"]) > 0, f"{chart_id} has no datasets"
+        # Snapshot table should have rows
+        snapshot_table = data.get("snapshot_table", [])
+        assert len(snapshot_table) > 0, f"Snapshot table has no rows for view {desc}"
 
     def test_snapshot_values_differ_between_all_and_bots(self, seeded_url: str) -> None:
-        """Snapshot 'Open Issues & PRs' must show different values for all vs bots."""
+        """Snapshot table 'Closed in Year' must show different values for all vs bots."""
         all_data = _get_chart_data(
             seeded_url, maintainers=True, contributors=True, bots=True
         )
@@ -174,18 +180,18 @@ class TestViewCombinations:
             seeded_url, maintainers=False, contributors=False, bots=True
         )
 
-        all_issues = all_data["snapshot-open-chart"]["datasets"][0]["data"]
-        bots_issues = bots_data["snapshot-open-chart"]["datasets"][0]["data"]
+        all_closed = [r["closedTotal"] for r in all_data.get("snapshot_table", [])]
+        bots_closed = [r["closedTotal"] for r in bots_data.get("snapshot_table", [])]
 
-        assert all_issues != bots_issues, (
-            f"Snapshot open issues should differ between all-3 and bots-only: "
-            f"all={all_issues}, bots={bots_issues}"
+        assert all_closed != bots_closed, (
+            f"Snapshot closed totals should differ between all-3 and bots-only: "
+            f"all={all_closed}, bots={bots_closed}"
         )
 
     def test_snapshot_values_differ_between_all_and_internal(
         self, seeded_url: str
     ) -> None:
-        """Snapshot 'Open Issues & PRs' must show different values for all vs internal."""
+        """Snapshot table 'Closed in Year' must show different values for all vs internal."""
         all_data = _get_chart_data(
             seeded_url, maintainers=True, contributors=True, bots=True
         )
@@ -193,12 +199,14 @@ class TestViewCombinations:
             seeded_url, maintainers=True, contributors=False, bots=False
         )
 
-        all_issues = all_data["snapshot-open-chart"]["datasets"][0]["data"]
-        internal_issues = internal_data["snapshot-open-chart"]["datasets"][0]["data"]
+        all_closed = [r["closedTotal"] for r in all_data.get("snapshot_table", [])]
+        internal_closed = [
+            r["closedTotal"] for r in internal_data.get("snapshot_table", [])
+        ]
 
-        assert all_issues != internal_issues, (
-            f"Snapshot open issues should differ between all-3 and internal: "
-            f"all={all_issues}, internal={internal_issues}"
+        assert all_closed != internal_closed, (
+            f"Snapshot closed totals should differ between all-3 and internal: "
+            f"all={all_closed}, internal={internal_closed}"
         )
 
     def test_none_view_shows_empty_charts(self, seeded_url: str) -> None:
@@ -220,11 +228,11 @@ class TestViewCombinations:
 
 
 # ---------------------------------------------------------------------------
-# Tests: Snapshot chart closed-year view switching
+# Tests: Snapshot table closed-year view switching
 # ---------------------------------------------------------------------------
 class TestSnapshotClosedChart:
     def test_closed_chart_differs_between_views(self, seeded_url: str) -> None:
-        """The closed-year snapshot chart should show different values per view."""
+        """The closed-year snapshot table should show different values per view."""
         all_data = _get_chart_data(
             seeded_url, maintainers=True, contributors=True, bots=True
         )
@@ -232,11 +240,11 @@ class TestSnapshotClosedChart:
             seeded_url, maintainers=False, contributors=True, bots=False
         )
 
-        all_closed = all_data["snapshot-closed-chart"]["datasets"][0]["data"]
-        ext_closed = external_data["snapshot-closed-chart"]["datasets"][0]["data"]
+        all_closed = [r["closedTotal"] for r in all_data.get("snapshot_table", [])]
+        ext_closed = [r["closedTotal"] for r in external_data.get("snapshot_table", [])]
 
         assert all_closed != ext_closed, (
-            f"Closed chart should differ between all and external: "
+            f"Closed table totals should differ between all and external: "
             f"all={all_closed}, external={ext_closed}"
         )
 
@@ -246,7 +254,7 @@ class TestSnapshotClosedChart:
 # ---------------------------------------------------------------------------
 class TestProjectToggling:
     def test_toggling_projects_changes_line_charts(self, seeded_url: str) -> None:
-        """Checking/unchecking project checkboxes should add/remove datasets."""
+        """Filtering projects via top multiselect should update datasets."""
         script = make_script("""\
     await page.goto(`${BASE}/stats/trends`, {waitUntil: 'networkidle0', timeout: 30000});
     await page.waitForFunction(() => {
@@ -264,12 +272,15 @@ class TestProjectToggling:
 
     const initial = await getDatasetCount('issues-chart');
 
-    // Check snapcraft
-    const snapcraft = await page.$('#open-issues-snapcraft');
-    if (snapcraft) {
-      await snapcraft.click();
-      await new Promise(r => setTimeout(r, 500));
-    }
+    // Filter to just snapcraft via top multiselect hidden input
+    await page.evaluate(() => {
+      const hidden = document.getElementById('trend-projects-hidden');
+      if (hidden) {
+        hidden.value = 'snapcraft';
+        hidden.dispatchEvent(new Event('change', {bubbles: true}));
+      }
+    });
+    await new Promise(r => setTimeout(r, 600));
 
     const afterToggle = await getDatasetCount('issues-chart');
 
@@ -279,6 +290,11 @@ class TestProjectToggling:
       changed: initial !== afterToggle,
     }));
 """)
+        result = run_puppeteer(script, base_url=seeded_url, timeout=30)
+        assert result["changed"], (
+            f"Expected dataset count to change after toggling project: "
+            f"initial={result['initial_datasets']}, after={result['after_toggle_datasets']}"
+        )
         result = run_puppeteer(script, base_url=seeded_url, timeout=30)
         assert result["changed"], (
             f"Expected dataset count to change after toggling project: "
@@ -391,19 +407,15 @@ class TestChartTypes:
                 f"{chart_id} should be line chart, got {data[chart_id]['type']}"
             )
 
-    def test_snapshot_charts_are_bar_type(self, seeded_url: str) -> None:
-        """Snapshot charts should be bar type."""
+    def test_snapshot_table_renders(self, seeded_url: str) -> None:
+        """Annual Delivery & Project State table should render rows."""
         data = _get_chart_data(
             seeded_url, maintainers=True, contributors=True, bots=True
         )
-        for chart_id in [
-            "snapshot-open-chart",
-            "snapshot-age-chart",
-            "snapshot-closed-chart",
-        ]:
-            assert data[chart_id]["type"] == "bar", (
-                f"{chart_id} should be bar chart, got {data[chart_id]['type']}"
-            )
+        snapshot_table = data.get("snapshot_table", [])
+        assert len(snapshot_table) > 0, "Expected rows in #snapshot-table"
+        first_row = snapshot_table[0]
+        assert first_row.get("project"), "First row should have project name"
 
 
 # ---------------------------------------------------------------------------
@@ -419,11 +431,14 @@ class TestDataAlignment:
       return !el || el.style.display === 'none';
     }, {timeout: 15000});
 
-    // Check snapcraft and charmcraft
-    const snap = await page.$('#open-issues-snapcraft');
-    const charm = await page.$('#open-issues-charmcraft');
-    if (snap) await snap.click();
-    if (charm) await charm.click();
+    // Select snapcraft and charmcraft via top multiselect
+    await page.evaluate(() => {
+      const hidden = document.getElementById('trend-projects-hidden');
+      if (hidden) {
+        hidden.value = 'snapcraft,charmcraft';
+        hidden.dispatchEvent(new Event('change', {bubbles: true}));
+      }
+    });
     await new Promise(r => setTimeout(r, 800));
 
     const chartData = await page.evaluate(() => {

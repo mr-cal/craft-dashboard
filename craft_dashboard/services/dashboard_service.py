@@ -161,6 +161,49 @@ class RepoCadenceRow(TypedDict):
     is_fallback: bool
 
 
+class ContributorAwaitingPR(TypedDict):
+    """Contributor PR awaiting maintainer review or response."""
+
+    project_name: str
+    external_id: str
+    title: str
+    author: str | None
+    days_waiting: int
+    url: str | None
+    created_at_str: str
+
+
+class ProjectTriageHealthRow(TypedDict):
+    """Project-level triage queue status."""
+
+    name: str
+    github_org: str
+    category: str
+    open_issues: int
+    open_prs: int
+    untriaged_issues: int
+    untriaged_prs: int
+    untriaged_total: int
+    untriaged_pct: float
+    badge_color: str
+
+
+class TriageResponsivenessData(TypedDict):
+    """Data payload for Triage & Responsiveness page."""
+
+    velocity: PRVelocity
+    awaiting_prs: list[ContributorAwaitingPR]
+    application_projects: list[ProjectTriageHealthRow]
+    library_projects: list[ProjectTriageHealthRow]
+    other_projects: list[ProjectTriageHealthRow]
+    action_counts: dict[str, int]
+    total_open: int
+    evaluated_count: int
+    healthy_project_count: int
+    attention_project_count: int
+    overdue_project_count: int
+
+
 class HomepageMetrics(TypedDict):
     """Aggregated homepage metrics payload."""
 
@@ -1152,3 +1195,387 @@ class DashboardService:
             key=lambda item: (item["days_ago"] is None, -(item["days_ago"] or 0))
         )
         return cadence_rows
+
+    async def get_triage_and_responsiveness_data(
+        self,
+        config: DashboardConfig,
+        now: datetime | None = None,
+    ) -> TriageResponsivenessData:
+        """Fetch metrics for the Triage and Responsiveness dashboard."""
+        now = now or datetime.now(tz=UTC)
+        one_year_ago = now - timedelta(days=365)
+        excl = _build_excluded_issues_condition(config.filtered_issues)
+
+        # 1. PR Velocity and Awaiting PRs
+        pr_query = (
+            select(
+                Issue.id,
+                Issue.external_id,
+                Issue.title,
+                Issue.author,
+                Issue.url,
+                Project.name.label("project_name"),
+                Issue.created_at,
+                Issue.author_is_maintainer,
+                Issue.author_is_bot,
+                Issue.metadata_,
+                Issue.comments,
+            )
+            .join(Project, Issue.project_id == Project.id)
+            .where(
+                Issue.state == "open",
+                Issue.issue_type == "pull_request",
+                Project.category != "aggregate",
+            )
+        )
+        if excl is not None:
+            pr_query = pr_query.where(excl)
+        pr_rows = (await self.session.execute(pr_query)).all()
+
+        maintainers_set = set(config.maintainers + config.launchpad_maintainers)
+        contrib_ages: list[int] = []
+        overall_ages: list[int] = []
+        waiting_ages: list[int] = []
+        awaiting_prs: list[ContributorAwaitingPR] = []
+
+        for row in pr_rows:
+            if row.created_at is not None:
+                created = (
+                    row.created_at
+                    if row.created_at.tzinfo
+                    else row.created_at.replace(tzinfo=UTC)
+                )
+                age_days = max(0, (now - created).days)
+                overall_ages.append(age_days)
+                if not row.author_is_maintainer and not row.author_is_bot:
+                    contrib_ages.append(age_days)
+                    comments = row.comments or []
+                    has_maintainer_response = any(
+                        isinstance(c, dict) and c.get("author") in maintainers_set
+                        for c in comments
+                    )
+                    review_count = (
+                        (row.metadata_ or {}).get("review_count", 0)
+                        if isinstance(row.metadata_, dict)
+                        else 0
+                    )
+                    if not has_maintainer_response and review_count == 0:
+                        waiting_ages.append(age_days)
+                        awaiting_prs.append(
+                            {
+                                "project_name": row.project_name,
+                                "external_id": row.external_id,
+                                "title": row.title,
+                                "author": row.author,
+                                "days_waiting": age_days,
+                                "url": row.url,
+                                "created_at_str": created.strftime("%Y-%m-%d"),
+                            }
+                        )
+
+        # Sort awaiting PRs: longest waiting first
+        awaiting_prs.sort(key=lambda x: x["days_waiting"], reverse=True)
+
+        velocity_contrib_avg = (
+            int(round(sum(contrib_ages) / len(contrib_ages))) if contrib_ages else None
+        )
+        velocity_waiting_avg = (
+            int(round(sum(waiting_ages) / len(waiting_ages))) if waiting_ages else None
+        )
+        velocity_overall_avg = (
+            int(round(sum(overall_ages) / len(overall_ages))) if overall_ages else None
+        )
+
+        # 12-month baseline of open PR age and response times across 12 monthly checkpoints
+        pr_history_query = (
+            select(
+                Issue.id,
+                Issue.created_at,
+                Issue.closed_at,
+                Issue.author_is_maintainer,
+                Issue.author_is_bot,
+                Issue.comments,
+            )
+            .join(Project, Issue.project_id == Project.id)
+            .where(
+                Issue.issue_type == "pull_request",
+                Project.category != "aggregate",
+                or_(
+                    Issue.state == "open",
+                    Issue.closed_at >= one_year_ago,
+                ),
+            )
+        )
+        if excl is not None:
+            pr_history_query = pr_history_query.where(excl)
+        pr_history_rows = (await self.session.execute(pr_history_query)).all()
+
+        checkpoints = [now - timedelta(days=30 * i) for i in range(1, 13)]
+        hist_contrib_avgs: list[float] = []
+        hist_waiting_avgs: list[float] = []
+        hist_overall_avgs: list[float] = []
+
+        for cp in checkpoints:
+            cp_contrib: list[int] = []
+            cp_waiting: list[int] = []
+            cp_overall: list[int] = []
+            for prow in pr_history_rows:
+                p_created = (
+                    prow.created_at
+                    if prow.created_at and prow.created_at.tzinfo
+                    else prow.created_at.replace(tzinfo=UTC)
+                    if prow.created_at
+                    else None
+                )
+                p_closed = (
+                    prow.closed_at
+                    if prow.closed_at and prow.closed_at.tzinfo
+                    else prow.closed_at.replace(tzinfo=UTC)
+                    if prow.closed_at
+                    else None
+                )
+                if (
+                    p_created is not None
+                    and p_created <= cp
+                    and (p_closed is None or p_closed > cp)
+                ):
+                    age = max(0, (cp - p_created).days)
+                    cp_overall.append(age)
+                    if not prow.author_is_maintainer and not prow.author_is_bot:
+                        cp_contrib.append(age)
+                        comments = prow.comments or []
+                        has_resp = False
+                        for c in comments:
+                            if (
+                                isinstance(c, dict)
+                                and c.get("author") in maintainers_set
+                            ):
+                                c_time = c.get("created_at")
+                                try:
+                                    if (
+                                        c_time
+                                        and datetime.fromisoformat(c_time).astimezone(
+                                            UTC
+                                        )
+                                        <= cp
+                                    ):
+                                        has_resp = True
+                                        break
+                                except (ValueError, TypeError):
+                                    has_resp = True
+                                    break
+                        if not has_resp:
+                            cp_waiting.append(age)
+            if cp_contrib:
+                hist_contrib_avgs.append(sum(cp_contrib) / len(cp_contrib))
+            if cp_waiting:
+                hist_waiting_avgs.append(sum(cp_waiting) / len(cp_waiting))
+            if cp_overall:
+                hist_overall_avgs.append(sum(cp_overall) / len(cp_overall))
+
+        contributor_12m_avg = (
+            sum(hist_contrib_avgs) / len(hist_contrib_avgs)
+            if hist_contrib_avgs
+            else None
+        )
+        waiting_12m_avg = (
+            sum(hist_waiting_avgs) / len(hist_waiting_avgs)
+            if hist_waiting_avgs
+            else None
+        )
+        overall_12m_avg = (
+            sum(hist_overall_avgs) / len(hist_overall_avgs)
+            if hist_overall_avgs
+            else None
+        )
+
+        velocity_contrib_baseline = (
+            int(round(contributor_12m_avg)) if contributor_12m_avg is not None else None
+        )
+        velocity_waiting_baseline = (
+            int(round(waiting_12m_avg)) if waiting_12m_avg is not None else None
+        )
+        velocity_overall_baseline = (
+            int(round(overall_12m_avg)) if overall_12m_avg is not None else None
+        )
+
+        velocity: PRVelocity = {
+            "contributor_count": len(contrib_ages),
+            "contributor_avg_age": velocity_contrib_avg,
+            "contributor_avg_delta": (
+                velocity_contrib_avg - velocity_contrib_baseline
+                if velocity_contrib_avg is not None
+                and velocity_contrib_baseline is not None
+                else None
+            ),
+            "contributor_avg_baseline": velocity_contrib_baseline,
+            "first_response_waiting_count": len(waiting_ages),
+            "first_response_avg_days": velocity_waiting_avg,
+            "first_response_avg_delta": (
+                velocity_waiting_avg - velocity_waiting_baseline
+                if velocity_waiting_avg is not None
+                and velocity_waiting_baseline is not None
+                else None
+            ),
+            "first_response_avg_baseline": velocity_waiting_baseline,
+            "overall_count": len(overall_ages),
+            "overall_avg_age": velocity_overall_avg,
+            "overall_avg_delta": (
+                velocity_overall_avg - velocity_overall_baseline
+                if velocity_overall_avg is not None
+                and velocity_overall_baseline is not None
+                else None
+            ),
+            "overall_avg_baseline": velocity_overall_baseline,
+        }
+
+        # 2. Per-project triage queues
+        all_projects_q = (
+            select(Project)
+            .where(Project.category != "aggregate")
+            .order_by(Project.display_order, Project.name)
+        )
+        all_projects = (await self.session.execute(all_projects_q)).scalars().all()
+
+        open_items_q = (
+            select(
+                Project.id,
+                Issue.issue_type,
+                LLMEvaluation.suggested_action,
+                func.count(Issue.id),
+            )
+            .join(Project, Issue.project_id == Project.id)
+            .outerjoin(
+                LLMEvaluation,
+                (LLMEvaluation.issue_id == Issue.id) & LLMEvaluation.latest,
+            )
+            .where(Issue.state == "open", Project.category != "aggregate")
+        )
+        if excl is not None:
+            open_items_q = open_items_q.where(excl)
+        open_items_q = open_items_q.group_by(
+            Project.id, Issue.issue_type, LLMEvaluation.suggested_action
+        )
+        open_items_rows = (await self.session.execute(open_items_q)).all()
+
+        project_open_issues: dict[int, int] = {}
+        project_open_prs: dict[int, int] = {}
+        project_untriaged_issues: dict[int, int] = {}
+        project_untriaged_prs: dict[int, int] = {}
+
+        for pid, itype, action, cnt in open_items_rows:
+            if itype == "issue":
+                project_open_issues[pid] = project_open_issues.get(pid, 0) + cnt
+                if action == "needs_triage" or action is None:
+                    project_untriaged_issues[pid] = (
+                        project_untriaged_issues.get(pid, 0) + cnt
+                    )
+            elif itype == "pull_request":
+                project_open_prs[pid] = project_open_prs.get(pid, 0) + cnt
+                if action == "needs_review" or action is None:
+                    project_untriaged_prs[pid] = project_untriaged_prs.get(pid, 0) + cnt
+
+        application_projects: list[ProjectTriageHealthRow] = []
+        library_projects: list[ProjectTriageHealthRow] = []
+        other_projects: list[ProjectTriageHealthRow] = []
+
+        healthy_count = 0
+        attention_count = 0
+        overdue_count = 0
+
+        for p in all_projects:
+            op_issues = project_open_issues.get(p.id, 0)
+            op_prs = project_open_prs.get(p.id, 0)
+            u_issues = project_untriaged_issues.get(p.id, 0)
+            u_prs = project_untriaged_prs.get(p.id, 0)
+            u_total = u_issues + u_prs
+            tot_open = op_issues + op_prs
+            u_pct = round((u_total / tot_open) * 100.0, 1) if tot_open > 0 else 0.0
+            badge_color = compute_triage_badge_color(u_total, tot_open)
+
+            if badge_color == "green":
+                healthy_count += 1
+            elif badge_color == "yellow":
+                attention_count += 1
+            elif badge_color == "red":
+                overdue_count += 1
+
+            row_data: ProjectTriageHealthRow = {
+                "name": p.name,
+                "github_org": p.github_org or "canonical",
+                "category": p.category,
+                "open_issues": op_issues,
+                "open_prs": op_prs,
+                "untriaged_issues": u_issues,
+                "untriaged_prs": u_prs,
+                "untriaged_total": u_total,
+                "untriaged_pct": u_pct,
+                "badge_color": badge_color,
+            }
+
+            if p.category == "application":
+                application_projects.append(row_data)
+            elif p.category == "library":
+                library_projects.append(row_data)
+            else:
+                other_projects.append(row_data)
+
+        # 3. LLM triage evaluation coverage & actions
+        total_open_q = (
+            select(func.count(Issue.id))
+            .join(Project, Issue.project_id == Project.id)
+            .where(Issue.state == "open", Project.category != "aggregate")
+        )
+        if excl is not None:
+            total_open_q = total_open_q.where(excl)
+        total_open = (await self.session.execute(total_open_q)).scalar() or 0
+
+        evaluated_q = (
+            select(func.count(func.distinct(LLMEvaluation.issue_id)))
+            .select_from(LLMEvaluation)
+            .join(Issue, LLMEvaluation.issue_id == Issue.id)
+            .join(Project, Issue.project_id == Project.id)
+            .where(
+                Issue.state == "open",
+                Project.category != "aggregate",
+                LLMEvaluation.latest,
+            )
+        )
+        if excl is not None:
+            evaluated_q = evaluated_q.where(excl)
+        evaluated_count = (await self.session.execute(evaluated_q)).scalar() or 0
+
+        action_q = (
+            select(
+                LLMEvaluation.suggested_action,
+                func.count().label("action_count"),
+            )
+            .join(Issue, LLMEvaluation.issue_id == Issue.id)
+            .join(Project, Issue.project_id == Project.id)
+            .where(
+                Issue.state == "open",
+                Project.category != "aggregate",
+                LLMEvaluation.latest,
+            )
+            .group_by(LLMEvaluation.suggested_action)
+        )
+        if excl is not None:
+            action_q = action_q.where(excl)
+        action_rows = (await self.session.execute(action_q)).all()
+        action_counts: dict[str, int] = {
+            str(row[0]): int(row[1]) for row in action_rows if row[0] is not None
+        }
+
+        return TriageResponsivenessData(
+            velocity=velocity,
+            awaiting_prs=awaiting_prs,
+            application_projects=application_projects,
+            library_projects=library_projects,
+            other_projects=other_projects,
+            action_counts=action_counts,
+            total_open=total_open,
+            evaluated_count=evaluated_count,
+            healthy_project_count=healthy_count,
+            attention_project_count=attention_count,
+            overdue_project_count=overdue_count,
+        )

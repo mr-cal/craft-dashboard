@@ -1,17 +1,205 @@
 {% extends "base.html" %}
-{% block title %}Triage stats - craft-dashboard{% endblock %}
+{% block title %}Triage - craft-dashboard{% endblock %}
 {% block content %}
-<h2>Stats</h2>
 {% include "stats/partials/tabs.html" %}
 
-<div class="row--25-75">
+<div class="row" style="margin-bottom: 1.5rem;">
+  <div class="col-12">
+    <h2>Triage</h2>
+    <p class="p-text--default">
+      Contributor review queues, response SLAs, untriaged backlog health, and LLM classification across tracked projects.
+    </p>
+  </div>
+</div>
+
+<!-- SECTION 1: CONTRIBUTOR PR RESPONSIVENESS & SLA -->
+<div class="row--25-75" style="margin-bottom: 2.5rem;">
   <div class="col">
-    <h3>LLM triage status</h3>
-    <p>{{ evaluated_count }} of {{ total_open }} open issues and PRs have been evaluated.</p>
+    <h3>Contributor PRs</h3>
+    <div style="margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.75rem;">
+      <div>
+        <span class="p-text--small">Awaiting review</span>
+        <div style="font-size: 1.4rem; font-weight: 700;">
+          {{ velocity.first_response_waiting_count }}
+          <span class="p-text--small p-text--muted" style="font-weight: normal;">/ {{ velocity.contributor_count }} open</span>
+        </div>
+      </div>
+      <div>
+        <span class="p-text--small">Time to 1st response</span>
+        <div style="font-size: 1.2rem; font-weight: 600;">
+          {{ velocity.first_response_avg_days or '—' }} days
+        </div>
+        {% if velocity.first_response_avg_delta is not none %}
+        <span class="p-text--small {% if velocity.first_response_avg_delta <= 0 %}kpi-delta--positive{% else %}kpi-delta--negative{% endif %}">
+          {{ '+' if velocity.first_response_avg_delta > 0 else '' }}{{ velocity.first_response_avg_delta }}d vs 12m avg
+        </span>
+        {% endif %}
+      </div>
+      <div>
+        <span class="p-text--small">Contributor avg age</span>
+        <div style="font-size: 1.2rem; font-weight: 600;">
+          {{ velocity.contributor_avg_age or '—' }} days
+        </div>
+        {% if velocity.contributor_avg_delta is not none %}
+        <span class="p-text--small {% if velocity.contributor_avg_delta <= 0 %}kpi-delta--positive{% else %}kpi-delta--negative{% endif %}">
+          {{ '+' if velocity.contributor_avg_delta > 0 else '' }}{{ velocity.contributor_avg_delta }}d vs 12m avg
+        </span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <h4 class="p-heading--5" style="margin-bottom: 0.5rem;">Contributor PRs awaiting maintainer review</h4>
+    {% if awaiting_prs %}
+    <table data-sortable class="p-table--sortable table-fixed u-no-margin--bottom">
+      <colgroup>
+        <col style="width: 20%;">
+        <col style="width: 12%;">
+        <col style="width: 40%;">
+        <col style="width: 16%;">
+        <col style="width: 12%;">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Repository</th>
+          <th>PR #</th>
+          <th>Title</th>
+          <th>Author</th>
+          <th>Waiting</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in awaiting_prs %}
+        <tr>
+          <td><strong>{{ row.project_name }}</strong></td>
+          <td>
+            {% if row.url %}
+            <a href="{{ row.url }}" target="_blank" rel="noopener noreferrer">#{{ row.external_id }}</a>
+            {% else %}
+            #{{ row.external_id }}
+            {% endif %}
+          </td>
+          <td class="text-truncate" title="{{ row.title }}">
+            {% if row.url %}
+            <a href="{{ row.url }}" target="_blank" rel="noopener noreferrer">{{ row.title }}</a>
+            {% else %}
+            {{ row.title }}
+            {% endif %}
+          </td>
+          <td class="text-truncate" title="{{ row.author or '—' }}">
+            {{ row.author or '—' }}
+          </td>
+          <td>
+            <span class="dash-pill dash-pill--{% if row.days_waiting > 30 %}red{% elif row.days_waiting > 14 %}yellow{% else %}green{% endif %}">
+              {{ row.days_waiting }}d
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="p-text--default" style="padding: 1rem 0;">All open contributor pull requests have received maintainer review.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="row"><hr class="p-rule" /></div>
+
+<!-- SECTION 2: UNTRIAGED BACKLOG BY PROJECT -->
+<div class="row--25-75" style="margin-bottom: 2.5rem; margin-top: 1.5rem;">
+  <div class="col">
+    <h3>Untriaged backlog</h3>
+    <div style="margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.35rem;">
+      <span class="p-text--small"><strong>{{ application_projects|length + library_projects|length + other_projects|length }}</strong> tracked projects</span>
+      {% if healthy_project_count > 0 %}<div><span class="dash-pill dash-pill--green">{{ healthy_project_count }} healthy (&lt; 5)</span></div>{% endif %}
+      {% if attention_project_count > 0 %}<div><span class="dash-pill dash-pill--yellow">{{ attention_project_count }} attention</span></div>{% endif %}
+      {% if overdue_project_count > 0 %}<div><span class="dash-pill dash-pill--red">{{ overdue_project_count }} overdue</span></div>{% endif %}
+      <div style="margin-top: 0.75rem;">
+        <a href="/issues?action=needs_triage&type=issue" class="p-text--small">View all untriaged issues &rarr;</a>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <table data-sortable class="p-table--sortable table-fixed u-no-margin--bottom">
+      <colgroup>
+        <col style="width: 25%;">
+        <col style="width: 15%;">
+        <col style="width: 15%;">
+        <col style="width: 15%;">
+        <col style="width: 15%;">
+        <col style="width: 15%;">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Repository</th>
+          <th>Open Issues</th>
+          <th>Open PRs</th>
+          <th>Untriaged Issues</th>
+          <th>Untriaged PRs</th>
+          <th>Triage Health</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for cat_title, cat_rows in [('Applications', application_projects), ('Libraries', library_projects), ('Other', other_projects)] %}
+          {% if cat_rows %}
+            {% for row in cat_rows %}
+            <tr>
+              <td class="text-truncate" title="{{ row.name }}">
+                <a href="/issues?project={{ row.name }}&action=needs_triage">
+                  <strong>{{ row.name }}</strong>
+                </a>
+              </td>
+              <td>{{ row.open_issues }}</td>
+              <td>{{ row.open_prs }}</td>
+              <td>
+                {% if row.untriaged_issues > 0 %}
+                <a href="/issues?project={{ row.name }}&action=needs_triage&type=issue">
+                  {{ row.untriaged_issues }}
+                </a>
+                {% else %}
+                0
+                {% endif %}
+              </td>
+              <td>
+                {% if row.untriaged_prs > 0 %}
+                <a href="/issues?project={{ row.name }}&action=needs_review&type=pull_request">
+                  {{ row.untriaged_prs }}
+                </a>
+                {% else %}
+                0
+                {% endif %}
+              </td>
+              <td>
+                <span class="dash-pill dash-pill--{{ row.badge_color }}">
+                  {% if row.badge_color == 'green' %}Healthy{% elif row.badge_color == 'yellow' %}Attention{% elif row.badge_color == 'red' %}Overdue{% else %}Clean{% endif %}
+                </span>
+              </td>
+            </tr>
+            {% endfor %}
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="row"><hr class="p-rule" /></div>
+
+<!-- SECTION 3: LLM CLASSIFICATION & ACTIONS -->
+<div class="row--25-75" style="margin-top: 1.5rem;">
+  <div class="col">
+    <h3>LLM classification</h3>
+    <p class="p-text--default">{{ evaluated_count }} of {{ total_open }} open issues and PRs have been evaluated.</p>
   </div>
   <div class="col">
     {% if action_counts %}
-    <table>
+    <table class="p-table--sortable table-fixed u-no-margin--bottom">
+      <colgroup>
+        <col style="width: 45%;">
+        <col style="width: 30%;">
+        <col style="width: 25%;">
+      </colgroup>
       <thead>
         <tr>
           <th>Suggested Action</th>
@@ -24,14 +212,19 @@
         <tr>
           <td><span class="action-badge">{{ action | replace("_", " ") }}</span></td>
           <td>{{ count }}</td>
-          <td><a href="/issues?action={{ action }}">View</a></td>
+          <td><a href="/issues?action={{ action }}">View items &rarr;</a></td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
     {% else %}
-    <p>No evaluations yet. Run <code>scripts/run_llm.py</code> to triage open issues.</p>
+    <p class="p-text--default">No evaluations yet. Run <code>scripts/run_llm.py</code> to triage open issues.</p>
     {% endif %}
   </div>
 </div>
 {% endblock %}
+
+{% block scripts %}
+<script src="/static/js/table-sort.js"></script>
+{% endblock %}
+

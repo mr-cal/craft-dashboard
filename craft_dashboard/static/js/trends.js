@@ -1,10 +1,8 @@
 import {
   CHART_COLORS,
   createChartRegistry,
-  createCheckboxItem,
   rollingAverage,
   rollingAverageNullable,
-  chartHeight,
   wireDateRangeFilter,
 } from "/static/js/chart-common.js";
 
@@ -19,7 +17,7 @@ let allProjects = projects;
 let filteredProjects = projects;
 const rootElement = document.documentElement;
 const registry = createChartRegistry(rootElement);
-const { createLineChart, createBarChart } = registry;
+const { createLineChart } = registry;
 
 function getThemeColors() {
   return registry.applyChartDefaults();
@@ -54,20 +52,23 @@ function alignData(name, dataKey, unifiedDates) {
 }
 
 // ============================================================================
+// Project selection helper
+// ============================================================================
+
+function getSelectedProjects() {
+  const hiddenInput = document.getElementById("trend-projects-hidden");
+  if (!hiddenInput || !hiddenInput.value) {
+    return ["all-projects"];
+  }
+  return hiddenInput.value.split(",").map(s => s.trim()).filter(Boolean);
+}
+
+// ============================================================================
 // Line chart updates
 // ============================================================================
 
 function updateOpenIssuesChart() {
-  const selected = order.filter(name => {
-    const cb = document.getElementById(`open-issues-${name}`);
-    return cb?.checked;
-  });
-  
-  // Check if all-projects is selected
-  const allProjectsCb = document.getElementById("open-issues-all-projects");
-  if (allProjectsCb?.checked) {
-    selected.push("all-projects");
-  }
+  const selected = getSelectedProjects();
   
   if (!selected.length) {
     issuesChart.data.labels = [];
@@ -76,7 +77,6 @@ function updateOpenIssuesChart() {
     return;
   }
   
-  const firstProject = selected[0];
   const unifiedDates = getUnifiedDates(selected);
   issuesChart.data.labels = unifiedDates;
   
@@ -110,15 +110,7 @@ function updateOpenIssuesChart() {
 }
 
 function updateMedianAgeChart() {
-  const selected = order.filter(name => {
-    const cb = document.getElementById(`median-age-${name}`);
-    return cb?.checked;
-  });
-  
-  const allProjectsCb = document.getElementById("median-age-all-projects");
-  if (allProjectsCb?.checked) {
-    selected.push("all-projects");
-  }
+  const selected = getSelectedProjects();
   
   if (!selected.length) {
     medianAgeChart.data.labels = [];
@@ -135,7 +127,6 @@ function updateMedianAgeChart() {
     return;
   }
   
-  const firstProject = selected[0];
   const unifiedDates = getUnifiedDates(selected);
   medianAgeChart.data.labels = unifiedDates;
   
@@ -169,15 +160,7 @@ function updateMedianAgeChart() {
 }
 
 function updateClosedChart() {
-  const selected = order.filter(name => {
-    const cb = document.getElementById(`closed-${name}`);
-    return cb?.checked;
-  });
-  
-  const allProjectsCb = document.getElementById("closed-all-projects");
-  if (allProjectsCb?.checked) {
-    selected.push("all-projects");
-  }
+  const selected = getSelectedProjects();
   
   if (!selected.length) {
     closedChart.data.labels = [];
@@ -186,7 +169,6 @@ function updateClosedChart() {
     return;
   }
   
-  const firstProject = selected[0];
   const unifiedDates = getUnifiedDates(selected);
   closedChart.data.labels = unifiedDates;
   
@@ -220,51 +202,15 @@ function updateClosedChart() {
 }
 
 // ============================================================================
-// Bar chart updates
+// Snapshot table & summary updates
 // ============================================================================
 
-function updateSnapshotCharts() {
-  const selected = order.filter(name => {
-    const cb = document.getElementById(`snapshot-${name}`);
-    return cb?.checked;
-  });
-  
-  const allProjectsCb = document.getElementById("snapshot-all-projects");
-  if (allProjectsCb?.checked) {
-    selected.unshift("all-projects"); // Put all-projects first
-  }
-  
-  if (!selected.length) {
-    snapshotOpenChart.data.labels = [];
-    snapshotOpenChart.data.datasets = [];
-    snapshotAgeChart.data.labels = [];
-    snapshotAgeChart.data.datasets = [];
-    snapshotClosedChart.data.labels = [];
-    snapshotClosedChart.data.datasets = [];
-    
-    snapshotOpenChart.update();
-    snapshotAgeChart.update();
-    snapshotClosedChart.update();
-    return;
-  }
-  
-  const labels = selected;
+function updateSnapshotTable() {
+  const selected = getSelectedProjects();
+  const showAll = selected.includes("all-projects");
+  const visibleProjects = order.filter(name => showAll || selected.includes(name));
+
   const view = getCurrentView();
-  
-  if (view === "none") {
-    snapshotOpenChart.data.labels = [];
-    snapshotOpenChart.data.datasets = [];
-    snapshotAgeChart.data.labels = [];
-    snapshotAgeChart.data.datasets = [];
-    snapshotClosedChart.data.labels = [];
-    snapshotClosedChart.data.datasets = [];
-    snapshotOpenChart.update();
-    snapshotAgeChart.update();
-    snapshotClosedChart.update();
-    return;
-  }
-  
-  // Open Issues/PRs Chart
   const types = getSelectedTypes();
 
   const issueKey = view === "bots" ? "bots_open_issues"
@@ -275,62 +221,6 @@ function updateSnapshotCharts() {
     : view === "external" ? "nm_open_prs"
     : view === "internal" ? "internal_open_prs"
     : "open_prs";
-  
-  snapshotOpenChart.data.labels = labels;
-  const openDatasets = [];
-  if (types.issues) {
-    openDatasets.push({
-      label: "Issues",
-      data: selected.map(name => snapshot[name][issueKey]),
-      backgroundColor: CHART_COLORS.issues,
-      borderColor: CHART_COLORS.issues,
-      borderWidth: 1,
-    });
-  }
-  if (types.prs) {
-    openDatasets.push({
-      label: "PRs",
-      data: selected.map(name => snapshot[name][prKey]),
-      backgroundColor: CHART_COLORS.prs,
-      borderColor: CHART_COLORS.prs,
-      borderWidth: 1,
-    });
-  }
-  snapshotOpenChart.data.datasets = openDatasets;
-  
-  // Median Age Chart
-  const issueAgeKey = view === "external" ? "nm_median_issue_age"
-    : view === "internal" ? "median_issue_age_internal"
-    : view === "bots" ? "median_issue_age_bots"
-    : "median_issue_age";
-  const prAgeKey = view === "external" ? "nm_median_pr_age"
-    : view === "internal" ? "median_pr_age_internal"
-    : view === "bots" ? "median_pr_age_bots"
-    : "median_pr_age";
-  
-  snapshotAgeChart.data.labels = labels;
-  const ageDatasets = [];
-  if (types.issues) {
-    ageDatasets.push({
-      label: "Issue age",
-      data: selected.map(name => snapshot[name][issueAgeKey]),
-      backgroundColor: CHART_COLORS.issues,
-      borderColor: CHART_COLORS.issues,
-      borderWidth: 1,
-    });
-  }
-  if (types.prs) {
-    ageDatasets.push({
-      label: "PR Age",
-      data: selected.map(name => snapshot[name][prAgeKey]),
-      backgroundColor: CHART_COLORS.prs,
-      borderColor: CHART_COLORS.prs,
-      borderWidth: 1,
-    });
-  }
-  snapshotAgeChart.data.datasets = ageDatasets;
-  
-  // Closed Last Year Chart
   const closedIssueKey = view === "external" ? "nm_closed_issues_year"
     : view === "bots" ? "bots_closed_issues_year"
     : view === "internal" ? "internal_closed_issues_year"
@@ -339,39 +229,82 @@ function updateSnapshotCharts() {
     : view === "bots" ? "bots_closed_prs_year"
     : view === "internal" ? "internal_closed_prs_year"
     : "closed_prs_year";
-  
-  snapshotClosedChart.data.labels = labels;
-  const closedDatasets = [];
-  if (types.issues) {
-    closedDatasets.push({
-      label: "Issues",
-      data: selected.map(name => snapshot[name][closedIssueKey]),
-      backgroundColor: CHART_COLORS.issues,
-      borderColor: CHART_COLORS.issues,
-      borderWidth: 1,
-    });
+  const issueAgeKey = view === "external" ? "nm_median_issue_age"
+    : view === "internal" ? "median_issue_age_internal"
+    : view === "bots" ? "median_issue_age_bots"
+    : "median_issue_age";
+  const prAgeKey = view === "external" ? "nm_median_pr_age"
+    : view === "internal" ? "median_pr_age_internal"
+    : view === "bots" ? "median_pr_age_bots"
+    : "median_pr_age";
+
+  let sumClosedIssues = 0;
+  let sumClosedPrs = 0;
+  let sumOpenIssues = 0;
+  let sumOpenPrs = 0;
+  let ageIssuesList = [];
+  let agePrsList = [];
+
+  visibleProjects.forEach(name => {
+    const p = snapshot[name];
+    if (!p) return;
+    sumClosedIssues += (p[closedIssueKey] || 0);
+    sumClosedPrs += (p[closedPrKey] || 0);
+    sumOpenIssues += (p[issueKey] || 0);
+    sumOpenPrs += (p[prKey] || 0);
+    if (p[issueAgeKey] != null && p[issueAgeKey] > 0) ageIssuesList.push(p[issueAgeKey]);
+    if (p[prAgeKey] != null && p[prAgeKey] > 0) agePrsList.push(p[prAgeKey]);
+  });
+
+  const totClosed = (types.issues ? sumClosedIssues : 0) + (types.prs ? sumClosedPrs : 0);
+  const totOpen = (types.issues ? sumOpenIssues : 0) + (types.prs ? sumOpenPrs : 0);
+  const avgIssueAge = ageIssuesList.length ? Math.round(ageIssuesList.reduce((a, b) => a + b, 0) / ageIssuesList.length) : null;
+  const avgPrAge = agePrsList.length ? Math.round(agePrsList.reduce((a, b) => a + b, 0) / agePrsList.length) : null;
+
+  const elClosedTot = document.getElementById("snap-closed-year-total");
+  const elClosedBreak = document.getElementById("snap-closed-year-breakdown");
+  const elOpenTot = document.getElementById("snap-open-total");
+  const elOpenBreak = document.getElementById("snap-open-breakdown");
+  const elMedAge = document.getElementById("snap-median-age");
+  const elMedBreak = document.getElementById("snap-median-breakdown");
+
+  if (elClosedTot) elClosedTot.textContent = totClosed.toLocaleString();
+  if (elClosedBreak) elClosedBreak.textContent = `(${sumClosedIssues.toLocaleString()} issues, ${sumClosedPrs.toLocaleString()} PRs)`;
+  if (elOpenTot) elOpenTot.textContent = totOpen.toLocaleString();
+  if (elOpenBreak) elOpenBreak.textContent = `(${sumOpenIssues.toLocaleString()} issues, ${sumOpenPrs.toLocaleString()} PRs)`;
+  if (elMedAge) {
+    const parts = [];
+    if (types.issues && avgIssueAge !== null) parts.push(`${avgIssueAge}d issues`);
+    if (types.prs && avgPrAge !== null) parts.push(`${avgPrAge}d PRs`);
+    elMedAge.textContent = parts.length ? parts.join(" / ") : "—";
   }
-  if (types.prs) {
-    closedDatasets.push({
-      label: "PRs",
-      data: selected.map(name => snapshot[name][closedPrKey]),
-      backgroundColor: CHART_COLORS.prs,
-      borderColor: CHART_COLORS.prs,
-      borderWidth: 1,
-    });
+  if (elMedBreak) elMedBreak.textContent = `across ${visibleProjects.length} selected project${visibleProjects.length === 1 ? '' : 's'}`;
+
+  const tbody = document.getElementById("snapshot-table-body");
+  if (tbody) {
+    tbody.innerHTML = visibleProjects.map(name => {
+      const p = snapshot[name];
+      if (!p) return "";
+      const cIssues = p[closedIssueKey] || 0;
+      const cPrs = p[closedPrKey] || 0;
+      const cTotal = (types.issues ? cIssues : 0) + (types.prs ? cPrs : 0);
+      const opIssues = p[issueKey] || 0;
+      const opPrs = p[prKey] || 0;
+      const ageIssue = p[issueAgeKey] != null && p[issueAgeKey] > 0 ? `${p[issueAgeKey]}d` : "—";
+      const agePr = p[prAgeKey] != null && p[prAgeKey] > 0 ? `${p[prAgeKey]}d` : "—";
+
+      return `
+        <tr>
+          <td><strong>${name}</strong></td>
+          <td class="u-align--right" data-sort-value="${cTotal}">${cTotal.toLocaleString()}</td>
+          <td class="u-align--right" data-sort-value="${types.issues ? opIssues : 0}">${types.issues ? opIssues.toLocaleString() : "—"}</td>
+          <td class="u-align--right" data-sort-value="${types.prs ? opPrs : 0}">${types.prs ? opPrs.toLocaleString() : "—"}</td>
+          <td class="u-align--right" data-sort-value="${types.issues && p[issueAgeKey] != null ? p[issueAgeKey] : -1}">${types.issues ? ageIssue : "—"}</td>
+          <td class="u-align--right" data-sort-value="${types.prs && p[prAgeKey] != null ? p[prAgeKey] : -1}">${types.prs ? agePr : "—"}</td>
+        </tr>
+      `;
+    }).join("");
   }
-  snapshotClosedChart.data.datasets = closedDatasets;
-  
-  // Adjust chart height based on number of bars (like starcraft-stats)
-  const numDatasets = snapshotOpenChart.data.datasets.length;
-  const height = chartHeight(selected.length, numDatasets);
-  snapshotOpenWrap.style.height = height + "px";
-  snapshotAgeWrap.style.height = height + "px";
-  snapshotClosedWrap.style.height = height + "px";
-  
-  snapshotOpenChart.update();
-  snapshotAgeChart.update();
-  snapshotClosedChart.update();
 }
 
 // ============================================================================
@@ -449,7 +382,7 @@ function onViewChange() {
   updateOpenIssuesChart();
   updateMedianAgeChart();
   updateClosedChart();
-  updateSnapshotCharts();
+  updateSnapshotTable();
 }
 
 // ============================================================================
@@ -528,59 +461,7 @@ function applyDateFilterForRange(startDate, endDate) {
   updateOpenIssuesChart();
   updateMedianAgeChart();
   updateClosedChart();
-  updateSnapshotCharts();
-}
-
-// ============================================================================
-// Populate checkboxes
-// ============================================================================
-
-function populateLineChartCheckboxes(containerId, prefix, onChange) {
-  const container = document.getElementById(containerId);
-  
-  // Add all-projects checkbox first
-  createCheckboxItem(container, {
-    id: `${prefix}-all-projects`,
-    label: "all-projects",
-    checked: true, // Check all-projects by default for all charts
-    onChange: () => onChange(),
-    color: CHART_COLORS.palette[0],
-  });
-  
-  // Add individual projects
-  order.forEach((name, i) => {
-    createCheckboxItem(container, {
-      id: `${prefix}-${name}`,
-      label: name,
-      checked: false,
-      onChange: () => onChange(),
-      color: CHART_COLORS.palette[i % CHART_COLORS.palette.length],
-    });
-  });
-}
-
-function populateSnapshotCheckboxes() {
-  const container = document.getElementById("snapshot-checkboxes");
-  
-  // Add all-projects checkbox first
-  createCheckboxItem(container, {
-    id: "snapshot-all-projects",
-    label: "all-projects",
-    checked: true, // Checked by default
-    onChange: () => updateSnapshotCharts(),
-    color: CHART_COLORS.palette[0],
-  });
-  
-  // Add individual projects
-  order.forEach((name, i) => {
-    createCheckboxItem(container, {
-      id: `snapshot-${name}`,
-      label: name,
-      checked: false,
-      onChange: () => updateSnapshotCharts(),
-      color: CHART_COLORS.palette[i % CHART_COLORS.palette.length],
-    });
-  });
+  updateSnapshotTable();
 }
 
 // ============================================================================
@@ -593,29 +474,28 @@ const closedChart = createLineChart("closed-chart", "Closed per week (4-week avg
 
 registry.watchTheme();
 
-const { chart: snapshotOpenChart, wrapper: snapshotOpenWrap } = createBarChart("snapshot-open-chart", "Count");
-const { chart: snapshotAgeChart, wrapper: snapshotAgeWrap } = createBarChart("snapshot-age-chart", "Days");
-const { chart: snapshotClosedChart, wrapper: snapshotClosedWrap } = createBarChart("snapshot-closed-chart", "Count");
-
-// Populate checkboxes
-populateLineChartCheckboxes("open-issues-checkboxes", "open-issues", updateOpenIssuesChart);
-populateLineChartCheckboxes("median-age-checkboxes", "median-age", updateMedianAgeChart);
-populateLineChartCheckboxes("closed-checkboxes", "closed", updateClosedChart);
-populateSnapshotCheckboxes();
-
 // Initialize author group multiselect change handler
 const authorGroupsInput = document.querySelector('input[name="author-groups"]');
 if (authorGroupsInput) {
   const observer = new MutationObserver(onViewChange);
   observer.observe(authorGroupsInput, { attributes: true, attributeFilter: ["value"] });
-  // Also listen for change events from multiselect.js
   authorGroupsInput.addEventListener("change", onViewChange);
 }
 
 // Initialize type filter change handler
 const trendTypeInput = document.querySelector('input[name="trend-type"]');
 if (trendTypeInput) {
+  const observer = new MutationObserver(onViewChange);
+  observer.observe(trendTypeInput, { attributes: true, attributeFilter: ["value"] });
   trendTypeInput.addEventListener("change", onViewChange);
+}
+
+// Initialize projects multiselect change handler
+const trendProjectsInput = document.querySelector('input[name="trend-projects"]');
+if (trendProjectsInput) {
+  const observer = new MutationObserver(onViewChange);
+  observer.observe(trendProjectsInput, { attributes: true, attributeFilter: ["value"] });
+  trendProjectsInput.addEventListener("change", onViewChange);
 }
 
 // Initialize date range inputs and apply default filter
@@ -631,8 +511,8 @@ registry.wireTooltipToggle("hide-tooltips");
 // Apply default date filter on page load (2021 to today)
 document.getElementById("btn-date-reset").click();
 
-// Initial render (applyDateFilter already calls these, but ensure snapshot charts are updated)
-updateSnapshotCharts();
+// Initial render
+updateSnapshotTable();
 
 // Hide loading spinner
 document.getElementById("trends-loading").style.display = "none";
