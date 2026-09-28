@@ -33,19 +33,15 @@ The VPS for this project is managed by the `mr-cal/vps-infra` repo on github.
 When you push to `mr-cal/dashboard`, the vps-infra will pick up the newly
 
 Don't change the configured git url for origin when pushing and pulling changes.
-Instead, just push to a custom url with the token. You can mint a scoped ephemeral token using:
+Instead, just push to a custom url with the token. You can mint a scoped ephemeral token using the centralized minter in `vps-infra`:
 
 ```bash
-# Push to craft-dashboard:
-git push "$(uv run scripts/mint_bot_token.py --print-remote-url --repo craft-dashboard)" main
-
-# Or push to vps-infra:
-git push "$(uv run scripts/mint_bot_token.py --print-remote-url --repo vps-infra)" main
+git push "$(/home/callahan.kovacs@canonical.com/dev/cal/vps-infra/scripts/mint_bot_token.py --print-remote-url)" main
 ```
 
 If GitHub App credentials (`GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_PATH`)
-are configured in `.env.llm`, this mints an ephemeral 1-hour token scoped strictly to the specified repo.
-Otherwise, it transparently falls back to `GH_TOKEN`. See `docs/github-app-auth.md` for GitHub App setup.
+are configured in `.env.llm`, this mints an ephemeral 1-hour token scoped strictly to this repository.
+Otherwise, it transparently falls back to `GH_TOKEN`. See `vps-infra/docs/github-app-auth.md` for GitHub App setup.
 
 There is no local dev website. For example, you shouldn't create a local Docker
 instance and set up a local website for testing.
