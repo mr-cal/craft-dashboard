@@ -100,8 +100,14 @@
           <input type="date" id="date-start" />
           <span>to</span>
           <input type="date" id="date-end" />
-          <button class="p-button--neutral is-small" id="btn-date-apply">Apply</button>
-          <button class="p-button--neutral is-small" id="btn-date-reset">Reset</button>
+        </div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="filter-group" style="align-self:flex-end;">
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+          <button class="p-button--positive is-small" id="btn-date-apply">Apply</button>
+          <button class="p-button--neutral is-small" id="btn-date-reset">Clear filters</button>
         </div>
       </div>
 
@@ -127,8 +133,8 @@
     </div>
   </div>
   <div class="row">
-    <div class="col-12">
-      <canvas id="issues-chart" role="img" aria-label="Line chart showing open issues over time for selected projects" style="width:100%;height:400px;"></canvas>
+    <div class="col-12" style="position:relative;height:600px;width:100%;">
+      <canvas id="issues-chart" role="img" aria-label="Line chart showing open issues over time for selected projects" style="width:100%;height:600px;"></canvas>
     </div>
   </div>
 </div>
@@ -143,8 +149,8 @@
     </div>
   </div>
   <div class="row">
-    <div class="col-12">
-      <canvas id="median-age-chart" role="img" aria-label="Line chart showing median issue age over time for selected projects" style="width:100%;height:400px;"></canvas>
+    <div class="col-12" style="position:relative;height:600px;width:100%;">
+      <canvas id="median-age-chart" role="img" aria-label="Line chart showing median issue age over time for selected projects" style="width:100%;height:600px;"></canvas>
     </div>
   </div>
 </div>
@@ -159,8 +165,8 @@
     </div>
   </div>
   <div class="row">
-    <div class="col-12">
-      <canvas id="closed-chart" role="img" aria-label="Bar chart showing issues closed per week for selected projects" style="width:100%;height:400px;"></canvas>
+    <div class="col-12" style="position:relative;height:600px;width:100%;">
+      <canvas id="closed-chart" role="img" aria-label="Bar chart showing issues closed per week for selected projects" style="width:100%;height:600px;"></canvas>
     </div>
   </div>
 </div>

@@ -59,7 +59,7 @@
       (cb) => cb.value === "all-projects" || cb.value === "all"
     );
 
-    // Add search box & toolbar if more than 5 options
+    // Add search box if more than 5 options
     if (options.length > 5 && !dropdown.querySelector(".multiselect__search-box")) {
       const searchBox = document.createElement("div");
       searchBox.className = "multiselect__search-box";
@@ -76,48 +76,6 @@
           const txt = opt.textContent.toLowerCase();
           opt.style.display = txt.includes(term) ? "" : "none";
         });
-      });
-    }
-
-    if (options.length > 3 && !dropdown.querySelector(".multiselect__toolbar")) {
-      const toolbar = document.createElement("div");
-      toolbar.className = "multiselect__toolbar";
-      toolbar.innerHTML =
-        '<button type="button" class="multiselect__action-btn" data-action="all">Select all</button>' +
-        '<button type="button" class="multiselect__action-btn" data-action="clear">Clear</button>';
-
-      const refNode = dropdown.querySelector(".multiselect__search-box");
-      if (refNode && refNode.nextSibling) {
-        dropdown.insertBefore(toolbar, refNode.nextSibling);
-      } else {
-        dropdown.insertBefore(toolbar, dropdown.firstChild);
-      }
-
-      toolbar.addEventListener("click", function (e) {
-        const btn = e.target.closest("button");
-        if (!btn) return;
-        const action = btn.dataset.action;
-        if (action === "all") {
-          if (allOption) {
-            allOption.checked = true;
-            options.forEach((cb) => {
-              if (cb !== allOption) cb.checked = false;
-            });
-          } else {
-            options.forEach((cb) => {
-              cb.checked = true;
-            });
-          }
-        } else if (action === "clear") {
-          options.forEach((cb) => {
-            cb.checked = false;
-          });
-          if (allOption) {
-            allOption.checked = true;
-          }
-        }
-        updateDisplay();
-        syncHidden();
       });
     }
 
@@ -141,8 +99,14 @@
         if (placeholder) placeholder.style.display = "none";
         container.classList.add("has-selection");
 
+        const nonAllOptions = Array.from(options).filter((cb) => cb !== allOption);
+        const allSelected = nonAllOptions.length > 0 && selected.length === nonAllOptions.length;
+
         if (allOption && allOption.checked) {
           displaySpan.textContent = allOption.closest("label")?.textContent.trim() || "All projects";
+          badgeSpan.style.display = "none";
+        } else if (allSelected) {
+          displaySpan.textContent = placeholder ? placeholder.textContent.trim() : "All";
           badgeSpan.style.display = "none";
         } else if (selected.length === 1) {
           displaySpan.textContent = selected[0].label;
@@ -151,12 +115,7 @@
           displaySpan.textContent = `${selected[0].label}, ${selected[1].label}`;
           badgeSpan.style.display = "none";
         } else {
-          const nonAllOptions = Array.from(options).filter((cb) => cb !== allOption);
-          if (selected.length === nonAllOptions.length) {
-            displaySpan.textContent = "All selected";
-          } else {
-            displaySpan.textContent = `${selected[0].label}, +${selected.length - 1} more`;
-          }
+          displaySpan.textContent = `${selected[0].label}, +${selected.length - 1} more`;
           badgeSpan.textContent = String(selected.length);
           badgeSpan.style.display = "inline-flex";
         }

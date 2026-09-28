@@ -280,7 +280,7 @@ export function rollingAverageNullable(data, windowSize) {
 // #date-start/#date-end/#btn-date-apply/#btn-date-reset markup) to a
 // caller-supplied onApply(startDate, endDate) callback, and returns a
 // resetToDefault(defaultStartStr) helper.
-export function wireDateRangeFilter({ onApply }) {
+export function wireDateRangeFilter({ onApply, onReset }) {
   const startInput = document.getElementById("date-start");
   const endInput = document.getElementById("date-end");
   const applyBtn = document.getElementById("btn-date-apply");
@@ -310,11 +310,19 @@ export function wireDateRangeFilter({ onApply }) {
     const today = new Date().toISOString().slice(0, 10);
     startInput.value = defaultStartStr;
     endInput.value = today;
-    applyDateFilter();
+    if (onReset) {
+      onReset();
+    } else {
+      applyDateFilter();
+    }
   }
 
-  applyBtn.addEventListener("click", applyDateFilter);
-  resetBtn.addEventListener("click", () => resetDateFilter(startInput.dataset.defaultStart || "2021-01-01"));
+  if (applyBtn) {
+    applyBtn.addEventListener("click", applyDateFilter);
+  }
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => resetDateFilter(startInput?.dataset?.defaultStart || "2021-01-01"));
+  }
 
   return { applyDateFilter, resetDateFilter };
 }

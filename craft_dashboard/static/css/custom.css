@@ -661,6 +661,7 @@ html.is-dark-theme .similarity-fill {
   padding: 0.05rem 0.35rem;
   border-radius: 999px;
   flex-shrink: 0;
+  margin-left: 0.25rem;
 }
 
 html.is-dark-theme .multiselect__badge {

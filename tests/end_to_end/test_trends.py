@@ -43,6 +43,8 @@ _FETCH_CHART_DATA_SCRIPT = """\
           cb.dispatchEvent(new Event('change', {bubbles: true}));
         }
       });
+      const applyBtn = document.getElementById('btn-date-apply');
+      if (applyBtn) applyBtn.click();
     }, views);
 
     await new Promise(r => setTimeout(r, 800));
@@ -272,13 +274,15 @@ class TestProjectToggling:
 
     const initial = await getDatasetCount('issues-chart');
 
-    // Filter to snapcraft and charmcraft via top multiselect hidden input
+    // Filter to snapcraft and charmcraft via top multiselect hidden input and click Apply
     await page.evaluate(() => {
       const hidden = document.getElementById('trend-projects-hidden');
       if (hidden) {
         hidden.value = 'snapcraft,charmcraft';
         hidden.dispatchEvent(new Event('change', {bubbles: true}));
       }
+      const applyBtn = document.getElementById('btn-date-apply');
+      if (applyBtn) applyBtn.click();
     });
     await new Promise(r => setTimeout(r, 600));
 

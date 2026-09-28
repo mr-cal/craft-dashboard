@@ -378,13 +378,6 @@ function getMedianAgeDataKey() {
   return "median" + typeInfix + "_age";
 }
 
-function onViewChange() {
-  updateOpenIssuesChart();
-  updateMedianAgeChart();
-  updateClosedChart();
-  updateSnapshotTable();
-}
-
 // ============================================================================
 // Date filtering
 // ============================================================================
@@ -474,45 +467,66 @@ const closedChart = createLineChart("closed-chart", "Closed per week (4-week avg
 
 registry.watchTheme();
 
-// Initialize author group multiselect change handler
-const authorGroupsInput = document.querySelector('input[name="author-groups"]');
-if (authorGroupsInput) {
-  const observer = new MutationObserver(onViewChange);
-  observer.observe(authorGroupsInput, { attributes: true, attributeFilter: ["value"] });
-  authorGroupsInput.addEventListener("change", onViewChange);
+// ============================================================================
+// Filter actions: Apply & Clear filters
+// ============================================================================
+
+function clearAllFilters() {
+  // 1. Reset Author Groups to default (all checked)
+  const authorHidden = document.getElementById("author-groups-hidden");
+  if (authorHidden) {
+    authorHidden.value = "maintainers,contributors,bots";
+    authorHidden.dispatchEvent(new CustomEvent("change", { bubbles: true }));
+  }
+
+  // 2. Reset Type to default (all checked)
+  const typeHidden = document.getElementById("trend-type-hidden");
+  if (typeHidden) {
+    typeHidden.value = "issue,pull_request";
+    typeHidden.dispatchEvent(new CustomEvent("change", { bubbles: true }));
+  }
+
+  // 3. Reset Projects to default (all-projects checked)
+  const projHidden = document.getElementById("trend-projects-hidden");
+  if (projHidden) {
+    projHidden.value = "all-projects";
+    projHidden.dispatchEvent(new CustomEvent("change", { bubbles: true }));
+  }
+
+  // 4. Reset Tooltips toggle
+  const tooltipsCheckbox = document.getElementById("hide-tooltips");
+  if (tooltipsCheckbox && tooltipsCheckbox.checked) {
+    tooltipsCheckbox.checked = false;
+    registry.setTooltipsEnabled(true);
+  }
+
+  // 5. Reset Dates to default (2021-01-01 to today) and apply
+  const dateStartInput = document.getElementById("date-start");
+  const dateEndInput = document.getElementById("date-end");
+  const defaultStart = dateStartInput?.dataset.defaultStart || "2021-01-01";
+  const today = new Date().toISOString().slice(0, 10);
+  if (dateStartInput) dateStartInput.value = defaultStart;
+  if (dateEndInput) dateEndInput.value = today;
+
+  applyDateFilterForRange(new Date(defaultStart), new Date());
 }
 
-// Initialize type filter change handler
-const trendTypeInput = document.querySelector('input[name="trend-type"]');
-if (trendTypeInput) {
-  const observer = new MutationObserver(onViewChange);
-  observer.observe(trendTypeInput, { attributes: true, attributeFilter: ["value"] });
-  trendTypeInput.addEventListener("change", onViewChange);
-}
-
-// Initialize projects multiselect change handler
-const trendProjectsInput = document.querySelector('input[name="trend-projects"]');
-if (trendProjectsInput) {
-  const observer = new MutationObserver(onViewChange);
-  observer.observe(trendProjectsInput, { attributes: true, attributeFilter: ["value"] });
-  trendProjectsInput.addEventListener("change", onViewChange);
-}
-
-// Initialize date range inputs and apply default filter
+// Initialize date range inputs and wire up Apply and Clear filters
 const dateStartInput = document.getElementById("date-start");
-dateStartInput.dataset.defaultStart = "2021-01-01";
+if (dateStartInput) {
+  dateStartInput.dataset.defaultStart = "2021-01-01";
+}
+
 wireDateRangeFilter({
   onApply: (startDate, endDate) => applyDateFilterForRange(startDate, endDate),
+  onReset: () => clearAllFilters(),
 });
 
 // Wire up tooltip toggle
 registry.wireTooltipToggle("hide-tooltips");
 
-// Apply default date filter on page load (2021 to today)
-document.getElementById("btn-date-reset").click();
-
-// Initial render
-updateSnapshotTable();
+// Apply default filters on page load
+clearAllFilters();
 
 // Hide loading spinner
 document.getElementById("trends-loading").style.display = "none";
