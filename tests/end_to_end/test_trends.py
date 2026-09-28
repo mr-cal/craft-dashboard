@@ -272,11 +272,11 @@ class TestProjectToggling:
 
     const initial = await getDatasetCount('issues-chart');
 
-    // Filter to just snapcraft via top multiselect hidden input
+    // Filter to snapcraft and charmcraft via top multiselect hidden input
     await page.evaluate(() => {
       const hidden = document.getElementById('trend-projects-hidden');
       if (hidden) {
-        hidden.value = 'snapcraft';
+        hidden.value = 'snapcraft,charmcraft';
         hidden.dispatchEvent(new Event('change', {bubbles: true}));
       }
     });
@@ -290,11 +290,6 @@ class TestProjectToggling:
       changed: initial !== afterToggle,
     }));
 """)
-        result = run_puppeteer(script, base_url=seeded_url, timeout=30)
-        assert result["changed"], (
-            f"Expected dataset count to change after toggling project: "
-            f"initial={result['initial_datasets']}, after={result['after_toggle_datasets']}"
-        )
         result = run_puppeteer(script, base_url=seeded_url, timeout=30)
         assert result["changed"], (
             f"Expected dataset count to change after toggling project: "

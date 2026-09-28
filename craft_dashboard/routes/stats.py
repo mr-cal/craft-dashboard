@@ -269,7 +269,7 @@ async def trends_page(
     project_result = await session.execute(
         select(Project.name).order_by(Project.display_order)
     )
-    project_names = [row.name for row in project_result]
+    project_names = [row.name for row in project_result if row.name != "all-projects"]
 
     return templates.TemplateResponse(
         request,

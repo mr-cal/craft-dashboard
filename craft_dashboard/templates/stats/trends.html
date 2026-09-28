@@ -84,12 +84,12 @@
               </label>
               {% for p in project_names %}
               <label class="multiselect__option" role="option">
-                <input type="checkbox" value="{{ p }}" checked /> {{ p }}
+                <input type="checkbox" value="{{ p }}" /> {{ p }}
               </label>
               {% endfor %}
             </div>
           </div>
-          <input type="hidden" id="trend-projects-hidden" name="trend-projects" value="all-projects,{{ project_names | join(',') }}" />
+          <input type="hidden" id="trend-projects-hidden" name="trend-projects" value="all-projects" />
         </div>
       </div>
 

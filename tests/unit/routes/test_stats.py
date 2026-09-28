@@ -81,6 +81,11 @@ class TestStatsRoutes:
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
         assert "Triage" in response.text
+        assert 'data-paginate="20"' in response.text
+        assert (
+            'data-tooltip="Contributor PRs awaiting first maintainer review"'
+            in response.text
+        )
 
     def test_trends_page(self) -> None:
         """GET /stats/trends returns accessible HTML with loading state."""
@@ -113,6 +118,11 @@ class TestStatsRoutes:
         assert 'id="snapshot-table"' in response.text
         assert "Annual delivery &amp; project state" in response.text
         assert 'name="trend-projects"' in response.text
+        # Verify only all-projects is checked by default and not duplicated
+        assert (
+            response.text.count('value="all-projects"') == 2
+        )  # 1 in option, 1 in hidden input
+        assert 'value="all-projects" checked' in response.text
 
     def test_stats_index_redirects(self) -> None:
         """GET /stats redirects to /stats/dependencies."""

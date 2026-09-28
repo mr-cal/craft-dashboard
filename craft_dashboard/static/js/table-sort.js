@@ -71,6 +71,9 @@ function sortTable(table, columnIndex) {
   
   // Update arrow indicators
   updateSortIndicators(table, columnIndex, currentSortDirection);
+  
+  // Notify listeners that table was sorted
+  table.dispatchEvent(new CustomEvent('table-sorted'));
 }
 
 function updateSortIndicators(table, sortedColumn, direction) {

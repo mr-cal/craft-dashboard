@@ -18,7 +18,7 @@
     <h3>Contributor PRs</h3>
     <div style="margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.75rem;">
       <div>
-        <span class="p-text--small">Awaiting review</span>
+        <span class="p-text--small" title="Contributor PRs awaiting first maintainer review" data-tooltip="Contributor PRs awaiting first maintainer review" tabindex="0">Awaiting review</span>
         <div style="font-size: 1.4rem; font-weight: 700;">
           {{ velocity.first_response_waiting_count }}
           <span class="p-text--small p-text--muted" style="font-weight: normal;">/ {{ velocity.contributor_count }} open</span>
@@ -29,7 +29,17 @@
         <div style="font-size: 1.2rem; font-weight: 600;">
           {{ velocity.first_response_avg_days or '—' }} days
         </div>
-        {% if velocity.first_response_avg_delta is not none %}
+        {% if velocity.first_response_avg_delta is not none and velocity.first_response_avg_delta != 0 and velocity.first_response_avg_baseline is not none %}
+        {% set f_abs = velocity.first_response_avg_delta | abs %}
+        {% set f_dir = 'higher' if velocity.first_response_avg_delta > 0 else 'lower' %}
+        {% set f_tip = f_abs ~ " days " ~ f_dir ~ " than the " ~ velocity.first_response_avg_baseline ~ " day baseline (the monthly average over the last 12 months)" %}
+        <span class="p-text--small {% if velocity.first_response_avg_delta < 0 %}kpi-delta--positive{% else %}kpi-delta--negative{% endif %}"
+              title="{{ f_tip }}"
+              data-tooltip="{{ f_tip }}"
+              tabindex="0">
+          {{ '+' if velocity.first_response_avg_delta > 0 else '' }}{{ velocity.first_response_avg_delta }}d vs 12m avg
+        </span>
+        {% elif velocity.first_response_avg_delta is not none %}
         <span class="p-text--small {% if velocity.first_response_avg_delta <= 0 %}kpi-delta--positive{% else %}kpi-delta--negative{% endif %}">
           {{ '+' if velocity.first_response_avg_delta > 0 else '' }}{{ velocity.first_response_avg_delta }}d vs 12m avg
         </span>
@@ -40,7 +50,17 @@
         <div style="font-size: 1.2rem; font-weight: 600;">
           {{ velocity.contributor_avg_age or '—' }} days
         </div>
-        {% if velocity.contributor_avg_delta is not none %}
+        {% if velocity.contributor_avg_delta is not none and velocity.contributor_avg_delta != 0 and velocity.contributor_avg_baseline is not none %}
+        {% set c_abs = velocity.contributor_avg_delta | abs %}
+        {% set c_dir = 'higher' if velocity.contributor_avg_delta > 0 else 'lower' %}
+        {% set c_tip = c_abs ~ " days " ~ c_dir ~ " than the " ~ velocity.contributor_avg_baseline ~ " day baseline (the monthly average over the last 12 months)" %}
+        <span class="p-text--small {% if velocity.contributor_avg_delta < 0 %}kpi-delta--positive{% else %}kpi-delta--negative{% endif %}"
+              title="{{ c_tip }}"
+              data-tooltip="{{ c_tip }}"
+              tabindex="0">
+          {{ '+' if velocity.contributor_avg_delta > 0 else '' }}{{ velocity.contributor_avg_delta }}d vs 12m avg
+        </span>
+        {% elif velocity.contributor_avg_delta is not none %}
         <span class="p-text--small {% if velocity.contributor_avg_delta <= 0 %}kpi-delta--positive{% else %}kpi-delta--negative{% endif %}">
           {{ '+' if velocity.contributor_avg_delta > 0 else '' }}{{ velocity.contributor_avg_delta }}d vs 12m avg
         </span>
@@ -51,7 +71,7 @@
   <div class="col">
     <h4 class="p-heading--5" style="margin-bottom: 0.5rem;">Contributor PRs awaiting maintainer review</h4>
     {% if awaiting_prs %}
-    <table data-sortable class="p-table--sortable table-fixed u-no-margin--bottom">
+    <table data-sortable data-paginate="20" class="p-table--sortable table-fixed u-no-margin--bottom">
       <colgroup>
         <col style="width: 20%;">
         <col style="width: 12%;">
@@ -121,7 +141,7 @@
     </div>
   </div>
   <div class="col">
-    <table data-sortable class="p-table--sortable table-fixed u-no-margin--bottom">
+    <table data-sortable data-paginate="20" class="p-table--sortable table-fixed u-no-margin--bottom">
       <colgroup>
         <col style="width: 25%;">
         <col style="width: 15%;">
@@ -226,5 +246,6 @@
 
 {% block scripts %}
 <script src="/static/js/table-sort.js"></script>
+<script src="/static/js/table-paginate.js"></script>
 {% endblock %}
 
