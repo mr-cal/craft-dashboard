@@ -296,6 +296,7 @@ class IssueRepository:
             "content_hash": issue.content_hash,
             "evidence_generation": issue.evidence_generation,
             "issue_type": issue.issue_type,
+            "is_pr": issue.is_pr,
             "created_at": issue.created_at,
             "updated_at": issue.updated_at,
             "closed_at": issue.closed_at,
@@ -659,6 +660,7 @@ class IssueRepository:
                 LLMEvaluation.suggested_action_reason,
                 LLMEvaluation.scores,
                 distance.label("distance"),
+                _has_related_links_expr().label("has_related_links"),
             )
             .join(Project, Issue.project_id == Project.id)
             .outerjoin(
@@ -682,6 +684,7 @@ class IssueRepository:
         for row in result:
             issue = row[0]
             scores = _normalize_scores(row.scores)
+            has_related_links = bool(getattr(row, "has_related_links", False))
             issues.append(
                 IssueView(
                     id=issue.id,
@@ -708,6 +711,7 @@ class IssueRepository:
                     confidence=scores.get("confidence"),
                     impact=scores.get("impact"),
                     quick_win=_to_int_score(scores.get("quick_win")),
+                    has_related_links=has_related_links,
                 )
             )
         return issues

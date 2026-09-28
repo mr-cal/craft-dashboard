@@ -1134,6 +1134,7 @@ class TestEvalResultIntegration:
         assert evaluations[0].latest is False
         assert evaluations[0].eval_locked_until is None
         assert evaluations[1].latest is True
+        assert evaluations[1].eval_locked_until is None
         assert evaluations[1].summary == (
             "Maintainers confirmed the regression is still reproducible."
         )
@@ -1141,7 +1142,7 @@ class TestEvalResultIntegration:
         assert evaluations[1].llm_backend == "local"
         assert evaluations[1].issue_data_hash == current_hash
         assert evaluations[1].eval_version == OPEN_ISSUE_EVAL_VERSION
-        assert evaluations[1].eval_locked_until is not None
+        assert evaluations[1].eval_locked_until is None
 
     def test_submit_result_stamps_evidence_generation(
         self, test_db_session: AsyncSession

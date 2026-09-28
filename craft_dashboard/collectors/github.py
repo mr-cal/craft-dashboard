@@ -917,7 +917,14 @@ class GitHubCollector:
                 now_utc = datetime.now(UTC)
                 for num, status in reconciled.items():
                     if status["state"] == "closed":
-                        closed_at = status["closed_at"] or now_utc
+                        is_merged = bool(status.get("merged_at"))
+                        closed_at = (
+                            status["merged_at"]
+                            if is_merged
+                            else status["closed_at"] or now_utc
+                        )
+                        new_state = "merged" if is_merged else "closed"
+                        new_change_type = "merged" if is_merged else "closed"
                         # Look up current issue fields to recompute content_hash and title for activity
                         issue_res = await session.execute(
                             sa.select(
@@ -938,7 +945,7 @@ class GitHubCollector:
                             compute_content_hash(
                                 curr_title,
                                 issue_row[1] if issue_row else None,
-                                "closed",
+                                new_state,
                                 issue_row[2] or [] if issue_row else [],
                                 comments=issue_row[3] or [] if issue_row else [],
                                 pr_details=issue_row[4] if issue_row else None,
@@ -954,19 +961,19 @@ class GitHubCollector:
                                 Issue.external_id == str(num),
                             )
                             .values(
-                                state="closed",
+                                state=new_state,
                                 closed_at=closed_at,
                                 content_hash=new_content_hash,
                                 last_fetched_at=now_utc,
                                 collection_run_id=collection_run_id,
                             )
                         )
-                        # Record activity entry for issue closure
+                        # Record activity entry for issue closure/merge
                         session.add(
                             IssueActivity(
                                 project_id=project_id,
                                 issue_number=num,
-                                change_type="closed",
+                                change_type=new_change_type,
                                 title=curr_title[:200],
                                 occurred_at=closed_at,
                                 collection_run_id=collection_run_id,
@@ -1108,7 +1115,9 @@ class GitHubCollector:
             pub = _parse_graphql_datetime(node["publishedAt"] or node["createdAt"])
             metadata: dict = {"prerelease": False, "draft": False}
 
-            # Upsert: one row per project+branch
+            # Upsert: one row per project+branch. Do not overwrite metadata in on_conflict_do_update
+            # so that previously computed commits_since_tag and tag_on_main are preserved
+            # if git compare fails.
             stmt = insert(Release).values(
                 project_id=project_id,
                 version=best_tag,
@@ -1123,7 +1132,6 @@ class GitHubCollector:
                     "version": stmt.excluded.version,
                     "released_at": stmt.excluded.released_at,
                     "is_hotfix": stmt.excluded.is_hotfix,
-                    "metadata": stmt.excluded.metadata,
                 },
             )
             await session.execute(stmt)

@@ -708,7 +708,11 @@ class AdminService:
             )
             .join(Issue, LLMEvaluation.issue_id == Issue.id)
             .join(Project, Issue.project_id == Project.id)
-            .where(LLMEvaluation.latest.is_(True))
+            .where(
+                LLMEvaluation.latest.is_(True),
+                LLMEvaluation.model_name != "pending",
+                ~LLMEvaluation.model_name.like("released:%"),
+            )
         )
 
         total_query = select(func.count()).select_from(base_query.subquery())

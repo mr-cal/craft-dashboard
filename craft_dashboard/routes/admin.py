@@ -1,7 +1,6 @@
 """Admin routes for dashboard operations and refreshes."""
 
 import asyncio
-import html
 import json
 import logging
 import pathlib
@@ -471,7 +470,7 @@ async def admin_logs(
                 f"(no journal entries found for units: {', '.join(_LOG_SERVICE_UNITS)})\n"
                 "Hint: logs are only available when running as systemd services on the deployed server."
             )
-        return PlainTextResponse(html.escape(output))
+        return PlainTextResponse(output)
     except (TimeoutError, FileNotFoundError):
         return PlainTextResponse(
             "(journalctl not available — logs are only accessible on the deployed server)"

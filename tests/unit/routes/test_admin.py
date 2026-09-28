@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from craft_dashboard.app import create_app
@@ -318,6 +318,27 @@ class TestAdminLogs:
 
         assert response.status_code == 200
         assert "text/plain" in response.headers["content-type"]
+
+    def test_logs_does_not_escape_html(self, mocker) -> None:
+        """GET /admin/logs returns raw unescaped text so quotes and angle brackets are readable."""
+        app = _create_admin_app()
+
+        proc_mock = MagicMock()
+        proc_mock.communicate = AsyncMock(
+            return_value=(b'<info> process "worker" started & ready\n', b"")
+        )
+        mocker.patch("asyncio.wait_for", AsyncMock(return_value=proc_mock))
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/admin/logs",
+                headers={"Authorization": f"Bearer {_ADMIN_TOKEN}"},
+            )
+
+        assert response.status_code == 200
+        assert '<info> process "worker" started & ready' in response.text
+        assert "&lt;" not in response.text
+        assert "&quot;" not in response.text
 
 
 class TestVerifyOrigin:

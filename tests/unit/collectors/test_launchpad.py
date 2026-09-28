@@ -623,3 +623,103 @@ class TestCollectBugsComments:
 
         assert count == 1
         assert captured["comments"] == []
+
+
+class TestCollectBugsIssueActivity:
+    """Tests for IssueActivity creation during Launchpad bug collection."""
+
+    def _make_mock_task(self, bug_id: int = 123, status: str = "New") -> MagicMock:
+        mock_bug = MagicMock()
+        mock_bug.id = bug_id
+        mock_bug.title = "Activity test bug"
+        mock_bug.description = "Test description"
+        mock_bug.tags = []
+        mock_bug.date_created = datetime(2024, 1, 1, tzinfo=UTC)
+        mock_bug.date_last_updated = datetime(2024, 1, 2, tzinfo=UTC)
+        mock_bug.web_link = f"https://bugs.launchpad.net/bugs/{bug_id}"
+
+        mock_task = MagicMock()
+        mock_task.bug = mock_bug
+        mock_task.status = status
+        mock_task.owner_link = "https://api.launchpad.net/1.0/~user"
+        mock_task.importance = "Medium"
+        mock_task.date_closed = (
+            datetime(2024, 1, 3, tzinfo=UTC)
+            if status in ("Fix Released", "Fix Committed")
+            else None
+        )
+        return mock_task
+
+    async def test_activity_recorded_for_new_bug(self, mocker) -> None:
+        """First time seeing a bug records change_type='created'."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        mock_task = self._make_mock_task(123, status="New")
+        mocker.patch.object(
+            collector,
+            "_get_launchpad",
+            return_value=MagicMock(
+                projects={
+                    "snapcraft": MagicMock(
+                        searchTasks=MagicMock(return_value=[mock_task])
+                    )
+                }
+            ),
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.launchpad._fetch_bug_comments", return_value=[]
+        )
+
+        mock_result = MagicMock()
+        mock_result.one_or_none.return_value = None
+
+        session = AsyncMock()
+        session.scalar.return_value = None
+        session.execute.return_value = mock_result
+
+        await collector.collect_bugs("snapcraft", 1, session, collection_run_id=99)
+
+        activities = [
+            arg[0]
+            for arg, _ in session.add.call_args_list
+            if hasattr(arg[0], "change_type")
+        ]
+        assert len(activities) == 1
+        assert activities[0].change_type == "created"
+        assert activities[0].issue_number == 123
+        assert activities[0].collection_run_id == 99
+
+    async def test_activity_recorded_for_closed_bug(self, mocker) -> None:
+        """Closing a previously open bug records change_type='closed'."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        mock_task = self._make_mock_task(123, status="Fix Released")
+        mocker.patch.object(
+            collector,
+            "_get_launchpad",
+            return_value=MagicMock(
+                projects={
+                    "snapcraft": MagicMock(
+                        searchTasks=MagicMock(return_value=[mock_task])
+                    )
+                }
+            ),
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.launchpad._fetch_bug_comments", return_value=[]
+        )
+
+        mock_result = MagicMock()
+        mock_result.one_or_none.return_value = (datetime(2024, 1, 1, tzinfo=UTC), None)
+
+        session = AsyncMock()
+        session.scalar.return_value = None
+        session.execute.return_value = mock_result
+
+        await collector.collect_bugs("snapcraft", 1, session, collection_run_id=99)
+
+        activities = [
+            arg[0]
+            for arg, _ in session.add.call_args_list
+            if hasattr(arg[0], "change_type")
+        ]
+        assert len(activities) == 1
+        assert activities[0].change_type == "closed"

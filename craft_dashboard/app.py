@@ -169,8 +169,8 @@ def _ref_external_url(ref: str | None) -> str | None:
     prefix, _, external_id = ref.rpartition("#")
     if not prefix or not external_id:
         return None
-    if "(launchpad)" in prefix:
-        lp_name = prefix.replace("(launchpad)", "").strip()
+    if "(launchpad)" in prefix or prefix.endswith("-launchpad"):
+        lp_name = prefix.replace("(launchpad)", "").removesuffix("-launchpad").strip()
         return f"https://bugs.launchpad.net/{lp_name}/+bug/{external_id}"
     project_name = prefix.rsplit("/", 1)[-1].strip()
     org = prefix.rsplit("/", 1)[0].strip() if "/" in prefix else "canonical"

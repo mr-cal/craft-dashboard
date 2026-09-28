@@ -2,6 +2,7 @@
 
 import ipaddress
 import logging
+import math
 from dataclasses import asdict
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, TypedDict, cast
@@ -255,6 +256,9 @@ async def _build_issue_context(
     project_names = await repo.get_project_names()
 
     combined_issues = result.issues
+    total_count = result.total_count
+    total_pages = result.total_pages
+
     if filters.search.strip():
         semantic_issues = await _run_semantic_search(
             session,
@@ -266,7 +270,22 @@ async def _build_issue_context(
             similarity_threshold=semantic_search_similarity_threshold,
             filtered_issues=filtered_issues,
         )
-        combined_issues = [*result.issues, *semantic_issues]
+        if semantic_issues:
+            total_count += len(semantic_issues)
+            if filters.items_per_page > 0:
+                total_pages = max(
+                    result.total_pages, math.ceil(total_count / filters.items_per_page)
+                )
+
+        if result.page == 1:
+            combined_issues = [*result.issues, *semantic_issues]
+            if (
+                filters.items_per_page > 0
+                and len(combined_issues) > filters.items_per_page
+            ):
+                combined_issues = combined_issues[: filters.items_per_page]
+        else:
+            combined_issues = result.issues
 
     normalized_scores = scores.strip()
     active_scores: list[str] = [
@@ -291,14 +310,14 @@ async def _build_issue_context(
         "filter_search": filters.search,
         "sort_by": filters.sort_by,
         "page": result.page,
-        "total_pages": result.total_pages,
+        "total_pages": total_pages,
         "per_page": filters.items_per_page,
         "filter_scores": scores,
         "active_scores": active_scores,
         "all_scores": ALL_SCORES,
         "inverted_scores": INVERTED_SCORES,
         "filter_llm_status": filters.llm_status,
-        "total_count": result.total_count,
+        "total_count": total_count,
     }
     return context
 
@@ -320,11 +339,18 @@ class IssueSort(StrEnum):
 
 def _build_original_issue_url(issue: dict[str, Any]) -> str:
     """Build the upstream issue URL from issue data."""
-    if issue["source"] == "launchpad":
+    if issue.get("url"):
+        return issue["url"]
+    if issue.get("source") == "launchpad":
         lp_name = issue["project_name"].removesuffix(" (launchpad)")
         return f"https://bugs.launchpad.net/{lp_name}/+bug/{issue['external_id']}"
+    path_segment = (
+        "pull"
+        if issue.get("issue_type") == "pull_request" or issue.get("is_pr")
+        else "issues"
+    )
     return (
-        f"https://github.com/canonical/{issue['project_name']}/issues/"
+        f"https://github.com/canonical/{issue['project_name']}/{path_segment}/"
         f"{issue['external_id']}"
     )
 
@@ -482,7 +508,7 @@ async def issue_detail(
         )
         eval_ver = current_evaluation.get("eval_version")
         is_open = issue["state"] == "open"
-        is_pr = bool(issue.get("is_pr"))
+        is_pr = bool(issue.get("is_pr") or issue.get("issue_type") == "pull_request")
         expected_ver = current_version_for_item(state=issue["state"], is_pr=is_pr)
         matching_type = (is_open and eval_type == "scoring") or (
             not is_open and eval_type == "summary"

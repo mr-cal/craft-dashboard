@@ -645,7 +645,7 @@ async def submit_result(
         issue_data_hash=current_hash,
         evidence_generation=issue.evidence_generation,
         latest=True,
-        eval_locked_until=datetime.now(tz=UTC) + _LOCK_TTL,
+        eval_locked_until=None,
         summary_embedding=summary_embedding,
     )
     session.add(evaluation)

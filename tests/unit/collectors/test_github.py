@@ -1084,6 +1084,73 @@ class TestCollectIssuesGraphQLOpenPath:
         fetch_states.assert_called_once_with(requester, "canonical", "repo", [102])
         session.commit.assert_awaited_once()
 
+    async def test_collect_issues_reconciles_missing_merged_pr(self, mocker) -> None:
+        """Reconciling a merged PR marks it state='merged' and change_type='merged'."""
+        collector = GitHubCollector(token=_TEST_TOKEN, org="canonical")
+        requester = MagicMock()
+        collector.gh = MagicMock()
+        collector.gh.requester = requester
+        collector.wait_for_rate_limit = MagicMock()
+
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_issues",
+            return_value=iter([]),
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.github.paginated_pull_requests",
+            return_value=iter([]),
+        )
+
+        db_open_result = MagicMock()
+        db_open_result.fetchall.return_value = [("200",)]
+
+        issue_200_select_result = MagicMock()
+        issue_200_select_result.one_or_none.return_value = (
+            "PR 200",
+            "Body 200",
+            [],
+            [],
+            {},
+        )
+
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                db_open_result,  # query DB open items
+                issue_200_select_result,  # query issue details for 200
+                None,  # update issue 200
+            ]
+        )
+        session.commit = AsyncMock()
+
+        merged_time = datetime(2025, 1, 5, 12, 0, tzinfo=UTC)
+        fetch_states = mocker.patch(
+            "craft_dashboard.collectors.github.fetch_issue_states",
+            return_value={
+                200: {
+                    "state": "closed",
+                    "closed_at": merged_time,
+                    "merged_at": merged_time,
+                }
+            },
+        )
+
+        count = await collector.collect_issues(
+            "repo", 1, session, state="open", collection_run_id=42
+        )
+
+        assert count == 1
+        fetch_states.assert_called_once_with(requester, "canonical", "repo", [200])
+        # Verify activity entry was added with change_type="merged"
+        added_activity = [
+            arg[0]
+            for arg, _ in session.add.call_args_list
+            if hasattr(arg[0], "change_type")
+        ]
+        assert len(added_activity) == 1
+        assert added_activity[0].change_type == "merged"
+        assert added_activity[0].occurred_at == merged_time
+
 
 class TestFetchPRDetails:
     """Tests for _fetch_pr_details."""

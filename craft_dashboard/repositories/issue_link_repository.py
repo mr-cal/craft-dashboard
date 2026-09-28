@@ -124,6 +124,8 @@ class IssueLinkRepository:
         if not prefix or not external_id:
             return None
         project_name = prefix.rsplit("/", 1)[-1]
+        if project_name == "snapcraft-launchpad":
+            project_name = "snapcraft (launchpad)"
         query = (
             select(Issue.id)
             .join(Project, Issue.project_id == Project.id)

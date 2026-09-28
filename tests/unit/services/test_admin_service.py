@@ -1064,6 +1064,62 @@ class TestLLMServiceStatus:
         assert recent[0]["suggested_action"] == "needs_review"
         assert total == 2
 
+    async def test_excludes_pending_and_released_claims(self, test_db_session) -> None:
+        """Worker claims with model_name='pending' or 'released:...' are excluded."""
+        await _seed_admin_data(test_db_session)
+        now = datetime.now(tz=UTC)
+        issue3 = Issue(
+            project_id=1,
+            source="github",
+            external_id="3",
+            issue_type="issue",
+            title="Pending claim issue",
+            state="open",
+            url="https://example.com/3",
+            last_fetched_at=now,
+        )
+        issue4 = Issue(
+            project_id=1,
+            source="github",
+            external_id="4",
+            issue_type="issue",
+            title="Released claim issue",
+            state="open",
+            url="https://example.com/4",
+            last_fetched_at=now,
+        )
+        test_db_session.add_all([issue3, issue4])
+        await test_db_session.flush()
+
+        # Add an in-flight worker claim and a released placeholder
+        test_db_session.add(
+            LLMEvaluation(
+                issue_id=issue3.id,
+                model_name="pending",
+                eval_type="scoring",
+                evaluated_at=now,
+                latest=True,
+            )
+        )
+        test_db_session.add(
+            LLMEvaluation(
+                issue_id=issue4.id,
+                model_name="released:timeout",
+                eval_type="scoring",
+                evaluated_at=now,
+                latest=True,
+            )
+        )
+        await test_db_session.commit()
+
+        recent, total = await AdminService(test_db_session).get_recent_evaluations(
+            limit=20
+        )
+
+        assert not any(entry["model_name"] == "pending" for entry in recent)
+        assert not any(entry["model_name"].startswith("released:") for entry in recent)
+        assert total == 2
+
 
 class TestDailyEvaluationStats:
     """Tests for AdminService.get_daily_evaluation_stats."""

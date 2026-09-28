@@ -249,6 +249,37 @@ class TestCreateFromRelatedWork:
         assert len(links) == 1
         assert links[0].kind == "superseded_by"
 
+    async def test_resolves_snapcraft_launchpad_slug_ref(self, test_db_session) -> None:
+        """A ref using 'snapcraft-launchpad#<id>' resolves to 'snapcraft (launchpad)' project."""
+        project = make_project(name="snapcraft (launchpad)")
+        test_db_session.add(project)
+        await test_db_session.flush()
+        from_issue = make_issue(project_id=project.id, external_id="1")
+        to_issue = make_issue(project_id=project.id, external_id="1876370")
+        test_db_session.add_all([from_issue, to_issue])
+        await test_db_session.flush()
+        evaluation = make_evaluation(issue_id=from_issue.id)
+        test_db_session.add(evaluation)
+        await test_db_session.flush()
+
+        repo = IssueLinkRepository(test_db_session)
+        links = await repo.create_from_related_work(
+            from_issue_id=from_issue.id,
+            llm_evaluation_id=evaluation.id,
+            related_work=[
+                {
+                    "kind": "duplicate_of",
+                    "ref": "snapcraft-launchpad#1876370",
+                    "confidence": 90,
+                    "note": "same LP bug",
+                }
+            ],
+        )
+
+        assert len(links) == 1
+        assert links[0].to_issue_id == to_issue.id
+        assert links[0].to_ref == "snapcraft-launchpad#1876370"
+
 
 class TestReconcileUnresolvedLinks:
     """Tests for IssueLinkRepository.reconcile_unresolved_links."""

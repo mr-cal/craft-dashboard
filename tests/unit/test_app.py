@@ -176,6 +176,12 @@ class TestRefExternalUrl:
             == "https://bugs.launchpad.net/snapcraft/+bug/2048"
         )
 
+    def test_launchpad_slug_ref(self) -> None:
+        assert (
+            _ref_external_url("snapcraft-launchpad#2048")
+            == "https://bugs.launchpad.net/snapcraft/+bug/2048"
+        )
+
     def test_invalid_refs(self) -> None:
         assert _ref_external_url(None) is None
         assert _ref_external_url("") is None

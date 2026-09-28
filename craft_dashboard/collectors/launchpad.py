@@ -157,6 +157,9 @@ class LaunchpadCollector:
         from craft_dashboard.models.issue import (
             Issue,
         )
+        from craft_dashboard.models.issue_activity import (
+            IssueActivity,
+        )
 
         lp = self._get_launchpad()
         project = lp.projects[lp_project_name]
@@ -201,6 +204,48 @@ class LaunchpadCollector:
                     exc_info=True,
                 )
                 comments = []
+
+            existing = await session.execute(
+                select(Issue.last_fetched_at, Issue.closed_at).where(
+                    Issue.project_id == project_id,
+                    Issue.source == "launchpad",
+                    Issue.external_id == str(bug.id),
+                )
+            )
+            existing_row = (
+                existing.one_or_none()
+                if existing is not None and hasattr(existing, "one_or_none")
+                else None
+            )
+            if existing_row and isinstance(existing_row, (tuple, list)):
+                last_fetched_item, previous_closed_at = (
+                    existing_row[0],
+                    existing_row[1],
+                )
+            else:
+                last_fetched_item, previous_closed_at = None, None
+            if last_fetched_item is None:
+                change_type = "created"
+            elif state == "closed" and previous_closed_at is None:
+                change_type = "closed"
+            else:
+                change_type = "updated"
+
+            occurred_at = (
+                bug.date_last_updated.replace(tzinfo=UTC)
+                if bug.date_last_updated
+                else datetime.now(tz=UTC)
+            )
+            session.add(
+                IssueActivity(
+                    project_id=project_id,
+                    issue_number=bug.id,
+                    change_type=change_type,
+                    title=(bug.title or "")[:200],
+                    occurred_at=occurred_at,
+                    collection_run_id=collection_run_id,
+                )
+            )
 
             stmt = insert(Issue).values(
                 project_id=project_id,

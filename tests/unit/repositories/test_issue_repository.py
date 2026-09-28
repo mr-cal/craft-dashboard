@@ -1218,13 +1218,20 @@ class TestFindRelatedBySummaryEmbedding:
 
 class _SemanticSearchRow:
     def __init__(self, **kwargs) -> None:
-        self.issue = _FakeIssue(**{k: v for k, v in kwargs.items() if k != "distance"})
+        self.issue = _FakeIssue(
+            **{
+                k: v
+                for k, v in kwargs.items()
+                if k not in ("distance", "has_related_links")
+            }
+        )
         self.project_name = kwargs["project_name"]
         self.summary = kwargs["summary"]
         self.suggested_action = kwargs["suggested_action"]
         self.suggested_action_reason = kwargs["suggested_action_reason"]
         self.scores = kwargs["scores"]
         self.distance = kwargs["distance"]
+        self.has_related_links = kwargs.get("has_related_links", False)
 
     def __getitem__(self, index: int):
         assert index == 0
@@ -1261,6 +1268,7 @@ class TestSemanticSearch:
                 suggested_action_reason="Needs investigation.",
                 scores={"actionability": 5},
                 distance=0.1,
+                has_related_links=True,
             ),
             _SemanticSearchRow(
                 id=2,
@@ -1295,8 +1303,10 @@ class TestSemanticSearch:
         assert [issue.id for issue in result] == [1, 2]
         assert result[0].title == "Fix YAML parser crash"
         assert result[0].actionability == 5
+        assert result[0].has_related_links is True
         assert result[1].summary is None
         assert result[1].scores == {}
+        assert result[1].has_related_links is False
 
     async def test_passes_exclude_ids_and_thresholds_to_query(self) -> None:
         session = AsyncMock()

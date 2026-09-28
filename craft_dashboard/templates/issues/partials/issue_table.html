@@ -31,8 +31,11 @@
     <thead>
       <tr>
         {% macro sort_header(label, field, tooltip="", column_name="") %}
-        {% set is_asc = sort_by == field %}
-        {% set is_desc = sort_by == ("-" ~ field) %}
+        {% set default_desc = field in ["updated", "impact", "actionability", "complexity", "confidence", "quick_win"] %}
+        {% set is_active = (sort_by == field) or (sort_by == ("-" ~ field)) %}
+        {% set is_asc = (sort_by == ("-" ~ field)) if default_desc else (sort_by == field) %}
+        {% set is_desc = (sort_by == field) if default_desc else (sort_by == ("-" ~ field)) %}
+        {% set next_sort = ("-" ~ field) if sort_by == field else field %}
         <th {% if column_name %}data-col="{{ column_name }}"{% endif %} {% if tooltip %}data-tooltip="{{ tooltip }}" tabindex="0"{% endif %}
             {% if is_asc %}aria-sort="ascending"{% elif is_desc %}aria-sort="descending"{% else %}aria-sort="none"{% endif %}>
           <a href="#"
@@ -40,10 +43,10 @@
              hx-target="#issue-table"
              hx-swap="outerHTML"
              hx-include=".filter-bar [name]:not([name='sort'])"
-             hx-vals='{"sort": "{{ ("-" ~ field) if is_asc else field }}"}'
+             hx-vals='{"sort": "{{ next_sort }}"}'
              hx-indicator="#loading-indicator"
              hx-push-url="false"
-             class="{% if is_asc or is_desc %}is-active{% endif %}"
+             class="{% if is_active %}is-active{% endif %}"
              aria-label="Sort by {{ label }}"
              style="text-decoration:none;color:inherit;cursor:pointer;">
             {{ label }}

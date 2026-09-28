@@ -354,13 +354,13 @@ class TestAdminLogsIntegration:
         assert response.status_code == 200
         assert response.text.strip() != ""
 
-    def test_logs_escape_html_entities(
+    def test_logs_return_raw_plaintext(
         self,
         client: TestClient,
         app_with_db: tuple[FastAPI, str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Logs escape HTML entities before returning output."""
+        """Logs return raw output in PlainTextResponse without HTML escaping."""
         _, token = app_with_db
 
         class _FakeProcess:
@@ -381,7 +381,7 @@ class TestAdminLogsIntegration:
         )
 
         assert response.status_code == 200
-        assert response.text == "&lt;script&gt;alert(1)&lt;/script&gt;"
+        assert response.text == "<script>alert(1)</script>"
 
     def test_logs_use_async_subprocess_exec(
         self,

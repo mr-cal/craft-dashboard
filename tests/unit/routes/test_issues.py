@@ -14,6 +14,7 @@ from craft_dashboard.routes.issues import (
     DEFAULT_SCORES,
     INVERTED_SCORES,
     _build_issue_context,
+    _build_original_issue_url,
     _run_semantic_search,
     _semantic_search_cost,
 )
@@ -376,6 +377,70 @@ class TestIssueTablePartial:
             >= 2
         )
 
+    def test_issue_table_sort_indicators_direction(self) -> None:
+        """Score columns default to descending (arrow down), text columns default to ascending."""
+        app = create_app()
+        app.dependency_overrides[get_db_session] = _override_issue_db_session
+        base_context = {
+            "issues": [],
+            "project_names": ["snapcraft"],
+            "filter_project": "",
+            "filter_source": "",
+            "filter_state": "open",
+            "filter_type": "",
+            "filter_action": "",
+            "filter_author_role": "",
+            "filter_search": "",
+            "page": 1,
+            "total_pages": 1,
+            "per_page": 100,
+            "filter_scores": "impact",
+            "active_scores": ["impact"],
+            "all_scores": ALL_SCORES,
+            "filter_llm_status": "",
+            "total_count": 0,
+        }
+
+        # 1. Sorted by impact (default descending)
+        context_impact = dict(base_context, sort_by="impact")
+        with patch(
+            "craft_dashboard.routes.issues._build_issue_context",
+            AsyncMock(return_value=context_impact),
+        ):
+            with TestClient(app) as client:
+                resp = client.get("/issues/table")
+        assert 'data-col="impact"' in resp.text
+        assert (
+            'data-col="impact" data-tooltip="Value/severity of fixing or merging (0=none, 100=critical/huge)" tabindex="0"\n            aria-sort="descending"'
+            in resp.text
+        )
+        assert 'hx-vals=\'{"sort": "-impact"}\'' in resp.text
+
+        # 2. Sorted by -impact (inverted to ascending)
+        context_impact_asc = dict(base_context, sort_by="-impact")
+        with patch(
+            "craft_dashboard.routes.issues._build_issue_context",
+            AsyncMock(return_value=context_impact_asc),
+        ):
+            with TestClient(app) as client:
+                resp = client.get("/issues/table")
+        assert (
+            'data-col="impact" data-tooltip="Value/severity of fixing or merging (0=none, 100=critical/huge)" tabindex="0"\n            aria-sort="ascending"'
+            in resp.text
+        )
+        assert 'hx-vals=\'{"sort": "impact"}\'' in resp.text
+
+        # 3. Sorted by title (default ascending)
+        context_title = dict(base_context, sort_by="title")
+        with patch(
+            "craft_dashboard.routes.issues._build_issue_context",
+            AsyncMock(return_value=context_title),
+        ):
+            with TestClient(app) as client:
+                resp = client.get("/issues/table")
+        assert 'data-col="title" \n            aria-sort="ascending"' in resp.text
+        assert 'hx-vals=\'{"sort": "-title"}\'' in resp.text
+
     def test_issue_table_partial_uses_shared_context_builder(self) -> None:
         """The table partial route delegates context building to the shared helper."""
         app = create_app()
@@ -583,3 +648,61 @@ class TestRunSemanticSearch:
         assert result == expected
         mock_search.assert_awaited_once()
         mock_client.close.assert_awaited_once()
+
+
+class TestBuildOriginalIssueUrl:
+    """Tests for _build_original_issue_url."""
+
+    def test_uses_stored_url_if_present(self) -> None:
+        issue = {
+            "source": "github",
+            "project_name": "craft-providers",
+            "external_id": "42",
+            "url": "https://github.com/custom-org/craft-providers/pull/42",
+            "issue_type": "pull_request",
+        }
+        assert (
+            _build_original_issue_url(issue)
+            == "https://github.com/custom-org/craft-providers/pull/42"
+        )
+
+    def test_builds_launchpad_url(self) -> None:
+        issue = {
+            "source": "launchpad",
+            "project_name": "snapcraft (launchpad)",
+            "external_id": "1876370",
+            "url": None,
+            "issue_type": "issue",
+        }
+        assert (
+            _build_original_issue_url(issue)
+            == "https://bugs.launchpad.net/snapcraft/+bug/1876370"
+        )
+
+    def test_builds_pull_request_url_for_prs(self) -> None:
+        issue = {
+            "source": "github",
+            "project_name": "snapcraft",
+            "external_id": "100",
+            "url": None,
+            "issue_type": "pull_request",
+            "is_pr": True,
+        }
+        assert (
+            _build_original_issue_url(issue)
+            == "https://github.com/canonical/snapcraft/pull/100"
+        )
+
+    def test_builds_issue_url_for_issues(self) -> None:
+        issue = {
+            "source": "github",
+            "project_name": "snapcraft",
+            "external_id": "101",
+            "url": None,
+            "issue_type": "issue",
+            "is_pr": False,
+        }
+        assert (
+            _build_original_issue_url(issue)
+            == "https://github.com/canonical/snapcraft/issues/101"
+        )
