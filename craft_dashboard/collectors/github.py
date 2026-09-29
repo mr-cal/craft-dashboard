@@ -1,12 +1,9 @@
 """GitHub data collector for issues, PRs, releases, and dependencies."""
 
-import hashlib
 import logging
 import time
-from collections import deque
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 import github
@@ -14,18 +11,45 @@ import sqlalchemy as sa
 import urllib3
 from github import Github, GithubException
 from github.Issue import Issue as GHIssue
-from github.PullRequest import PullRequest as GHPullRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from craft_dashboard.collectors import ISSUE_UPSERT_FIELDS, RateLimitError
+from craft_dashboard.collectors import RateLimitError
+from craft_dashboard.collectors import github_issue_store as store
+from craft_dashboard.collectors import github_release_store as release_store
+from craft_dashboard.collectors.github_adapters import (
+    GraphQLIssueAdapter,
+    GraphQLPullRequestAdapter,
+    interleave_open_graphql_items,
+)
 from craft_dashboard.collectors.github_graphql import (
     _parse_graphql_datetime,
-    classify_pr_ci_checks,
-    classify_pr_review_status,
     fetch_issue_states,
     paginated_issues,
     paginated_pull_requests,
     paginated_releases_and_branches,
+)
+from craft_dashboard.collectors.github_mapping import (
+    build_issue_values,
+    classify_change_type,
+)
+from craft_dashboard.collectors.github_mapping import (
+    classify_issue as _classify_issue,
+)
+from craft_dashboard.collectors.github_releases import (
+    select_best_tag,
+    select_branches_to_track,
+)
+from craft_dashboard.collectors.github_rest import (
+    fetch_closing_references as _fetch_closing_references,
+)
+from craft_dashboard.collectors.github_rest import (
+    fetch_issue_comments as _fetch_issue_comments,
+)
+from craft_dashboard.collectors.github_rest import (
+    fetch_pr_details as _fetch_pr_details,
+)
+from craft_dashboard.collectors.github_rest import (
+    tag_on_main as _tag_on_main,
 )
 from craft_dashboard.llm.content_hash import compute_content_hash
 
@@ -36,23 +60,11 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from github.Repository import Repository as GHRepository
 
+_CollectedItem = GHIssue | GraphQLIssueAdapter | GraphQLPullRequestAdapter
+
 _PROGRESS_LOG_INTERVAL_SECONDS = 30
-_HOTFIX_VERSION_COMPONENTS = 2
-
-
-def _tag_on_main(repo: "GHRepository", best_tag: str) -> bool:
-    """Return True if best_tag is an ancestor of main (i.e., main contains the tag).
-
-    Uses the GitHub compare API: compare(base=best_tag, head="main").
-    If behind_by == 0, main has not diverged behind the tag, meaning the tag's
-    commit is reachable from main's history.
-    """
-    try:
-        comparison = repo.compare(best_tag, "main")
-    except Exception:  # noqa: BLE001
-        return False
-    else:
-        return comparison.behind_by == 0
+_REST_RATE_LIMIT_CHECK_INTERVAL = 25
+_MAX_REST_LOOKBACK_DAYS = 90
 
 
 class RateLimitStatus(TypedDict):
@@ -64,317 +76,6 @@ class RateLimitStatus(TypedDict):
     graphql_remaining: int
     graphql_limit: int
     graphql_reset: datetime | None
-
-
-def _classify_issue(gh_issue: GHIssue) -> tuple[str, str]:
-    """Classify a GitHub issue as issue or PR, and determine its state.
-
-    Args:
-        gh_issue: A PyGithub Issue object.
-
-    Returns:
-        A tuple of (issue_type, state).
-
-    """
-    is_pr = gh_issue.pull_request is not None
-    issue_type = "pull_request" if is_pr else "issue"
-
-    if gh_issue.state == "closed" and is_pr:
-        merged_at = getattr(gh_issue.pull_request, "merged_at", None)
-        if merged_at is not None:
-            return issue_type, "merged"
-
-    return issue_type, gh_issue.state
-
-
-def _compute_issue_hash(
-    title: str,
-    body: str | None,
-    state: str,
-    labels: list[str],
-) -> str:
-    """Compute a SHA-256 hash of issue content for change detection.
-
-    Args:
-        title: Issue title.
-        body: Issue body text.
-        state: Issue state.
-        labels: List of label names.
-
-    Returns:
-        A 64-character hex string.
-
-    """
-    content = f"{title}|{body or ''}|{state}|{','.join(sorted(labels))}"
-    return hashlib.sha256(content.encode()).hexdigest()
-
-
-def _fetch_issue_comments(gh_issue: GHIssue) -> list[dict]:
-    """Fetch the last 10 comments from a GitHub issue.
-
-    Args:
-        gh_issue: A PyGithub Issue object.
-
-    Returns:
-        List of comment dicts, each with author/body/created_at/type.
-
-    """
-    comments = list(gh_issue.get_comments())
-    # Keep only the last 10
-    recent = comments[-10:]
-    return [
-        {
-            "author": c.user.login if c.user else "unknown",
-            "body": (c.body or "")[:1000],
-            "created_at": c.created_at.isoformat() if c.created_at else None,
-            "type": "comment",
-        }
-        for c in recent
-    ]
-
-
-def _fetch_closing_references(gh_issue: GHIssue) -> list[dict]:
-    """Fetch PRs that closed this issue via GitHub timeline events.
-
-    Args:
-        gh_issue: A PyGithub Issue object (closed issues only).
-
-    Returns:
-        List of dicts describing each merged PR that closed the issue.
-
-    """
-    refs = []
-    for event in gh_issue.get_timeline():
-        if event.event == "cross-referenced" and event.source:
-            source = event.source
-            if (
-                source.type == "pull_request"
-                and source.issue is not None
-                and source.issue.pull_request is not None
-                and source.issue.pull_request.merged_at is not None
-            ):
-                refs.append(
-                    {
-                        "type": "pull_request",
-                        "number": source.issue.number,
-                        "title": source.issue.title,
-                        "url": source.issue.html_url,
-                        "state": "merged",
-                        "merged_at": source.issue.pull_request.merged_at.isoformat(),
-                    }
-                )
-    return refs
-
-
-def _fetch_pr_details(gh_pr: GHPullRequest) -> dict:
-    """Fetch PR-specific data: reviews, CI checks, and diff stats.
-
-    Review status is determined by taking the latest review per reviewer
-    (later reviews override earlier ones) and classifying as:
-    - 'changes_requested' if any reviewer's latest is CHANGES_REQUESTED
-    - 'approved' if all unique reviewers approved
-    - 'pending' otherwise
-
-    CI checks are taken from the last commit's check runs.
-
-    Args:
-        gh_pr: A PyGithub PullRequest object.
-
-    Returns:
-        Dict with review_status, review_count, unresolved_review_comments,
-        ci_passing, ci_failing, ci_pending, diff_additions, diff_deletions,
-        diff_files_changed.
-
-    """
-    # Reviews: take latest review per reviewer
-    reviews = list(gh_pr.get_reviews())
-    latest_per_reviewer: dict[str, str] = {}
-    for review in reviews:
-        if review.user and review.state not in ("COMMENTED", "DISMISSED"):
-            latest_per_reviewer[review.user.login] = review.state
-
-    if any(s == "CHANGES_REQUESTED" for s in latest_per_reviewer.values()):
-        review_status = "changes_requested"
-    elif latest_per_reviewer and all(
-        s == "APPROVED" for s in latest_per_reviewer.values()
-    ):
-        review_status = "approved"
-    else:
-        review_status = "pending"
-
-    # Unresolved review comments: position is None when a comment is resolved
-    review_comments = list(gh_pr.get_review_comments())
-    unresolved = sum(1 for c in review_comments if c.position is not None)
-
-    # CI checks from last commit
-    ci_passing: list[str] = []
-    ci_failing: list[str] = []
-    ci_pending: list[str] = []
-    commits_list = list(gh_pr.get_commits())
-    if commits_list:
-        last_commit = commits_list[-1]
-        for check in last_commit.get_check_runs():
-            if check.conclusion in ("success", "skipped", "neutral"):
-                ci_passing.append(check.name)
-            elif check.conclusion in (
-                "failure",
-                "cancelled",
-                "timed_out",
-                "action_required",
-            ):
-                ci_failing.append(check.name)
-            else:
-                ci_pending.append(check.name)
-
-    return {
-        "review_status": review_status,
-        "review_count": len(latest_per_reviewer),
-        "unresolved_review_comments": unresolved,
-        "ci_passing": ci_passing,
-        "ci_failing": ci_failing,
-        "ci_pending": ci_pending,
-        "diff_additions": gh_pr.additions,
-        "diff_deletions": gh_pr.deletions,
-        "diff_files_changed": gh_pr.changed_files,
-    }
-
-
-def _comments_from_graphql_node(node: dict[str, Any]) -> list[dict]:
-    """Convert a GraphQL node's embedded ``comments`` to the REST comment shape."""
-    return [
-        {
-            "author": (comment["author"] or {}).get("login", "unknown"),
-            "body": (comment["body"] or "")[:1000],
-            "created_at": comment["createdAt"],
-            "type": "comment",
-        }
-        # `comments`/`nodes` can come back null on a partial GraphQL error for
-        # this field — see the matching guard in _GraphQLIssueAdapter.
-        for comment in (node.get("comments") or {}).get("nodes") or []
-    ]
-
-
-def _closing_refs_from_graphql_node(node: dict[str, Any]) -> list[dict]:
-    """Convert a GraphQL issue node's timeline items to the REST closing-ref shape."""
-    refs = []
-    for item in (node.get("timelineItems") or {}).get("nodes") or []:
-        source = item.get("source")
-        if source and source.get("mergedAt") is not None:
-            refs.append(
-                {
-                    "type": "pull_request",
-                    "number": source["number"],
-                    "title": source["title"],
-                    "url": source["url"],
-                    "state": "merged",
-                    "merged_at": source["mergedAt"],
-                }
-            )
-    return refs
-
-
-class _GraphQLIssueAdapter:
-    """GraphQL issue shim matching the PyGithub Issue read interface."""
-
-    def __init__(self, node: dict[str, Any]) -> None:
-        self._node = node
-        self.number = node["number"]
-        self.title = node["title"]
-        self.body = node["body"]
-        self.state = node["state"].lower()
-        author = node["author"]
-        self.user = SimpleNamespace(login=author["login"]) if author else None
-        # `labels` (or its nested `nodes`) can come back null on a partial
-        # GraphQL error for this field (e.g. RESOURCE_LIMITS_EXCEEDED on a
-        # deeply-nested query) — see `classify_pr_ci_checks`'s similar guard
-        # for `checkSuites`. Treat as "no labels" rather than crashing.
-        label_nodes = (node.get("labels") or {}).get("nodes") or []
-        self.labels = [SimpleNamespace(name=label["name"]) for label in label_nodes]
-        self.created_at = _parse_graphql_datetime(node["createdAt"])
-        self.updated_at = _parse_graphql_datetime(node["updatedAt"])
-        self.closed_at = _parse_graphql_datetime(node["closedAt"])
-        self.html_url = node["url"]
-        self.pull_request = None
-
-    def fetch_comments(self) -> list[dict]:
-        """Return the last-10 comments already embedded in the GraphQL node."""
-        return _comments_from_graphql_node(self._node)
-
-    def fetch_closing_references(self) -> list[dict]:
-        """Return closing PR references already embedded in the GraphQL node."""
-        return _closing_refs_from_graphql_node(self._node)
-
-
-class _GraphQLPullRequestAdapter:
-    """GraphQL pull-request shim matching the PyGithub Issue read interface."""
-
-    def __init__(self, node: dict[str, Any]) -> None:
-        self._node = node
-        self.number = node["number"]
-        self.title = node["title"]
-        self.body = node["body"]
-        self.state = node["state"].lower()
-        author = node["author"]
-        self.user = SimpleNamespace(login=author["login"]) if author else None
-        # See the matching comment in _GraphQLIssueAdapter.__init__.
-        label_nodes = (node.get("labels") or {}).get("nodes") or []
-        self.labels = [SimpleNamespace(name=label["name"]) for label in label_nodes]
-        self.created_at = _parse_graphql_datetime(node["createdAt"])
-        self.updated_at = _parse_graphql_datetime(node["updatedAt"])
-        self.closed_at = _parse_graphql_datetime(node["closedAt"])
-        self.html_url = node["url"]
-        self.pull_request = SimpleNamespace(
-            merged_at=_parse_graphql_datetime(node["mergedAt"])
-        )
-
-    def fetch_comments(self) -> list[dict]:
-        """Return the last-10 comments already embedded in the GraphQL node."""
-        return _comments_from_graphql_node(self._node)
-
-    def fetch_pr_details(self) -> dict:
-        """Return PR review/CI/diff details already embedded in the GraphQL node."""
-        review_status, review_count = classify_pr_review_status(
-            (self._node.get("reviews") or {}).get("nodes") or []
-        )
-        ci_passing, ci_failing, ci_pending = classify_pr_ci_checks(
-            (self._node.get("commits") or {}).get("nodes") or []
-        )
-        unresolved = sum(
-            1
-            for thread in (self._node.get("reviewThreads") or {}).get("nodes") or []
-            if not thread["isResolved"]
-        )
-        return {
-            "review_status": review_status,
-            "review_count": review_count,
-            "unresolved_review_comments": unresolved,
-            "ci_passing": ci_passing,
-            "ci_failing": ci_failing,
-            "ci_pending": ci_pending,
-            "diff_additions": self._node["additions"],
-            "diff_deletions": self._node["deletions"],
-            "diff_files_changed": self._node["changedFiles"],
-        }
-
-
-def _interleave_open_graphql_items(
-    issues: Iterable[dict[str, Any]],
-    pull_requests: Iterable[dict[str, Any]],
-) -> Iterator[_GraphQLIssueAdapter | _GraphQLPullRequestAdapter]:
-    """Yield open GraphQL issues and PRs in round-robin order."""
-    active = deque(
-        [
-            iter(_GraphQLIssueAdapter(node) for node in issues),
-            iter(_GraphQLPullRequestAdapter(node) for node in pull_requests),
-        ]
-    )
-    while active:
-        current = active.popleft()
-        try:
-            yield next(current)
-        except StopIteration:
-            continue
-        active.append(current)
 
 
 class GitHubCollector:
@@ -442,42 +143,16 @@ class GitHubCollector:
             Dict of column values for the insert statement.
 
         """
-        author = gh_issue.user.login if gh_issue.user else None
-        labels = [label.name for label in gh_issue.labels]
-        return {
-            "project_id": project_id,
-            "source": "github",
-            "external_id": str(gh_issue.number),
-            "issue_type": issue_type,
-            "title": gh_issue.title,
-            "body": gh_issue.body,
-            "state": state,
-            "author": author,
-            "author_is_maintainer": self.is_maintainer(author) if author else False,
-            "author_is_bot": author.endswith("[bot]") if author else False,
-            "labels": labels,
-            "created_at": gh_issue.created_at.replace(tzinfo=UTC)
-            if gh_issue.created_at
-            else None,
-            "updated_at": gh_issue.updated_at.replace(tzinfo=UTC)
-            if gh_issue.updated_at
-            else None,
-            "closed_at": gh_issue.closed_at.replace(tzinfo=UTC)
-            if gh_issue.closed_at
-            else None,
-            "url": gh_issue.html_url,
-            "metadata_": extra_metadata,
-            "comments": comments,
-            "content_hash": compute_content_hash(
-                gh_issue.title,
-                gh_issue.body,
-                state,
-                labels,
-                comments,
-                pr_details=extra_metadata or None,
-            ),
-            "last_fetched_at": datetime.now(tz=UTC),
-        }
+        return build_issue_values(
+            gh_issue,
+            project_id=project_id,
+            issue_type=issue_type,
+            state=state,
+            comments=comments,
+            extra_metadata=extra_metadata,
+            is_maintainer=self.is_maintainer,
+            fetched_at=datetime.now(tz=UTC),
+        )
 
     def check_rate_limit(self) -> RateLimitStatus:
         """Check GitHub REST (core) and GraphQL API rate limit status."""
@@ -537,6 +212,385 @@ class GitHubCollector:
         )
         time.sleep(sleep_seconds)
 
+    def _open_issue_source(
+        self,
+        repo_name: str,
+        limit: int,
+        since: datetime | None,
+    ) -> Iterator[GraphQLIssueAdapter | GraphQLPullRequestAdapter]:
+        """Return the GraphQL-backed iterator of currently open issues and PRs.
+
+        Args:
+            repo_name: Repository name (without org prefix).
+            limit: Maximum number of issues to fetch, for logging only.
+            since: Only fetch items updated on or after this timestamp.
+
+        Returns:
+            An iterator of GraphQL issue and PR adapters.
+
+        """
+        # Always fetch all currently-open issues; no schedule gate.
+        # The per-issue updated_at skip below handles efficiency.
+        # Use GraphQL (not REST) for the open pass: this runs every 10
+        # minutes, and REST's N+1 per-item calls (comments, reviews, CI
+        # checks) would blow the REST rate limit at that cadence.
+        self.wait_for_rate_limit(resource="graphql")
+        requester = self.gh.requester
+        gh_issues = interleave_open_graphql_items(
+            paginated_issues(requester, self.org, repo_name, since=since),
+            paginated_pull_requests(requester, self.org, repo_name, since=since),
+        )
+        logger.info(
+            "  %s/%s: collecting open issues (via GraphQL)%s",
+            self.org,
+            repo_name,
+            f", limit: {limit}" if limit else "",
+        )
+        return gh_issues
+
+    async def _rest_issue_source(
+        self,
+        repo: "GHRepository",
+        repo_name: str,
+        project_id: int,
+        session: AsyncSession,
+        limit: int,
+        refresh_age_days: int,
+        since: datetime | None,
+        state: Literal["closed", "all", "full"],
+    ) -> Iterable[GHIssue] | None:
+        """Return the REST-backed iterator of issues due for collection.
+
+        Args:
+            repo: The PyGithub repository.
+            repo_name: Repository name (without org prefix).
+            project_id: The database ID of the project.
+            session: An async SQLAlchemy session.
+            limit: Maximum number of issues to fetch, for logging only.
+            refresh_age_days: Issues last fetched more than this many days ago
+                are eligible for re-fetching.
+            since: Explicit watermark to fetch from, if any.
+            state: Which issues to fetch.
+
+        Returns:
+            An iterable of PyGithub issues, or None when nothing is due.
+
+        """
+        # Count how many existing issues are due for refresh
+        cutoff = datetime.now(tz=UTC) - timedelta(days=refresh_age_days)
+        stale_where = store.stale_issue_filter(project_id, cutoff)
+        due_count = await store.count_stale_issues(session, stale_where)
+
+        # Also check whether this project has any issues at all (fresh-project detection).
+        total_count = await store.count_issues(session, project_id)
+
+        # Check whether closed issues exist in the DB for this project.
+        closed_count = await store.count_closed_issues(session, project_id)
+
+        rest_state = "all" if state == "full" else state
+        is_full_collection = state == "full" or (since is None and closed_count == 0)
+
+        if (
+            not is_full_collection
+            and since is None
+            and due_count == 0
+            and total_count > 0
+        ):
+            logger.info(
+                "  %s/%s: no issues due for refresh, skipping", self.org, repo_name
+            )
+            return None
+
+        since_date = await self._resolve_rest_since(
+            session,
+            repo_name,
+            stale_where,
+            since=since,
+            state=state,
+            is_full_collection=is_full_collection,
+        )
+
+        if since_date is not None:
+            gh_issues = repo.get_issues(
+                state=rest_state,
+                sort="updated",
+                direction="desc",
+                since=since_date,
+            )
+            logger.info(
+                "  %s/%s: starting collection (%d issues due for refresh, fetching updated since %s)%s",
+                self.org,
+                repo_name,
+                due_count,
+                since_date.strftime("%Y-%m-%d"),
+                f", limit: {limit}" if limit else "",
+            )
+        else:
+            gh_issues = repo.get_issues(
+                state=rest_state, sort="updated", direction="desc"
+            )
+            logger.info(
+                "  %s/%s: starting full collection (all history)%s",
+                self.org,
+                repo_name,
+                f", limit: {limit}" if limit else "",
+            )
+        return gh_issues
+
+    async def _resolve_rest_since(
+        self,
+        session: AsyncSession,
+        repo_name: str,
+        stale_where: sa.ColumnElement[bool],
+        *,
+        since: datetime | None,
+        state: Literal["closed", "all", "full"],
+        is_full_collection: bool,
+    ) -> datetime | None:
+        """Determine the REST 'since' watermark for this collection pass.
+
+        Args:
+            session: An async SQLAlchemy session.
+            repo_name: Repository name (without org prefix).
+            stale_where: Filter matching issues due for refresh.
+            since: Explicit watermark supplied by the caller, if any.
+            state: Which issues to fetch.
+            is_full_collection: Whether this pass fetches all history.
+
+        Returns:
+            The timestamp to fetch from, or None for unbounded collection.
+
+        """
+        if state == "full":
+            # Unbounded collection back to repository creation
+            return None
+        if since is not None:
+            since_date = since.replace(tzinfo=UTC) if since.tzinfo is None else since
+            logger.info(
+                "  %s/%s: using watermark since %s",
+                self.org,
+                repo_name,
+                since_date.isoformat(),
+            )
+            return since_date
+        if is_full_collection:
+            return None
+
+        # Use 'since' based on the oldest last_fetched_at of due issues so we
+        # never miss a state transition that happened while the system was offline.
+        # Cap at 90 days to bound the amount of data fetched on a long outage.
+        max_lookback = datetime.now(tz=UTC) - timedelta(days=_MAX_REST_LOOKBACK_DAYS)
+        oldest_fetch = await store.oldest_stale_last_fetched(session, stale_where)
+        if oldest_fetch is None:
+            # Fresh project with no issues yet: fetch all history.
+            return None
+        oldest_fetch_tz = (
+            oldest_fetch.replace(tzinfo=UTC)
+            if oldest_fetch.tzinfo is None
+            else oldest_fetch
+        )
+        return max(oldest_fetch_tz - timedelta(days=1), max_lookback)
+
+    def _is_unchanged(
+        self,
+        gh_issue: _CollectedItem,
+        last_fetched: datetime | None,
+        repo_name: str,
+    ) -> bool:
+        """Report whether an issue is unchanged since it was last fetched.
+
+        Uses updated_at comparison rather than a fixed age window so that
+        state transitions (e.g. open → closed) that happened after our last
+        fetch are never silently ignored.
+        """
+        if last_fetched is None or gh_issue.updated_at is None:
+            return False
+        fetched_tz = (
+            last_fetched.replace(tzinfo=UTC)
+            if last_fetched.tzinfo is None
+            else last_fetched
+        )
+        issue_updated_at = (
+            gh_issue.updated_at.replace(tzinfo=UTC)
+            if gh_issue.updated_at.tzinfo is None
+            else gh_issue.updated_at
+        )
+        if issue_updated_at <= fetched_tz:
+            logger.debug(
+                "  Skipping %s#%d (unchanged since %s)",
+                repo_name,
+                gh_issue.number,
+                fetched_tz.strftime("%Y-%m-%d"),
+            )
+            return True
+        return False
+
+    def _fetch_item_payload(
+        self,
+        gh_issue: _CollectedItem,
+        repo: "GHRepository | None",
+        repo_name: str,
+        issue_type: str,
+        issue_state: str,
+    ) -> tuple[list, dict]:
+        """Fetch comments and PR/closing-reference metadata for one item.
+
+        GraphQL items carry this data inline; REST items need extra calls,
+        which are allowed to fail without aborting the collection pass.
+
+        Args:
+            gh_issue: A PyGithub issue or a GraphQL adapter.
+            repo: The PyGithub repository, for REST pull-request lookups.
+            repo_name: Repository name (without org prefix).
+            issue_type: 'issue' or 'pull_request'.
+            issue_state: Normalized state string.
+
+        Returns:
+            A tuple of (comments, extra_metadata).
+
+        """
+        comments: list = []
+        if isinstance(gh_issue, (GraphQLIssueAdapter, GraphQLPullRequestAdapter)):
+            comments = gh_issue.fetch_comments()
+        else:
+            try:
+                comments = _fetch_issue_comments(gh_issue)
+            except GithubException:
+                logger.warning(
+                    "Failed to fetch comments for %s#%d",
+                    repo_name,
+                    gh_issue.number,
+                    exc_info=True,
+                )
+
+        # For all PRs, fetch reviews, CI status, and diff stats.
+        # For closed issues, fetch closing references (PRs that closed them).
+        extra_metadata: dict = {}
+        if issue_type == "pull_request":
+            logger.debug(
+                "  Fetching PR details for %s/%s#%d",
+                self.org,
+                repo_name,
+                gh_issue.number,
+            )
+            if isinstance(gh_issue, GraphQLPullRequestAdapter):
+                extra_metadata = gh_issue.fetch_pr_details()
+            else:
+                rest_repo = cast("GHRepository", repo)
+                try:
+                    gh_pr = rest_repo.get_pull(gh_issue.number)
+                    extra_metadata = _fetch_pr_details(gh_pr)
+                except GithubException:
+                    logger.warning(
+                        "Failed to fetch PR details for %s#%d",
+                        repo_name,
+                        gh_issue.number,
+                        exc_info=True,
+                    )
+        elif issue_state == "closed":
+            logger.debug(
+                "  Fetching closing references for %s/%s#%d",
+                self.org,
+                repo_name,
+                gh_issue.number,
+            )
+            if isinstance(gh_issue, GraphQLIssueAdapter):
+                closing_refs = gh_issue.fetch_closing_references()
+            elif isinstance(gh_issue, GraphQLPullRequestAdapter):
+                closing_refs = []
+            else:
+                closing_refs = _fetch_closing_references(gh_issue)
+            if closing_refs:
+                extra_metadata["closing_references"] = closing_refs
+
+        return comments, extra_metadata
+
+    async def _reconcile_dropped_open_items(
+        self,
+        repo_name: str,
+        project_id: int,
+        session: AsyncSession,
+        seen_open_external_ids: set[str],
+        collection_run_id: int | None,
+    ) -> int:
+        """Close out issues that are stored as open but are gone from GitHub's open set.
+
+        Args:
+            repo_name: Repository name (without org prefix).
+            project_id: The database ID of the project.
+            session: An async SQLAlchemy session.
+            seen_open_external_ids: External IDs observed in this pass.
+            collection_run_id: ID of the current collection run.
+
+        Returns:
+            The number of issues reconciled to a closed or merged state.
+
+        """
+        db_open_ids = await store.fetch_open_external_ids(session, project_id)
+        missing_ids = db_open_ids - seen_open_external_ids
+        if not missing_ids:
+            return 0
+
+        missing_numbers = [int(eid) for eid in missing_ids if eid.isdigit()]
+        logger.info(
+            "  %s/%s: reconciling %d dropped open items: %s",
+            self.org,
+            repo_name,
+            len(missing_numbers),
+            missing_numbers,
+        )
+        reconciled = fetch_issue_states(
+            self.gh.requester, self.org, repo_name, missing_numbers
+        )
+        now_utc = datetime.now(UTC)
+        count = 0
+        for num, status in reconciled.items():
+            if status["state"] != "closed":
+                continue
+            is_merged = bool(status.get("merged_at"))
+            closed_at = (
+                status["merged_at"] if is_merged else status["closed_at"] or now_utc
+            )
+            new_state = "merged" if is_merged else "closed"
+            new_change_type = "merged" if is_merged else "closed"
+            # Look up current issue fields to recompute content_hash and title for activity
+            issue_row = await store.fetch_issue_content(session, project_id, str(num))
+            curr_title = issue_row[0] if issue_row and issue_row[0] else ""
+            new_content_hash = (
+                compute_content_hash(
+                    curr_title,
+                    issue_row[1] if issue_row else None,
+                    new_state,
+                    issue_row[2] or [] if issue_row else [],
+                    comments=issue_row[3] or [] if issue_row else [],
+                    pr_details=issue_row[4] if issue_row else None,
+                )
+                if issue_row
+                else None
+            )
+            await store.mark_issue_closed(
+                session,
+                project_id=project_id,
+                external_id=str(num),
+                state=new_state,
+                closed_at=closed_at,
+                content_hash=new_content_hash,
+                last_fetched_at=now_utc,
+                collection_run_id=collection_run_id,
+            )
+            # Record activity entry for issue closure/merge
+            store.stage_issue_activity(
+                session,
+                project_id=project_id,
+                issue_number=num,
+                change_type=new_change_type,
+                title=curr_title[:200],
+                occurred_at=closed_at,
+                collection_run_id=collection_run_id,
+            )
+            count += 1
+        return count
+
     async def collect_issues(
         self,
         repo_name: str,
@@ -550,7 +604,8 @@ class GitHubCollector:
     ) -> int:
         """Collect issues and PRs for a repository.
 
-        Fetches issues from GitHub and upserts them into the database.
+        Fetches issues from GitHub and upserts them into the database. All
+        staged rows are committed once, at the end of a fully successful pass.
 
         Args:
             repo_name: Repository name (without org prefix).
@@ -575,151 +630,26 @@ class GitHubCollector:
             The number of issues upserted.
 
         """
-        from sqlalchemy.dialects.postgresql import (
-            insert,
-        )
-
-        from craft_dashboard.models.issue import (
-            Issue,
-        )
-        from craft_dashboard.models.issue_activity import (
-            IssueActivity,
-        )
-
-        repo = None
+        repo: GHRepository | None = None
+        gh_issues: Iterable[_CollectedItem]
         seen_open_external_ids: set[str] = set()
         if state == "open":
-            # Always fetch all currently-open issues; no schedule gate.
-            # The per-issue updated_at skip below handles efficiency.
-            # Use GraphQL (not REST) for the open pass: this runs every 10
-            # minutes, and REST's N+1 per-item calls (comments, reviews, CI
-            # checks) would blow the REST rate limit at that cadence.
-            self.wait_for_rate_limit(resource="graphql")
-            requester = self.gh.requester
-            gh_issues = _interleave_open_graphql_items(
-                paginated_issues(requester, self.org, repo_name, since=since),
-                paginated_pull_requests(requester, self.org, repo_name, since=since),
-            )
-            logger.info(
-                "  %s/%s: collecting open issues (via GraphQL)%s",
-                self.org,
-                repo_name,
-                f", limit: {limit}" if limit else "",
-            )
+            gh_issues = self._open_issue_source(repo_name, limit, since)
         else:
             repo = self.gh.get_repo(f"{self.org}/{repo_name}")
-            # Count how many existing issues are due for refresh
-            cutoff = datetime.now(tz=UTC) - timedelta(days=refresh_age_days)
-            stale_where = sa.and_(
-                Issue.project_id == project_id,
-                Issue.source == "github",
-                sa.or_(
-                    Issue.last_fetched_at.is_(None),
-                    Issue.last_fetched_at < cutoff,
-                ),
+            rest_issues = await self._rest_issue_source(
+                repo,
+                repo_name,
+                project_id,
+                session,
+                limit,
+                refresh_age_days,
+                since,
+                state,
             )
-            due_count_result = await session.execute(
-                sa.select(sa.func.count()).select_from(Issue).where(stale_where)
-            )
-            due_count = due_count_result.scalar_one()
-
-            # Also check whether this project has any issues at all (fresh-project detection).
-            total_result = await session.execute(
-                sa.select(sa.func.count())
-                .select_from(Issue)
-                .where(Issue.project_id == project_id, Issue.source == "github")
-            )
-            total_count = total_result.scalar_one()
-
-            # Check whether closed issues exist in the DB for this project.
-            closed_result = await session.execute(
-                sa.select(sa.func.count())
-                .select_from(Issue)
-                .where(
-                    Issue.project_id == project_id,
-                    Issue.source == "github",
-                    Issue.state == "closed",
-                )
-            )
-            closed_count = closed_result.scalar_one()
-
-            rest_state = "all" if state == "full" else state
-            is_full_collection = state == "full" or (
-                since is None and closed_count == 0
-            )
-
-            if (
-                not is_full_collection
-                and since is None
-                and due_count == 0
-                and total_count > 0
-            ):
-                logger.info(
-                    "  %s/%s: no issues due for refresh, skipping", self.org, repo_name
-                )
+            if rest_issues is None:
                 return 0
-
-            since_date: datetime | None = None
-            if state == "full":
-                # Unbounded collection back to repository creation
-                since_date = None
-            elif since is not None:
-                since_date = (
-                    since.replace(tzinfo=UTC) if since.tzinfo is None else since
-                )
-                logger.info(
-                    "  %s/%s: using watermark since %s",
-                    self.org,
-                    repo_name,
-                    since_date.isoformat(),
-                )
-            elif not is_full_collection:
-                # Use 'since' based on the oldest last_fetched_at of due issues so we
-                # never miss a state transition that happened while the system was offline.
-                # Cap at 90 days to bound the amount of data fetched on a long outage.
-                _max_lookback = datetime.now(tz=UTC) - timedelta(days=90)
-                oldest_fetch_result = await session.execute(
-                    sa.select(sa.func.min(Issue.last_fetched_at))
-                    .select_from(Issue)
-                    .where(stale_where)
-                )
-                oldest_fetch = oldest_fetch_result.scalar_one_or_none()
-                if oldest_fetch is not None:
-                    oldest_fetch_tz = (
-                        oldest_fetch.replace(tzinfo=UTC)
-                        if oldest_fetch.tzinfo is None
-                        else oldest_fetch
-                    )
-                    since_date = max(oldest_fetch_tz - timedelta(days=1), _max_lookback)
-                else:
-                    # Fresh project with no issues yet: fetch all history.
-                    since_date = None
-
-            if since_date is not None:
-                gh_issues = repo.get_issues(
-                    state=rest_state,
-                    sort="updated",
-                    direction="desc",
-                    since=since_date,
-                )
-                logger.info(
-                    "  %s/%s: starting collection (%d issues due for refresh, fetching updated since %s)%s",
-                    self.org,
-                    repo_name,
-                    due_count,
-                    since_date.strftime("%Y-%m-%d"),
-                    f", limit: {limit}" if limit else "",
-                )
-            else:
-                gh_issues = repo.get_issues(
-                    state=rest_state, sort="updated", direction="desc"
-                )
-                logger.info(
-                    "  %s/%s: starting full collection (all history)%s",
-                    self.org,
-                    repo_name,
-                    f", limit: {limit}" if limit else "",
-                )
+            gh_issues = rest_issues
 
         count = 0
         skipped = 0
@@ -735,41 +665,12 @@ class GitHubCollector:
 
             issue_type, issue_state = _classify_issue(cast(GHIssue, gh_issue))
 
-            # Skip if the issue hasn't changed since we last fetched it.
-            # Use updated_at comparison rather than a fixed age window so that
-            # state transitions (e.g. open → closed) that happened after our
-            # last fetch are never silently ignored.
-            existing = await session.execute(
-                sa.select(Issue.last_fetched_at, Issue.closed_at).where(
-                    Issue.project_id == project_id,
-                    Issue.source == "github",
-                    Issue.external_id == str(gh_issue.number),
-                )
+            last_fetched, previous_closed_at = await store.fetch_issue_freshness(
+                session, project_id, str(gh_issue.number)
             )
-            existing_row = existing.one_or_none()
-            last_fetched, previous_closed_at = (
-                existing_row if existing_row else (None, None)
-            )
-            if last_fetched is not None and gh_issue.updated_at is not None:
-                fetched_tz = (
-                    last_fetched.replace(tzinfo=UTC)
-                    if last_fetched.tzinfo is None
-                    else last_fetched
-                )
-                issue_updated_at = (
-                    gh_issue.updated_at.replace(tzinfo=UTC)
-                    if gh_issue.updated_at.tzinfo is None
-                    else gh_issue.updated_at
-                )
-                if issue_updated_at <= fetched_tz:
-                    logger.debug(
-                        "  Skipping %s#%d (unchanged since %s)",
-                        repo_name,
-                        gh_issue.number,
-                        fetched_tz.strftime("%Y-%m-%d"),
-                    )
-                    skipped += 1
-                    continue
+            if self._is_unchanged(gh_issue, last_fetched, repo_name):
+                skipped += 1
+                continue
 
             logger.debug(
                 "  %s/%s#%d  %s (%s)",
@@ -780,86 +681,24 @@ class GitHubCollector:
                 issue_state,
             )
 
-            # Fetch comments for all items (open and closed)
-            comments: list = []
-            if isinstance(gh_issue, (_GraphQLIssueAdapter, _GraphQLPullRequestAdapter)):
-                comments = gh_issue.fetch_comments()
-            else:
-                try:
-                    comments = _fetch_issue_comments(gh_issue)
-                except GithubException:
-                    logger.warning(
-                        "Failed to fetch comments for %s#%d",
-                        repo_name,
-                        gh_issue.number,
-                        exc_info=True,
-                    )
-
-            # For all PRs, fetch reviews, CI status, and diff stats.
-            # For closed issues, fetch closing references (PRs that closed them).
-            extra_metadata: dict = {}
-            if issue_type == "pull_request":
-                logger.debug(
-                    "  Fetching PR details for %s/%s#%d",
-                    self.org,
-                    repo_name,
-                    gh_issue.number,
-                )
-                if isinstance(gh_issue, _GraphQLPullRequestAdapter):
-                    extra_metadata = gh_issue.fetch_pr_details()
-                else:
-                    rest_repo = cast("GHRepository", repo)
-                    try:
-                        gh_pr = rest_repo.get_pull(gh_issue.number)
-                        extra_metadata = _fetch_pr_details(gh_pr)
-                    except GithubException:
-                        logger.warning(
-                            "Failed to fetch PR details for %s#%d",
-                            repo_name,
-                            gh_issue.number,
-                            exc_info=True,
-                        )
-            elif issue_state == "closed":
-                logger.debug(
-                    "  Fetching closing references for %s/%s#%d",
-                    self.org,
-                    repo_name,
-                    gh_issue.number,
-                )
-                if isinstance(gh_issue, _GraphQLIssueAdapter):
-                    closing_refs = gh_issue.fetch_closing_references()
-                elif isinstance(gh_issue, _GraphQLPullRequestAdapter):
-                    closing_refs = []
-                else:
-                    closing_refs = _fetch_closing_references(gh_issue)
-                if closing_refs:
-                    extra_metadata["closing_references"] = closing_refs
-
-            # Note: if an issue closes, reopens, and closes again entirely
-            # between polls (the reopen never independently observed),
-            # previous_closed_at stays stale from the first closure and this
-            # reclose is classified as "updated" rather than "closed" — an
-            # accepted single-poll-granularity simplification, not a bug.
-            if last_fetched is None:
-                change_type = "created"
-            elif issue_state == "closed" and previous_closed_at is None:
-                change_type = "closed"
-            else:
-                change_type = "updated"
-
-            session.add(
-                IssueActivity(
-                    project_id=project_id,
-                    issue_number=gh_issue.number,
-                    change_type=change_type,
-                    title=(gh_issue.title or "")[:200],
-                    occurred_at=gh_issue.updated_at or datetime.now(UTC),
-                    collection_run_id=collection_run_id,
-                )
+            comments, extra_metadata = self._fetch_item_payload(
+                gh_issue, repo, repo_name, issue_type, issue_state
             )
 
-            stmt = insert(Issue).values(
-                **self._build_issue_values(
+            store.stage_issue_activity(
+                session,
+                project_id=project_id,
+                issue_number=gh_issue.number,
+                change_type=classify_change_type(
+                    last_fetched, issue_state, previous_closed_at
+                ),
+                title=(gh_issue.title or "")[:200],
+                occurred_at=gh_issue.updated_at or datetime.now(UTC),
+                collection_run_id=collection_run_id,
+            )
+            await store.upsert_issue(
+                session,
+                self._build_issue_values(
                     cast(GHIssue, gh_issue),
                     project_id,
                     issue_type,
@@ -867,22 +706,10 @@ class GitHubCollector:
                     comments,
                     extra_metadata,
                 ),
-                collection_run_id=collection_run_id,
+                collection_run_id,
             )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["project_id", "source", "external_id"],
-                set_={
-                    field: getattr(stmt.excluded, field)
-                    for field in ISSUE_UPSERT_FIELDS
-                }
-                | {
-                    "metadata": stmt.excluded.metadata,
-                    "comments": stmt.excluded.comments,
-                },
-            )
-            await session.execute(stmt)
             count += 1
-            if state != "open" and count % 25 == 0:
+            if state != "open" and count % _REST_RATE_LIMIT_CHECK_INTERVAL == 0:
                 self.wait_for_rate_limit(resource="core")
 
             now = time.monotonic()
@@ -893,93 +720,13 @@ class GitHubCollector:
         # In open mode, reconcile any issues/PRs that were open in our DB
         # but are no longer in GitHub's open set (meaning they were closed/merged).
         if state == "open" and not limit:
-            db_open_rows = await session.execute(
-                sa.select(Issue.external_id).where(
-                    Issue.project_id == project_id,
-                    Issue.source == "github",
-                    Issue.state == "open",
-                )
+            count += await self._reconcile_dropped_open_items(
+                repo_name,
+                project_id,
+                session,
+                seen_open_external_ids,
+                collection_run_id,
             )
-            db_open_ids = {row[0] for row in db_open_rows.fetchall()}
-            missing_ids = db_open_ids - seen_open_external_ids
-            if missing_ids:
-                missing_numbers = [int(eid) for eid in missing_ids if eid.isdigit()]
-                logger.info(
-                    "  %s/%s: reconciling %d dropped open items: %s",
-                    self.org,
-                    repo_name,
-                    len(missing_numbers),
-                    missing_numbers,
-                )
-                reconciled = fetch_issue_states(
-                    self.gh.requester, self.org, repo_name, missing_numbers
-                )
-                now_utc = datetime.now(UTC)
-                for num, status in reconciled.items():
-                    if status["state"] == "closed":
-                        is_merged = bool(status.get("merged_at"))
-                        closed_at = (
-                            status["merged_at"]
-                            if is_merged
-                            else status["closed_at"] or now_utc
-                        )
-                        new_state = "merged" if is_merged else "closed"
-                        new_change_type = "merged" if is_merged else "closed"
-                        # Look up current issue fields to recompute content_hash and title for activity
-                        issue_res = await session.execute(
-                            sa.select(
-                                Issue.title,
-                                Issue.body,
-                                Issue.labels,
-                                Issue.comments,
-                                Issue.metadata_,
-                            ).where(
-                                Issue.project_id == project_id,
-                                Issue.source == "github",
-                                Issue.external_id == str(num),
-                            )
-                        )
-                        issue_row = issue_res.one_or_none()
-                        curr_title = issue_row[0] if issue_row and issue_row[0] else ""
-                        new_content_hash = (
-                            compute_content_hash(
-                                curr_title,
-                                issue_row[1] if issue_row else None,
-                                new_state,
-                                issue_row[2] or [] if issue_row else [],
-                                comments=issue_row[3] or [] if issue_row else [],
-                                pr_details=issue_row[4] if issue_row else None,
-                            )
-                            if issue_row
-                            else None
-                        )
-                        await session.execute(
-                            sa.update(Issue)
-                            .where(
-                                Issue.project_id == project_id,
-                                Issue.source == "github",
-                                Issue.external_id == str(num),
-                            )
-                            .values(
-                                state=new_state,
-                                closed_at=closed_at,
-                                content_hash=new_content_hash,
-                                last_fetched_at=now_utc,
-                                collection_run_id=collection_run_id,
-                            )
-                        )
-                        # Record activity entry for issue closure/merge
-                        session.add(
-                            IssueActivity(
-                                project_id=project_id,
-                                issue_number=num,
-                                change_type=new_change_type,
-                                title=curr_title[:200],
-                                occurred_at=closed_at,
-                                collection_run_id=collection_run_id,
-                            )
-                        )
-                        count += 1
 
         await session.commit()
         logger.info(
@@ -1012,18 +759,6 @@ class GitHubCollector:
             Number of branch+release rows upserted.
 
         """
-        import re
-
-        from sqlalchemy.dialects.postgresql import (
-            insert,
-        )
-
-        from craft_dashboard.models.release import (
-            Release,
-        )
-
-        hotfix_re = re.compile(r"^hotfix/(\d+)\.(\d+)$")
-
         self.wait_for_rate_limit(resource="graphql")
         requester = self.gh.requester
         # known_since is always None (no incremental fetch) even though every
@@ -1053,54 +788,15 @@ class GitHubCollector:
             len(all_releases),
         )
 
-        # Determine branches to track
-        branches_to_track: list[str] = ["main"]
-
-        # List ALL hotfix/* branches from GitHub — no version filter.
-        # The DB stores every branch so the Hotfixes page can show a complete picture.
-        branches_to_track.extend(name for name in branch_names if hotfix_re.match(name))
+        branches_to_track = select_branches_to_track(branch_names)
 
         logger.info(
             "  %s/%s: tracking branches: %s", self.org, repo_name, branches_to_track
         )
 
-        def parse_version(tag: str) -> tuple[int, ...] | None:
-            """Parse a version tag like '4.2.1' or 'v4.2.1' into a tuple."""
-            clean = tag.lstrip("v")
-            try:
-                return tuple(int(p) for p in clean.split("."))
-            except ValueError:
-                return None
-
         count = 0
         for branch_name in branches_to_track:
-            # Find the best matching tag for this branch
-            best_tag: str | None = None
-            best_ver: tuple[int, ...] = ()
-
-            if branch_name == "main":
-                # Latest tag overall
-                for tag in all_releases:
-                    ver = parse_version(tag)
-                    if ver and ver > best_ver:
-                        best_ver = ver
-                        best_tag = tag
-            else:
-                # hotfix/X.Y → latest X.Y.* tag
-                m = hotfix_re.match(branch_name)
-                if not m:
-                    continue
-                hf_major, hf_minor = int(m.group(1)), int(m.group(2))
-                for tag in all_releases:
-                    ver = parse_version(tag)
-                    if (
-                        ver
-                        and len(ver) >= _HOTFIX_VERSION_COMPONENTS
-                        and ver[0] == hf_major
-                        and ver[1] == hf_minor
-                    ) and ver > best_ver:
-                        best_ver = ver
-                        best_tag = tag
+            best_tag = select_best_tag(branch_name, list(all_releases))
 
             if not best_tag:
                 logger.debug(
@@ -1115,48 +811,29 @@ class GitHubCollector:
             pub = _parse_graphql_datetime(node["publishedAt"] or node["createdAt"])
             metadata: dict = {"prerelease": False, "draft": False}
 
-            # Upsert: one row per project+branch. Do not overwrite metadata in on_conflict_do_update
-            # so that previously computed commits_since_tag and tag_on_main are preserved
-            # if git compare fails.
-            stmt = insert(Release).values(
+            await release_store.upsert_release(
+                session,
                 project_id=project_id,
                 version=best_tag,
                 branch=branch_name,
                 released_at=pub if pub else None,
                 is_hotfix=(branch_name != "main"),
-                metadata_=metadata,
+                metadata=metadata,
             )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["project_id", "branch"],
-                set_={
-                    "version": stmt.excluded.version,
-                    "released_at": stmt.excluded.released_at,
-                    "is_hotfix": stmt.excluded.is_hotfix,
-                },
-            )
-            await session.execute(stmt)
             count += 1
 
             # Compute commits since tag
             try:
                 comparison = repo.compare(best_tag, branch_name)
                 commits_since = comparison.ahead_by
-                result = await session.execute(
-                    sa.select(Release.metadata_).where(
-                        Release.project_id == project_id,
-                        Release.branch == branch_name,
-                    )
+                meta = await release_store.fetch_release_metadata(
+                    session, project_id, branch_name
                 )
-                meta = result.scalar_one_or_none() or {}
                 meta["commits_since_tag"] = commits_since
                 if branch_name != "main":
                     meta["tag_on_main"] = _tag_on_main(repo, best_tag)
-                await session.execute(
-                    sa.update(Release)
-                    .where(
-                        Release.project_id == project_id, Release.branch == branch_name
-                    )
-                    .values(metadata_=meta)
+                await release_store.update_release_metadata(
+                    session, project_id, branch_name, meta
                 )
                 logger.info(
                     "  %s@%s: %d commits since %s",

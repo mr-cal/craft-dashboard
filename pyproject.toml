@@ -155,7 +155,6 @@ max-args = 8
 "craft_dashboard/app.py" = ["B008"]
 "craft_dashboard/cli.py" = ["ARG001", "PLC0415"]
 "craft_dashboard/collectors/dependencies.py" = ["PLC0415"]
-"craft_dashboard/collectors/github.py" = ["PLC0415", "UP037"]
 "craft_dashboard/collectors/launchpad.py" = ["PLC0415"]
 "craft_dashboard/collectors/scheduler.py" = ["PLC0415"]
 "scripts/llm/eval_worker.py" = ["D301"]

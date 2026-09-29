@@ -9,9 +9,11 @@ import urllib3
 from craft_dashboard.collectors.github import (
     GitHubCollector,
     _classify_issue,
-    _compute_issue_hash,
     _fetch_issue_comments,
     _fetch_pr_details,
+)
+from craft_dashboard.collectors.github_mapping import (
+    compute_issue_hash as _compute_issue_hash,
 )
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.issue_activity import IssueActivity
