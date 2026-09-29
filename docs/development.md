@@ -27,10 +27,15 @@ Fill in `.env` only for features that need external services. Local Compose supp
 From the repository root:
 
 ```bash
-podman compose up --build
+make dev-seeded
 ```
 
-Open `http://localhost:8000/`.
+This builds the image, starts PostgreSQL and the app, loads the same fixture
+data the end-to-end suite uses, and prints the URL. Remove it with:
+
+```bash
+make dev-down
+```
 
 For hot reload against an already available database, run:
 

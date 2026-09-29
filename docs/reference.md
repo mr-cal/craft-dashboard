@@ -81,8 +81,12 @@ The LLM worker also reads these variables in `scripts/llm/cli.py`:
 | `make format` | Ruff check with fixes, then Ruff format. |
 | `make lint` | Ruff check, Ruff format diff, docs check, and ty. |
 | `make test` | Run pytest. |
+| `make test-fast` | Run unit tests in parallel. |
 | `make test-cov` | Run pytest with coverage. |
+| `make check` | Format, lint, and fast tests. |
 | `make dev` | Run Uvicorn with reload. |
+| `make dev-seeded` | Build, start, and seed a local stack for manual checks. |
+| `make dev-down` | Stop the local seeded stack and delete its volumes. |
 | `make migrate` | Run Alembic upgrade head. |
 | `make collect` | Run `scripts/collect_data.py --source all`. |
 | `make llm` | Run `scripts/run_llm.py evaluate --open-only`. |

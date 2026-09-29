@@ -96,17 +96,26 @@ it is not finished.
 
 ## Local development
 
-There is no local website. Do not stand up a local container or database to try a
-change out — use the test suite, which seeds its own fixtures.
-
 ```bash
-make setup     # install dependencies
-make test-fast # unit tests in parallel, seconds
-make test      # unit + integration, no external services needed
-make dev       # only if you genuinely need a running server
+make setup      # install dependencies
+make test-fast  # unit tests in parallel, seconds
+make test       # unit + integration, no external services needed
+make check      # format, lint, and fast tests — the pre-commit gate
 ```
 
 Unit and integration tests run against in-memory SQLite and need no credentials.
+Reach for them first: they are faster than anything involving a container.
+
+To look at a UI change in a browser, use the seeded stack rather than deploying:
+
+```bash
+make dev-seeded  # builds the image, starts postgres + app, loads fixture data
+make dev-down    # stop it and delete the volumes
+```
+
+It prints a `http://localhost:PORT` URL and uses the same fixtures as the
+end-to-end suite, so what you see matches what `make test-e2e` asserts. Never
+verify a change by deploying it to production first.
 
 ## Key config files
 

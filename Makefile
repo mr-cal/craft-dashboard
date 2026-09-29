@@ -46,6 +46,14 @@ test-cov:  ## Run tests with coverage report
 dev:  ## Run development server with hot reload
 	uv run uvicorn craft_dashboard.app:create_app --factory --reload --host 0.0.0.0 --port 8000
 
+.PHONY: dev-seeded
+dev-seeded:  ## Build, start, and seed a local stack for manual UI verification
+	uv run scripts/dev_stack.py up
+
+.PHONY: dev-down
+dev-down:  ## Stop and delete the local seeded stack
+	uv run scripts/dev_stack.py down
+
 .PHONY: migrate
 migrate:  ## Apply database migrations
 	uv run alembic upgrade head
