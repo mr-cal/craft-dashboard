@@ -102,7 +102,7 @@ async def _run_one(
             )
     except TimeoutError:
         return "timeout"
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - the canary reports every failure mode
         return f"error: {exc}"
     return "ok"
 

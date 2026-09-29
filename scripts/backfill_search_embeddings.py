@@ -131,7 +131,7 @@ async def run_backfill(
                         embedding_client=embedding_client,
                         rows=rows,
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - deliberate fallback to per-row
                     logger.warning(
                         "Batch %d-%d failed (%s); falling back to per-row updates",
                         start_id,
@@ -144,7 +144,7 @@ async def run_backfill(
                                 build_search_embedding_text(title, body),
                                 dimensions=1024,
                             )
-                        except Exception:
+                        except Exception:  # noqa: BLE001 - skip this issue, continue the backfill
                             logger.warning(
                                 "Skipping issue %d: embedding failed even at the"
                                 " per-row level",

@@ -11,7 +11,7 @@ For each project, for each day from the earliest issue's created_at to today:
 """
 
 import sys
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from statistics import median
 from typing import Any
@@ -292,7 +292,7 @@ def backfill_project(
         return
 
     earliest_date = min(created_dates)
-    today = date.today()
+    today = datetime.now(UTC).date()
 
     print(
         f"  Date range: {earliest_date} to {today} ({(today - earliest_date).days} days)"

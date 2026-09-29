@@ -32,6 +32,7 @@ import pathlib
 import sys
 import time
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import click
 from sqlalchemy import select
@@ -48,6 +49,9 @@ from craft_dashboard.config import load_config
 from craft_dashboard.database import get_engine, get_session_factory
 from craft_dashboard.models.forum import ForumBackfillState
 from craft_dashboard.settings import Settings
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -75,7 +79,7 @@ def _format_duration(seconds: float) -> str:
 
 async def _run_backfill(
     collector: ForumCollector,
-    session_factory,
+    session_factory: "async_sessionmaker[AsyncSession]",
     forums: list[str],
     max_requests_per_batch: int,
 ) -> int:
@@ -94,7 +98,7 @@ async def _run_backfill(
 
 async def _run_refresh(
     collector: ForumCollector,
-    session_factory,
+    session_factory: "async_sessionmaker[AsyncSession]",
     forums: list[str],
     refresh_interval_days: int,
 ) -> int:

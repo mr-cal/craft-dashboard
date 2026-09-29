@@ -412,7 +412,7 @@ def _get_dep_branches(
         Sorted list of branch names starting with ``"main"``.
 
     """
-    from packaging.version import Version
+    from packaging.version import InvalidVersion, Version
 
     branches = ["main"]
     try:
@@ -426,13 +426,13 @@ def _get_dep_branches(
             ver_str = branch_name.split("/", 1)[1]
             try:
                 ver = Version(ver_str)
-            except Exception:
+            except InvalidVersion:
                 continue
             if hotfix_min_version:
                 try:
                     if ver < Version(hotfix_min_version):
                         continue
-                except Exception:
+                except InvalidVersion:
                     logger.debug(
                         "Could not compare hotfix minimum version %r",
                         hotfix_min_version,
@@ -443,7 +443,7 @@ def _get_dep_branches(
                 latest_per_major[major] = (ver, branch_name)
 
         branches += sorted(b for _, b in latest_per_major.values())
-    except Exception:
+    except Exception:  # noqa: BLE001 - one project's branch listing must not abort the run
         logger.warning("Could not list branches for %s", project_name, exc_info=True)
     return branches
 
@@ -546,7 +546,7 @@ async def _collect_github(
                     dependency_count,
                     _format_duration(time.monotonic() - dep_started_at),
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 - per-project isolation; other projects still collect
                 logger.warning(
                     "Failed to collect dependencies for %s",
                     project_name,
@@ -571,7 +571,7 @@ async def _collect_github(
                     release_count,
                     _format_duration(time.monotonic() - releases_started_at),
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 - per-project isolation; other projects still collect
                 logger.warning(
                     "Failed to collect releases for %s",
                     project_name,
@@ -1129,7 +1129,7 @@ async def _main(
                 "Cross-project snapshot generated in %s",
                 _format_duration(time.monotonic() - cross_started_at),
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - a snapshot failure must not discard collected data
             logger.warning(
                 "Failed to generate cross-project snapshot",
                 exc_info=True,
@@ -1146,7 +1146,7 @@ async def _main(
                         "Reconciled %d previously unresolved issue link(s)",
                         reconciled,
                     )
-        except Exception:
+        except Exception:  # noqa: BLE001 - reconciliation is best-effort and retried next run
             logger.warning(
                 "Failed to reconcile unresolved issue links",
                 exc_info=True,

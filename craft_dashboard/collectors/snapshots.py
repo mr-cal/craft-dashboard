@@ -100,7 +100,7 @@ def compute_snapshot_counts(
 
     """
     if today is None:
-        today = date.today()
+        today = datetime.now(UTC).date()
     today_dt = datetime.combine(today, datetime.min.time(), tzinfo=UTC)
 
     counts: dict[str, int] = {
@@ -288,7 +288,7 @@ async def backfill_missing_snapshots(
 
     from craft_dashboard.models.snapshot import Snapshot
 
-    today_val = date.today()
+    today_val = datetime.now(UTC).date()
 
     # Find the most recent snapshot date before today
     last_snapshot = await session.scalar(
@@ -400,7 +400,7 @@ async def generate_snapshot(
     ]
 
     counts = compute_snapshot_counts(issues, maintainers, bots=bots)
-    today_val = date.today()
+    today_val = datetime.now(UTC).date()
 
     stmt = insert(Snapshot).values(
         project_id=project_id,
@@ -508,7 +508,7 @@ async def generate_cross_project_snapshot(
     ]
 
     counts = compute_snapshot_counts(issues, maintainers, bots=bots)
-    today_val = date.today()
+    today_val = datetime.now(UTC).date()
 
     stmt = insert(Snapshot).values(
         project_id=agg_project_id,

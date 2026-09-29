@@ -48,7 +48,7 @@ class TimingHistory:
                         for k, vals in raw.items()
                         if isinstance(k, str) and isinstance(vals, list)
                     }
-        except Exception:
+        except Exception:  # noqa: BLE001 - unreadable timing data is not worth failing over
             return {}
         return {}
 
@@ -57,7 +57,7 @@ class TimingHistory:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(self._data, indent=2))
-        except Exception:  # noqa: S110
+        except Exception:  # noqa: BLE001, S110 - timings are advisory only
             pass
 
     # ------------------------------------------------------------------

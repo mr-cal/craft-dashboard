@@ -21,7 +21,11 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 from craft_dashboard.config import load_config
-from craft_dashboard.git_mirrors.paths import clone_url_for, resolve_allowed_projects
+from craft_dashboard.git_mirrors.paths import (
+    UnknownProjectError,
+    clone_url_for,
+    resolve_allowed_projects,
+)
 from craft_dashboard.git_mirrors.sync import sync_mirror
 from craft_dashboard.llm.acp_client import CopilotACPClient
 from craft_dashboard.llm.client import (
@@ -765,7 +769,7 @@ async def _evaluate_issue(  # noqa: PLR0911
             await _release_and_maybe_stop(runtime)
             await _handle_evaluation_failure(runtime)
             return False
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - one bad issue must not stop the worker
             runtime.progress.update(runtime.overall_id, description="Evaluating issues")
             exc_name = type(exc).__name__
             logger.error(  # noqa: TRY400
@@ -922,7 +926,7 @@ async def _run_issue_preflight(
             clone_url = clone_url_for(
                 project, allowed_projects=runtime.allowed_projects
             )
-        except Exception:
+        except UnknownProjectError:
             logger.warning("%s: no clone URL available for %s", issue_ref, project)
             return False
 

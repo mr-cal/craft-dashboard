@@ -124,7 +124,7 @@ async def run_backfill(
                         embedding_client=embedding_client,
                         rows=rows,
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - deliberate fallback to per-row
                     logger.warning(
                         "Batch %d-%d failed (%s); falling back to per-row updates",
                         start_id,

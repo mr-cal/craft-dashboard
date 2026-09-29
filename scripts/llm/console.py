@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import pathlib
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from rich.logging import RichHandler
@@ -78,7 +78,7 @@ def setup_rich_logging(
     if log:
         target_dir = pathlib.Path(log_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         log_path = target_dir / f"evaluate_{timestamp}.log"
         file_handler = logging.FileHandler(log_path, encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)

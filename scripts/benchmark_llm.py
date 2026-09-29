@@ -45,7 +45,7 @@ def main() -> None:
             resp.raise_for_status()
             models_resp: dict[str, Any] = resp.json()
             models: list[str] = [m["id"] for m in models_resp.get("data", [])]
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - a diagnostic script reports rather than raises
             print(f"Failed to fetch models: {exc}")
             return
 
@@ -96,7 +96,7 @@ def main() -> None:
             except httpx.HTTPStatusError as exc:
                 print(f"HTTP {exc.response.status_code}")
                 results.append((model, "—", "—", f"HTTP {exc.response.status_code}"))
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - record the failure per model and continue
                 print(f"Error: {exc}")
                 results.append((model, "—", "—", str(exc)[:30]))
 
