@@ -10,6 +10,8 @@
  *   Child .multiselect__dropdown > .multiselect__options > label.multiselect__option
  */
 (function () {
+  let multiselectCounter = 0;
+
   document.querySelectorAll(".multiselect").forEach(initMultiselect);
 
   function initMultiselect(container) {
@@ -135,18 +137,70 @@
       }
     }
 
-    // Toggle dropdown on click
-    inputWrap.addEventListener("click", function (e) {
-      const isOpen = !dropdown.classList.contains("u-hide");
+    // `role="combobox"` promises `aria-controls`, so a screen reader can
+    // announce what the trigger opens.
+    if (!dropdown.id) {
+      multiselectCounter += 1;
+      dropdown.id = "multiselect-dropdown-" + multiselectCounter;
+    }
+    inputWrap.setAttribute("aria-controls", dropdown.id);
+
+    function openDropdown() {
       closeAll();
-      if (!isOpen) {
-        dropdown.classList.remove("u-hide");
-        container.classList.add("is-open");
-        inputWrap.setAttribute("aria-expanded", "true");
-        const searchInput = dropdown.querySelector(".multiselect__search-input");
-        if (searchInput) {
-          setTimeout(() => searchInput.focus(), 50);
+      dropdown.classList.remove("u-hide");
+      container.classList.add("is-open");
+      inputWrap.setAttribute("aria-expanded", "true");
+      const searchInput = dropdown.querySelector(".multiselect__search-input");
+      const target = searchInput || dropdown.querySelector(".multiselect__option input");
+      if (target) {
+        setTimeout(() => target.focus(), 50);
+      }
+    }
+
+    function closeDropdown(restoreFocus) {
+      closeAll();
+      if (restoreFocus) inputWrap.focus();
+    }
+
+    function isOpen() {
+      return !dropdown.classList.contains("u-hide");
+    }
+
+    inputWrap.addEventListener("click", function () {
+      if (isOpen()) {
+        closeAll();
+      } else {
+        openDropdown();
+      }
+    });
+
+    // The trigger is a div, so it gets none of a button's built-in keyboard
+    // behaviour. Without this the filter controls are unreachable by keyboard.
+    inputWrap.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+        e.preventDefault();
+        if (isOpen()) {
+          closeDropdown(false);
+        } else {
+          openDropdown();
         }
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        openDropdown();
+      } else if (e.key === "Escape" && isOpen()) {
+        e.preventDefault();
+        closeDropdown(false);
+      }
+    });
+
+    // Closing from inside the dropdown must return focus to the trigger,
+    // otherwise focus falls back to the document and the user loses their
+    // place in the filter row.
+    dropdown.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeDropdown(true);
       }
     });
 
