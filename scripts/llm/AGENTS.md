@@ -7,7 +7,17 @@ production data and spend money.
 
 - `eval_worker.py` — the long-running pull-based worker. Claims work from
   `/api/eval/next`, evaluates, posts results back. Never writes to git
-  mirrors.
+  mirrors. This is the entry point; the modules below are its internals and
+  must not be imported by anything outside `scripts/llm/`.
+  - `worker_runtime.py` — process-wide pause/shutdown flags, per-run
+    counters (`RunState`), the dependency bundle (`Runtime`), and the
+    signal/TTY plumbing.
+  - `eval_http.py` — one wrapper per `/api/eval/*` endpoint. No policy.
+  - `eval_payload.py` — pure claim/result parsing and `/result` payload
+    building. No I/O.
+  - `eval_failures.py` — classifies an exception raised during evaluation
+    into a release reason plus "is this a quota exhaustion?".
+  - `eval_startup.py` — backend client construction and one-time setup.
 - `canary.py` — evaluates a small explicit set of issues one at a time against
   the real pipeline, for validating a prompt or model change before a full
   rollout.

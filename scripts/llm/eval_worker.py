@@ -1,4 +1,15 @@
-"""Continuous HTTP-only evaluation worker for craft-dashboard."""
+"""Continuous HTTP-only evaluation worker for craft-dashboard.
+
+This module is the entry point and orchestrator. The pieces it coordinates
+live alongside it:
+
+- :mod:`scripts.llm.worker_runtime` — process-wide pause/shutdown flags, the
+  per-run counters, and the dependency bundle handed to each coroutine.
+- :mod:`scripts.llm.eval_http` — the ``/api/eval/*`` request wrappers.
+- :mod:`scripts.llm.eval_payload` — claim/result parsing and payload building.
+- :mod:`scripts.llm.eval_failures` — classification of evaluation errors.
+- :mod:`scripts.llm.eval_startup` — one-time setup before polling begins.
+"""
 
 from __future__ import annotations
 
@@ -6,16 +17,10 @@ import asyncio
 import contextlib
 import logging
 import os
-import pathlib
 import secrets
-import select
 import signal
 import sys
-import termios
-import threading
 import time
-import tty
-import urllib.parse
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -27,304 +32,81 @@ from craft_dashboard.git_mirrors.paths import (
     resolve_allowed_projects,
 )
 from craft_dashboard.git_mirrors.sync import sync_mirror
-from craft_dashboard.llm.acp_client import CopilotACPClient
-from craft_dashboard.llm.client import (
-    LocalLLMClient,
-    OpenRouterClient,
-)
 from craft_dashboard.llm.evaluator import (
-    EvaluationDiscarded,
+    EvaluationDiscarded,  # noqa: F401 - re-exported for callers and tests
     IssueEvaluator,
-    _compute_content_hash,
 )
-from craft_dashboard.llm.exceptions import (
-    LLMQuotaError,
-    LLMTimeoutError,
-    LLMUnavailableError,
-)
+from craft_dashboard.llm.exceptions import LLMQuotaError
 from craft_dashboard.llm.preflight import run_preflight
-from craft_dashboard.llm.tool_dispatch import ToolContext
 from craft_dashboard.settings import Settings
 from rich.console import Console
 
 from scripts.eval_timing import PHASE_EVALUATE, TimingHistory
 from scripts.llm.console import format_elapsed, make_progress, setup_rich_logging
-from scripts.llm.validation import LLMValidationError, validate_evaluation_result
+from scripts.llm.eval_failures import classify_evaluation_error
+from scripts.llm.eval_http import (
+    HTTP_CONFLICT,
+    HTTP_NO_CONTENT,
+    HTTP_OK,
+    HTTP_TOO_MANY,
+    fetch_project_orgs,
+    format_error_body,
+    log_queue_status,
+    post_submission,
+    release_claim,
+    report_quota_pause,
+)
+from scripts.llm.eval_payload import (
+    build_submission,
+    build_tool_context,
+    days_since,
+    format_issue_label,
+    issue_ref_for,
+    validate_result,
+    warn_on_hash_mismatch,
+)
+from scripts.llm.eval_startup import (
+    build_queue_params,
+    create_llm_client_for_backend,
+    describe_filters,
+    resolve_server_verify,
+)
+from scripts.llm.validation import LLMValidationError
+from scripts.llm.worker_runtime import (
+    RunState,
+    Runtime,
+    paused_state,
+    release_and_maybe_stop,
+    shutdown_state,
+    signal_handler,
+    start_keyboard_monitor,
+    timed,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
-    from pathlib import Path
 
     from craft_dashboard.llm.client import LLMClient
-    from rich.progress import Progress, TaskID
 
 logger = logging.getLogger(__name__)
 
-HTTP_OK = httpx.codes.OK
-HTTP_NO_CONTENT = httpx.codes.NO_CONTENT
-HTTP_CONFLICT = httpx.codes.CONFLICT
-HTTP_TOO_MANY = httpx.codes.TOO_MANY_REQUESTS
-shutdown_state = {"requested": False}
-paused_state = {"paused": False}
-_quota_pause_lock = asyncio.Lock()
-_quota_paused = False
-
-_MAX_ERROR_BODY = 200
+# Names re-exported under their historical spellings so the module's public
+# surface (and the seams tests patch) stays exactly where callers expect it.
+_RunState = RunState
+_Runtime = Runtime
+_timed = timed
+_release_and_maybe_stop = release_and_maybe_stop
+_signal_handler = signal_handler
+_start_keyboard_monitor = start_keyboard_monitor
+_format_error_body = format_error_body
+_post_submission = post_submission
+_release_claim = release_claim
 _setup_logging = setup_rich_logging
 _format_elapsed = format_elapsed
 _make_progress = make_progress
 
-
-async def _timed[T](coro: Awaitable[T]) -> tuple[T, float]:
-    """Run an awaitable and return ``(result, elapsed_seconds)``."""
-    started_at = time.monotonic()
-    result = await coro
-    return result, time.monotonic() - started_at
-
-
-class _RunState:
-    """Shared counters and limit reservation state for worker coroutines."""
-
-    def __init__(self, *, limit: int) -> None:
-        self.limit = limit
-        self.reserved = 0
-        self.evaluated = 0
-        self.total_prompt_tokens = 0
-        self.total_completion_tokens = 0
-        self.consecutive_failures = 0
-        self.lock = asyncio.Lock()
-
-    async def reserve(self) -> bool:
-        """Reserve one evaluation slot when a finite limit is active."""
-        if self.limit <= 0:
-            return True
-        async with self.lock:
-            if self.reserved >= self.limit:
-                return False
-            self.reserved += 1
-            return True
-
-    async def release(self) -> None:
-        """Release a reserved slot after a failed or skipped attempt."""
-        if self.limit <= 0:
-            return
-        async with self.lock:
-            self.reserved = max(0, self.reserved - 1)
-
-    async def record_failure(self) -> int:
-        """Record one failed evaluation and return current consecutive failures."""
-        async with self.lock:
-            self.consecutive_failures += 1
-            return self.consecutive_failures
-
-    async def complete(self, *, prompt_tokens: int, completion_tokens: int) -> int:
-        """Record one successful evaluation and return the new total."""
-        async with self.lock:
-            self.evaluated += 1
-            self.consecutive_failures = 0
-            self.total_prompt_tokens += prompt_tokens
-            self.total_completion_tokens += completion_tokens
-            return self.evaluated
-
-
-class _Runtime:
-    """Shared runtime dependencies for worker coroutines."""
-
-    def __init__(
-        self,
-        *,
-        client: LLMClient,
-        evaluator: IssueEvaluator,
-        http_client: httpx.AsyncClient,
-        headers: dict[str, str],
-        params: dict[str, Any],
-        progress: Progress,
-        overall_id: TaskID,
-        timing: TimingHistory,
-        state: _RunState,
-        poll_interval: int,
-        issue_limit: int,
-        model: str,
-        llm_backend: str,
-        mirror_dir: Path,
-        allowed_projects: dict[str, str],
-        eval_server_base_url: str,
-        single_issue: bool = False,
-        slow_eval: bool = False,
-        min_delay: float = 25.0,
-        max_delay: float = 55.0,
-    ) -> None:
-        self.client = client
-        self.evaluator = evaluator
-        self.http_client = http_client
-        self.headers = headers
-        self.params = params
-        self.progress = progress
-        self.overall_id = overall_id
-        self.timing = timing
-        self.state = state
-        self.poll_interval = poll_interval
-        self.issue_limit = issue_limit
-        self.model = model
-        self.llm_backend = llm_backend
-        self.mirror_dir = mirror_dir
-        self.allowed_projects = allowed_projects
-        self.eval_server_base_url = eval_server_base_url
-        self.slow_eval = slow_eval
-        self.min_delay = min_delay
-        self.max_delay = max_delay
-        #: True for a single-target ``--issue ... --force`` run (e.g. the
-        #: canary script). In that mode there is only ever one issue to
-        #: evaluate, and a claimed-then-discarded/failed/skipped issue is
-        #: never re-offered by ``/next`` (the server sees it as already
-        #: attempted), so any terminal outcome — not just success — must
-        #: end the run. Otherwise the worker polls "no work available"
-        #: forever, bounded only by an external timeout.
-        self.single_issue = single_issue
-
-
-async def _release_and_maybe_stop(runtime: _Runtime) -> None:
-    """Release a reserved slot after a terminal (non-retryable) outcome.
-
-    In single-issue mode (see ``_Runtime.single_issue``) this also requests
-    shutdown, since there is nothing else left to poll for: a
-    claimed-then-discarded/failed/skipped issue is never re-offered by
-    ``/next`` in a single-issue ``--force`` run, so without this the worker
-    would poll "no work available" forever, bounded only by an external
-    timeout.
-    """
-    await runtime.state.release()
-    if runtime.single_issue:
-        shutdown_state["requested"] = True
-
-
-def create_llm_client_for_backend(
-    *,
-    llm_backend: str = "",
-    base_url: str = "",
-    api_key: str = "",
-    ca_cert: str = "",
-    timeout: float | None = None,
-    openrouter_api_key: str = "",
-    llm_url: str = "",
-    llm_api_key: str = "",
-) -> LLMClient:
-    """Create the completion client for the selected backend."""
-    resolved_url = (base_url or llm_url).rstrip("/")
-    resolved_api_key = api_key or llm_api_key or openrouter_api_key
-
-    if llm_backend == "copilot-acp":
-        return CopilotACPClient(timeout=timeout or 600.0)
-    if llm_backend == "openrouter" or "openrouter.ai" in resolved_url.lower():
-        return OpenRouterClient(
-            base_url=resolved_url if resolved_url else "https://openrouter.ai/api/v1",
-            api_key=resolved_api_key,
-            timeout=timeout,
-        )
-    if llm_backend == "local" or resolved_url:
-        return LocalLLMClient(
-            base_url=resolved_url or "http://localhost:11434/v1",
-            api_key=resolved_api_key,
-            ca_cert=ca_cert,
-            timeout=timeout,
-        )
-    raise ValueError(f"Unsupported llm backend: {llm_backend}")
-
-
-def _format_error_body(response: httpx.Response) -> str:
-    """Return a compact, readable summary of a non-2xx response body."""
-    content_type = response.headers.get("content-type", "")
-    text = response.text.strip()
-    if "json" in content_type or text.startswith(("{", "[")):
-        try:
-            data = response.json()
-            raw: object = data
-            if isinstance(data, dict):
-                if "error" in data:
-                    err = data["error"]
-                    raw = err.get("message", err) if isinstance(err, dict) else err
-                elif "detail" in data:
-                    raw = data["detail"]
-            return " ".join(str(raw).strip().split())
-        except ValueError:
-            pass
-    if "html" in content_type:
-        if response.status_code >= 500:  # noqa: PLR2004
-            return (
-                f"(HTML response from {response.url} — "
-                "server error; check the craft-dashboard logs)"
-            )
-        return f"(HTML response from {response.url} — is the server URL correct?)"
-    collapsed = " ".join(text.split())
-    return (
-        (collapsed[:_MAX_ERROR_BODY] + "…")
-        if len(collapsed) > _MAX_ERROR_BODY
-        else collapsed
-    )
-
-
-def _serialize_evidence_paths(ctx: object | None) -> list[dict[str, str]]:
-    """Return sorted worker-touched repo/path pairs for `/result` payloads."""
-    touched_paths = getattr(ctx, "touched_paths", None) or set()
-    return [{"repo": repo, "path": path} for repo, path in sorted(touched_paths)]
-
-
-def _signal_handler(signum: int, frame: object) -> None:
-    del signum, frame
-    if shutdown_state["requested"]:
-        # Second Ctrl+C: the user already asked us to wind down gracefully
-        # and doesn't want to wait (e.g. a stuck in-flight LLM call). Exit
-        # immediately rather than waiting for the current evaluation.
-        logger.info("Shutting down immediately...")
-        os._exit(1)
-    shutdown_state["requested"] = True
-    logger.info("Shutting down after current evaluation...")
-
-
-def _start_keyboard_monitor() -> None:
-    """Monitor stdin for space key to pause/unpause. No-op if not a TTY."""
-    if not sys.stdin.isatty():
-        return
-
-    import contextlib
-
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-
-    def _listen() -> None:
-        with contextlib.suppress(Exception):
-            tty.setcbreak(fd)
-            while not shutdown_state["requested"]:
-                ready, _, _ = select.select([sys.stdin], [], [], 0.2)
-                if ready:
-                    ch = sys.stdin.read(1)
-                    if ch == " ":
-                        paused_state["paused"] = not paused_state["paused"]
-                        if paused_state["paused"]:
-                            logger.info("Paused — press space to resume")
-                        else:
-                            logger.info("Resuming")
-        with contextlib.suppress(Exception):
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-
-    threading.Thread(target=_listen, daemon=True).start()
-
-
-def _parse_timestamp(value: str | None) -> datetime | None:
-    if not value:
-        return None
-
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
-
-
-def _days_since(value: str | None) -> int:
-    timestamp = _parse_timestamp(value)
-    if timestamp is None:
-        return 0
-    return max(0, (datetime.now(tz=UTC) - timestamp).days)
+_quota_pause_lock = asyncio.Lock()
+_quota_paused = False
 
 
 async def _sleep_until_next_poll(seconds: float) -> None:
@@ -340,23 +122,6 @@ async def _sleep_until_next_poll(seconds: float) -> None:
 #: providers can also free up mid-day (e.g. a shared/team pool), and a
 #: crash-free 30-minute retry is cheap insurance either way.
 _QUOTA_BACKOFF_SECONDS = 30 * 60
-
-
-async def _report_quota_pause(runtime: _Runtime, *, resume_at: datetime) -> None:
-    """Tell the server this worker is pausing for a quota backoff.
-
-    Best-effort: if the request fails (e.g. the server is briefly
-    unreachable), the worker still pauses locally — only the admin page's
-    "why is it stalled" context is lost, not the backoff itself.
-    """
-    try:
-        await runtime.http_client.post(
-            "/api/eval/quota-pause",
-            json={"resume_at": resume_at.isoformat(), "reason": "quota"},
-            headers=runtime.headers,
-        )
-    except httpx.HTTPError:
-        logger.warning("Could not report quota pause to server", exc_info=True)
 
 
 async def _enter_quota_backoff(runtime: _Runtime) -> None:
@@ -387,7 +152,7 @@ async def _enter_quota_backoff(runtime: _Runtime) -> None:
         "LLM quota exhausted. Pausing all workers for %s.",
         _format_elapsed(_QUOTA_BACKOFF_SECONDS),
     )
-    await _report_quota_pause(runtime, resume_at=resume_at)
+    await report_quota_pause(runtime, resume_at=resume_at)
 
     while not shutdown_state["requested"]:
         await _sleep_until_next_poll(_QUOTA_BACKOFF_SECONDS)
@@ -406,7 +171,7 @@ async def _enter_quota_backoff(runtime: _Runtime) -> None:
                 resume_at = datetime.now(tz=UTC) + timedelta(
                     seconds=_QUOTA_BACKOFF_SECONDS
                 )
-                await _report_quota_pause(runtime, resume_at=resume_at)
+                await report_quota_pause(runtime, resume_at=resume_at)
         else:
             break
 
@@ -550,119 +315,8 @@ async def _fetch_next_issue(
     return None
 
 
-async def _post_submission(
-    runtime: _Runtime,
-    *,
-    issue_ref: str,
-    submission: dict[str, Any],
-) -> httpx.Response | None:
-    """POST an evaluation result back to the craft-dashboard API with retry backoff."""
-    max_retries = 3
-    for attempt in range(1, max_retries + 1):
-        try:
-            response = await runtime.http_client.post(
-                "/api/eval/result",
-                json=submission,
-                headers=runtime.headers,
-            )
-            if response.status_code in {502, 503, 504} and attempt < max_retries:
-                logger.warning(
-                    "%s: submit returned %d on attempt %d/%d; retrying in %ds...",
-                    issue_ref,
-                    response.status_code,
-                    attempt,
-                    max_retries,
-                    2**attempt,
-                )
-                await asyncio.sleep(2**attempt)
-                continue
-        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
-            if attempt < max_retries:
-                logger.warning(
-                    "%s: network error (%s) submitting result on attempt %d/%d; retrying in %ds...",
-                    issue_ref,
-                    exc,
-                    attempt,
-                    max_retries,
-                    2**attempt,
-                )
-                await asyncio.sleep(2**attempt)
-                continue
-            logger.error(  # noqa: TRY400
-                "%s: failed to submit result after %d attempts: %s",
-                issue_ref,
-                max_retries,
-                exc,
-            )
-        except httpx.HTTPError as exc:
-            logger.error("%s: HTTP error submitting result: %s", issue_ref, exc)  # noqa: TRY400
-            return None
-        else:
-            return response
-    return None
-
-
-async def _release_claim(
-    runtime: _Runtime,
-    *,
-    issue_id: int,
-    issue_ref: str,
-    reason: str,
-) -> None:
-    """Release a claimed issue back to the server queue."""
-    try:
-        response = await runtime.http_client.post(
-            "/api/eval/release",
-            json={"issue_id": issue_id, "reason": reason},
-            headers=runtime.headers,
-        )
-    except httpx.HTTPError:
-        logger.warning("%s: failed to release claim", issue_ref, exc_info=True)
-        return
-
-    if response.status_code != HTTP_OK:
-        logger.warning(
-            "%s: release claim failed %d from %s: %s",
-            issue_ref,
-            response.status_code,
-            response.url,
-            _format_error_body(response),
-        )
-
-
-async def _evaluate_issue(  # noqa: PLR0911
-    runtime: _Runtime,
-    *,
-    issue_data: dict[str, Any],
-    worker_name: str,
-) -> bool:
-    """Evaluate one claimed issue, embed the summary, and submit the result."""
-    local_hash = _compute_content_hash(
-        issue_data["title"],
-        issue_data.get("body"),
-        issue_data["state"],
-        issue_data.get("labels", []),
-        issue_data.get("comments"),
-        pr_details=issue_data.get("pr_details"),
-    )
-    current_hash = issue_data.get("current_hash", "")
-    if current_hash and local_hash != current_hash:
-        logger.warning(
-            "Issue %s: server hash mismatch (server=%s local=%s)",
-            issue_data["external_id"],
-            current_hash,
-            local_hash,
-        )
-
-    issue_ref = f"{issue_data['project_name']}#{issue_data['external_id']}"
-    author = issue_data.get("author") or ""
-    maintainers = set(issue_data.get("maintainers", []))
-    normalized_state = issue_data["state"].lower()
-
-    runtime.progress.update(
-        runtime.overall_id,
-        description=f"[dim]{issue_ref} ({worker_name}):[/dim] eval…",
-    )
+def _install_eval_progress(runtime: _Runtime, *, issue_ref: str) -> None:
+    """Route the LLM client's retry notifications into the progress bar."""
 
     def _on_eval_attempt(attempt: int, total: int, *, _ref: str = issue_ref) -> None:
         runtime.progress.update(
@@ -671,15 +325,147 @@ async def _evaluate_issue(  # noqa: PLR0911
         )
 
     runtime.client.retry_callback = _on_eval_attempt
+
+
+def _start_evaluation(
+    runtime: _Runtime,
+    *,
+    issue_data: dict[str, Any],
+    state: str,
+    tool_ctx: object,
+) -> Awaitable[dict[str, Any] | None]:
+    """Return the evaluator coroutine for one claimed issue."""
+    author = issue_data.get("author") or ""
+    maintainers = set(issue_data.get("maintainers", []))
+    return runtime.evaluator.evaluate(
+        title=issue_data["title"],
+        body=issue_data.get("body"),
+        issue_type=issue_data["issue_type"],
+        state=state,
+        labels=issue_data.get("labels", []),
+        age_days=days_since(issue_data.get("created_at")),
+        last_activity_days=days_since(issue_data.get("updated_at")),
+        author=author,
+        is_maintainer=author in maintainers
+        or issue_data.get("author_association") == "MAINTAINER",
+        comment_count=len(issue_data.get("comments", [])),
+        comments=issue_data.get("comments"),
+        closing_references=issue_data.get("closing_references"),
+        pr_details=issue_data.get("pr_details"),
+        project=issue_data["project_name"],
+        tool_ctx=tool_ctx,
+    )
+
+
+async def _submit_evaluation(
+    runtime: _Runtime,
+    *,
+    issue_ref: str,
+    worker_name: str,
+    submission: dict[str, Any],
+) -> tuple[bool | None, str]:
+    """POST a finished evaluation and map the response to an outcome.
+
+    Returns ``(None, "")`` when the evaluation was stored and the caller
+    should continue. Otherwise the first element is the value
+    ``_evaluate_issue`` must return and the second is the release reason to
+    record for the still-held claim.
+    """
+    runtime.progress.update(
+        runtime.overall_id,
+        description=f"[dim]{issue_ref} ({worker_name}):[/dim] posting eval…",
+    )
+    submit_response = await _post_submission(
+        runtime,
+        issue_ref=issue_ref,
+        submission=submission,
+    )
+    if submit_response is None:
+        await _release_and_maybe_stop(runtime)
+        await _handle_evaluation_failure(runtime)
+        return False, "submit_network_error"
+
+    if submit_response.status_code == HTTP_CONFLICT:
+        logger.warning("%s: content changed during evaluation, skipped", issue_ref)
+        await _release_and_maybe_stop(runtime)
+        return True, "content_changed"
+
+    if submit_response.status_code != HTTP_OK:
+        logger.error(
+            "%s: submit failed %d from %s: %s",
+            issue_ref,
+            submit_response.status_code,
+            submit_response.url,
+            _format_error_body(submit_response),
+        )
+        await _release_and_maybe_stop(runtime)
+        await _handle_evaluation_failure(runtime)
+        return False, f"submit_failed_{submit_response.status_code}"
+
+    return None, ""
+
+
+async def _record_completion(
+    runtime: _Runtime,
+    *,
+    issue_data: dict[str, Any],
+    issue_ref: str,
+    submission: dict[str, Any],
+    started_at: float,
+    evaluate_elapsed: float,
+) -> None:
+    """Advance the run counters and print the one-line result summary."""
+    completed = await runtime.state.complete(
+        prompt_tokens=submission["prompt_tokens"],
+        completion_tokens=submission["completion_tokens"],
+    )
+    runtime.timing.add(PHASE_EVALUATE, time.monotonic() - started_at)
+    runtime.progress.update(
+        runtime.overall_id, advance=1, description="Evaluating issues"
+    )
+    action = submission.get("suggested_action") or "summary_only"
+    issue_label = format_issue_label(
+        issue_data,
+        issue_ref=issue_ref,
+        eval_server_base_url=runtime.eval_server_base_url,
+    )
+
+    runtime.progress.console.print(
+        f"{issue_label} — {action}"
+        f"  [dim]{submission['prompt_tokens']} in / {submission['completion_tokens']} out"
+        f"  eval {_format_elapsed(evaluate_elapsed)}[/dim]"
+    )
+
+    if runtime.issue_limit > 0 and completed >= runtime.issue_limit:
+        logger.info("Done: evaluated %d issues", runtime.issue_limit)
+        shutdown_state["requested"] = True
+
+
+async def _evaluate_issue(
+    runtime: _Runtime,
+    *,
+    issue_data: dict[str, Any],
+    worker_name: str,
+) -> bool:
+    """Evaluate one claimed issue, embed the summary, and submit the result."""
+    warn_on_hash_mismatch(issue_data)
+
+    issue_ref = issue_ref_for(issue_data)
+    normalized_state = issue_data["state"].lower()
+
+    runtime.progress.update(
+        runtime.overall_id,
+        description=f"[dim]{issue_ref} ({worker_name}):[/dim] eval…",
+    )
+    _install_eval_progress(runtime, issue_ref=issue_ref)
+
     started_at = time.monotonic()
-    project_name = issue_data["project_name"]
-    tool_ctx = ToolContext(
+    tool_ctx = build_tool_context(
+        issue_data,
         mirror_dir=runtime.mirror_dir,
         allowed_projects=runtime.allowed_projects,
-        pinned_shas=issue_data.get("repo_shas", {}),
         eval_server_base_url=runtime.eval_server_base_url,
-        eval_api_token=runtime.headers.get("Authorization", "").removeprefix("Bearer "),
-        issue_id=issue_data["issue_id"],
+        headers=runtime.headers,
     )
 
     submitted = False
@@ -689,100 +475,27 @@ async def _evaluate_issue(  # noqa: PLR0911
     try:
         try:
             result, evaluate_elapsed = await _timed(
-                runtime.evaluator.evaluate(
-                    title=issue_data["title"],
-                    body=issue_data.get("body"),
-                    issue_type=issue_data["issue_type"],
+                _start_evaluation(
+                    runtime,
+                    issue_data=issue_data,
                     state=normalized_state,
-                    labels=issue_data.get("labels", []),
-                    age_days=_days_since(issue_data.get("created_at")),
-                    last_activity_days=_days_since(issue_data.get("updated_at")),
-                    author=author,
-                    is_maintainer=author in maintainers
-                    or issue_data.get("author_association") == "MAINTAINER",
-                    comment_count=len(issue_data.get("comments", [])),
-                    comments=issue_data.get("comments"),
-                    closing_references=issue_data.get("closing_references"),
-                    pr_details=issue_data.get("pr_details"),
-                    project=project_name,
                     tool_ctx=tool_ctx,
                 )
             )
-        except EvaluationDiscarded as exc:
-            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-            logger.warning(
-                "%s: evaluation discarded (post-preflight tool failure): %s; "
-                "releasing claim, submitting nothing",
-                issue_ref,
-                exc,
-            )
-            release_reason = "evaluation_discarded"
-            await _release_and_maybe_stop(runtime)
-            await _handle_evaluation_failure(runtime)
-            return False
-        except LLMQuotaError:
-            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-            release_reason = "quota_exhausted"
-            await runtime.state.release()
-            await _enter_quota_backoff(runtime)
-            return False
-        except (httpx.TimeoutException, LLMTimeoutError) as exc:
-            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-            exc_name = type(exc).__name__
-            logger.error(  # noqa: TRY400
-                "%s: evaluation failed after %s: LLM request timed out (%s)",
-                issue_ref,
-                _format_elapsed(time.monotonic() - started_at),
-                exc_name,
-            )
-            logger.debug("%s: LLM timeout traceback:", issue_ref, exc_info=True)
-            release_reason = "evaluation_error"
-            await _release_and_maybe_stop(runtime)
-            await _handle_evaluation_failure(runtime)
-            return False
-        except LLMUnavailableError as exc:
-            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-            logger.error(  # noqa: TRY400
-                "%s: evaluation failed after %s: LLM service unavailable (%s)",
-                issue_ref,
-                _format_elapsed(time.monotonic() - started_at),
-                exc,
-            )
-            logger.debug("%s: LLM unavailable traceback:", issue_ref, exc_info=True)
-            release_reason = "evaluation_error"
-            await _release_and_maybe_stop(runtime)
-            await _handle_evaluation_failure(runtime)
-            return False
-        except httpx.HTTPStatusError as exc:
-            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-            body_summary = _format_error_body(exc.response)
-            logger.error(  # noqa: TRY400
-                "%s: evaluation failed after %s: HTTP %d from %s — %s",
-                issue_ref,
-                _format_elapsed(time.monotonic() - started_at),
-                exc.response.status_code,
-                exc.response.url,
-                body_summary,
-            )
-            logger.debug("%s: HTTP error traceback:", issue_ref, exc_info=True)
-            release_reason = "evaluation_error"
-            await _release_and_maybe_stop(runtime)
-            await _handle_evaluation_failure(runtime)
-            return False
         except Exception as exc:  # noqa: BLE001 - one bad issue must not stop the worker
             runtime.progress.update(runtime.overall_id, description="Evaluating issues")
-            exc_name = type(exc).__name__
-            logger.error(  # noqa: TRY400
-                "%s: evaluation failed after %s: %s: %s",
-                issue_ref,
-                _format_elapsed(time.monotonic() - started_at),
-                exc_name,
+            failure = classify_evaluation_error(
                 exc,
+                issue_ref=issue_ref,
+                elapsed=time.monotonic() - started_at,
             )
-            logger.debug("%s: evaluation traceback:", issue_ref, exc_info=True)
-            release_reason = "evaluation_error"
-            await _release_and_maybe_stop(runtime)
-            await _handle_evaluation_failure(runtime)
+            release_reason = failure.release_reason
+            if failure.is_quota:
+                await runtime.state.release()
+                await _enter_quota_backoff(runtime)
+            else:
+                await _release_and_maybe_stop(runtime)
+                await _handle_evaluation_failure(runtime)
             return False
 
         if result is None:
@@ -791,18 +504,8 @@ async def _evaluate_issue(  # noqa: PLR0911
             await _release_and_maybe_stop(runtime)
             return True
 
-        validation_payload = {
-            "summary": result.get("summary"),
-            "scores": result.get("scores", {}),
-            "suggested_action": result.get("suggested_action"),
-            "suggested_action_reason": result.get("suggested_action_reason"),
-        }
         try:
-            validate_evaluation_result(
-                validation_payload,
-                issue_type=issue_data.get("issue_type", "issue"),
-                state=normalized_state,
-            )
+            validate_result(result, issue_data=issue_data, state=normalized_state)
         except LLMValidationError as exc:
             runtime.progress.update(runtime.overall_id, description="Evaluating issues")
             logger.warning(
@@ -816,57 +519,22 @@ async def _evaluate_issue(  # noqa: PLR0911
             await _handle_evaluation_failure(runtime)
             return False
 
-        submission: dict[str, Any] = {
-            "issue_id": issue_data["issue_id"],
-            "content_hash": result["issue_data_hash"],
-            "summary": result["summary"],
-            "scores": result["scores"],
-            "suggested_action": result["suggested_action"],
-            "suggested_action_reason": result["suggested_action_reason"],
-            "tokens_used": result["tokens_used"],
-            "prompt_tokens": result["prompt_tokens"],
-            "completion_tokens": result["completion_tokens"],
-            "model_used": runtime.model,
-            "llm_backend": runtime.llm_backend,
-            "cost_usd": result["cost_usd"],
-            "related_work": result.get("related_work", []),
-            "transcript": result.get("transcript"),
-            "evidence_paths": _serialize_evidence_paths(result.get("tool_context")),
-        }
-
-        runtime.progress.update(
-            runtime.overall_id,
-            description=f"[dim]{issue_ref} ({worker_name}):[/dim] posting eval…",
+        submission = build_submission(
+            result,
+            issue_data=issue_data,
+            model=runtime.model,
+            llm_backend=runtime.llm_backend,
         )
-        submit_response = await _post_submission(
+
+        outcome, reason = await _submit_evaluation(
             runtime,
             issue_ref=issue_ref,
+            worker_name=worker_name,
             submission=submission,
         )
-        if submit_response is None:
-            release_reason = "submit_network_error"
-            await _release_and_maybe_stop(runtime)
-            await _handle_evaluation_failure(runtime)
-            return False
-
-        if submit_response.status_code == HTTP_CONFLICT:
-            logger.warning("%s: content changed during evaluation, skipped", issue_ref)
-            release_reason = "content_changed"
-            await _release_and_maybe_stop(runtime)
-            return True
-
-        if submit_response.status_code != HTTP_OK:
-            logger.error(
-                "%s: submit failed %d from %s: %s",
-                issue_ref,
-                submit_response.status_code,
-                submit_response.url,
-                _format_error_body(submit_response),
-            )
-            release_reason = f"submit_failed_{submit_response.status_code}"
-            await _release_and_maybe_stop(runtime)
-            await _handle_evaluation_failure(runtime)
-            return False
+        if outcome is not None:
+            release_reason = reason
+            return outcome
 
         submitted = True
     finally:
@@ -878,33 +546,14 @@ async def _evaluate_issue(  # noqa: PLR0911
                 reason=release_reason,
             )
 
-    completed = await runtime.state.complete(
-        prompt_tokens=submission["prompt_tokens"],
-        completion_tokens=submission["completion_tokens"],
+    await _record_completion(
+        runtime,
+        issue_data=issue_data,
+        issue_ref=issue_ref,
+        submission=submission,
+        started_at=started_at,
+        evaluate_elapsed=evaluate_elapsed,
     )
-    wall_elapsed = time.monotonic() - started_at
-    runtime.timing.add(PHASE_EVALUATE, wall_elapsed)
-    runtime.progress.update(
-        runtime.overall_id, advance=1, description="Evaluating issues"
-    )
-    action = submission.get("suggested_action") or "summary_only"
-    if runtime.eval_server_base_url:
-        quoted_project = urllib.parse.quote(issue_data["project_name"], safe="")
-        quoted_id = urllib.parse.quote(str(issue_data["external_id"]), safe="")
-        issue_url = f"{runtime.eval_server_base_url.rstrip('/')}/issues/{quoted_project}/{quoted_id}"
-        issue_label = f"[link={issue_url}][bold]{issue_ref}[/bold][/link]"
-    else:
-        issue_label = f"[bold]{issue_ref}[/bold]"
-
-    runtime.progress.console.print(
-        f"{issue_label} — {action}"
-        f"  [dim]{submission['prompt_tokens']} in / {submission['completion_tokens']} out"
-        f"  eval {_format_elapsed(evaluate_elapsed)}[/dim]"
-    )
-
-    if runtime.issue_limit > 0 and completed >= runtime.issue_limit:
-        logger.info("Done: evaluated %d issues", runtime.issue_limit)
-        shutdown_state["requested"] = True
     return True
 
 
@@ -915,7 +564,7 @@ async def _run_issue_preflight(
     worker_name: str,
 ) -> bool:
     """Return whether a claimed issue passed preflight."""
-    issue_ref = f"{issue_data['project_name']}#{issue_data['external_id']}"
+    issue_ref = issue_ref_for(issue_data)
     runtime.progress.update(
         runtime.overall_id,
         description=f"[dim]{issue_ref} ({worker_name}):[/dim] preflight…",
@@ -981,6 +630,21 @@ async def _run_issue_preflight(
     return False
 
 
+async def _pace_after_success(runtime: _Runtime) -> None:
+    """Sleep a randomised pacing delay between evaluations in slow-eval mode."""
+    if (
+        runtime.slow_eval
+        and not shutdown_state["requested"]
+        and (runtime.issue_limit <= 0 or runtime.state.evaluated < runtime.issue_limit)
+    ):
+        delay = secrets.SystemRandom().uniform(runtime.min_delay, runtime.max_delay)
+        runtime.progress.update(
+            runtime.overall_id,
+            description=f"[dim]Pacing delay: sleeping {delay:.1f}s…[/dim]",
+        )
+        await _sleep_until_next_poll(delay)
+
+
 async def _worker_loop(
     runtime: _Runtime, *, server_url: str, worker_index: int
 ) -> None:
@@ -1012,20 +676,62 @@ async def _worker_loop(
             if not shutdown_state["requested"]:
                 await _sleep_until_next_poll(_FAILURE_BACKOFF_SECONDS)
             continue
-        if (
-            runtime.slow_eval
-            and not shutdown_state["requested"]
-            and (
-                runtime.issue_limit <= 0
-                or runtime.state.evaluated < runtime.issue_limit
+        await _pace_after_success(runtime)
+
+
+def _reset_process_state() -> None:
+    """Clear the module-level pause/shutdown flags before a fresh run."""
+    global _circuit_breaker_active, _quota_paused  # noqa: PLW0603
+    shutdown_state["requested"] = False
+    paused_state["paused"] = False
+    _quota_paused = False
+    _circuit_breaker_active = False
+
+
+async def _await_startup_quota(
+    http_client: httpx.AsyncClient,
+    llm_client: LLMClient,
+    *,
+    headers: dict[str, str],
+    issue: str,
+    limit: int,
+) -> bool:
+    """Block until the LLM has quota. Returns False if the run should abort."""
+    while not shutdown_state["requested"] and hasattr(llm_client, "check_quota"):
+        try:
+            await llm_client.check_quota()
+            break
+        except LLMQuotaError:
+            logger.exception("LLM quota check failed")
+            resume_at = datetime.now(tz=UTC) + timedelta(seconds=_QUOTA_BACKOFF_SECONDS)
+            with contextlib.suppress(httpx.HTTPError):
+                await http_client.post(
+                    "/api/eval/quota-pause",
+                    json={"resume_at": resume_at.isoformat(), "reason": "quota"},
+                    headers=headers,
+                )
+            if issue or limit > 0:
+                return False
+            logger.info(
+                "Pausing evaluation for %s due to quota exhaustion...",
+                _format_elapsed(_QUOTA_BACKOFF_SECONDS),
             )
-        ):
-            delay = secrets.SystemRandom().uniform(runtime.min_delay, runtime.max_delay)
-            runtime.progress.update(
-                runtime.overall_id,
-                description=f"[dim]Pacing delay: sleeping {delay:.1f}s…[/dim]",
-            )
-            await _sleep_until_next_poll(delay)
+            paused_state["paused"] = True
+            await _sleep_until_next_poll(_QUOTA_BACKOFF_SECONDS)
+            paused_state["paused"] = False
+    return True
+
+
+def _log_run_totals(state: _RunState) -> None:
+    """Log the token totals for a finished run, if anything was evaluated."""
+    if state.evaluated > 0:
+        logger.info(
+            "Run total: %d issues, %d in / %d out tokens (%d total)",
+            state.evaluated,
+            state.total_prompt_tokens,
+            state.total_completion_tokens,
+            state.total_prompt_tokens + state.total_completion_tokens,
+        )
 
 
 async def run_evaluate_loop(
@@ -1062,11 +768,7 @@ async def run_evaluate_loop(
     the claimed issue via the selected chat backend, and submits the finished
     payload to ``POST /api/eval/result``. No direct database access is used.
     """
-    global _circuit_breaker_active, _quota_paused  # noqa: PLW0603
-    shutdown_state["requested"] = False
-    paused_state["paused"] = False
-    _quota_paused = False
-    _circuit_breaker_active = False
+    _reset_process_state()
     signal.signal(signal.SIGINT, _signal_handler)
     console = Console()
     log_file = _setup_logging(verbose=verbose, console=console, log=log)
@@ -1074,25 +776,16 @@ async def run_evaluate_loop(
         logger.info("Logging detailed output to %s", log_file)
 
     server_url = server.rstrip("/")
-    if server_ca_cert:
-        expanded_server_ca = pathlib.Path(server_ca_cert).expanduser()  # noqa: ASYNC240
-        if not expanded_server_ca.is_file():
-            raise FileNotFoundError(
-                f"Dashboard CA certificate file not found: '{server_ca_cert}' (resolved to '{expanded_server_ca}'). "
-                "Please check your DASHBOARD_CA_CERT configuration."
-            )
-        verify: bool | str = str(expanded_server_ca)
-    else:
-        verify = True
+    verify = resolve_server_verify(server_ca_cert)
     headers = {"Authorization": "Bearer " + token}
-    params = {
-        "project": project,
-        "open_only": open_only,
-        "force": force,
-        "incomplete": incomplete,
-        "stale_days": stale_days,
-        "external_id": issue,
-    }
+    params = build_queue_params(
+        project=project,
+        open_only=open_only,
+        force=force,
+        incomplete=incomplete,
+        stale_days=stale_days,
+        issue=issue,
+    )
     if issue:
         limit = 1
     settings = Settings()
@@ -1114,96 +807,37 @@ async def run_evaluate_loop(
         tool_call_delay=tool_delay,
     )
 
-    filter_parts = []
-    if project:
-        filter_parts.append(project)
-    if open_only:
-        filter_parts.append("open only")
-    filter_desc = f" ({', '.join(filter_parts)})" if filter_parts else ""
+    filter_desc = describe_filters(project=project, open_only=open_only)
 
     try:
         async with httpx.AsyncClient(
             base_url=server_url, timeout=30.0, verify=verify
         ) as http_client:
-            project_orgs: dict[str, str] = {}
-            try:
-                projects_resp = await http_client.get(
-                    "/api/eval/projects", headers=headers
-                )
-                if projects_resp.status_code == HTTP_OK:
-                    project_orgs = projects_resp.json().get("projects", {})
-            except httpx.HTTPError:
-                pass
             allowed_projects = resolve_allowed_projects(
                 craft_projects=config.craft_projects,
-                project_orgs=project_orgs,
+                project_orgs=await fetch_project_orgs(http_client, headers=headers),
             )
 
-            total_remaining = limit if limit > 0 else 0
-            try:
-                status_resp = await http_client.get(
-                    "/api/eval/status", params=params, headers=headers
-                )
-                if status_resp.status_code == HTTP_OK:
-                    status_data = status_resp.json()
-                    server_pending = status_data.get("pending", 0)
-                    total_open = status_data.get("total_open", 0)
-                    total_evaluated = status_data.get("total_evaluated", 0)
-                    already_pct = (
-                        int(100 * total_evaluated / total_open) if total_open > 0 else 0
-                    )
-                    total_remaining = limit if limit > 0 else server_pending
-                    logger.info(
-                        "Connected to %s%s — %d/%d open issues evaluated (%d%%), %d pending | backend=%s model=%s concurrency=%d",
-                        server_url,
-                        filter_desc,
-                        total_evaluated,
-                        total_open,
-                        already_pct,
-                        server_pending,
-                        llm_backend,
-                        model_scoring,
-                        concurrency,
-                    )
-            except httpx.HTTPError:
-                logger.info(
-                    "Connected to %s%s | backend=%s model=%s concurrency=%d",
-                    server_url,
-                    filter_desc,
-                    llm_backend,
-                    model_scoring,
-                    concurrency,
-                )
+            total_remaining = await log_queue_status(
+                http_client,
+                headers=headers,
+                params=params,
+                server_url=server_url,
+                filter_desc=filter_desc,
+                llm_backend=llm_backend,
+                model_scoring=model_scoring,
+                concurrency=concurrency,
+                limit=limit,
+            )
 
-            while not shutdown_state["requested"] and hasattr(
-                llm_client, "check_quota"
+            if not await _await_startup_quota(
+                http_client,
+                llm_client,
+                headers=headers,
+                issue=issue,
+                limit=limit,
             ):
-                try:
-                    await llm_client.check_quota()
-                    break
-                except LLMQuotaError:
-                    logger.exception("LLM quota check failed")
-                    resume_at = datetime.now(tz=UTC) + timedelta(
-                        seconds=_QUOTA_BACKOFF_SECONDS
-                    )
-                    with contextlib.suppress(httpx.HTTPError):
-                        await http_client.post(
-                            "/api/eval/quota-pause",
-                            json={
-                                "resume_at": resume_at.isoformat(),
-                                "reason": "quota",
-                            },
-                            headers=headers,
-                        )
-                    if issue or limit > 0:
-                        return
-                    logger.info(
-                        "Pausing evaluation for %s due to quota exhaustion...",
-                        _format_elapsed(_QUOTA_BACKOFF_SECONDS),
-                    )
-                    paused_state["paused"] = True
-                    await _sleep_until_next_poll(_QUOTA_BACKOFF_SECONDS)
-                    paused_state["paused"] = False
+                return
 
             if shutdown_state["requested"]:
                 return
@@ -1252,13 +886,6 @@ async def run_evaluate_loop(
                     )
                 )
 
-                if state.evaluated > 0:
-                    logger.info(
-                        "Run total: %d issues, %d in / %d out tokens (%d total)",
-                        state.evaluated,
-                        state.total_prompt_tokens,
-                        state.total_completion_tokens,
-                        state.total_prompt_tokens + state.total_completion_tokens,
-                    )
+                _log_run_totals(state)
     finally:
         await llm_client.close()
