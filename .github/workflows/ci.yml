@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
 
 jobs:
   lint:
@@ -17,6 +18,15 @@ jobs:
           make setup
           make lint
 
+  lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      # A lockfile that has drifted from pyproject.toml means CI and the
+      # published image resolve different dependency versions.
+      - run: uv lock --check
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -26,3 +36,52 @@ jobs:
           uv sync --frozen
           make setup
           make test
+
+  migrations:
+    runs-on: ubuntu-latest
+    # The app runs `alembic upgrade head` at startup, so a migration that fails
+    # on PostgreSQL takes production down rather than failing a test. The unit
+    # suite runs on SQLite and cannot catch that.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: craft_dashboard
+          POSTGRES_PASSWORD: craft_dashboard
+          POSTGRES_DB: craft_dashboard
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U craft_dashboard"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://craft_dashboard:craft_dashboard@localhost:5432/craft_dashboard
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - run: uv sync --frozen
+      - name: Upgrade an empty database to head
+        run: uv run alembic upgrade head
+      - name: Check for a missing migration
+        # Autogenerate must produce no operations once head is applied,
+        # otherwise a model change shipped without its migration.
+        run: |
+          uv run alembic check
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0  # needed for setuptools_scm versioning
+      - name: Build the runtime image
+        run: |
+          docker build --build-arg SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0 \
+            -t craft-dashboard:ci .
+      - name: Smoke test the image
+        # Catches a broken entrypoint or a missing runtime dependency before
+        # the image reaches GHCR and the deploy workflow restarts production.
+        run: |
+          docker run --rm craft-dashboard:ci \
+            python -c "from craft_dashboard.app import create_app; create_app()"

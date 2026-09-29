@@ -9,11 +9,22 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Publishing to GHCR triggers a production deploy, so it must not run ahead
+  # of the checks. Calling the workflows here (rather than relying on branch
+  # protection) keeps the gate in version control.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  e2e:
+    uses: ./.github/workflows/e2e.yml
+
   publish:
+    needs: [ci, e2e]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      security-events: write  # for the Trivy SARIF upload
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -37,18 +48,46 @@ jobs:
             type=sha,prefix=
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
           build-args: |
             SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0
 
+      - name: Scan the published image
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Upload scan results
+        # Informational: a base-image CVE must not block shipping an app fix.
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@88585263c0627ee42c0e1c5143a112c8d6f4aa18 # v4.38.2
+        with:
+          sarif_file: trivy.sarif
+
       - name: Trigger vps-infra deploy
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0 # v3.0.0
         with:
           token: ${{ secrets.VPSINFRA_PAT }}
           repository: mr-cal/vps-infra
           event-type: craft-dashboard-updated
+          # The digest makes a deploy reproducible and a rollback unambiguous;
+          # `latest` is a convenience tag only. vps-infra may pin to this.
+          client-payload: |
+            {
+              "image": "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}",
+              "digest": "${{ steps.build.outputs.digest }}",
+              "sha": "${{ github.sha }}"
+            }
