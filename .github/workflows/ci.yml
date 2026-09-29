@@ -44,7 +44,9 @@ jobs:
     # suite runs on SQLite and cannot catch that.
     services:
       postgres:
-        image: postgres:17
+        # Must match the image vps-infra runs; migrations create the
+        # `vector` extension, which stock postgres does not ship.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: craft_dashboard
           POSTGRES_PASSWORD: craft_dashboard
