@@ -1,6 +1,6 @@
 """Issue link model: structured relationships between issues.
 
-Populated by the evaluator's ``related_work`` output (Phase 6) and by
+Populated by the evaluator's ``related_work`` output and by
 ``DuplicateDetector`` (see ``craft_dashboard.repositories.issue_link_repository``),
 this table subsumes duplicate detection: a duplicate finding is simply a row
 with ``kind="duplicate_of"`` and ``source="duplicate_detector"``.

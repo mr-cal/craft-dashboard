@@ -17,9 +17,9 @@ SCHEDULE_DAY_MAX = 6
 class ForumConfig(BaseModel):
     """Configuration for a single Discourse forum to track.
 
-    Every configured forum is always tracked in full (all categories) — see
-    plans/33-forum-activity-tracker.md for the storage-feasibility analysis
-    behind that decision. There is intentionally no per-forum ``categories``
+    Every configured forum is always tracked in full (all categories);
+    topic-level rows are small enough that selecting categories would save
+    nothing. There is intentionally no per-forum ``categories``
     field to configure.
     """
 

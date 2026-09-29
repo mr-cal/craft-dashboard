@@ -1,7 +1,6 @@
 """Native tool-calling schemas for the deep-evaluation tool set.
 
-Every tool is read-only and bare-mirror-safe (see
-plans/36-deep-evaluation-design.md section 5). ``ref`` is optional on every
+Every tool is read-only and bare-mirror-safe. ``ref`` is optional on every
 repo-scoped tool and defaults, at dispatch time (craft_dashboard.llm.
 tool_dispatch), to the pinned HEAD SHA `/api/eval/next` supplied for that
 repo — never to a branch name or "latest", so recorded evidence stays

@@ -1,4 +1,4 @@
-"""Discourse forum activity models (see plans/33-forum-activity-tracker.md)."""
+"""Discourse forum activity models."""
 
 from datetime import datetime
 
@@ -15,9 +15,8 @@ class ForumTopic(Base):
     """A topic on a tracked Discourse forum, with topic-level metadata only.
 
     This intentionally stores topic-level aggregates (post/like counts,
-    category, timestamps) rather than individual post bodies — see the
-    storage feasibility analysis in plans/33-forum-activity-tracker.md
-    Step 1 for why that's sufficient (and negligible in size) for the
+    category, timestamps) rather than individual post bodies, which is
+    sufficient (and negligible in size) for the
     current trend-graph requirements.
     """
 
@@ -64,8 +63,8 @@ class ForumBackfillState(Base):
 
     Historical backfill walks each category's topic list (GET
     /c/{slug}/{id}.json?order=created), which Discourse paginates reliably
-    (unlike /search.json — see plans/33-forum-activity-tracker.md's
-    "Search API pagination is unreliable" note). ``category_progress``
+    (unlike /search.json, whose pagination is unreliable).
+    ``category_progress``
     tracks a resumable per-category cursor so a multi-thousand-topic
     backfill can spread across several scheduled runs without re-fetching
     pages it already covered.

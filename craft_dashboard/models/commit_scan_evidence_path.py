@@ -1,14 +1,13 @@
 """Reverse index: which issue's evidence touched which (project, path).
 
-Populated by Phase 4's tool layer, whenever an evaluation reads a file or
+Populated by the evaluation tool layer, whenever an evaluation reads a file or
 greps a repo — every tool records the (repo, path) pairs it touched. The
 commit scanner queries this table to find issues whose evidence overlaps a
 newly changed path, without needing to replay each issue's evidence.
 
-This table is created in Phase 3 (rather than deferred to Phase 4) so the
-path-intersection invalidation query can be fully implemented and tested
-now; it is simply empty in production until Phase 4 evaluations begin
-writing to it.
+The table exists ahead of its writer so the path-intersection invalidation
+query can be implemented and tested; it stays empty in production until
+evaluations record touched paths.
 """
 
 from datetime import datetime

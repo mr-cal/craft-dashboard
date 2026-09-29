@@ -1,4 +1,4 @@
-"""Discourse forum activity collector (see plans/33-forum-activity-tracker.md).
+"""Discourse forum activity collector.
 
 Tracks every category on each configured forum (no per-forum category
 scoping — see the storage feasibility analysis in the plan). Two entry
@@ -68,9 +68,8 @@ logger = logging.getLogger(__name__)
 
 #: Default historical backfill lookback. Set generously high (these forums
 #: were all created well within the last 15 years) so a fresh backfill
-#: effectively collects "all" history rather than a rolling window — see
-#: the storage-feasibility analysis in plans/33-forum-activity-tracker.md
-#: for why keeping full history is cheap enough to just do.
+#: effectively collects "all" history rather than a rolling window.
+#: Topic-level rows are small enough that full history is cheap.
 DEFAULT_YEARS_LOOKBACK = 15
 #: Safety cap on category-listing pages fetched in a single
 #: ``backfill_next_batch`` call, so one scheduled run can't block
@@ -486,7 +485,7 @@ class ForumCollector:
         the current or previous month — matching the original "current +
         previous month" refresh scope (it doesn't catch new replies on
         older topics, which is an accepted tradeoff for topic-level
-        aggregate tracking; see plans/33-forum-activity-tracker.md).
+        aggregate tracking).
 
         Args:
             forum: Forum key from craft-dashboard.toml's [forums.*] sections.

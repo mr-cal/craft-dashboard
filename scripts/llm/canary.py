@@ -1,4 +1,4 @@
-"""Canary rollout tool for the deep-evaluation Phase 6 rewrite.
+"""Canary rollout tool for deep-evaluation changes.
 
 Evaluates an explicit, small set of issues one at a time via the real
 `/api/eval/next` -> evaluate -> `/api/eval/result` HTTP pipeline

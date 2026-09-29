@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # How many days before re-fetching an issue from GitHub
     refresh_age_days: int = 7
 
-    # Bare git mirror storage for deep-evaluation git tools (Phase 2+).
+    # Bare git mirror storage for the deep-evaluation git tools.
     # Named with the CRAFT_DASHBOARD_ prefix (unlike this file's other env
     # vars) because it must remain stable across both the VPS mount path
     # and a developer's default cache directory, and is referenced by name
@@ -67,11 +67,9 @@ class Settings(BaseSettings):
         validation_alias="CRAFT_DASHBOARD_MIRROR_DIR",
     )
 
-    # Max concurrent git subprocesses, independent of eval concurrency. The
-    # default of 2 is provisional; Task 7 measures actual peak RSS of a
-    # `git grep` across the full mirror set and this default is set from that
-    # measurement (design "Open risks / 1 vCPU": Phase 2 measures peak RSS
-    # before Phase 6). A dev machine can raise it; the VPS stays at 1-2.
+    # Max concurrent git subprocesses, independent of eval concurrency.
+    # Bounded because a `git grep` across the full mirror set is the peak
+    # memory consumer on a 1 vCPU VPS. A dev machine can raise it.
     git_concurrency: int = Field(
         default=2,
         validation_alias="CRAFT_DASHBOARD_GIT_CONCURRENCY",

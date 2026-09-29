@@ -122,9 +122,9 @@ def validate_ref(ref: str) -> None:
     drawn from **the pinned set**" — i.e. one of the specific HEAD SHAs that
     `/api/eval/next` supplied for that project. That pinned-set membership
     check does not exist yet because the pinned set does not exist until
-    Phase 4. When Phase 4 lands SHA pinning it MUST extend this: the reader
-    functions currently take a bare `ref: str` with no `allowed_refs`
-    parameter, so Phase 4 has to change these signatures (add e.g.
+    SHA pinning exists. Whoever lands SHA pinning MUST extend this: the
+    reader functions take a bare `ref: str` with no `allowed_refs`
+    parameter, so that work has to change these signatures (add e.g.
     `allowed_refs: frozenset[str] | None`) and reject any 40-hex ref not in
     the pinned set. Format-only validation lets a caller reach any commit
     that exists in the mirror, which is acceptable while nothing wires the
@@ -278,7 +278,7 @@ async def head_sha(mirror: pathlib.Path) -> str:
     """Return the full 40-char commit SHA that HEAD resolves to in *mirror*.
 
     Public wrapper over `git rev-parse HEAD`, for callers outside this module
-    (e.g. Phase 4's `/api/eval/next` SHA-pinning) that need a repo's current
+    (e.g. `/api/eval/next` SHA-pinning) that need a repo's current
     HEAD without reaching into the private `_run_git` helper.
     """
     return (await _run_git(mirror, "rev-parse", "--verify", "HEAD")).strip()
@@ -288,7 +288,7 @@ async def has_commit(mirror: pathlib.Path, sha: str) -> bool:
     """Return whether *mirror* already has *sha* as a reachable commit object.
 
     Uses `git cat-file -e <sha>^{commit}` (existence check, no output) so
-    Phase 4's worker preflight can tell "I already hold this pinned SHA"
+    a worker preflight can tell "I already hold this pinned SHA"
     from "I need to fetch first" without a throwaway git-log/show call. A
     malformed (non-40-hex) sha is rejected up front via validate_ref rather
     than shelled out to git, consistent with every other public entry point
@@ -416,8 +416,8 @@ async def repo_layout(mirror: pathlib.Path, *, ref: str) -> dict[str, int]:
     right shape for caching and tests. The design's round-1 baseline (§1)
     needs a *rendered text block* like ``craft_parts/executor/  18 files``.
     That formatter is intentionally NOT built here — it is presentation for
-    the prompt layer and belongs to Phase 6, which will render this dict.
-    Phase 2 stops at the structured data plus its cache (Task 7).
+    the prompt layer, which renders this dict. This module provides only
+    the structured data plus its cache.
     """
     validate_ref(ref)
     output = await _run_git(mirror, "--no-pager", "ls-tree", "-r", "--name-only", ref)

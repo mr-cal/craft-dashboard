@@ -7,9 +7,9 @@ queried ``llm_evaluations`` table (521MB / 81,099 rows already) stays narrow
 and retention deletes here never touch it. See
 ``craft_dashboard.services.transcript_gc`` for the retention policy.
 
-Phase 1 intentionally adds only the persistence shape. The Phase 4/6 writer
-follow-up must introduce ``EVAL_TRANSCRIPT_FULL`` wiring in Settings and
-``.env.example`` when the tool-calling loop actually reads the flag.
+This module defines only the persistence shape. ``EVAL_TRANSCRIPT_FULL``
+wiring in Settings and ``.env.example`` is still needed before the
+tool-calling loop can read the flag.
 """
 
 from datetime import datetime

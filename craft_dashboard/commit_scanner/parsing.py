@@ -7,7 +7,7 @@ Precision tiers, from the design doc (section 4):
   own repo); NEVER an exact match against another project's issue #1234,
   since issue numbers are not globally unique. Contributes only a weak
   cross-repo candidate signal, disambiguated later by the model via the
-  issue_detail("#1234") tool (Phase 4).
+  issue_detail("#1234") tool.
 - LaunchpadRef ("LP: #567"): cross-*source*, not cross-repo — resolves
   against launchpad-projects (currently only snapcraft).
 """

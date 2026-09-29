@@ -1,6 +1,6 @@
 """Engagement routes: Discourse forum activity trend graphs.
 
-See plans/33-forum-activity-tracker.md for the full design.
+See ``craft_dashboard.collectors.forum`` for how the data is gathered.
 """
 
 from collections import defaultdict

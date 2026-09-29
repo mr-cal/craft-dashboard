@@ -30,7 +30,14 @@ already stored. See `docs/architecture.md` for why it is shaped this way.
 | `tests/end_to_end/` | Run by `make test-e2e`, needs a browser |
 
 Layering runs routes → services → repositories → models. Routes must not build
-queries directly, and collectors must not import from routes.
+queries directly, and collectors must not import from routes. `import-linter`
+contracts in `pyproject.toml` enforce this; `make lint` runs them.
+
+`REPO_MAP.md` has the fuller map, including where each decision is configured.
+`craft_dashboard/{routes,services,repositories,collectors,llm}/AGENTS.md` and
+`scripts/llm/AGENTS.md` each state that package's public API, invariants,
+forbidden imports, and one-test command. Read the one covering the code you are
+about to change.
 
 ## Before completing any task
 

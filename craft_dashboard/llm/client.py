@@ -228,8 +228,8 @@ class LLMResponse:
     # local LLM server), in which case callers fall back to the static
     # per-token pricing table.
     cost_usd: float | None = None
-    # Native tool_calls from the response, if the model invoked any (see
-    # plans/36-deep-evaluation-design.md section 1). None when the model
+    # Native tool_calls from the response, if the model invoked any.
+    # None when the model
     # returned plain content instead. Each entry is the raw OpenAI-format
     # dict: {"id": ..., "type": "function", "function": {"name": ..., "arguments": "<json str>"}}.
     tool_calls: list[dict[str, Any]] | None = None

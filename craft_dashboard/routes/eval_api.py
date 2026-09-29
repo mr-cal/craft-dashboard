@@ -218,7 +218,7 @@ def _normalize_evidence_paths(
     """Return distinct ``(project, path)`` pairs for reverse-index storage."""
     pairs = {
         (
-            # Task 5 recorded qualified owner/repo strings like
+            # The scanner records qualified owner/repo strings like
             # ``canonical/rockcraft`` in ``ctx.touched_paths``, but the
             # reverse-index table stores the short project name used
             # throughout commit scanning (for example ``rockcraft``).

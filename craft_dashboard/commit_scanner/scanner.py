@@ -1,6 +1,6 @@
 """Commit scanner orchestration: turn new commits into evidence_generation bumps.
 
-See plans/36-deep-evaluation-design.md section 4. The scanner is a
+The scanner is a
 high-recall candidate generator, not a judge — a false positive costs one
 wasted evaluation; a false negative leaves an issue permanently stale. It
 therefore biases toward recall and uses no LLM.
@@ -95,7 +95,7 @@ async def find_issues_by_bare_ref(
     Never matches a different project's issue with the same external_id —
     issue numbers are not globally unique across the 18 tracked repos, and
     a bare ref outside its own repo is only ever a weak signal, resolved
-    later by the model via the issue_detail() tool (Phase 4), not by this
+    later by the model via the issue_detail() tool, not by this
     function. Delegates to find_issues_by_qualified_ref, so it inherits the
     same github-source and open-state scoping.
     """
@@ -210,7 +210,7 @@ async def scan_project(  # noqa: PLR0913
         The CommitScanRun row describing this pass. scan_project() always
         flushes this row and never commits; the caller is responsible for
         committing when dry_run is False and rolling back when dry_run is
-        True (see scan_all_projects in Task 6).
+        True (see scan_all_projects).
 
     """
     started = time.monotonic()

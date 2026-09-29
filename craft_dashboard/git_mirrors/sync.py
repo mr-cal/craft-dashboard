@@ -1,6 +1,6 @@
 """Idempotent bare-mirror clone/fetch bootstrap.
 
-The commit scanner (Phase 3) and `craft-dashboard mirrors sync` (this
+The commit scanner and `craft-dashboard mirrors sync` (this
 module's CLI entry point) are the only callers of git fetch — the eval
 worker never writes to a mirror. Safe to call repeatedly: an existing
 mirror is fetched, a missing one is cloned.
