@@ -6,10 +6,15 @@ Runs, in order:
 1. transcript GC (``eval_transcript_retention_days``)
 2. embedding clearing on superseded evaluations
 3. superseded evaluation deletion (``eval_retention_days``)
-4. snapshot pruning (``snapshot_retention_days``)
 
 Order matters: embeddings are cleared before rows are deleted so the pgvector
 index shrinks even for rows still inside the retention window.
+
+Snapshots are deliberately not pruned here. They are the only record of the
+project's history -- nothing else can reconstruct what the issue counts were
+on a given past day except a full replay -- and the whole table is a couple
+of megabytes. ``prune_old_snapshots`` exists for a database that has to be
+shrunk by hand; it is not a scheduled policy.
 
 Idempotent and safe to run as often as desired. ``--dry-run`` reports what
 each policy would remove without writing.
@@ -32,7 +37,6 @@ from craft_dashboard.services.evaluation_gc import (
 )
 from craft_dashboard.services.transcript_gc import delete_superseded_transcripts
 from craft_dashboard.settings import Settings
-from craft_dashboard.utils.retention import prune_old_snapshots
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,13 +84,6 @@ async def run_gc(*, dry_run: bool = False) -> None:
                 verb,
                 evaluations,
             )
-
-            if not dry_run:
-                snapshots = await prune_old_snapshots(
-                    session,
-                    retention_days=settings.snapshot_retention_days,
-                )
-                logger.info("Snapshots: %s %d row(s)", verb, snapshots)
     finally:
         await engine.dispose()
 

@@ -18,7 +18,6 @@ Application settings come from `craft_dashboard/settings.py` and `.env.example`.
 | `EVAL_API_TOKEN` | empty | Bearer token for `/api/eval/*`. |
 | `EVAL_TRANSCRIPT_RETENTION_DAYS` | `30` | Retention window for non-latest evaluation transcripts. |
 | `EVAL_RETENTION_DAYS` | `90` | Retention window for superseded evaluations. Evaluations marked `latest` are never deleted. |
-| `SNAPSHOT_RETENTION_DAYS` | `365` | Retention window for daily snapshots. |
 | `EVAL_DAILY_SPEND_CAP_USD` | `0.0` | Daily evaluation spend cap; zero disables the cap. |
 | `RELATED_ISSUES_TOP_N` | `10` | Related-issue result limit on issue detail pages. |
 | `RELATED_ISSUES_SIMILARITY_THRESHOLD` | `0.70` | Related-issue embedding similarity floor. |

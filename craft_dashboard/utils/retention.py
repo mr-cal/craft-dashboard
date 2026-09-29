@@ -1,4 +1,11 @@
-"""Snapshot data retention utilities."""
+"""Snapshot data retention utilities.
+
+Snapshots are the only record of what the issue counts were on a past day;
+regenerating them requires a full replay of every issue's history. The whole
+table is a couple of megabytes, so nothing prunes it on a schedule. This
+exists for the rare case of shrinking a database by hand, and the caller
+chooses the window deliberately.
+"""
 
 import logging
 from datetime import UTC, datetime, timedelta

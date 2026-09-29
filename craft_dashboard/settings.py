@@ -33,7 +33,6 @@ class Settings(BaseSettings):
     # `latest`. They are deleted once older than this, which bounds a table
     # that otherwise grows by hundreds of thousands of rows a month.
     eval_retention_days: int = Field(default=90, ge=0)
-    snapshot_retention_days: int = Field(default=365, ge=0)
     eval_daily_spend_cap_usd: float = 0.0
     """Auto-pause evaluation once today's summed cost_usd exceeds this many USD."""
 
