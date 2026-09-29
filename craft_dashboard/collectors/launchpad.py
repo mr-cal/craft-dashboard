@@ -139,6 +139,8 @@ class LaunchpadCollector:
         project_id: int,
         session: AsyncSession,
         collection_run_id: int | None = None,
+        *,
+        full_refresh: bool = False,
     ) -> int:
         """Collect bugs for a Launchpad project.
 
@@ -147,6 +149,9 @@ class LaunchpadCollector:
             project_id: The database ID of the project.
             session: An async SQLAlchemy session.
             collection_run_id: ID of the collection run that fetched these bugs.
+            full_refresh: Ignore the stored watermark and re-fetch every bug.
+                Needed to repair gaps left by a run that advanced the floor
+                past bugs it never actually fetched.
 
         Returns:
             The number of bugs upserted.
@@ -179,12 +184,14 @@ class LaunchpadCollector:
         # `max(Issue.last_fetched_at)` instead would advance it on every
         # partial run, permanently skipping bugs modified in the gap.
         # On the first run (no watermark) we fetch everything.
-        last_collected = await session.scalar(
-            select(CollectionWatermark.last_collected_at).where(
-                CollectionWatermark.project_id == project_id,
-                CollectionWatermark.source == "launchpad",
+        last_collected = None
+        if not full_refresh:
+            last_collected = await session.scalar(
+                select(CollectionWatermark.last_collected_at).where(
+                    CollectionWatermark.project_id == project_id,
+                    CollectionWatermark.source == "launchpad",
+                )
             )
-        )
 
         search_kwargs: dict = {"status": list(_OPEN_STATUSES | _CLOSED_STATUSES)}
         if last_collected is not None:
@@ -199,7 +206,11 @@ class LaunchpadCollector:
                 _WATERMARK_OVERLAP,
             )
         else:
-            logger.info("Full Launchpad fetch for %s (no watermark)", lp_project_name)
+            logger.info(
+                "Full Launchpad fetch for %s (%s)",
+                lp_project_name,
+                "--full-refresh" if full_refresh else "no watermark",
+            )
 
         bug_tasks = project.searchTasks(**search_kwargs)
         count = 0

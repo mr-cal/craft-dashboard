@@ -806,6 +806,7 @@ async def _collect_launchpad(
     projects: list[str] | None = None,
     run_started_at: float | None = None,
     collection_run_id: int | None = None,
+    full_refresh: bool = False,
 ) -> CollectionStats:
     """Run Launchpad data collection for all configured projects.
 
@@ -840,7 +841,11 @@ async def _collect_launchpad(
             try:
                 bugs_started_at = time.monotonic()
                 bug_count = await collector.collect_bugs(
-                    lp_name, project_id, session, collection_run_id=collection_run_id
+                    lp_name,
+                    project_id,
+                    session,
+                    collection_run_id=collection_run_id,
+                    full_refresh=full_refresh,
                 )
                 stats.issues_collected += bug_count
                 logger.info(
@@ -868,10 +873,11 @@ async def _collect_launchpad(
 
                 # Record last_refreshed_at so the hourly rotation (see
                 # `get_least_recently_refreshed`) can consider Launchpad
-                # projects alongside GitHub ones. Launchpad has no
-                # open/full split or schedule gate of its own — every call
-                # here is already a full bug collection — so this is purely
-                # bookkeeping for rotation ordering, not a gate on this path.
+                # projects alongside GitHub ones. Launchpad has no open/full
+                # split or schedule gate of its own — scheduled runs are
+                # incremental from the watermark, and rotation passes
+                # `full_refresh=True` — so this is purely bookkeeping for
+                # rotation ordering, not a gate on this path.
                 await update_refresh_schedule(
                     project_id,
                     "launchpad",
@@ -1011,6 +1017,12 @@ async def _main(
                                 projects=[_lp],
                                 run_started_at=run_started_at,
                                 collection_run_id=run_id,
+                                # Rotation exists to fully refresh one project
+                                # at a time, so it must ignore the watermark.
+                                # This is also what lets the system heal gaps
+                                # on its own instead of needing a manual
+                                # re-collection.
+                                full_refresh=True,
                             ),
                         )
                     )
@@ -1091,6 +1103,7 @@ async def _main(
                             projects=project_filter,
                             run_started_at=run_started_at,
                             collection_run_id=run_id,
+                            full_refresh=full_refresh,
                         ),
                     )
                 )

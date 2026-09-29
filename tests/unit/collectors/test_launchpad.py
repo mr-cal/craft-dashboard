@@ -330,6 +330,23 @@ class TestCollectBugsIncremental:
         )
         assert call_kwargs["modified_since"] == last_collected - _WATERMARK_OVERLAP
 
+    async def test_full_refresh_ignores_the_watermark(self, mocker) -> None:
+        """R1: `--full-refresh` re-fetches everything, repairing prior gaps."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        mock_project = MagicMock()
+        mock_project.searchTasks.return_value = []
+        mock_lp = MagicMock()
+        mock_lp.projects.__getitem__.return_value = mock_project
+        mocker.patch.object(collector, "_get_launchpad", return_value=mock_lp)
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = datetime(2024, 5, 1, tzinfo=UTC)
+
+        await collector.collect_bugs("snapcraft", 1, mock_session, full_refresh=True)
+
+        assert "modified_since" not in mock_project.searchTasks.call_args.kwargs
+        mock_session.scalar.assert_not_called()
+
     async def test_watermark_is_read_from_collection_watermarks(self, mocker) -> None:
         """B7: the incremental floor must not come from Issue.last_fetched_at."""
         collector = LaunchpadCollector(projects=["snapcraft"])
