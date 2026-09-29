@@ -7,6 +7,13 @@ Homepage and triage metrics live in `dashboard/`, one module per metric group
 (`velocity`, `throughput`, `volume`, `untriaged`, `releases`, `spotlights`,
 `health`), with `dashboard_service.py` orchestrating them.
 
+`dashboard/view_models.py` turns the homepage metric payload into the frozen
+dataclasses in `models/views.py` (`DashboardView` and friends). Every derived
+string the dashboard shows — delta labels, tooltips, badge CSS classes,
+formatted ages — is computed there so the template only iterates and prints.
+Badge *classification* stays in `dashboard/badges.py`; the view models only map
+a colour word onto its CSS class.
+
 ## Contract
 
 - May import: `repositories`, `models`, `config`, `settings`.

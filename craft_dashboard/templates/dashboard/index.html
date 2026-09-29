@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Dashboard - craft-dashboard{% endblock %}
+{% macro kpi_delta(delta, testid) %}
+{% if delta %}
+<span class="{{ delta.css_class }}"
+      data-testid="{{ testid }}"
+      title="{{ delta.tooltip }}"
+      data-tooltip="{{ delta.tooltip }}"
+      tabindex="0">{{ delta.text }}</span>
+{% endif %}
+{% endmacro %}
 {% block content %}
 <div class="row" style="margin-bottom: 1.5rem;">
   <div class="col-12">
@@ -11,7 +20,7 @@
 <div class="kpi-deck" style="margin-bottom: 2rem;">
   <!-- PR Velocity & Response -->
   <div class="col-3">
-    <div class="p-card kpi-card">
+    <div class="p-card kpi-card" id="kpi-velocity">
       <div class="kpi-card__header">
         <h3 class="p-card__title u-no-margin--bottom">Open PR age &amp; response</h3>
         <a href="/issues?state=open&issue_type=pull_request&sort=age_desc" class="p-link--soft kpi-card__nav-link">View more &rarr;</a>
@@ -22,57 +31,33 @@
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">Age of PRs from contributors:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ metrics.velocity.contributor_avg_age | format_age_days(use_days=true) if metrics.velocity.contributor_avg_age is not none else "—" }}</span>
-          {% if metrics.velocity.contributor_avg_delta is not none and metrics.velocity.contributor_avg_delta != 0 and metrics.velocity.contributor_avg_baseline is not none %}
-          {% set c_abs = metrics.velocity.contributor_avg_delta | abs %}
-          {% set c_dir = 'higher' if metrics.velocity.contributor_avg_delta > 0 else 'lower' %}
-          {% set c_tip = c_abs ~ " days " ~ c_dir ~ " than the " ~ metrics.velocity.contributor_avg_baseline ~ " day baseline (the monthly average over the last 12 months)" %}
-          <span class="{% if metrics.velocity.contributor_avg_delta < 0 %}kpi-delta--positive{% else %}kpi-delta--negative{% endif %}"
-                title="{{ c_tip }}"
-                data-tooltip="{{ c_tip }}"
-                tabindex="0">({{ '+' if metrics.velocity.contributor_avg_delta > 0 else '' }}{{ metrics.velocity.contributor_avg_delta }}d)</span>
-          {% endif %}
+          <span class="kpi-main-val" data-testid="velocity-contributor-age">{{ view.velocity.contributor.display_age }}</span>
+          {{ kpi_delta(view.velocity.contributor.delta, "velocity-contributor-delta") }}
           <a href="/issues?state=open&issue_type=pull_request&author_role=contributor&sort=age_desc"
              class="p-chip is-dense kpi-chip" title="View open contributor PRs">
-            {{ metrics.velocity.contributor_count }} open
+            {{ view.velocity.contributor.count_label }}
           </a>
         </div>
       </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">Time to 1st response for contributors:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ (metrics.velocity.first_response_avg_days | format_age_days(use_days=true)) ~ " wait" if metrics.velocity.first_response_avg_days is not none else "—" }}</span>
-          {% if metrics.velocity.first_response_avg_delta is not none and metrics.velocity.first_response_avg_delta != 0 and metrics.velocity.first_response_avg_baseline is not none %}
-          {% set f_abs = metrics.velocity.first_response_avg_delta | abs %}
-          {% set f_dir = 'higher' if metrics.velocity.first_response_avg_delta > 0 else 'lower' %}
-          {% set f_tip = f_abs ~ " days " ~ f_dir ~ " than the " ~ metrics.velocity.first_response_avg_baseline ~ " day baseline (the monthly average over the last 12 months)" %}
-          <span class="{% if metrics.velocity.first_response_avg_delta < 0 %}kpi-delta--positive{% else %}kpi-delta--negative{% endif %}"
-                title="{{ f_tip }}"
-                data-tooltip="{{ f_tip }}"
-                tabindex="0">({{ '+' if metrics.velocity.first_response_avg_delta > 0 else '' }}{{ metrics.velocity.first_response_avg_delta }}d)</span>
-          {% endif %}
+          <span class="kpi-main-val" data-testid="velocity-first-response">{{ view.velocity.first_response.display_age }}</span>
+          {{ kpi_delta(view.velocity.first_response.delta, "velocity-first-response-delta") }}
           <a href="/issues?state=open&issue_type=pull_request&author_role=contributor&action=needs_review"
              class="p-chip is-dense kpi-chip" title="Contributor PRs awaiting first maintainer review">
-            {{ metrics.velocity.first_response_waiting_count }} unreviewed
+            {{ view.velocity.first_response.count_label }}
           </a>
         </div>
       </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">Age of all PRs:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ metrics.velocity.overall_avg_age | format_age_days(use_days=true) if metrics.velocity.overall_avg_age is not none else "—" }}</span>
-          {% if metrics.velocity.overall_avg_delta is not none and metrics.velocity.overall_avg_delta != 0 and metrics.velocity.overall_avg_baseline is not none %}
-          {% set o_abs = metrics.velocity.overall_avg_delta | abs %}
-          {% set o_dir = 'higher' if metrics.velocity.overall_avg_delta > 0 else 'lower' %}
-          {% set o_tip = o_abs ~ " days " ~ o_dir ~ " than the " ~ metrics.velocity.overall_avg_baseline ~ " day baseline (the monthly average over the last 12 months)" %}
-          <span class="{% if metrics.velocity.overall_avg_delta < 0 %}kpi-delta--positive{% else %}kpi-delta--negative{% endif %}"
-                title="{{ o_tip }}"
-                data-tooltip="{{ o_tip }}"
-                tabindex="0">({{ '+' if metrics.velocity.overall_avg_delta > 0 else '' }}{{ metrics.velocity.overall_avg_delta }}d)</span>
-          {% endif %}
+          <span class="kpi-main-val" data-testid="velocity-overall-age">{{ view.velocity.overall.display_age }}</span>
+          {{ kpi_delta(view.velocity.overall.delta, "velocity-overall-delta") }}
           <a href="/issues?state=open&issue_type=pull_request&sort=age_desc"
              class="p-chip is-dense kpi-chip" title="View all open PRs">
-            {{ metrics.velocity.overall_count }} open
+            {{ view.velocity.overall.count_label }}
           </a>
         </div>
       </div>
@@ -81,7 +66,7 @@
 
   <!-- Resolution Throughput -->
   <div class="col-3">
-    <div class="p-card kpi-card">
+    <div class="p-card kpi-card" id="kpi-throughput">
       <div class="kpi-card__header">
         <h3 class="p-card__title u-no-margin--bottom">Resolution throughput</h3>
         <a href="/stats/trends" class="p-link--soft kpi-card__nav-link">View more &rarr;</a>
@@ -92,24 +77,16 @@
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">Last 30 days:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ "{:,}".format(metrics.throughput.total_30d) }}</span>
-          {% if metrics.throughput.total_monthly_delta is defined and metrics.throughput.total_monthly_delta is not none and metrics.throughput.total_monthly_delta != 0 %}
-          {% set tp_abs = metrics.throughput.total_monthly_delta | abs %}
-          {% set tp_dir = 'higher' if metrics.throughput.total_monthly_delta > 0 else 'lower' %}
-          {% set tp_tip = tp_abs ~ " items " ~ tp_dir ~ " than the " ~ '{:,}'.format(metrics.throughput.total_monthly_avg) ~ " item baseline (the monthly average over the last 12 months)" %}
-          <span class="{% if metrics.throughput.total_monthly_delta > 0 %}kpi-delta--positive{% else %}kpi-delta--negative{% endif %}"
-                title="{{ tp_tip }}"
-                data-tooltip="{{ tp_tip }}"
-                tabindex="0">({{ '+' if metrics.throughput.total_monthly_delta > 0 else '' }}{{ metrics.throughput.total_monthly_delta }}/mo)</span>
-          {% endif %}
-          <span class="kpi-sub-text">({{ "{:,}".format(metrics.throughput.issues_30d) }} issues, {{ "{:,}".format(metrics.throughput.prs_30d) }} PRs)</span>
+          <span class="kpi-main-val" data-testid="throughput-total-30d">{{ view.throughput.total_30d }}</span>
+          {{ kpi_delta(view.throughput.delta, "throughput-delta") }}
+          <span class="kpi-sub-text">({{ view.throughput.issues_30d }} issues, {{ view.throughput.prs_30d }} PRs)</span>
         </div>
       </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">Last year:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ "{:,}".format(metrics.throughput.total_365d) }}</span>
-          <span class="kpi-sub-text">({{ "{:,}".format(metrics.throughput.issues_365d) }} issues, {{ "{:,}".format(metrics.throughput.prs_365d) }} PRs)</span>
+          <span class="kpi-main-val" data-testid="throughput-total-365d">{{ view.throughput.total_365d }}</span>
+          <span class="kpi-sub-text">({{ view.throughput.issues_365d }} issues, {{ view.throughput.prs_365d }} PRs)</span>
         </div>
       </div>
     </div>
@@ -117,7 +94,7 @@
 
   <!-- Untriaged Backlog -->
   <div class="col-3">
-    <div class="p-card kpi-card">
+    <div class="p-card kpi-card" id="kpi-untriaged">
       <div class="kpi-card__header">
         <h3 class="p-card__title u-no-margin--bottom">Untriaged backlog</h3>
         <a href="/issues?state=open&action=needs_triage" class="p-link--soft kpi-card__nav-link">View more &rarr;</a>
@@ -129,20 +106,20 @@
         <span class="kpi-metric-label">Issues:</span>
         <div class="kpi-metric-values">
           <a href="/issues?state=open&issue_type=issue&action=needs_triage"
-             class="kpi-main-val" title="Open untriaged issues">
-            {{ "{:,}".format(metrics.untriaged.issues_count) }}
+             class="kpi-main-val" data-testid="untriaged-issues-count" title="Open untriaged issues">
+            {{ view.untriaged.issues.count }}
           </a>
-          <span class="kpi-sub-text">(<span class="{% if metrics.untriaged.issues_30d_new > 0 %}kpi-delta--positive{% elif metrics.untriaged.issues_30d_new < 0 %}kpi-delta--negative{% endif %}">+{{ metrics.untriaged.issues_30d_new }}</span> in 30d)</span>
+          <span class="kpi-sub-text">(<span class="{{ view.untriaged.issues.new_30d_css_class }}" data-testid="untriaged-issues-new">{{ view.untriaged.issues.new_30d_text }}</span> in 30d)</span>
         </div>
       </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">PRs:</span>
         <div class="kpi-metric-values">
           <a href="/issues?state=open&issue_type=pull_request&action=needs_review"
-             class="kpi-main-val" title="Open untriaged PRs">
-            {{ "{:,}".format(metrics.untriaged.prs_count) }}
+             class="kpi-main-val" data-testid="untriaged-prs-count" title="Open untriaged PRs">
+            {{ view.untriaged.prs.count }}
           </a>
-          <span class="kpi-sub-text">(<span class="{% if metrics.untriaged.prs_30d_new > 0 %}kpi-delta--positive{% elif metrics.untriaged.prs_30d_new < 0 %}kpi-delta--negative{% endif %}">+{{ metrics.untriaged.prs_30d_new }}</span> in 30d)</span>
+          <span class="kpi-sub-text">(<span class="{{ view.untriaged.prs.new_30d_css_class }}" data-testid="untriaged-prs-new">{{ view.untriaged.prs.new_30d_text }}</span> in 30d)</span>
         </div>
       </div>
     </div>
@@ -150,7 +127,7 @@
 
   <!-- All-Time Volume -->
   <div class="col-3">
-    <div class="p-card kpi-card">
+    <div class="p-card kpi-card" id="kpi-volume">
       <div class="kpi-card__header">
         <h3 class="p-card__title u-no-margin--bottom">All-time volume</h3>
         <a href="/stats/trends" class="p-link--soft kpi-card__nav-link">View more &rarr;</a>
@@ -161,40 +138,34 @@
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">Issues:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ "{:,}".format(metrics.volume.open_issues) }} open</span>
-          {% set iss_net = metrics.volume.net_open_issues_30d %}
-          {% set iss_sign = '+' if iss_net > 0 else '' %}
-          {% set iss_tip = "Net change in open issues over the last 30 days (" ~ metrics.volume.created_issues_30d ~ " opened − " ~ metrics.volume.issues_30d_closed ~ " closed = " ~ iss_sign ~ iss_net ~ " net change)" %}
-          <span class="kpi-sub-text">(<span class="{% if iss_net < 0 %}kpi-delta--positive{% elif iss_net > 0 %}kpi-delta--negative{% endif %}"
-                                            title="{{ iss_tip }}"
-                                            data-tooltip="{{ iss_tip }}"
-                                            tabindex="0">{{ iss_sign }}{{ "{:,}".format(iss_net) }} in 30d</span>) / {{ "{:,}".format(metrics.volume.closed_issues) }} closed</span>
+          <span class="kpi-main-val" data-testid="volume-issues-open">{{ view.volume.issues.total }}</span>
+          <span class="kpi-sub-text">(<span class="{{ view.volume.issues.net.css_class }}"
+                                            data-testid="volume-issues-net"
+                                            title="{{ view.volume.issues.net.tooltip }}"
+                                            data-tooltip="{{ view.volume.issues.net.tooltip }}"
+                                            tabindex="0">{{ view.volume.issues.net.text }}</span>) / {{ view.volume.issues.closed }} closed</span>
         </div>
       </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">PRs:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ "{:,}".format(metrics.volume.open_prs) }} open</span>
-          {% set prs_net = metrics.volume.net_open_prs_30d %}
-          {% set prs_sign = '+' if prs_net > 0 else '' %}
-          {% set prs_tip = "Net change in open PRs over the last 30 days (" ~ metrics.volume.created_prs_30d ~ " opened − " ~ metrics.volume.prs_30d_closed ~ " closed = " ~ prs_sign ~ prs_net ~ " net change)" %}
-          <span class="kpi-sub-text">(<span class="{% if prs_net < 0 %}kpi-delta--positive{% elif prs_net > 0 %}kpi-delta--negative{% endif %}"
-                                            title="{{ prs_tip }}"
-                                            data-tooltip="{{ prs_tip }}"
-                                            tabindex="0">{{ prs_sign }}{{ "{:,}".format(prs_net) }} in 30d</span>) / {{ "{:,}".format(metrics.volume.closed_prs) }} closed</span>
+          <span class="kpi-main-val" data-testid="volume-prs-open">{{ view.volume.prs.total }}</span>
+          <span class="kpi-sub-text">(<span class="{{ view.volume.prs.net.css_class }}"
+                                            data-testid="volume-prs-net"
+                                            title="{{ view.volume.prs.net.tooltip }}"
+                                            data-tooltip="{{ view.volume.prs.net.tooltip }}"
+                                            tabindex="0">{{ view.volume.prs.net.text }}</span>) / {{ view.volume.prs.closed }} closed</span>
         </div>
       </div>
       <div class="kpi-metric-row">
         <span class="kpi-metric-label">Combined Total:</span>
         <div class="kpi-metric-values">
-          <span class="kpi-main-val">{{ "{:,}".format(metrics.volume.total_items) }}</span>
-          {% set tot_net = metrics.volume.net_open_total_30d %}
-          {% set tot_sign = '+' if tot_net > 0 else '' %}
-          {% set tot_tip = "Net change in open backlog over the last 30 days (" ~ metrics.volume.created_total_30d ~ " opened − " ~ metrics.volume.total_30d_closed ~ " closed = " ~ tot_sign ~ tot_net ~ " net change)" %}
-          <span class="kpi-sub-text">work items (<span class="{% if tot_net < 0 %}kpi-delta--positive{% elif tot_net > 0 %}kpi-delta--negative{% endif %}"
-                                                      title="{{ tot_tip }}"
-                                                      data-tooltip="{{ tot_tip }}"
-                                                      tabindex="0">{{ tot_sign }}{{ "{:,}".format(tot_net) }} in 30d</span>)</span>
+          <span class="kpi-main-val" data-testid="volume-total">{{ view.volume.combined.total }}</span>
+          <span class="kpi-sub-text">work items (<span class="{{ view.volume.combined.net.css_class }}"
+                                                      data-testid="volume-total-net"
+                                                      title="{{ view.volume.combined.net.tooltip }}"
+                                                      data-tooltip="{{ view.volume.combined.net.tooltip }}"
+                                                      tabindex="0">{{ view.volume.combined.net.text }}</span>)</span>
         </div>
       </div>
     </div>
@@ -205,7 +176,7 @@
 <div class="row" style="margin-bottom: 2rem;">
   <!-- ROW 1 LEFT: Apps with Least-Recent Releases -->
   <div class="col-6">
-    <div class="p-card spotlight-card">
+    <div class="p-card spotlight-card" id="spotlight-least-recent-releases">
       <div class="spotlight-header">
         <h3 class="p-card__title u-no-margin--bottom">Apps with least-recent releases</h3>
         <a href="/stats/releases" class="p-link--soft spotlight-nav-link">View all in Releases &rarr;</a>
@@ -226,8 +197,8 @@
           </tr>
         </thead>
         <tbody>
-          {% for app in metrics.least_recent_apps %}
-          <tr>
+          {% for app in view.least_recent_apps %}
+          <tr data-testid="least-recent-release-row">
             <td class="text-truncate" title="{{ app.project_name }}">
               <a href="/issues?project={{ app.project_name }}&state=open"><strong>{{ app.project_name }}</strong></a>
             </td>
@@ -238,15 +209,11 @@
               <code>{{ app.version }}</code>
               {% endif %}
             </td>
+            <td>{{ app.released_display }}</td>
             <td>
-              {% if app.released_at %}
-              {{ app.released_at.strftime("%Y-%m-%d") }}
-              {% else %}—{% endif %}
-            </td>
-            <td>
-              {% if app.days_ago is not none %}
-              <span class="dash-pill dash-pill--{{ app.badge_color }}" title="{{ app.days_ago }} days ago">
-                {{ app.days_ago | format_age_days }} ago
+              {% if app.age_label %}
+              <span class="{{ app.badge_css_class }}" data-testid="release-cadence-pill" title="{{ app.age_tooltip }}">
+                {{ app.age_label }}
               </span>
               {% else %}
               <span class="p-text--muted">—</span>
@@ -265,7 +232,7 @@
 
   <!-- ROW 1 RIGHT: Aging Contributor PRs (Attention Needed) -->
   <div class="col-6">
-    <div class="p-card spotlight-card">
+    <div class="p-card spotlight-card" id="spotlight-aging-prs">
       <div class="spotlight-header">
         <h3 class="p-card__title u-no-margin--bottom">Aging contributor PRs</h3>
         <a href="/issues?state=open&issue_type=pull_request&author_role=contributor&sort=age_desc"
@@ -287,18 +254,18 @@
           </tr>
         </thead>
         <tbody>
-          {% for pr in metrics.aging_prs %}
-          <tr>
-            <td class="text-truncate" title="{{ pr.project_name }} #{{ pr.external_id }}">
+          {% for pr in view.aging_prs %}
+          <tr data-testid="aging-pr-row">
+            <td class="text-truncate" title="{{ pr.reference_label }}">
               <a href="/issues/{{ pr.project_name | urlencode_path }}/{{ pr.external_id }}">
                 <strong>{{ pr.project_name }}</strong> #{{ pr.external_id }}
               </a>
             </td>
-            <td class="text-truncate" title="{{ pr.author or '—' }}">{{ pr.author or "—" }}</td>
+            <td class="text-truncate" title="{{ pr.author_display }}">{{ pr.author_display }}</td>
             <td class="text-truncate" title="{{ pr.title }}">{{ pr.title }}</td>
             <td>
-              <span class="dash-pill dash-pill--red" title="{{ pr.days_old }} days">
-                {{ pr.days_old | format_age_days }}
+              <span class="{{ pr.badge_css_class }}" data-testid="aging-pr-age" title="{{ pr.age_tooltip }}">
+                {{ pr.display_age }}
               </span>
             </td>
           </tr>
@@ -316,7 +283,7 @@
 <div class="row" style="margin-bottom: 2rem;">
   <!-- ROW 2 LEFT: Needs Triage (Top 5 Oldest Untriaged Issues) -->
   <div class="col-6">
-    <div class="p-card spotlight-card">
+    <div class="p-card spotlight-card" id="spotlight-needs-triage">
       <div class="spotlight-header">
         <h3 class="p-card__title u-no-margin--bottom">Need triage (oldest)</h3>
         <a href="/issues?state=open&issue_type=issue&action=needs_triage"
@@ -338,18 +305,18 @@
           </tr>
         </thead>
         <tbody>
-          {% for issue in metrics.needs_triage_issues %}
-          <tr>
-            <td class="text-truncate" title="{{ issue.project_name }} #{{ issue.external_id }}">
+          {% for issue in view.needs_triage_issues %}
+          <tr data-testid="needs-triage-row">
+            <td class="text-truncate" title="{{ issue.reference_label }}">
               <a href="/issues/{{ issue.project_name | urlencode_path }}/{{ issue.external_id }}">
                 <strong>{{ issue.project_name }}</strong> #{{ issue.external_id }}
               </a>
             </td>
-            <td class="text-truncate" title="{{ issue.author or '—' }}">{{ issue.author or "—" }}</td>
+            <td class="text-truncate" title="{{ issue.author_display }}">{{ issue.author_display }}</td>
             <td class="text-truncate" title="{{ issue.title }}">{{ issue.title }}</td>
             <td>
-              <span class="dash-pill dash-pill--yellow" title="{{ issue.days_old }} days">
-                {{ issue.days_old | format_age_days }}
+              <span class="{{ issue.badge_css_class }}" data-testid="needs-triage-age" title="{{ issue.age_tooltip }}">
+                {{ issue.display_age }}
               </span>
             </td>
           </tr>
@@ -365,7 +332,7 @@
 
   <!-- ROW 2 RIGHT: Quick-Wins Radar (Top 5 High Impact / Low Complexity) -->
   <div class="col-6">
-    <div class="p-card spotlight-card">
+    <div class="p-card spotlight-card" id="spotlight-quick-wins">
       <div class="spotlight-header">
         <h3 class="p-card__title u-no-margin--bottom">Quick wins</h3>
         <a href="/issues?state=open&quick_win_min=50&sort=quick_win_desc"
@@ -385,17 +352,17 @@
           </tr>
         </thead>
         <tbody>
-          {% for qw in metrics.quick_wins %}
-          <tr>
-            <td class="text-truncate" title="{{ qw.project_name }} #{{ qw.external_id }}">
+          {% for qw in view.quick_wins %}
+          <tr data-testid="quick-win-row">
+            <td class="text-truncate" title="{{ qw.reference_label }}">
               <a href="/issues/{{ qw.project_name | urlencode_path }}/{{ qw.external_id }}">
                 <strong>{{ qw.project_name }}</strong> #{{ qw.external_id }}
               </a>
             </td>
             <td class="text-truncate" title="{{ qw.title }}">{{ qw.title }}</td>
             <td>
-              <span class="dash-pill dash-pill--purple">
-                Score {{ qw.quick_win }}
+              <span class="{{ qw.badge_css_class }}" data-testid="quick-win-score">
+                {{ qw.score_label }}
               </span>
             </td>
           </tr>
@@ -417,8 +384,8 @@
   </div>
 </div>
 
-{% macro render_health_table(project_list) %}
-<table class="p-table--default table-fixed project-health-table u-no-margin--bottom">
+{% macro render_health_table(project_list, testid) %}
+<table class="p-table--default table-fixed project-health-table u-no-margin--bottom" data-testid="{{ testid }}">
   <colgroup>
     <col style="width: 26%;">
     <col style="width: 17%;">
@@ -437,12 +404,12 @@
   </thead>
   <tbody>
     {% for p in project_list %}
-    <tr>
+    <tr data-testid="project-health-row" data-project="{{ p.name }}">
       <td class="text-truncate" title="{{ p.name }}">
         <a href="/issues?project={{ p.name }}&state=open" class="project-name-link">
           <strong>{{ p.name }}</strong>
         </a>
-        <a href="https://github.com/{{ p.github_org }}/{{ p.name }}"
+        <a href="{{ p.github_url }}"
            target="_blank" rel="noopener noreferrer" class="p-link--soft"
            title="View {{ p.name }} on GitHub">
           <i class="p-icon--external-link is-light" style="font-size: 0.8rem; margin-left: 0.25rem;"></i>
@@ -451,14 +418,14 @@
       <td>
         <a href="/issues?project={{ p.name }}&issue_type=issue&state=open"
            class="p-chip is-dense nav-chip" title="Filter open issues">
-          {{ p.open_issues }} issues
+          {{ p.open_issues_label }}
         </a>
       </td>
       <td>
         {% if p.show_prs %}
         <a href="/issues?project={{ p.name }}&issue_type=pull_request&state=open"
            class="p-chip is-dense nav-chip" title="Filter open PRs">
-          {{ p.open_prs }} PRs
+          {{ p.open_prs_label }}
         </a>
         {% else %}
         <span class="p-text--muted">—</span>
@@ -466,19 +433,21 @@
       </td>
       <td>
         <a href="/issues?project={{ p.name }}&action=needs_triage"
-           class="dash-pill dash-pill--{{ p.triage_badge_color }}"
+           class="{{ p.triage_badge_css_class }}"
+           data-testid="project-triage-pill"
            title="Filter untriaged backlog">
-          {{ p.untriaged_count }} untriaged ({{ p.untriaged_pct }}%)
+          {{ p.untriaged_label }}
         </a>
       </td>
       <td>
         {% if p.show_release %}
-        <a href="/stats/releases" class="dash-pill dash-pill--{{ p.release_badge_color }}"
+        <a href="/stats/releases" class="{{ p.release_badge_css_class }}"
+           data-testid="project-release-pill"
            title="View releases">
-          {% if p.latest_release_version %}
-          <code>{{ p.latest_release_version }}</code>
-          {% if p.latest_release_days_ago is not none %}
-          <span title="{{ p.latest_release_days_ago }} days ago">({{ p.latest_release_days_ago | format_age_days }} ago)</span>
+          {% if p.release_version %}
+          <code>{{ p.release_version }}</code>
+          {% if p.release_age_label %}
+          <span title="{{ p.release_age_tooltip }}">{{ p.release_age_label }}</span>
           {% endif %}
           {% else %}
           <span><em>(none)</em></span>
@@ -499,7 +468,7 @@
     <h4>Applications</h4>
   </div>
   <div class="col">
-    {{ render_health_table(metrics.application_projects) }}
+    {{ render_health_table(view.application_projects, "project-health-applications") }}
   </div>
 </div>
 
@@ -510,7 +479,7 @@
     <h4>Libraries</h4>
   </div>
   <div class="col">
-    {{ render_health_table(metrics.library_projects) }}
+    {{ render_health_table(view.library_projects, "project-health-libraries") }}
   </div>
 </div>
 
@@ -521,7 +490,7 @@
     <h4>Other</h4>
   </div>
   <div class="col">
-    {{ render_health_table(metrics.other_projects) }}
+    {{ render_health_table(view.other_projects, "project-health-other") }}
   </div>
 </div>
 {% endblock %}

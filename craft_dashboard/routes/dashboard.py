@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.dependencies import get_config, get_db_session
+from craft_dashboard.services.dashboard.view_models import build_dashboard_view
 from craft_dashboard.services.dashboard_service import DashboardService
 
 if TYPE_CHECKING:
@@ -43,6 +44,7 @@ async def index(
         "dashboard/index.html",
         {
             "metrics": metrics,
+            "view": build_dashboard_view(metrics),
             "project_count": metrics["project_count"],
             "open_issues": metrics["volume"]["open_issues"],
             "open_prs": metrics["volume"]["open_prs"],

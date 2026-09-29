@@ -15,6 +15,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 
+from tests.helpers.html import normalize_text, parse_html
+
 if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"
 
@@ -173,3 +175,114 @@ class TestDashboardIndexWithData:
 
         assert response.status_code == 200
         assert "snapcraft" in response.text
+
+
+class TestDashboardSemanticStructure:
+    """Structural assertions on the rendered dashboard markup."""
+
+    @pytest.fixture
+    async def seeded(self, test_db_session) -> None:
+        p = Project(name="snapcraft", category="application", github_org="canonical")
+        test_db_session.add(p)
+        await test_db_session.flush()
+
+        for i, (itype, state) in enumerate(
+            [
+                ("issue", "open"),
+                ("issue", "open"),
+                ("pull_request", "open"),
+                ("issue", "closed"),
+            ]
+        ):
+            test_db_session.add(
+                Issue(
+                    project_id=p.id,
+                    source="github",
+                    external_id=str(i),
+                    issue_type=itype,
+                    title=f"test {i}",
+                    state=state,
+                    labels=[],
+                    last_fetched_at=datetime.now(tz=UTC),
+                )
+            )
+
+        await test_db_session.commit()
+
+    def _render(self, session) -> str:
+        app = create_app()
+        app.router.lifespan_context = _noop_lifespan
+
+        async def _override():
+            yield session
+
+        app.dependency_overrides[get_db_session] = _override
+
+        with TestClient(app) as client:
+            response = client.get("/")
+
+        assert response.status_code == 200
+        return response.text
+
+    def test_kpi_cards_and_spotlights_present(self) -> None:
+        """Each KPI card and spotlight renders with a stable hook."""
+        doc = parse_html(self._render(_DashboardSession()))
+
+        for selector in (
+            "#kpi-velocity",
+            "#kpi-throughput",
+            "#kpi-untriaged",
+            "#kpi-volume",
+            "#spotlight-least-recent-releases",
+            "#spotlight-aging-prs",
+            "#spotlight-needs-triage",
+            "#spotlight-quick-wins",
+            "[data-testid='project-health-applications']",
+            "[data-testid='project-health-libraries']",
+            "[data-testid='project-health-other']",
+        ):
+            assert doc.exists(selector), selector
+
+    def test_empty_dashboard_renders_placeholders(self) -> None:
+        """With no data the KPI values fall back to precomputed placeholders."""
+        doc = parse_html(self._render(_DashboardSession()))
+
+        assert doc.text("[data-testid='velocity-contributor-age']") == "—"
+        assert doc.text("[data-testid='throughput-total-30d']") == "0"
+        assert doc.text("[data-testid='untriaged-issues-new']") == "+0"
+        assert doc.attr("[data-testid='untriaged-issues-new']", "class") == ""
+        assert doc.text("[data-testid='volume-total-net']") == "0 in 30d"
+        assert doc.count("[data-testid='aging-pr-row']") == 0
+
+    def test_volume_net_tooltip_is_precomputed(self) -> None:
+        """The net-change tooltip is rendered by Python, not assembled in Jinja."""
+        doc = parse_html(self._render(_DashboardSession()))
+
+        tooltip = doc.attr("[data-testid='volume-issues-net']", "title")
+        assert tooltip == (
+            "Net change in open issues over the last 30 days "
+            "(0 opened \u2212 0 closed = 0 net change)"
+        )
+        assert doc.attr("[data-testid='volume-issues-net']", "data-tooltip") == tooltip
+
+    def test_project_health_row_labels_and_badges(
+        self, test_db_session, seeded
+    ) -> None:
+        """A seeded project renders labels and badge classes from the view model."""
+        doc = parse_html(self._render(test_db_session))
+        row = doc.scope(
+            "[data-testid='project-health-applications'] "
+            "[data-testid='project-health-row'][data-project='snapcraft']"
+        )
+
+        assert "2 issues" in row.text("a.nav-chip")
+        pill = row.require("[data-testid='project-triage-pill']")
+        assert "dash-pill--green" in " ".join(pill["class"])
+        assert normalize_text(pill.get_text(" ")) == "3 untriaged (100.0%)"
+
+    def test_project_health_links_to_github(self, test_db_session, seeded) -> None:
+        """The GitHub link is built in Python from the project's org."""
+        doc = parse_html(self._render(test_db_session))
+        row = doc.scope("[data-testid='project-health-row'][data-project='snapcraft']")
+
+        assert "https://github.com/canonical/snapcraft" in row.links()

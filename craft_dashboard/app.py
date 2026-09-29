@@ -34,6 +34,7 @@ from craft_dashboard.routes.eval_api import router as eval_api_router
 from craft_dashboard.routes.issues import router as issues_router
 from craft_dashboard.routes.stats import router as stats_router
 from craft_dashboard.settings import Settings
+from craft_dashboard.utils.formatting import format_age_days
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 _DURATION_MINUTE = 60
 _DURATION_HOUR = 3600
-_DAYS_PER_YEAR = 365.0
 
 
 def _format_duration_seconds(seconds: float) -> str:
@@ -140,21 +140,7 @@ def _format_duration_seconds(seconds: float) -> str:
     return f"{hours}h {mins}m {secs}s"
 
 
-def _format_age_days(days: float | None, *, use_days: bool = False) -> str:
-    """Format elapsed days into human-readable compact string (e.g. '42d', '1.2y', '10.4y')."""
-    if days is None:
-        return "—"
-    try:
-        d = float(days)
-    except (ValueError, TypeError):
-        return "—"
-    if d < _DAYS_PER_YEAR:
-        suffix = " days" if use_days else "d"
-        return f"{int(round(d))}{suffix}"
-    years = round(d / _DAYS_PER_YEAR, 1)
-    if years == int(years):
-        return f"{int(years)} years" if use_days else f"{int(years)}y"
-    return f"{years} years" if use_days else f"{years}y"
+_format_age_days = format_age_days
 
 
 def _ref_external_url(ref: str | None) -> str | None:
