@@ -17,6 +17,8 @@ Application settings come from `craft_dashboard/settings.py` and `.env.example`.
 | `LOG_LEVEL` | `INFO` | Python logging level. |
 | `EVAL_API_TOKEN` | empty | Bearer token for `/api/eval/*`. |
 | `EVAL_TRANSCRIPT_RETENTION_DAYS` | `30` | Retention window for non-latest evaluation transcripts. |
+| `EVAL_RETENTION_DAYS` | `90` | Retention window for superseded evaluations. Evaluations marked `latest` are never deleted. |
+| `SNAPSHOT_RETENTION_DAYS` | `365` | Retention window for daily snapshots. |
 | `EVAL_DAILY_SPEND_CAP_USD` | `0.0` | Daily evaluation spend cap; zero disables the cap. |
 | `RELATED_ISSUES_TOP_N` | `10` | Related-issue result limit on issue detail pages. |
 | `RELATED_ISSUES_SIMILARITY_THRESHOLD` | `0.70` | Related-issue embedding similarity floor. |
@@ -111,7 +113,8 @@ The LLM worker also reads these variables in `scripts/llm/cli.py`:
 | `scripts/collect_data.py` | `--source github|launchpad|all`, `--limit`, repeatable `--project`, `--verbose`/`-v`, `--full-refresh`, `--force-schedule`, `--mode open|full|all|rotation` |
 | `scripts/collect_forum_data.py` | `--mode backfill|refresh|all`, repeatable `--forum`, `--refresh-interval-days`, `--years-lookback`, `--max-requests-per-batch`, `--verbose`/`-v` |
 | `scripts/backfill_snapshots.py` | No Click options. Uses `DATABASE_URL`. |
-| `scripts/gc_transcripts.py` | No Click options. Uses settings environment. |
+| `scripts/gc.py` | `--dry-run` reports what each retention policy would remove. |
+| `scripts/gc_transcripts.py` | Compatibility alias for `scripts/gc.py`. |
 | `scripts/lp_bug_report.py` | No Click options. Uses `DATABASE_URL`. |
 
 ### LLM evaluation
@@ -132,7 +135,7 @@ The repository does not contain production cron files. The deployment repository
 | Full GitHub and Launchpad refresh | `scripts/collect_data.py --source all --mode full` |
 | Rotation refresh | `scripts/collect_data.py --mode rotation` |
 | Forum collection | `scripts/collect_forum_data.py --mode all` |
-| Transcript cleanup | `scripts/gc_transcripts.py` |
+| Retention garbage collection | `scripts/gc_transcripts.py` (runs `scripts/gc.py`) |
 | Mirror sync | `craft-dashboard mirrors sync` |
 | Commit scan | `craft-dashboard commit-scanner run` |
 | Database backup | `pg_dump` against the PostgreSQL container |
