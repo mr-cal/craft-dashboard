@@ -19,6 +19,8 @@ from craft_dashboard.settings import Settings
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tests.helpers.html import parse_html
+
 
 class _IssueSession:
     async def execute(self, _query):
@@ -127,12 +129,16 @@ class TestIssueDetailRoute:
 
         assert response.status_code == 200
         get_issue_detail.assert_awaited_once_with("snapcraft", "321")
-        assert "Support core24 builds end to end" in response.text
-        assert "Regression in the core24 build pipeline." in response.text
-        assert "Earlier summary." in response.text
-        assert "sergio-cazzolato" in response.text
-        assert "https://github.com/canonical/snapcraft/issues/321" in response.text
-        assert "Back to issue list" in response.text
+        doc = parse_html(response)
+        assert doc.text("h2") == "Support core24 builds end to end"
+        history = doc.section_by_heading("Evaluation history")
+        rows = history.texts("tbody tr")
+        assert "Regression in the core24 build pipeline." in rows[0]
+        assert "Earlier summary." in rows[1]
+        metadata = doc.section_by_heading("Metadata")
+        assert metadata.texts("dd")[4] == "sergio-cazzolato"
+        assert "https://github.com/canonical/snapcraft/issues/321" in doc.links()
+        assert any("Back to issue list" in text for text in doc.texts("a"))
 
     def test_issue_detail_returns_404_for_unknown_issue(
         self, test_client: TestClient
@@ -159,7 +165,8 @@ class TestIssueDetailRoute:
             response = test_client.get("/issues/craft-parts/321")
 
         assert response.status_code == 200
-        assert "https://bugs.launchpad.net/craft-parts/+bug/321" in response.text
+        links = parse_html(response).links()
+        assert "https://bugs.launchpad.net/craft-parts/+bug/321" in links
 
     def test_snapcraft_launchpad_redirects_to_slug(
         self, test_client: TestClient
@@ -189,8 +196,10 @@ class TestIssueDetailRoute:
 
         assert response.status_code == 200
         get_detail.assert_awaited_once_with("snapcraft (launchpad)", "1876370")
-        assert "<dd>snapcraft (launchpad)</dd>" in response.text
-        assert "https://bugs.launchpad.net/snapcraft/+bug/1876370" in response.text
+        doc = parse_html(response)
+        metadata = doc.section_by_heading("Metadata")
+        assert metadata.texts("dd")[0] == "snapcraft (launchpad)"
+        assert "https://bugs.launchpad.net/snapcraft/+bug/1876370" in doc.links()
 
     def test_issue_list_slugifies_snapcraft_launchpad_url(
         self, test_client: TestClient
@@ -223,7 +232,7 @@ class TestIssueDetailRoute:
             response = test_client.get("/issues")
 
         assert response.status_code == 200
-        assert 'href="/issues/snapcraft-launchpad/1876370"' in response.text
+        assert "/issues/snapcraft-launchpad/1876370" in parse_html(response).links()
 
     def test_issue_detail_renders_activity_history(
         self, test_client: TestClient
@@ -256,9 +265,11 @@ class TestIssueDetailRoute:
 
         assert response.status_code == 200
         get_history.assert_awaited_once_with("snapcraft", "321")
-        assert "Update history" in response.text
-        assert "review approved" in response.text
-        assert "opened" in response.text
+        update_history = parse_html(response).section_by_heading("Update history")
+        assert update_history.texts("tbody tr td:nth-of-type(2)") == [
+            "review approved",
+            "opened",
+        ]
 
     def test_issue_detail_shows_no_history_message_when_empty(
         self, test_client: TestClient
@@ -278,7 +289,9 @@ class TestIssueDetailRoute:
             response = test_client.get("/issues/snapcraft/321")
 
         assert response.status_code == 200
-        assert "No update history recorded yet" in response.text
+        update_history = parse_html(response).section_by_heading("Update history")
+        assert update_history.text("p") == "No update history recorded yet."
+        assert update_history.count("tbody tr") == 0
 
     def test_issue_list_titles_link_to_issue_detail(
         self, test_client: TestClient
@@ -311,7 +324,7 @@ class TestIssueDetailRoute:
             response = test_client.get("/issues")
 
         assert response.status_code == 200
-        assert 'href="/issues/snapcraft/321"' in response.text
+        assert "/issues/snapcraft/321" in parse_html(response).links()
 
 
 _RELATED = [
@@ -345,9 +358,10 @@ class TestRelatedIssuesSection:
             response = test_client.get("/issues/snapcraft/321")
 
         assert response.status_code == 200
-        assert "Related issues" in response.text
-        assert "Similar bug in core22 builds" in response.text
-        assert "91%" in response.text
+        related = parse_html(response).section_by_heading("Related issues")
+        assert related.count("tbody tr") == 1
+        assert "Similar bug in core22 builds" in related.text("tbody tr")
+        assert related.text(".similarity-label") == "91%"
 
     def test_related_issues_empty_no_embedding_shows_notice(
         self, test_client: TestClient
@@ -368,8 +382,9 @@ class TestRelatedIssuesSection:
             response = test_client.get("/issues/snapcraft/321")
 
         assert response.status_code == 200
-        assert "Related issues" in response.text
-        assert "No embedding available" in response.text
+        related = parse_html(response).section_by_heading("Related issues")
+        assert related.count("tbody tr") == 0
+        assert related.has_text("No embedding available", "p")
 
     def test_related_issues_empty_with_embedding_shows_threshold_notice(
         self, test_client: TestClient
@@ -397,8 +412,12 @@ class TestRelatedIssuesSection:
             response = test_client.get("/issues/snapcraft/321")
 
         assert response.status_code == 200
-        assert "Related issues" in response.text
-        assert "No related issues found above the similarity threshold" in response.text
+        related = parse_html(response).section_by_heading("Related issues")
+        assert related.count("tbody tr") == 0
+        assert (
+            related.text("p")
+            == "No related issues found above the similarity threshold."
+        )
 
 
 class TestOutdatedEvaluationNotice:
@@ -453,7 +472,7 @@ class TestOutdatedEvaluationNotice:
             response = test_client.get("/issues/snapcraft/321")
 
         assert response.status_code == 200
-        assert "evaluation-outdated-notice" not in response.text
+        assert not parse_html(response).exists(".evaluation-outdated-notice")
 
     def test_outdated_notice_shown_when_version_is_stale(
         self, test_client: TestClient
@@ -488,7 +507,7 @@ class TestOutdatedEvaluationNotice:
             response = test_client.get("/issues/snapcraft/321")
 
         assert response.status_code == 200
-        assert "evaluation-outdated-notice" in response.text
+        assert parse_html(response).count(".evaluation-outdated-notice") == 1
 
     def test_outdated_notice_for_pr_eval_version(self, test_client: TestClient) -> None:
         pr_detail_current = {
@@ -523,7 +542,7 @@ class TestOutdatedEvaluationNotice:
             response = test_client.get("/issues/snapcraft/321")
 
         assert response.status_code == 200
-        assert "evaluation-outdated-notice" not in response.text
+        assert not parse_html(response).exists(".evaluation-outdated-notice")
 
         pr_detail_stale = {
             **pr_detail_current,
@@ -555,7 +574,7 @@ class TestOutdatedEvaluationNotice:
             response = test_client.get("/issues/snapcraft/321")
 
         assert response.status_code == 200
-        assert "evaluation-outdated-notice" in response.text
+        assert parse_html(response).count(".evaluation-outdated-notice") == 1
 
     def test_outdated_notice_shown_when_hash_mismatch(
         self, test_client: TestClient
@@ -591,7 +610,7 @@ class TestOutdatedEvaluationNotice:
             response = test_client.get("/issues/snapcraft/321")
 
         assert response.status_code == 200
-        assert "evaluation-outdated-notice" in response.text
+        assert parse_html(response).count(".evaluation-outdated-notice") == 1
 
 
 class TestRelatedLinksSection:
@@ -630,10 +649,11 @@ class TestRelatedLinksSection:
             response = test_client.get("/issues/snapcraft/321")
 
         assert response.status_code == 200
-        assert "Related work" in response.text
-        assert "Likely Fixed By" in response.text
-        assert (
-            'href="https://github.com/canonical/craft-providers/issues/823"'
-            in response.text
+        related_work = parse_html(response).section_by_heading("Related work")
+        item = related_work.text("li")
+        assert item.startswith("Likely Fixed By : craft-providers#823")
+        assert "(confidence 85%)" in item
+        assert related_work.attr("li a", "href") == (
+            "https://github.com/canonical/craft-providers/issues/823"
         )
-        assert "craft-providers#823" in response.text
+        assert related_work.text("li a") == "craft-providers#823"

@@ -1,10 +1,8 @@
 """Integration tests for dashboard and issues routes with real DB data."""
 
-import re
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from html.parser import HTMLParser
 
 import pytest
 from craft_dashboard.app import create_app
@@ -20,6 +18,7 @@ from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.factories import make_evaluation, make_issue, make_project
+from tests.helpers.html import parse_html
 
 if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
     SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"
@@ -106,38 +105,6 @@ async def _seed_entities(test_db_session: AsyncSession, *entities: object) -> No
     await test_db_session.commit()
 
 
-class _HTMLCollector(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.elements = []
-        self._stack = []
-
-    def handle_starttag(self, tag, attrs) -> None:
-        element = {"tag": tag, "attrs": dict(attrs), "text": ""}
-        self.elements.append(element)
-        self._stack.append(element)
-
-    def handle_endtag(self, tag) -> None:
-        for index in range(len(self._stack) - 1, -1, -1):
-            if self._stack[index]["tag"] == tag:
-                del self._stack[index:]
-                break
-
-    def handle_data(self, data) -> None:
-        if self._stack and data.strip():
-            self._stack[-1]["text"] += data.strip()
-
-
-def _parse_html(html):
-    parser = _HTMLCollector()
-    parser.feed(html)
-    return parser.elements
-
-
-def _has_class(element, class_name):
-    return class_name in element["attrs"].get("class", "").split()
-
-
 class TestDashboardWithData:
     @pytest.fixture
     async def seeded(self, test_db_session: AsyncSession) -> None:
@@ -149,7 +116,8 @@ class TestDashboardWithData:
         response = test_client.get("/")
 
         assert response.status_code == 200
-        assert "snapcraft" in response.text
+        doc = parse_html(response)
+        assert doc.has_text("snapcraft", ".project-health-table")
 
     def test_dashboard_empty_db(self, test_client: TestClient) -> None:
         response = test_client.get("/")
@@ -168,13 +136,15 @@ class TestIssuesPageWithData:
         response = test_client.get("/issues")
 
         assert response.status_code == 200
-        assert "first dashboard issue" in response.text
+        doc = parse_html(response)
+        assert doc.has_text("first dashboard issue", "#issue-table")
 
     def test_issues_table_partial(self, test_client: TestClient, seeded: None) -> None:
         response = test_client.get("/issues/table")
 
         assert response.status_code == 200
-        assert "first dashboard issue" in response.text
+        doc = parse_html(response)
+        assert doc.has_text("first dashboard issue", "#issue-table")
 
     def test_issues_filter_by_project(
         self, test_client: TestClient, seeded: None
@@ -182,7 +152,8 @@ class TestIssuesPageWithData:
         response = test_client.get("/issues", params={"project": "snapcraft"})
 
         assert response.status_code == 200
-        assert "first dashboard issue" in response.text
+        doc = parse_html(response)
+        assert doc.has_text("first dashboard issue", "#issue-table")
 
     def test_issues_filter_nonexistent(
         self, test_client: TestClient, seeded: None
@@ -190,8 +161,11 @@ class TestIssuesPageWithData:
         response = test_client.get("/issues", params={"project": "nonexistent"})
 
         assert response.status_code == 200
-        assert "first dashboard issue" not in response.text
-        assert "No issues found matching the current filters." in response.text
+        doc = parse_html(response)
+        assert not doc.has_text("first dashboard issue", "#issue-table")
+        assert doc.has_text(
+            "No issues found matching the current filters.", "#issue-table"
+        )
 
     def test_issues_table_with_comma_separated_projects(
         self, test_client: TestClient, seeded: None
@@ -243,14 +217,12 @@ class TestIssuesPageMarkup:
         response = test_client.get("/issues")
 
         assert response.status_code == 200
-        elements = _parse_html(response.text)
-        htmx_elements = [
-            element for element in elements if "hx-get" in element["attrs"]
-        ]
+        doc = parse_html(response)
+        htmx_elements = doc.select("[hx-get]")
 
         assert htmx_elements
         assert all(
-            element["attrs"].get("hx-indicator") == "#loading-indicator"
+            element.get("hx-indicator") == "#loading-indicator"
             for element in htmx_elements
         )
 
@@ -260,34 +232,16 @@ class TestIssuesPageMarkup:
         response = test_client.get("/issues")
 
         assert response.status_code == 200
-        elements = _parse_html(response.text)
-        input_wraps = [
-            element
-            for element in elements
-            if element["tag"] == "div"
-            and _has_class(element, "multiselect__input-wrap")
-        ]
-        option_lists = [
-            element
-            for element in elements
-            if element["tag"] == "div" and _has_class(element, "multiselect__options")
-        ]
-        options = [
-            element
-            for element in elements
-            if element["tag"] == "label" and _has_class(element, "multiselect__option")
-        ]
+        doc = parse_html(response)
+        input_wraps = doc.select("div.multiselect__input-wrap")
+        option_lists = doc.select("div.multiselect__options")
+        options = doc.select("label.multiselect__option")
 
         assert len(input_wraps) == 6
-        assert all(
-            element["attrs"].get("role") == "combobox" for element in input_wraps
-        )
-        assert all("aria-expanded" in element["attrs"] for element in input_wraps)
-        assert all(
-            element["attrs"].get("aria-haspopup") == "listbox"
-            for element in input_wraps
-        )
-        assert {element["attrs"].get("aria-label") for element in input_wraps} == {
+        assert all(element.get("role") == "combobox" for element in input_wraps)
+        assert all(element.has_attr("aria-expanded") for element in input_wraps)
+        assert all(element.get("aria-haspopup") == "listbox" for element in input_wraps)
+        assert {element.get("aria-label") for element in input_wraps} == {
             "Select projects",
             "Select author roles",
             "Select states",
@@ -296,11 +250,9 @@ class TestIssuesPageMarkup:
             "Select visible columns",
         }
         assert len(option_lists) == 6
-        assert all(
-            element["attrs"].get("role") == "listbox" for element in option_lists
-        )
+        assert all(element.get("role") == "listbox" for element in option_lists)
         assert options
-        assert all(element["attrs"].get("role") == "option" for element in options)
+        assert all(element.get("role") == "option" for element in options)
 
     def test_active_sort_header_is_marked_active(
         self, test_client: TestClient, seeded: None
@@ -308,16 +260,10 @@ class TestIssuesPageMarkup:
         response = test_client.get("/issues", params={"sort": "age"})
 
         assert response.status_code == 200
-        elements = _parse_html(response.text)
-        age_link = next(
-            element
-            for element in elements
-            if element["tag"] == "a"
-            and "hx-get" in element["attrs"]
-            and "Age" in element["text"]
-        )
+        doc = parse_html(response)
+        age_link = doc.require('th[data-col="age"] a[hx-get]')
 
-        assert "is-active" in age_link["attrs"].get("class", "").split()
+        assert "is-active" in age_link.get("class", [])
 
     def test_base_template_includes_htmx_error_feedback(
         self, test_client: TestClient, seeded: None
@@ -325,10 +271,12 @@ class TestIssuesPageMarkup:
         response = test_client.get("/issues")
 
         assert response.status_code == 200
-        assert 'id="toast-container"' in response.text
-        assert "showToast(message, type)" in response.text
-        assert 'document.body.addEventListener("htmx:responseError"' in response.text
-        assert 'document.body.addEventListener("htmx:sendError"' in response.text
+        doc = parse_html(response)
+        scripts = "\n".join(script.get_text() for script in doc.select("script"))
+        assert doc.exists("#toast-container")
+        assert "showToast(message, type)" in scripts
+        assert 'document.body.addEventListener("htmx:responseError"' in scripts
+        assert 'document.body.addEventListener("htmx:sendError"' in scripts
 
     def test_issues_page_has_single_state_hidden_input(
         self, test_client: TestClient, seeded: None
@@ -336,16 +284,8 @@ class TestIssuesPageMarkup:
         response = test_client.get("/issues")
 
         assert response.status_code == 200
-        elements = _parse_html(response.text)
-        state_inputs = [
-            element
-            for element in elements
-            if element["tag"] == "input"
-            and element["attrs"].get("type") == "hidden"
-            and element["attrs"].get("name") == "state"
-        ]
-
-        assert len(state_inputs) == 1
+        doc = parse_html(response)
+        assert doc.count('input[type="hidden"][name="state"]') == 1
 
 
 class TestDashboardExcludesAggregate:
@@ -372,14 +312,16 @@ class TestDashboardExcludesAggregate:
     ) -> None:
         response = test_client.get("/")
         assert response.status_code == 200
-        assert "all-projects" not in response.text
+        doc = parse_html(response)
+        assert not doc.has_text("all-projects", ".project-health-table")
 
     def test_aggregate_not_in_tables(
         self, test_client: TestClient, seeded: None
     ) -> None:
         response = test_client.get("/")
         assert response.status_code == 200
-        assert "all-projects" not in response.text
+        doc = parse_html(response)
+        assert not doc.has_text("all-projects", ".project-health-table")
 
 
 class TestIssueNumberSort:
@@ -412,24 +354,14 @@ class TestIssueNumberSort:
         """Sorting by number should be numeric, not lexicographic."""
         response = test_client.get("/issues", params={"sort": "number"})
         assert response.status_code == 200
-        text = response.text
-        pos_1 = re.search(r"issue\s+<a[^>]*>#1\b", text)
-        pos_2 = re.search(r"issue\s+<a[^>]*>#2\b", text)
-        pos_3 = re.search(r"issue\s+<a[^>]*>#3\b", text)
-        pos_10 = re.search(r"issue\s+<a[^>]*>#10\b", text)
-        pos_20 = re.search(r"issue\s+<a[^>]*>#20\b", text)
-        assert all(match is not None for match in (pos_1, pos_2, pos_3, pos_10, pos_20))
-        assert (
-            pos_1.start()
-            < pos_2.start()
-            < pos_3.start()
-            < pos_10.start()
-            < pos_20.start()
-        ), (
-            "Numbers not in numeric order: "
-            f"1@{pos_1.start()}, 2@{pos_2.start()}, 3@{pos_3.start()}, "
-            f"10@{pos_10.start()}, 20@{pos_20.start()}"
-        )
+        doc = parse_html(response)
+        assert doc.texts('#issue-table tbody td[data-col="issue"]') == [
+            "snapcraft issue #1",
+            "snapcraft issue #2",
+            "snapcraft issue #3",
+            "snapcraft issue #10",
+            "snapcraft issue #20",
+        ]
 
 
 class TestIssuePaginationClamping:
@@ -460,7 +392,8 @@ class TestIssuePaginationClamping:
         """Requesting a page beyond total should show the last page, not empty."""
         response = test_client.get("/issues", params={"page": 999})
         assert response.status_code == 200
-        assert "Only issue" in response.text
+        doc = parse_html(response)
+        assert doc.has_text("Only issue", "#issue-table")
 
 
 class TestPaginationPreservesSourceFilter:
@@ -492,7 +425,8 @@ class TestPaginationPreservesSourceFilter:
         """Pagination links must preserve the source filter."""
         response = test_client.get("/issues", params={"source": "github"})
         assert response.status_code == 200
-        assert "source=github" in response.text
+        doc = parse_html(response)
+        assert any("source=github" in link for link in doc.links())
 
 
 class TestIssueStateFilter:
@@ -533,18 +467,21 @@ class TestIssueStateFilter:
         self, test_client: TestClient, seeded: None
     ) -> None:
         response = test_client.get("/issues")
-        assert "Open issue" in response.text
-        assert "Closed issue" not in response.text
+        doc = parse_html(response)
+        assert doc.has_text("Open issue", "#issue-table")
+        assert not doc.has_text("Closed issue", "#issue-table")
 
     def test_filter_closed(self, test_client: TestClient, seeded: None) -> None:
         response = test_client.get("/issues", params={"state": "closed"})
-        assert "Closed issue" in response.text
-        assert "Open issue" not in response.text
+        doc = parse_html(response)
+        assert doc.has_text("Closed issue", "#issue-table")
+        assert not doc.has_text("Open issue", "#issue-table")
 
     def test_filter_all_states(self, test_client: TestClient, seeded: None) -> None:
         response = test_client.get("/issues", params={"state": "open,closed"})
-        assert "Open issue" in response.text
-        assert "Closed issue" in response.text
+        doc = parse_html(response)
+        assert doc.has_text("Open issue", "#issue-table")
+        assert doc.has_text("Closed issue", "#issue-table")
 
 
 class TestIssueDetailRelatedWork:
@@ -589,12 +526,18 @@ class TestIssueDetailRelatedWork:
         response = test_client.get("/issues/rockcraft/1")
 
         assert response.status_code == 200
-        assert "Related work" in response.text
-        assert "Likely Fixed By" in response.text
-        assert 'href="/issues/rockcraft/2"' in response.text
-        assert "rockcraft#2" in response.text
-        assert "confidence 80%" in response.text
-        assert "Fixed in the branch refresh change." in response.text
+        doc = parse_html(response)
+        related_work = next(
+            card
+            for card in doc.select(".issue-detail-card")
+            if card.select_one("h3") and "Related work" in card.get_text(" ")
+        )
+        related_work_text = related_work.get_text(" ", strip=True)
+        assert "Likely Fixed By" in related_work_text
+        assert related_work.select_one('a[href="/issues/rockcraft/2"]') is not None
+        assert "rockcraft#2" in related_work_text
+        assert "confidence 80%" in related_work_text
+        assert "Fixed in the branch refresh change." in related_work_text
 
     def test_issue_table_related_work_indicator_is_shown_for_linked_rows(
         self, test_client: TestClient, seeded: None
@@ -602,7 +545,8 @@ class TestIssueDetailRelatedWork:
         response = test_client.get("/issues/table", params={"project": "rockcraft"})
 
         assert response.status_code == 200
-        assert "related-work-indicator" in response.text
+        doc = parse_html(response)
+        assert doc.exists(".related-work-indicator")
 
 
 class TestIssueDetailExcludesClaimBookkeepingRows:
@@ -663,6 +607,7 @@ class TestIssueDetailExcludesClaimBookkeepingRows:
         response = test_client.get("/issues/snapcraft/6413")
 
         assert response.status_code == 200
-        assert "A real evaluation summary." in response.text
-        assert "pending" not in response.text
-        assert "released:related_endpoint_unreachable" not in response.text
+        doc = parse_html(response)
+        assert doc.has_text("A real evaluation summary.")
+        assert not doc.has_text("pending")
+        assert not doc.has_text("released:related_endpoint_unreachable")
