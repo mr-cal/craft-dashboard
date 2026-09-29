@@ -9,7 +9,8 @@ import sqlalchemy as sa
 from craft_dashboard.collectors.github import GitHubCollector
 from craft_dashboard.llm.content_hash import compute_content_hash
 from craft_dashboard.models.collection_watermark import CollectionWatermark
-from scripts import collect_data
+from scripts.collect import github_pass
+from scripts.collect import projects as collect_projects
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from tests.factories import make_project
@@ -150,28 +151,28 @@ async def test_collection_watermark_helpers_store_rows_by_project_and_source(
     test_db_session,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(collect_data, "insert", sqlite_insert)
+    monkeypatch.setattr(collect_projects, "insert", sqlite_insert)
     project = make_project(name="snapcraft")
     test_db_session.add(project)
     await test_db_session.commit()
     collected_at = datetime(2025, 1, 1, 12, 0, tzinfo=UTC)
     open_collected_at = datetime(2025, 1, 1, 13, 0, tzinfo=UTC)
 
-    await collect_data._upsert_collection_watermark(
+    await collect_projects._upsert_collection_watermark(
         test_db_session, project.id, "github", collected_at
     )
-    await collect_data._upsert_collection_watermark(
+    await collect_projects._upsert_collection_watermark(
         test_db_session, project.id, "github_issues_open", open_collected_at
     )
 
-    assert await collect_data._get_collection_watermark(
+    assert await collect_projects._get_collection_watermark(
         test_db_session, project.id, "github"
     ) == collected_at.replace(tzinfo=None)
-    assert await collect_data._get_collection_watermark(
+    assert await collect_projects._get_collection_watermark(
         test_db_session, project.id, "github_issues_open"
     ) == open_collected_at.replace(tzinfo=None)
     assert (
-        await collect_data._get_collection_watermark(
+        await collect_projects._get_collection_watermark(
             test_db_session, project.id, "launchpad"
         )
         is None
@@ -182,7 +183,7 @@ async def test_collection_watermark_upsert_replaces_only_matching_source(
     test_db_session,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(collect_data, "insert", sqlite_insert)
+    monkeypatch.setattr(collect_projects, "insert", sqlite_insert)
     project = make_project(name="charmcraft")
     test_db_session.add(project)
     await test_db_session.commit()
@@ -190,13 +191,13 @@ async def test_collection_watermark_upsert_replaces_only_matching_source(
     second = datetime(2025, 1, 2, 12, 0, tzinfo=UTC)
     open_value = datetime(2025, 1, 3, 12, 0, tzinfo=UTC)
 
-    await collect_data._upsert_collection_watermark(
+    await collect_projects._upsert_collection_watermark(
         test_db_session, project.id, "github", first
     )
-    await collect_data._upsert_collection_watermark(
+    await collect_projects._upsert_collection_watermark(
         test_db_session, project.id, "github_issues_open", open_value
     )
-    await collect_data._upsert_collection_watermark(
+    await collect_projects._upsert_collection_watermark(
         test_db_session, project.id, "github", second
     )
 
@@ -228,24 +229,24 @@ async def test_open_collection_reads_open_watermark_and_writes_start_time_on_suc
     collector.collect_releases = AsyncMock(return_value=0)
     collector.collect_issues = AsyncMock(return_value=3)
     monkeypatch.setattr(
-        collect_data, "GitHubCollector", MagicMock(return_value=collector)
+        github_pass, "GitHubCollector", MagicMock(return_value=collector)
     )
     dep_collector = MagicMock()
     dep_collector.collect_dependencies = AsyncMock(return_value=0)
     monkeypatch.setattr(
-        collect_data, "DependencyCollector", MagicMock(return_value=dep_collector)
+        github_pass, "DependencyCollector", MagicMock(return_value=dep_collector)
     )
-    monkeypatch.setattr(collect_data, "_get_dep_branches", MagicMock(return_value=[]))
+    monkeypatch.setattr(github_pass, "_get_dep_branches", MagicMock(return_value=[]))
     monkeypatch.setattr(
-        collect_data, "_get_or_create_project", AsyncMock(return_value=9)
+        github_pass, "_get_or_create_project", AsyncMock(return_value=9)
     )
     monkeypatch.setattr(
-        collect_data, "_get_collection_watermark", AsyncMock(return_value=watermark)
+        github_pass, "_get_collection_watermark", AsyncMock(return_value=watermark)
     )
     upsert_watermark = AsyncMock()
-    monkeypatch.setattr(collect_data, "_upsert_collection_watermark", upsert_watermark)
-    monkeypatch.setattr(collect_data, "generate_snapshot", AsyncMock())
-    monkeypatch.setattr(collect_data, "record_open_poll_success", AsyncMock())
+    monkeypatch.setattr(github_pass, "_upsert_collection_watermark", upsert_watermark)
+    monkeypatch.setattr(github_pass, "generate_snapshot", AsyncMock())
+    monkeypatch.setattr(github_pass, "record_open_poll_success", AsyncMock())
     settings = SimpleNamespace(github_token=_TEST_TOKEN, refresh_age_days=7)
     config = SimpleNamespace(
         maintainers=[],
@@ -257,7 +258,7 @@ async def test_open_collection_reads_open_watermark_and_writes_start_time_on_suc
         filtered_issues={},
     )
 
-    stats = await collect_data._collect_github(
+    stats = await github_pass._collect_github(
         settings,
         config,
         lambda: _SessionContext(session),
@@ -299,23 +300,23 @@ async def test_open_watermark_not_advanced_when_collect_issues_raises(
     collector.collect_releases = AsyncMock(return_value=0)
     collector.collect_issues = AsyncMock(side_effect=RuntimeError("page fetch failed"))
     monkeypatch.setattr(
-        collect_data, "GitHubCollector", MagicMock(return_value=collector)
+        github_pass, "GitHubCollector", MagicMock(return_value=collector)
     )
     dep_collector = MagicMock()
     dep_collector.collect_dependencies = AsyncMock(return_value=0)
     monkeypatch.setattr(
-        collect_data, "DependencyCollector", MagicMock(return_value=dep_collector)
+        github_pass, "DependencyCollector", MagicMock(return_value=dep_collector)
     )
-    monkeypatch.setattr(collect_data, "_get_dep_branches", MagicMock(return_value=[]))
+    monkeypatch.setattr(github_pass, "_get_dep_branches", MagicMock(return_value=[]))
     monkeypatch.setattr(
-        collect_data, "_get_or_create_project", AsyncMock(return_value=9)
+        github_pass, "_get_or_create_project", AsyncMock(return_value=9)
     )
     monkeypatch.setattr(
-        collect_data, "_get_collection_watermark", AsyncMock(return_value=watermark)
+        github_pass, "_get_collection_watermark", AsyncMock(return_value=watermark)
     )
     upsert_watermark = AsyncMock()
-    monkeypatch.setattr(collect_data, "_upsert_collection_watermark", upsert_watermark)
-    monkeypatch.setattr(collect_data, "record_refresh_error", AsyncMock())
+    monkeypatch.setattr(github_pass, "_upsert_collection_watermark", upsert_watermark)
+    monkeypatch.setattr(github_pass, "record_refresh_error", AsyncMock())
     settings = SimpleNamespace(github_token=_TEST_TOKEN, refresh_age_days=7)
     config = SimpleNamespace(
         maintainers=[],
@@ -327,7 +328,7 @@ async def test_open_watermark_not_advanced_when_collect_issues_raises(
         filtered_issues={},
     )
 
-    stats = await collect_data._collect_github(
+    stats = await github_pass._collect_github(
         settings,
         config,
         lambda: _SessionContext(session),

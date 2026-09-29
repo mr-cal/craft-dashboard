@@ -19,6 +19,8 @@ assert SPEC.loader is not None
 collect_data = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(collect_data)
 
+from scripts.collect import runs  # noqa: E402
+
 
 class TestCollectionStatsErrors:
     def test_merge_combines_project_errors(self) -> None:
@@ -68,7 +70,7 @@ class TestCollectionRunTracking:
             collect_data, "get_session_factory", lambda engine: "session-factory"
         )
         monkeypatch.setattr(
-            collect_data,
+            runs,
             "_get_running_collection_run",
             AsyncMock(return_value=None),
             raising=False,
@@ -125,7 +127,7 @@ class TestCollectionRunTracking:
             collect_data, "get_session_factory", lambda engine: "session-factory"
         )
         monkeypatch.setattr(
-            collect_data,
+            runs,
             "_get_running_collection_run",
             AsyncMock(return_value=None),
             raising=False,
@@ -391,14 +393,12 @@ class TestWaitForSourceAvailable:
     ) -> None:
         get_running = AsyncMock(return_value=None)
         monkeypatch.setattr(
-            collect_data, "_get_running_collection_run", get_running, raising=False
+            runs, "_get_running_collection_run", get_running, raising=False
         )
         sleep = AsyncMock()
         monkeypatch.setattr(collect_data.asyncio, "sleep", sleep)
 
-        result = await collect_data._wait_for_source_available(
-            "session-factory", "github"
-        )
+        result = await runs._wait_for_source_available("session-factory", "github")
 
         assert result is None
         get_running.assert_awaited_once_with("session-factory", "github")
@@ -411,12 +411,12 @@ class TestWaitForSourceAvailable:
         )
         get_running = AsyncMock(side_effect=[running_run, running_run, None])
         monkeypatch.setattr(
-            collect_data, "_get_running_collection_run", get_running, raising=False
+            runs, "_get_running_collection_run", get_running, raising=False
         )
         sleep = AsyncMock()
         monkeypatch.setattr(collect_data.asyncio, "sleep", sleep)
 
-        result = await collect_data._wait_for_source_available(
+        result = await runs._wait_for_source_available(
             "session-factory",
             "github",
             wait_timeout=timedelta(minutes=10),
@@ -436,12 +436,12 @@ class TestWaitForSourceAvailable:
         )
         get_running = AsyncMock(return_value=running_run)
         monkeypatch.setattr(
-            collect_data, "_get_running_collection_run", get_running, raising=False
+            runs, "_get_running_collection_run", get_running, raising=False
         )
         sleep = AsyncMock()
         monkeypatch.setattr(collect_data.asyncio, "sleep", sleep)
 
-        result = await collect_data._wait_for_source_available(
+        result = await runs._wait_for_source_available(
             "session-factory",
             "github",
             wait_timeout=timedelta(seconds=0),
@@ -514,7 +514,7 @@ class TestGetRunningCollectionRun:
             started_at=datetime.now(UTC) - timedelta(minutes=5),
         )
 
-        result = await collect_data._get_running_collection_run(
+        result = await runs._get_running_collection_run(
             _make_running_session_factory([recent_run]),
             "github",
         )
@@ -530,7 +530,7 @@ class TestGetRunningCollectionRun:
             started_at=datetime.now(UTC) - timedelta(minutes=5),
         )
 
-        result = await collect_data._get_running_collection_run(
+        result = await runs._get_running_collection_run(
             _make_running_session_factory([launchpad_run]),
             "github",
         )
@@ -546,7 +546,7 @@ class TestGetRunningCollectionRun:
             started_at=datetime.now(UTC) - timedelta(hours=7),
         )
 
-        result = await collect_data._get_running_collection_run(
+        result = await runs._get_running_collection_run(
             _make_running_session_factory([stale_run]),
             "github",
         )

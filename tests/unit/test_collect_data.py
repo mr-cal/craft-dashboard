@@ -23,6 +23,14 @@ assert SPEC.loader is not None
 collect_data = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(collect_data)
 
+from scripts.collect import (  # noqa: E402
+    github_pass,
+    launchpad_pass,
+    projects,
+    retry,
+    runs,
+)
+
 
 class _FakeResult:
     def __init__(self, value: int | None) -> None:
@@ -75,7 +83,7 @@ class TestGetOrCreateProject:
     async def test_returns_project_id(self) -> None:
         session = _RecordingSession(project_id=42)
 
-        result = await collect_data._get_or_create_project(
+        result = await projects._get_or_create_project(
             session, "snapcraft", "application", 0
         )
 
@@ -86,9 +94,7 @@ class TestGetOrCreateProject:
         """Verify the upsert updates category and display_order on conflict."""
         session = _RecordingSession(project_id=7)
 
-        await collect_data._get_or_create_project(
-            session, "snapcraft", "application", 0
-        )
+        await projects._get_or_create_project(session, "snapcraft", "application", 0)
 
         upsert_stmt = session.executed_statements[0]
         compiled = str(upsert_stmt.compile(dialect=pg_dialect.dialect()))
@@ -154,8 +160,8 @@ class TestRetryGithub:
                 raise GithubException(503, data=None, headers={})
             return "ok"
 
-        collect_data._GITHUB_RETRY_BASE_SLEEP = 0
-        result = await collect_data._retry_github(flaky, "test op")
+        retry._GITHUB_RETRY_BASE_SLEEP = 0
+        result = await retry._retry_github(flaky, "test op")
 
         assert result == "ok"
         assert attempts == 3
@@ -171,8 +177,8 @@ class TestRetryGithub:
                 raise json.JSONDecodeError("Unterminated string", "{", 5)
             return "ok"
 
-        collect_data._GITHUB_RETRY_BASE_SLEEP = 0
-        result = await collect_data._retry_github(flaky, "test op")
+        retry._GITHUB_RETRY_BASE_SLEEP = 0
+        result = await retry._retry_github(flaky, "test op")
 
         assert result == "ok"
         assert attempts == 2
@@ -190,8 +196,8 @@ class TestRetryGithub:
                 raise TypeError("argument of type 'NoneType' is not iterable")
             return "ok"
 
-        collect_data._GITHUB_RETRY_BASE_SLEEP = 0
-        result = await collect_data._retry_github(flaky, "test op")
+        retry._GITHUB_RETRY_BASE_SLEEP = 0
+        result = await retry._retry_github(flaky, "test op")
 
         assert result == "ok"
         assert attempts == 2
@@ -207,8 +213,8 @@ class TestRetryGithub:
                 raise urllib3.exceptions.ProtocolError("Response ended prematurely")
             return "ok"
 
-        collect_data._GITHUB_RETRY_BASE_SLEEP = 0
-        result = await collect_data._retry_github(flaky, "test op")
+        retry._GITHUB_RETRY_BASE_SLEEP = 0
+        result = await retry._retry_github(flaky, "test op")
 
         assert result == "ok"
         assert attempts == 2
@@ -218,9 +224,9 @@ class TestRetryGithub:
         async def always_fails() -> str:
             raise json.JSONDecodeError("Unterminated string", "{", 5)
 
-        collect_data._GITHUB_RETRY_BASE_SLEEP = 0
+        retry._GITHUB_RETRY_BASE_SLEEP = 0
         with pytest.raises(json.JSONDecodeError):
-            await collect_data._retry_github(always_fails, "test op")
+            await retry._retry_github(always_fails, "test op")
 
     @pytest.mark.asyncio
     async def test_does_not_retry_unrelated_exception(self) -> None:
@@ -231,9 +237,9 @@ class TestRetryGithub:
             attempts += 1
             raise ValueError("not a transient/network error")
 
-        collect_data._GITHUB_RETRY_BASE_SLEEP = 0
+        retry._GITHUB_RETRY_BASE_SLEEP = 0
         with pytest.raises(ValueError, match="not a transient/network error"):
-            await collect_data._retry_github(flaky, "test op")
+            await retry._retry_github(flaky, "test op")
 
         assert attempts == 1
 
@@ -261,23 +267,23 @@ class TestCollectGithubLogging:
         gh_collector.collect_releases = AsyncMock(return_value=3)
 
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "DependencyCollector",
             lambda token, org, craft_libraries: dep_collector,
         )
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "GitHubCollector",
             lambda token, org, maintainers: gh_collector,
         )
         monkeypatch.setattr(
-            collect_data, "_get_or_create_project", AsyncMock(return_value=101)
+            github_pass, "_get_or_create_project", AsyncMock(return_value=101)
         )
-        monkeypatch.setattr(collect_data, "generate_snapshot", AsyncMock())
-        monkeypatch.setattr(collect_data, "update_refresh_schedule", AsyncMock())
-        monkeypatch.setattr(collect_data, "record_refresh_error", AsyncMock())
+        monkeypatch.setattr(github_pass, "generate_snapshot", AsyncMock())
+        monkeypatch.setattr(github_pass, "update_refresh_schedule", AsyncMock())
+        monkeypatch.setattr(github_pass, "record_refresh_error", AsyncMock())
         monkeypatch.setattr(
-            collect_data, "is_due_for_refresh", lambda next_refresh: True
+            github_pass, "is_due_for_refresh", lambda next_refresh: True
         )
         monkeypatch.setattr(collect_data.asyncio, "sleep", AsyncMock())
 
@@ -330,23 +336,23 @@ class TestReleaseCollectionIndependentOfRefresh:
         gh_collector.collect_releases = AsyncMock(return_value=5)
 
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "DependencyCollector",
             lambda token, org, craft_libraries: dep_collector,
         )
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "GitHubCollector",
             lambda token, org, maintainers: gh_collector,
         )
         monkeypatch.setattr(
-            collect_data, "_get_or_create_project", AsyncMock(return_value=101)
+            github_pass, "_get_or_create_project", AsyncMock(return_value=101)
         )
-        monkeypatch.setattr(collect_data, "generate_snapshot", AsyncMock())
-        monkeypatch.setattr(collect_data, "update_refresh_schedule", AsyncMock())
-        monkeypatch.setattr(collect_data, "record_refresh_error", AsyncMock())
+        monkeypatch.setattr(github_pass, "generate_snapshot", AsyncMock())
+        monkeypatch.setattr(github_pass, "update_refresh_schedule", AsyncMock())
+        monkeypatch.setattr(github_pass, "record_refresh_error", AsyncMock())
         monkeypatch.setattr(
-            collect_data, "is_due_for_refresh", lambda next_refresh: False
+            github_pass, "is_due_for_refresh", lambda next_refresh: False
         )
         monkeypatch.setattr(collect_data.asyncio, "sleep", AsyncMock())
 
@@ -386,23 +392,23 @@ class TestReleaseCollectionIndependentOfRefresh:
         gh_collector.collect_releases = AsyncMock(return_value=2)
 
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "DependencyCollector",
             lambda token, org, craft_libraries: dep_collector,
         )
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "GitHubCollector",
             lambda token, org, maintainers: gh_collector,
         )
         monkeypatch.setattr(
-            collect_data, "_get_or_create_project", AsyncMock(return_value=201)
+            github_pass, "_get_or_create_project", AsyncMock(return_value=201)
         )
-        monkeypatch.setattr(collect_data, "generate_snapshot", AsyncMock())
-        monkeypatch.setattr(collect_data, "update_refresh_schedule", AsyncMock())
-        monkeypatch.setattr(collect_data, "record_refresh_error", AsyncMock())
+        monkeypatch.setattr(github_pass, "generate_snapshot", AsyncMock())
+        monkeypatch.setattr(github_pass, "update_refresh_schedule", AsyncMock())
+        monkeypatch.setattr(github_pass, "record_refresh_error", AsyncMock())
         monkeypatch.setattr(
-            collect_data, "is_due_for_refresh", lambda next_refresh: False
+            github_pass, "is_due_for_refresh", lambda next_refresh: False
         )
         monkeypatch.setattr(collect_data.asyncio, "sleep", AsyncMock())
 
@@ -436,14 +442,14 @@ class TestCollectLaunchpadLogging:
         lp_collector.collect_bugs = AsyncMock(return_value=150)
 
         monkeypatch.setattr(
-            collect_data,
+            launchpad_pass,
             "LaunchpadCollector",
             lambda projects, launchpad_maintainers: lp_collector,
         )
         monkeypatch.setattr(
-            collect_data, "_get_or_create_project", AsyncMock(return_value=202)
+            launchpad_pass, "_get_or_create_project", AsyncMock(return_value=202)
         )
-        monkeypatch.setattr(collect_data, "generate_snapshot", AsyncMock())
+        monkeypatch.setattr(launchpad_pass, "generate_snapshot", AsyncMock())
 
         caplog.set_level(logging.INFO)
 
@@ -485,7 +491,7 @@ class TestMainLogging:
             collect_data, "get_session_factory", lambda engine: "session-factory"
         )
         monkeypatch.setattr(
-            collect_data,
+            runs,
             "_get_running_collection_run",
             AsyncMock(return_value=None),
             raising=False,

@@ -23,6 +23,8 @@ assert SPEC.loader is not None
 collect_data = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(collect_data)
 
+from scripts.collect import github_pass  # noqa: E402
+
 _TOKEN = "placeholder-token"
 
 
@@ -78,32 +80,32 @@ class TestCollectGithubWatermarks:
         upsert_watermark = AsyncMock()
 
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "GitHubCollector",
             lambda token, org, maintainers: gh_collector,
         )
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "DependencyCollector",
             lambda token, org, craft_libraries: dep_collector,
         )
         monkeypatch.setattr(
-            collect_data, "_get_or_create_project", AsyncMock(return_value=101)
+            github_pass, "_get_or_create_project", AsyncMock(return_value=101)
         )
         monkeypatch.setattr(
-            collect_data, "_get_collection_watermark", get_watermark, raising=False
+            github_pass, "_get_collection_watermark", get_watermark, raising=False
         )
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "_upsert_collection_watermark",
             upsert_watermark,
             raising=False,
         )
-        monkeypatch.setattr(collect_data, "generate_snapshot", AsyncMock())
-        monkeypatch.setattr(collect_data, "update_refresh_schedule", AsyncMock())
-        monkeypatch.setattr(collect_data, "record_refresh_error", AsyncMock())
+        monkeypatch.setattr(github_pass, "generate_snapshot", AsyncMock())
+        monkeypatch.setattr(github_pass, "update_refresh_schedule", AsyncMock())
+        monkeypatch.setattr(github_pass, "record_refresh_error", AsyncMock())
         monkeypatch.setattr(
-            collect_data, "is_due_for_refresh", lambda next_refresh: True
+            github_pass, "is_due_for_refresh", lambda next_refresh: True
         )
         monkeypatch.setattr(collect_data.asyncio, "sleep", AsyncMock())
 
@@ -148,32 +150,32 @@ class TestCollectGithubWatermarks:
         get_watermark = AsyncMock(return_value=watermark)
 
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "GitHubCollector",
             lambda token, org, maintainers: gh_collector,
         )
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "DependencyCollector",
             lambda token, org, craft_libraries: dep_collector,
         )
         monkeypatch.setattr(
-            collect_data, "_get_or_create_project", AsyncMock(return_value=101)
+            github_pass, "_get_or_create_project", AsyncMock(return_value=101)
         )
         monkeypatch.setattr(
-            collect_data, "_get_collection_watermark", get_watermark, raising=False
+            github_pass, "_get_collection_watermark", get_watermark, raising=False
         )
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "_upsert_collection_watermark",
             AsyncMock(),
             raising=False,
         )
-        monkeypatch.setattr(collect_data, "generate_snapshot", AsyncMock())
-        monkeypatch.setattr(collect_data, "update_refresh_schedule", AsyncMock())
-        monkeypatch.setattr(collect_data, "record_refresh_error", AsyncMock())
+        monkeypatch.setattr(github_pass, "generate_snapshot", AsyncMock())
+        monkeypatch.setattr(github_pass, "update_refresh_schedule", AsyncMock())
+        monkeypatch.setattr(github_pass, "record_refresh_error", AsyncMock())
         monkeypatch.setattr(
-            collect_data, "is_due_for_refresh", lambda next_refresh: True
+            github_pass, "is_due_for_refresh", lambda next_refresh: True
         )
         monkeypatch.setattr(collect_data.asyncio, "sleep", AsyncMock())
 
@@ -237,32 +239,32 @@ class TestCollectGithubOpenIssueWatermarks:
         upsert_watermark = AsyncMock()
 
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "GitHubCollector",
             lambda token, org, maintainers: gh_collector,
         )
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "DependencyCollector",
             lambda token, org, craft_libraries: dep_collector,
         )
         monkeypatch.setattr(
-            collect_data, "_get_or_create_project", AsyncMock(return_value=101)
+            github_pass, "_get_or_create_project", AsyncMock(return_value=101)
         )
         monkeypatch.setattr(
-            collect_data, "_get_collection_watermark", get_watermark, raising=False
+            github_pass, "_get_collection_watermark", get_watermark, raising=False
         )
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "_upsert_collection_watermark",
             upsert_watermark,
             raising=False,
         )
-        monkeypatch.setattr(collect_data, "generate_snapshot", AsyncMock())
-        monkeypatch.setattr(collect_data, "update_refresh_schedule", AsyncMock())
-        monkeypatch.setattr(collect_data, "record_refresh_error", AsyncMock())
+        monkeypatch.setattr(github_pass, "generate_snapshot", AsyncMock())
+        monkeypatch.setattr(github_pass, "update_refresh_schedule", AsyncMock())
+        monkeypatch.setattr(github_pass, "record_refresh_error", AsyncMock())
         monkeypatch.setattr(
-            collect_data, "is_due_for_refresh", lambda next_refresh: True
+            github_pass, "is_due_for_refresh", lambda next_refresh: True
         )
         monkeypatch.setattr(collect_data.asyncio, "sleep", AsyncMock())
 
@@ -333,32 +335,32 @@ class TestCollectGithubOpenIssueWatermarks:
         upsert_watermark = AsyncMock()
 
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "GitHubCollector",
             lambda token, org, maintainers: gh_collector,
         )
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "DependencyCollector",
             lambda token, org, craft_libraries: dep_collector,
         )
         monkeypatch.setattr(
-            collect_data, "_get_or_create_project", AsyncMock(return_value=101)
+            github_pass, "_get_or_create_project", AsyncMock(return_value=101)
         )
         monkeypatch.setattr(
-            collect_data, "_get_collection_watermark", get_watermark, raising=False
+            github_pass, "_get_collection_watermark", get_watermark, raising=False
         )
         monkeypatch.setattr(
-            collect_data,
+            github_pass,
             "_upsert_collection_watermark",
             upsert_watermark,
             raising=False,
         )
-        monkeypatch.setattr(collect_data, "generate_snapshot", AsyncMock())
-        monkeypatch.setattr(collect_data, "update_refresh_schedule", AsyncMock())
-        monkeypatch.setattr(collect_data, "record_refresh_error", AsyncMock())
+        monkeypatch.setattr(github_pass, "generate_snapshot", AsyncMock())
+        monkeypatch.setattr(github_pass, "update_refresh_schedule", AsyncMock())
+        monkeypatch.setattr(github_pass, "record_refresh_error", AsyncMock())
         monkeypatch.setattr(
-            collect_data, "is_due_for_refresh", lambda next_refresh: True
+            github_pass, "is_due_for_refresh", lambda next_refresh: True
         )
         monkeypatch.setattr(collect_data.asyncio, "sleep", AsyncMock())
 
