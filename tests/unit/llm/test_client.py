@@ -1,7 +1,5 @@
 """Tests for the OpenRouter client."""
 
-import logging
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -10,7 +8,6 @@ from craft_dashboard.llm.client import (
     LLMResponse,
     LocalLLMClient,
     OpenRouterClient,
-    _make_before_sleep_log,
 )
 from craft_dashboard.llm.exceptions import LLMQuotaError
 
@@ -238,38 +235,6 @@ class TestLocalLLMClient:
         client = LocalLLMClient(timeout=180.0)
 
         assert client.http.timeout.read == 180.0
-
-
-class TestBeforeSleepLog:
-    """Tests for tenacity before_sleep log helper."""
-
-    def test_logs_exception_type_when_str_empty(self, caplog) -> None:
-        """Logs exception class name when str(exc) is empty (e.g. ReadTimeout)."""
-        hook = _make_before_sleep_log(max_attempts=3)
-        retry_state = SimpleNamespace(
-            attempt_number=1,
-            outcome=SimpleNamespace(exception=lambda: httpx.ReadTimeout("")),
-        )
-        with caplog.at_level(logging.WARNING):
-            hook(retry_state)
-
-        assert "HTTP retry (attempt 1/3): ReadTimeout" in caplog.text
-
-    def test_logs_exception_type_and_message(self, caplog) -> None:
-        """Logs exception class name and message when present."""
-        hook = _make_before_sleep_log(max_attempts=5)
-        retry_state = SimpleNamespace(
-            attempt_number=2,
-            outcome=SimpleNamespace(
-                exception=lambda: httpx.ConnectError("Connection refused")
-            ),
-        )
-        with caplog.at_level(logging.WARNING):
-            hook(retry_state)
-
-        assert (
-            "HTTP retry (attempt 2/5): ConnectError: Connection refused" in caplog.text
-        )
 
 
 class TestLLMResponse:

@@ -1,76 +1,169 @@
 # agents.md
 
+Guidance for AI agents working in this repository. Read this before making changes.
+
+## What this is
+
+A dashboard over the Canonical "craft" tooling projects. It collects issues, pull
+requests, releases, and forum activity from GitHub, Launchpad, and Discourse into
+PostgreSQL, runs LLM evaluations over that data, and serves a FastAPI + Jinja2 site.
+
+Collection is offline and scheduled; the web app only reads what collection has
+already stored. See `docs/architecture.md` for why it is shaped this way.
+
+## Repo map
+
+| Path | What lives here |
+|---|---|
+| `craft_dashboard/routes/` | FastAPI route handlers, one module per page |
+| `craft_dashboard/repositories/` | Database queries; all SQL belongs here |
+| `craft_dashboard/services/` | Business logic that spans repositories |
+| `craft_dashboard/collectors/` | External data collection (GitHub, Launchpad, Discourse) |
+| `craft_dashboard/llm/` | LLM clients, prompts, evaluation, embeddings |
+| `craft_dashboard/models/` | SQLAlchemy ORM models |
+| `craft_dashboard/templates/` | Jinja2 templates (Vanilla Framework) |
+| `craft_dashboard/static/` | CSS, JS, and pinned vendored browser libraries |
+| `craft_dashboard/http_retry.py` | Shared retry policy for all outbound HTTP |
+| `scripts/` | CLI entry points and one-off backfills |
+| `alembic/versions/` | Database migrations |
+| `tests/unit/`, `tests/integration/` | Run by `make test` |
+| `tests/end_to_end/` | Run by `make test-e2e`, needs a browser |
+
+Layering runs routes → services → repositories → models. Routes must not build
+queries directly, and collectors must not import from routes.
+
 ## Before completing any task
 
-Before completing any task, run and ensure the following pass:
-
 ```bash
-make format
-make lint
-make test
+make check     # format + lint + fast unit tests, the usual inner loop
+make test      # the full suite, before you call the task done
 ```
 
-Existing failures should be noted and communicated to the user.
+`make check` expands to `make format`, `make lint`, and `make test-fast`. Both must
+pass. Report pre-existing failures rather than fixing unrelated code.
 
-Any changes to the Dockerfile or Alembic migrations should also verify that
-`make build` succeeds.
+`make lint` also runs `lint-imports`, which enforces the layering above from the
+contracts in `pyproject.toml`. If it fails, move the shared code down a layer rather
+than relaxing the contract.
 
-Finally, your changes should be committed and pushed to github. Then, you must wait
-for the image to successfully build, for `mr-cal/vps-infra` to successfully deploy,
-and then verify your changes are on the production website.
+Additionally:
 
-## Before completing UI/UX tasks
+| If you changed | Also run |
+|---|---|
+| Templates, CSS, or JS | `make test-e2e` (about 6 minutes, needs a browser) |
+| `Dockerfile` or `alembic/versions/` | `make build` |
+| `docs/`, `README.md`, or this file | `uv run python scripts/check_docs.py` |
 
-Run the e2e tests when making UI or UX changes:
+Add a regression test for every bug you fix. A fix without a test that fails before
+it is not finished.
+
+## Writing code here
+
+- Comment *why*, not *what*. Explain the constraint or failure mode that makes the
+  code look the way it does. Do not narrate what the next line does.
+- Do not write comments that reference the change you are making ("now uses",
+  "previously", "fixed to"). The git log covers that; a comment should read correctly
+  to someone who never saw the old version.
+- Put SQL in `repositories/`. Put rendering in templates. Put outbound HTTP retry
+  behaviour in `http_retry.py`.
+- Never interpolate untrusted content into HTML. Use `| tojson` for data embedded in
+  `<script>`, and sanitize any Markdown rendered into `innerHTML`. Issue bodies come
+  from anyone who can file an issue on a tracked repo.
+- Frontend dependencies are vendored under `static/vendor/` and pinned. Do not add a
+  CDN `<script>` tag.
+
+## Writing docs here
+
+`docs/` is linted by `scripts/check_docs.py`. The rules:
+
+1. Present tense, current state only. No "no longer", "previously", "used to".
+2. No project-management references: no "Phase N", "Task N", no commit SHAs from
+   other repos.
+3. No self-justification. State the procedure; do not argue that it is trustworthy.
+4. No root-cause essays. Those belong in code comments or commit messages.
+5. Facts live in exactly one place. `docs/reference.md` is authoritative.
+6. No hardcoded hosts, IPs, or container names. Use the shell variables defined at
+   the top of `docs/operations.md`.
+7. No volatile numbers: no item counts, RAM measurements, or dated benchmarks.
+8. Commands must run as written from a stated working directory.
+
+## Local development
+
+There is no local website. Do not stand up a local container or database to try a
+change out — use the test suite, which seeds its own fixtures.
 
 ```bash
-make test-e2e  # ~5-10 min
+make setup     # install dependencies
+make test-fast # unit tests in parallel, seconds
+make test      # unit + integration, no external services needed
+make dev       # only if you genuinely need a running server
 ```
 
-## Verification and deployment
-
-The VPS for this project is managed by the `mr-cal/vps-infra` repo on github.
-When you push to `mr-cal/dashboard`, the vps-infra will pick up the newly
-
-Don't change the configured git url for origin when pushing and pulling changes.
-Instead, just push to a custom url with the token. You can mint a scoped ephemeral token using the centralized minter in `vps-infra`:
-
-```bash
-git push "$(/home/callahan.kovacs@canonical.com/dev/cal/vps-infra/scripts/mint_bot_token.py --print-remote-url)" main
-```
-
-If GitHub App credentials (`GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_PATH`)
-are configured in `.env.llm`, this mints an ephemeral 1-hour token scoped strictly to this repository.
-Otherwise, it transparently falls back to `GH_TOKEN`. See `vps-infra/docs/github-app-auth.md` for GitHub App setup.
-
-There is no local dev website. For example, you shouldn't create a local Docker
-instance and set up a local website for testing.
+Unit and integration tests run against in-memory SQLite and need no credentials.
 
 ## Key config files
 
-- `craft-dashboard.toml` - project list, maintainers, bots, hotfix thresholds.
-- `.env` - runtime secrets and feature flags. Not committed.
-  - You can ALWAYS connect to the local llm server and to the production web server
-    using the info in this file. Don't assume you can't access them. If you can't, stop
-    and ask for the user to resolve connectivity or update credentials.
-- `.env.llm` - information for connecting to the server for debugging, pushing changes
-  to git repos, and triggering deployments.
-- `alembic/versions/` - database migrations. Generate with `uv run alembic revision
-  --autogenerate -m "<description>"`.
+| File | Contents | Committed |
+|---|---|---|
+| `craft-dashboard.toml` | Project list, maintainers, bots, forums, thresholds | Yes |
+| `.env` | Runtime secrets and feature flags | No |
+| `.env.llm` | Credentials for the VPS and for pushing to GitHub | No |
+
+Connectivity to the LLM server and the production web server is expected to work
+using the values in `.env`. If it does not, stop and ask rather than working around
+it.
 
 ## Database
 
-Schema is managed by Alembic. The app runs `alembic upgrade head` on every startup, so
-migrations apply automatically on deploy.
+Alembic owns the schema. The app runs `alembic upgrade head` at startup, so
+migrations apply on deploy. Generate one with:
 
-## Image publishing
+```bash
+uv run alembic revision --autogenerate -m "<description>"
+```
 
-Pushing to `main` triggers `.github/workflows/publish.yml`, which builds and
-pushes `ghcr.io/mr-cal/craft-dashboard:latest` to GHCR, then dispatches a
-`repository_dispatch` event to [mr-cal/vps-infra](https://github.com/mr-cal/vps-infra)
-to trigger a redeploy. The vps-infra deploy workflow pulls the new image and restarts
-the container. You should verify the deployment job succeeded after pushing commits.
+Review the generated migration before committing it; autogenerate misses type
+changes and server defaults.
 
-A `VPSINFRA_PAT` secret must be set on this repo (Settings → Secrets and variables →
-Actions) with a fine-grained PAT scoped to `mr-cal/vps-infra` with
-**Contents: Read and write**.
+## Deploying
+
+**Deploy only when the task calls for it.** Most changes are finished once
+`make lint` and `make test` pass. Push and deploy when the user asks for it, when
+the change must be verified against production data, or when it fixes something
+currently broken in production.
+
+Pushing to `main` triggers `.github/workflows/publish.yml`, which builds and pushes
+`ghcr.io/mr-cal/craft-dashboard:latest` to GHCR, then sends a `repository_dispatch`
+event to [mr-cal/vps-infra](https://github.com/mr-cal/vps-infra), whose deploy
+workflow pulls the image and restarts the container.
+
+Leave `origin` alone. Push to a URL carrying an ephemeral token instead:
+
+```bash
+git push "$(../../cal/vps-infra/scripts/mint_bot_token.py --print-remote-url)" main
+```
+
+That minter uses the GitHub App credentials in `.env.llm` (`GITHUB_APP_ID`,
+`GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_PATH`) to issue a one-hour
+token scoped to this repository, falling back to `GH_TOKEN`. Setup is documented in
+`vps-infra/docs/github-app-auth.md`.
+
+After pushing, confirm the publish workflow succeeded, then the vps-infra deploy
+workflow, then check the change on the live site. The repo needs a `VPSINFRA_PAT`
+secret scoped to `mr-cal/vps-infra` with **Contents: Read and write** for the
+dispatch to work.
+
+Operational recipes — running collection by hand, restoring a backup, inspecting the
+database — are in `docs/operations.md`.
+
+## Touching production data
+
+Back up before any bulk write:
+
+```bash
+podman exec -i "$DB_CONTAINER" pg_dump -U craft_dashboard craft_dashboard \
+  | gzip > "backup-$(date +%Y%m%d-%H%M).sql.gz"
+```
+
+Prefer a supported CLI flag over editing rows by hand. If no flag exists, add one —
+a repair you can only perform with ad-hoc SQL is a repair nobody can repeat.

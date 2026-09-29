@@ -26,10 +26,10 @@ from craft_dashboard.config import load_config
 from craft_dashboard.database import get_engine, get_session_factory
 from craft_dashboard.dependencies import get_db_session, set_session_factory
 from craft_dashboard.models.collection_run import CollectionRun
+from craft_dashboard.rate_limit import limiter as eval_api_limiter
 from craft_dashboard.routes.admin import router as admin_router
 from craft_dashboard.routes.dashboard import router as dashboard_router
 from craft_dashboard.routes.engagement import router as engagement_router
-from craft_dashboard.routes.eval_api import limiter as eval_api_limiter
 from craft_dashboard.routes.eval_api import router as eval_api_router
 from craft_dashboard.routes.issues import router as issues_router
 from craft_dashboard.routes.stats import router as stats_router

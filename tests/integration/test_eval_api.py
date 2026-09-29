@@ -28,6 +28,7 @@ from craft_dashboard.models.issue_link import IssueLink
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.repositories.issue_repository import IssueRepository
 from craft_dashboard.routes import eval_api
+from craft_dashboard.services import eval_activity
 from craft_dashboard.settings import Settings
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -471,7 +472,7 @@ class TestQuotaPauseEndpoint:
     def test_records_pause_and_reason(
         self, test_db_session: AsyncSession, monkeypatch
     ) -> None:
-        monkeypatch.setattr(eval_api, "_quota_paused_until", None)
+        monkeypatch.setattr(eval_activity.state, "quota_paused_until", None)
         app, token = _create_eval_app(test_db_session)
         resume_at = datetime.now(UTC) + timedelta(minutes=30)
 
@@ -484,12 +485,12 @@ class TestQuotaPauseEndpoint:
 
         assert response.status_code == 200
         assert response.json() == {"status": "recorded"}
-        assert eval_api.get_quota_pause_until() == resume_at
+        assert eval_activity.get_quota_pause_until() == resume_at
 
     def test_defaults_reason_to_quota(
         self, test_db_session: AsyncSession, monkeypatch
     ) -> None:
-        monkeypatch.setattr(eval_api, "_quota_paused_until", None)
+        monkeypatch.setattr(eval_activity.state, "quota_paused_until", None)
         app, token = _create_eval_app(test_db_session)
         resume_at = datetime.now(UTC) + timedelta(minutes=30)
 
@@ -509,7 +510,7 @@ class TestQueueDepthSnapshot:
     def test_first_next_call_records_a_snapshot(
         self, test_db_session: AsyncSession, monkeypatch
     ) -> None:
-        monkeypatch.setattr(eval_api, "_last_queue_snapshot_at", None)
+        monkeypatch.setattr(eval_activity.state, "last_queue_snapshot_at", None)
         project = make_project(id=1, name="snapcraft")
         issue = make_issue(id=1, project_id=1, external_id="42")
         asyncio.get_event_loop().run_until_complete(
@@ -534,7 +535,9 @@ class TestQueueDepthSnapshot:
         self, test_db_session: AsyncSession, monkeypatch
     ) -> None:
         # Throttled so frequent polling doesn't flood the table with samples.
-        monkeypatch.setattr(eval_api, "_last_queue_snapshot_at", datetime.now(UTC))
+        monkeypatch.setattr(
+            eval_activity.state, "last_queue_snapshot_at", datetime.now(UTC)
+        )
         project = make_project(id=1, name="snapcraft")
         issue = make_issue(id=1, project_id=1, external_id="42")
         asyncio.get_event_loop().run_until_complete(
@@ -561,7 +564,7 @@ class TestQueueDepthSnapshot:
         true open-issue count by the number of projects. With 3 projects and
         2 real open issues, the buggy query would have produced 6, not 2.
         """
-        monkeypatch.setattr(eval_api, "_last_queue_snapshot_at", None)
+        monkeypatch.setattr(eval_activity.state, "last_queue_snapshot_at", None)
         projects = [
             make_project(id=1, name="snapcraft"),
             make_project(id=2, name="charmcraft"),
@@ -601,7 +604,7 @@ class TestQueueDepthSnapshot:
         self, test_db_session: AsyncSession, monkeypatch
     ) -> None:
         """The snapshot pending_count includes both open and closed issues needing evaluation."""
-        monkeypatch.setattr(eval_api, "_last_queue_snapshot_at", None)
+        monkeypatch.setattr(eval_activity.state, "last_queue_snapshot_at", None)
         project = make_project(id=1, name="snapcraft")
         open_issue = make_issue(id=1, project_id=1, external_id="1", state="open")
         closed_issue = make_issue(id=2, project_id=1, external_id="2", state="closed")

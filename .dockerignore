@@ -14,3 +14,11 @@ provisioning/
 plans/
 *.egg-info
 logs.txt
+*.sql.gz
+.logs/
+.local/
+debug-evals/
+*.pem
+.token_cache*.json
+htmlcov/
+.coverage

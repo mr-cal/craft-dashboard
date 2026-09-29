@@ -701,5 +701,5 @@ async def stats_triage(
     return templates.TemplateResponse(
         request,
         "stats/triage.html",
-        dict(data),
+        {**data},
     )

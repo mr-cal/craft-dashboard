@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from craft_dashboard.routes import eval_api
+from craft_dashboard.services import eval_activity
 
 from tests.factories import make_evaluation, make_issue, make_project
 
@@ -72,41 +73,41 @@ class TestGetEvalActivity:
     """Tests for the module-level /next and /result activity accessor."""
 
     def test_returns_none_before_any_activity(self, monkeypatch) -> None:
-        monkeypatch.setattr(eval_api, "_last_next_call_at", None)
-        monkeypatch.setattr(eval_api, "_last_result_submitted_at", None)
+        monkeypatch.setattr(eval_activity.state, "last_next_call_at", None)
+        monkeypatch.setattr(eval_activity.state, "last_result_submitted_at", None)
 
-        assert eval_api.get_eval_activity() == (None, None)
+        assert eval_activity.get_eval_activity() == (None, None)
 
     def test_returns_recorded_timestamps(self, monkeypatch) -> None:
         poll_at = datetime(2025, 1, 1, tzinfo=UTC)
         result_at = datetime(2025, 1, 2, tzinfo=UTC)
-        monkeypatch.setattr(eval_api, "_last_next_call_at", poll_at)
-        monkeypatch.setattr(eval_api, "_last_result_submitted_at", result_at)
+        monkeypatch.setattr(eval_activity.state, "last_next_call_at", poll_at)
+        monkeypatch.setattr(eval_activity.state, "last_result_submitted_at", result_at)
 
-        assert eval_api.get_eval_activity() == (poll_at, result_at)
+        assert eval_activity.get_eval_activity() == (poll_at, result_at)
 
 
 class TestGetQuotaPauseUntil:
     """Tests for the module-level quota-pause report accessor."""
 
     def test_returns_none_when_never_reported(self, monkeypatch) -> None:
-        monkeypatch.setattr(eval_api, "_quota_paused_until", None)
+        monkeypatch.setattr(eval_activity.state, "quota_paused_until", None)
 
-        assert eval_api.get_quota_pause_until() is None
+        assert eval_activity.get_quota_pause_until() is None
 
     def test_returns_future_resume_time(self, monkeypatch) -> None:
         resume_at = datetime.now(UTC) + timedelta(minutes=20)
-        monkeypatch.setattr(eval_api, "_quota_paused_until", resume_at)
+        monkeypatch.setattr(eval_activity.state, "quota_paused_until", resume_at)
 
-        assert eval_api.get_quota_pause_until() == resume_at
+        assert eval_activity.get_quota_pause_until() == resume_at
 
     def test_expires_once_resume_time_has_passed(self, monkeypatch) -> None:
         # A stale report from a since-recovered worker must not linger and
         # misreport the service as still paused.
         resume_at = datetime.now(UTC) - timedelta(minutes=1)
-        monkeypatch.setattr(eval_api, "_quota_paused_until", resume_at)
+        monkeypatch.setattr(eval_activity.state, "quota_paused_until", resume_at)
 
-        assert eval_api.get_quota_pause_until() is None
+        assert eval_activity.get_quota_pause_until() is None
 
 
 async def _seed_evaluations_with_cost(test_db_session, *, costs: list[float]) -> None:
@@ -135,21 +136,21 @@ class TestDailySpendCap:
         self, test_db_session, monkeypatch
     ) -> None:
         monkeypatch.setattr(eval_api.settings, "eval_daily_spend_cap_usd", 1.0)
-        monkeypatch.setattr(eval_api, "_quota_paused_until", None)
+        monkeypatch.setattr(eval_activity.state, "quota_paused_until", None)
         await _seed_evaluations_with_cost(test_db_session, costs=[0.60, 0.55])
 
         await eval_api._maybe_trip_daily_spend_cap(test_db_session)
 
-        assert eval_api.get_quota_pause_until() is not None
+        assert eval_activity.get_quota_pause_until() is not None
 
     @pytest.mark.asyncio
     async def test_daily_spend_cap_disabled_when_zero(
         self, test_db_session, monkeypatch
     ) -> None:
         monkeypatch.setattr(eval_api.settings, "eval_daily_spend_cap_usd", 0.0)
-        monkeypatch.setattr(eval_api, "_quota_paused_until", None)
+        monkeypatch.setattr(eval_activity.state, "quota_paused_until", None)
         await _seed_evaluations_with_cost(test_db_session, costs=[5.00])
 
         await eval_api._maybe_trip_daily_spend_cap(test_db_session)
 
-        assert eval_api.get_quota_pause_until() is None
+        assert eval_activity.get_quota_pause_until() is None

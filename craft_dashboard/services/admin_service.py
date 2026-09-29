@@ -25,8 +25,8 @@ from craft_dashboard.models.refresh_schedule import RefreshSchedule
 from craft_dashboard.repositories.issue_repository import (
     _build_excluded_issues_condition,
 )
-from craft_dashboard.routes.eval_api import (
-    _ACTIVITY_STALE_AFTER,
+from craft_dashboard.services.eval_activity import (
+    ACTIVITY_STALE_AFTER,
     get_eval_activity,
     get_quota_pause_until,
 )
@@ -649,7 +649,7 @@ class AdminService:
             status = "stalled_quota"
         elif last_poll_at is None:
             status = "unknown"
-        elif datetime.now(UTC) - last_poll_at <= _ACTIVITY_STALE_AFTER:
+        elif datetime.now(UTC) - last_poll_at <= ACTIVITY_STALE_AFTER:
             status = "running"
         else:
             status = "stalled"

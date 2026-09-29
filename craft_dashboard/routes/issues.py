@@ -1,6 +1,5 @@
 """Issue and PR triage routes."""
 
-import ipaddress
 import logging
 import math
 from dataclasses import asdict
@@ -21,9 +20,9 @@ from craft_dashboard.llm.evaluator import (
     current_version_for_item,
 )
 from craft_dashboard.models.views import IssueFilters, IssueView
+from craft_dashboard.rate_limit import limiter, local_aware_limit
 from craft_dashboard.repositories.issue_link_repository import IssueLinkRepository
 from craft_dashboard.repositories.issue_repository import IssueRepository
-from craft_dashboard.routes.eval_api import limiter
 
 if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
@@ -44,17 +43,7 @@ DEFAULT_PER_PAGE = 100
 SEMANTIC_SEARCH_QUERY_MAX_LENGTH = 200
 
 
-def _is_local_caller(key: str) -> bool:
-    """Return whether *key* (the caller's IP) counts as "local" for rate limits."""
-    try:
-        return ipaddress.ip_address(key).is_private
-    except ValueError:
-        return False
-
-
-def _semantic_search_rate_limit(key: str) -> str:
-    """Return a higher semantic-search rate limit for local callers."""
-    return "1000/minute" if _is_local_caller(key) else "20/minute"
+_semantic_search_rate_limit = local_aware_limit("1000/minute", "20/minute")
 
 
 def _semantic_search_cost(request: Request) -> int:

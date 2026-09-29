@@ -20,11 +20,23 @@ format:  ## Auto-format code with ruff
 lint:  ## Lint with ruff and check types with ty
 	uv run ruff check $(SOURCES)
 	uv run ruff format --diff $(SOURCES)
+	uv run python scripts/check_docs.py
+	uv run lint-imports
 	uv run ty check $(SOURCES)
 
 .PHONY: test
 test:  ## Run all tests
 	uv run pytest
+
+.PHONY: test-fast
+test-fast:  ## Run unit tests in parallel (quick inner-loop feedback)
+	uv run pytest tests/unit -n auto -q -p no:cacheprovider
+
+.PHONY: check
+check:  ## Format, lint, and run fast tests — the default pre-commit gate
+	$(MAKE) format
+	$(MAKE) lint
+	$(MAKE) test-fast
 
 .PHONY: test-cov
 test-cov:  ## Run tests with coverage report

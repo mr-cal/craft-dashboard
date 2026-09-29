@@ -44,18 +44,20 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from tenacity import (
-    RetryCallState,
     retry,
     retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
 
+from craft_dashboard.http_retry import (
+    is_retriable_http_error,
+    make_before_sleep_log,
+    make_wait_honoring_retry_after,
+)
 from craft_dashboard.models.forum import ForumBackfillState, ForumTopic
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from craft_dashboard.config import ForumConfig
@@ -64,7 +66,6 @@ __all__ = ["ForumCollector"]
 
 logger = logging.getLogger(__name__)
 
-HTTP_TOO_MANY_REQUESTS = 429
 #: Default historical backfill lookback. Set generously high (these forums
 #: were all created well within the last 15 years) so a fresh backfill
 #: effectively collects "all" history rather than a rolling window — see
@@ -97,6 +98,11 @@ _CATEGORY_REVALIDATION_INTERVAL = timedelta(days=30)
 #: backfill and removed ones are lingering in persisted progress.
 _CATEGORY_CACHE_TTL = timedelta(days=1)
 
+#: Retry budget for a single Discourse request. Generous because forum
+#: collection is a background job whose only real failure mode is giving up
+#: on a rate limit that would have cleared.
+_MAX_HTTP_ATTEMPTS = 6
+
 
 def _mark_category_done(cat_progress: dict, now: datetime) -> None:
     """Mark a category fully backfilled and stamp it for later revalidation."""
@@ -121,60 +127,6 @@ def _needs_revalidation(cat_progress: dict, now: datetime) -> bool:
     if done_at.tzinfo is None:
         done_at = done_at.replace(tzinfo=UTC)
     return now - done_at > _CATEGORY_REVALIDATION_INTERVAL
-
-
-def _is_retriable(exc: BaseException) -> bool:
-    """Return True for transient errors that should trigger a retry.
-
-    Retries on 429 (Discourse rate limiting) and network/timeout/protocol
-    errors. Does not retry on other 4xx errors.
-    """
-    if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code == HTTP_TOO_MANY_REQUESTS
-    return isinstance(exc, httpx.TransportError)
-
-
-def _retry_after_seconds(exc: BaseException) -> float | None:
-    """Extract a Retry-After header value (seconds) from a 429 response."""
-    if not isinstance(exc, httpx.HTTPStatusError):
-        return None
-    retry_after = exc.response.headers.get("Retry-After")
-    if not retry_after:
-        return None
-    try:
-        return float(retry_after)
-    except ValueError:
-        return None
-
-
-def _make_wait(default_wait: Callable) -> Callable[[RetryCallState], float]:
-    """Build a tenacity ``wait`` callable that honors Discourse's Retry-After.
-
-    Falls back to exponential backoff when no Retry-After header is present
-    (e.g. transport errors, or a 429 that omitted it).
-    """
-
-    def _wait(retry_state: RetryCallState) -> float:
-        exception = retry_state.outcome.exception() if retry_state.outcome else None
-        if exception is not None:
-            retry_after = _retry_after_seconds(exception)
-            if retry_after is not None:
-                return retry_after
-        return default_wait(retry_state)
-
-    return _wait
-
-
-def _before_sleep_log(retry_state: RetryCallState) -> None:
-    """Log each retry at debug level so progress logs stay uncluttered."""
-    exception = retry_state.outcome.exception() if retry_state.outcome else None
-    if exception is None:
-        return
-    logger.debug(
-        "Forum HTTP retry (attempt %d): %s",
-        retry_state.attempt_number,
-        exception,
-    )
 
 
 def _add_months(d: date, delta: int) -> date:
@@ -246,10 +198,17 @@ class ForumCollector:
             await self._http.aclose()
 
     @retry(
-        retry=retry_if_exception(_is_retriable),
-        wait=_make_wait(wait_exponential(multiplier=2, min=4, max=120)),
-        stop=stop_after_attempt(6),
-        before_sleep=_before_sleep_log,
+        retry=retry_if_exception(is_retriable_http_error),
+        wait=make_wait_honoring_retry_after(
+            wait_exponential(multiplier=2, min=4, max=120)
+        ),
+        stop=stop_after_attempt(_MAX_HTTP_ATTEMPTS),
+        before_sleep=make_before_sleep_log(
+            logger,
+            _MAX_HTTP_ATTEMPTS,
+            level=logging.DEBUG,
+            prefix="Forum HTTP retry",
+        ),
         reraise=True,
     )
     async def _get_json(self, url: str, params: dict | None = None) -> dict:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ipaddress
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
@@ -10,8 +9,6 @@ from typing import TYPE_CHECKING, Any, cast
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from scripts.llm.validation import validate_evaluation_result
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
@@ -40,53 +37,22 @@ from craft_dashboard.models.evaluation_transcript import EvaluationTranscript
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
+from craft_dashboard.rate_limit import limiter, local_aware_limit
 from craft_dashboard.repositories.issue_link_repository import IssueLinkRepository
 from craft_dashboard.repositories.issue_repository import (
     IssueRepository,
     _build_excluded_issues_condition,
 )
+from craft_dashboard.services import eval_activity
 from craft_dashboard.settings import Settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/eval", tags=["Evaluation API"])
-limiter = Limiter(key_func=get_remote_address)
 settings = Settings()
 
 _LOCK_TTL = timedelta(minutes=10)
-_AUTO_QUOTA_PAUSE_FOR = timedelta(minutes=30)
 
-#: How recently `/next`/`/result` must have been called for the service to
-
-#: How recently `/next`/`/result` must have been called for the service to
-#: be considered "running" rather than "stalled". A bit more than 2x the
-#: default 30s poll interval, to tolerate a slow evaluation or a missed tick
-#: without flapping.
-_ACTIVITY_STALE_AFTER = timedelta(seconds=90)
-
-#: Minimum gap between recorded queue-depth snapshots. Sampled as a side
-#: effect of `/next` (called by every worker every poll interval regardless
-#: of where it runs), throttled in-memory so concurrent/frequent pollers
-#: don't turn this into an extra query per poll.
-_QUEUE_SNAPSHOT_INTERVAL = timedelta(minutes=5)
-
-# In-memory activity tracking for `AdminService.get_llm_service_status()`.
-# The app runs as a single gunicorn worker process (see Dockerfile), so a
-# module-level timestamp is sufficient — no heartbeat table/DB writes needed.
-# This works identically whether the worker calling these endpoints runs on
-# the same host or remotely, since it's activity on the endpoints themselves,
-# not a separate signal from a specific caller.
-_last_next_call_at: datetime | None = None
-_last_result_submitted_at: datetime | None = None
-_last_queue_snapshot_at: datetime | None = None
-
-# In-memory quota-pause report from the worker. Any worker instance — the
-# in-cluster continuous service or a one-off run from a developer's laptop —
-# can report this via `POST /api/eval/quota-pause`, since they typically
-# share the same OpenRouter account/quota. Reported over HTTP (like all
-# other worker activity here) rather than assumed from silence, so the
-# admin page can show *why* the worker looks idle instead of just "stalled".
-_quota_paused_until: datetime | None = None
 _RELEASED_MODEL_PREFIX = "released:"
 _PREFLIGHT_RELEASE_PREFIX = "released:preflight"
 
@@ -105,61 +71,11 @@ class RelatedIssuesRequest(BaseModel):
     query: str = Field(default="", max_length=1000)
 
 
-def _is_local_caller(key: str) -> bool:
-    """Return whether *key* (the caller's IP) counts as "local" for rate limits.
-
-    The continuous `evaluate` worker runs in its own container on the shared
-    `vps-net` Podman network (see docker-compose.llm-evaluate.yml) and calls
-    craft-dashboard by its container hostname, never over loopback — so its
-    source IP is a private container address (e.g. ``10.89.0.x``), not
-    ``127.0.0.1``. A literal-loopback check would misclassify it as an
-    external caller, throttling it to 30/minute under `--concurrency > 1`,
-    which can back the worker off long enough for a `/next` lock to expire
-    and the same issue to be picked up and evaluated twice. Any private
-    (RFC 1918/RFC 4193/loopback) address is treated as local instead, since
-    only same-host/same-network containers can present one here.
-    """
-    try:
-        return ipaddress.ip_address(key).is_private
-    except ValueError:
-        return False
-
-
-def _eval_next_rate_limit(key: str) -> str:
-    """Return a higher `/next` rate limit for local callers.
-
-    ``slowapi`` calls this with the resolved rate-limit key (the result of
-    ``key_func``, i.e. the caller's IP) when the decorated limit value is a
-    callable declaring a ``key`` parameter, letting the limit vary per caller
-    without needing to inspect the request directly.
-    """
-    return "1000/minute" if _is_local_caller(key) else "30/minute"
-
-
-def get_eval_activity() -> tuple[datetime | None, datetime | None]:
-    """Return (last `/next` call time, last `/result` submission time).
-
-    Used by ``AdminService.get_llm_service_status`` to derive whether the
-    continuous evaluation worker looks like it's actually running, without
-    reaching into this module's internals directly.
-    """
-    return _last_next_call_at, _last_result_submitted_at
-
-
-def get_quota_pause_until() -> datetime | None:
-    """Return when the worker last reported it would resume after a quota pause.
-
-    Returns ``None`` once that time has passed, so a stale report from hours
-    ago can't linger and misreport a since-recovered worker as paused.
-    """
-    if _quota_paused_until is not None and datetime.now(tz=UTC) >= _quota_paused_until:
-        return None
-    return _quota_paused_until
+_eval_next_rate_limit = local_aware_limit("1000/minute", "30/minute")
 
 
 async def _maybe_trip_daily_spend_cap(session: AsyncSession) -> None:
     """Auto-pause evaluation when today's spend exceeds the configured cap."""
-    global _quota_paused_until  # noqa: PLW0603
     cap = settings.eval_daily_spend_cap_usd
     if cap <= 0:
         return
@@ -178,7 +94,7 @@ async def _maybe_trip_daily_spend_cap(session: AsyncSession) -> None:
             total,
             cap,
         )
-        _quota_paused_until = datetime.now(tz=UTC) + _AUTO_QUOTA_PAUSE_FOR
+        eval_activity.pause_for_spend_cap()
 
 
 async def _maybe_record_queue_snapshot(
@@ -190,14 +106,9 @@ async def _maybe_record_queue_snapshot(
     laptop) on every poll — so queue depth history accumulates automatically
     whenever the worker is running, without a separate cron sampler.
     """
-    global _last_queue_snapshot_at  # noqa: PLW0603
-    now = datetime.now(tz=UTC)
-    if (
-        _last_queue_snapshot_at is not None
-        and now - _last_queue_snapshot_at < _QUEUE_SNAPSHOT_INTERVAL
-    ):
+    if not eval_activity.should_record_queue_snapshot():
         return
-    _last_queue_snapshot_at = now
+    now = datetime.now(tz=UTC)
 
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     excl = _build_excluded_issues_condition(filtered_issues or {})
@@ -436,9 +347,8 @@ async def next_issue(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any] | Response:
     """Return the next issue that needs evaluation, if any."""
-    global _last_next_call_at  # noqa: PLW0603
     _require_eval_auth(request, authorization)
-    _last_next_call_at = datetime.now(tz=UTC)
+    eval_activity.record_next_call()
     await _maybe_record_queue_snapshot(
         session, filtered_issues=get_config(request).filtered_issues
     )
@@ -538,7 +448,6 @@ async def submit_result(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Store an evaluation result for an issue."""
-    global _last_result_submitted_at  # noqa: PLW0603
     _require_eval_auth(request, authorization)
 
     issue = await session.get(Issue, payload.issue_id)
@@ -683,7 +592,7 @@ async def submit_result(
     )
 
     await session.commit()
-    _last_result_submitted_at = datetime.now(tz=UTC)
+    eval_activity.record_result_submitted()
     await _maybe_trip_daily_spend_cap(session)
     return {"status": "stored", "issue_id": payload.issue_id}
 
@@ -896,9 +805,8 @@ async def report_quota_pause(
     bare "stalled", which would otherwise be indistinguishable from a
     genuinely broken worker.
     """
-    global _quota_paused_until  # noqa: PLW0603
     _require_eval_auth(request, authorization)
-    _quota_paused_until = payload.resume_at
+    eval_activity.set_quota_pause_until(payload.resume_at)
     return {"status": "recorded"}
 
 

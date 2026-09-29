@@ -38,6 +38,7 @@ craft-dashboard = "craft_dashboard.cli:main"
 lint = [
     "ruff>=0.9",
     "ty>=0.0.1a6",
+    "import-linter>=2.0",
 ]
 types = []
 dev = [
@@ -47,6 +48,7 @@ dev = [
     "pytest-cov~=7.0",
     "pytest-mock~=3.12",
     "pytest-timeout~=2.3",
+    "pytest-xdist~=3.6",
     "httpx",
     "aiosqlite>=0.22.1",
     "ruff>=0.15.13",
@@ -180,3 +182,37 @@ include = ["scripts/**"]
 
 [tool.ty.overrides.rules]
 all = "ignore"
+
+[tool.importlinter]
+root_package = "craft_dashboard"
+
+# Enforces the layering documented in agents.md. Violations fail `make lint`
+# rather than waiting for review.
+[[tool.importlinter.contracts]]
+name = "Layered architecture"
+type = "layers"
+layers = [
+    "craft_dashboard.routes",
+    "craft_dashboard.services",
+    "craft_dashboard.repositories",
+    "craft_dashboard.models",
+]
+
+[[tool.importlinter.contracts]]
+name = "Collectors are independent of the web layer"
+type = "forbidden"
+source_modules = ["craft_dashboard.collectors"]
+forbidden_modules = [
+    "craft_dashboard.routes",
+    "craft_dashboard.services",
+    "craft_dashboard.templates",
+]
+
+[[tool.importlinter.contracts]]
+name = "Repositories do not reach upwards"
+type = "forbidden"
+source_modules = ["craft_dashboard.repositories"]
+forbidden_modules = [
+    "craft_dashboard.routes",
+    "craft_dashboard.services",
+]

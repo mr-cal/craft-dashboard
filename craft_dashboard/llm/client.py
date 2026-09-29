@@ -19,6 +19,11 @@ from tenacity import (
     wait_exponential,
 )
 
+from craft_dashboard.http_retry import (
+    is_retriable_http_error,
+    make_before_sleep_log,
+    make_wait_honoring_retry_after,
+)
 from craft_dashboard.llm.exceptions import LLMQuotaError, LLMUnavailableError
 
 if TYPE_CHECKING:
@@ -32,7 +37,10 @@ HTTP_OK = 200
 HTTP_UNAUTHORIZED = 401
 HTTP_PAYMENT_REQUIRED = 402
 HTTP_FORBIDDEN = 403
-HTTP_TOO_MANY_REQUESTS = 429
+#: Retry budget for a single provider request. Kept small: completions are
+#: slow and billable, so a long retry chain costs real money and stalls the
+#: evaluation queue behind one bad request.
+_MAX_HTTP_ATTEMPTS = 3
 
 
 def _make_before_attempt(max_attempts: int) -> Callable[[RetryCallState], None]:
@@ -51,34 +59,6 @@ def _make_before_attempt(max_attempts: int) -> Callable[[RetryCallState], None]:
             callback(retry_state.attempt_number, max_attempts)
 
     return _before
-
-
-def _make_before_sleep_log(max_attempts: int) -> Callable[[RetryCallState], None]:
-    """Build a tenacity ``before_sleep`` hook that logs each retry.
-
-    Unlike ``before`` (which tenacity only calls once, ahead of the very
-    first attempt), ``before_sleep`` fires right before every retry, once
-    the previous attempt's failure is known -- this is the layer that was
-    previously completely silent, even though a retried/discarded attempt
-    can still incur real provider cost (e.g. a dropped connection after the
-    model already started generating).
-    """
-
-    def _before_sleep(retry_state: RetryCallState) -> None:
-        exception = retry_state.outcome.exception() if retry_state.outcome else None
-        if exception is None:
-            return
-        exc_name = type(exception).__name__
-        exc_msg = str(exception).strip()
-        detail = f"{exc_name}: {exc_msg}" if exc_msg else exc_name
-        logger.warning(
-            "HTTP retry (attempt %d/%d): %s",
-            retry_state.attempt_number,
-            max_attempts,
-            detail,
-        )
-
-    return _before_sleep
 
 
 def _parse_single_tool_call_body(body: str, index: int = 0) -> list[dict[str, Any]]:
@@ -333,20 +313,6 @@ class LLMClient(Protocol):
         """Verify remaining quota/budget for this client, raising LLMQuotaError if exhausted."""
 
 
-def _is_retriable(exc: BaseException) -> bool:
-    """Return True for transient errors that should trigger a retry.
-
-    Retries on 429 (rate limited) and network/timeout/protocol errors.
-    ``httpx.TransportError`` covers ``TimeoutException``, ``NetworkError``,
-    and ``ProtocolError`` (e.g. ``RemoteProtocolError`` raised when the
-    server drops the connection without sending a response).
-    Does NOT retry on 402 (quota exhausted) or other 4xx errors.
-    """
-    if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code == HTTP_TOO_MANY_REQUESTS
-    return isinstance(exc, httpx.TransportError)
-
-
 class OpenRouterClient:
     """HTTP client for the OpenRouter API."""
 
@@ -422,11 +388,15 @@ class OpenRouterClient:
                 )
 
     @retry(
-        retry=retry_if_exception(_is_retriable),
-        wait=wait_exponential(multiplier=1, min=4, max=60),
-        stop=stop_after_attempt(3),
-        before=_make_before_attempt(3),
-        before_sleep=_make_before_sleep_log(3),
+        retry=retry_if_exception(is_retriable_http_error),
+        # Honor Retry-After: OpenRouter sends it on 429, and backing off for
+        # less simply gets the next request rejected too.
+        wait=make_wait_honoring_retry_after(
+            wait_exponential(multiplier=1, min=4, max=60)
+        ),
+        stop=stop_after_attempt(_MAX_HTTP_ATTEMPTS),
+        before=_make_before_attempt(_MAX_HTTP_ATTEMPTS),
+        before_sleep=make_before_sleep_log(logger, _MAX_HTTP_ATTEMPTS),
         reraise=True,
     )
     async def complete(
@@ -589,12 +559,16 @@ class LocalLLMClient:
 
     @retry(
         retry=retry_if_exception(
-            lambda exc: isinstance(exc, (httpx.TransportError, LLMUnavailableError))
+            lambda exc: (
+                is_retriable_http_error(exc) or isinstance(exc, LLMUnavailableError)
+            )
         ),
-        wait=wait_exponential(multiplier=1, min=2, max=30),
-        stop=stop_after_attempt(3),
-        before=_make_before_attempt(3),
-        before_sleep=_make_before_sleep_log(3),
+        wait=make_wait_honoring_retry_after(
+            wait_exponential(multiplier=1, min=2, max=30)
+        ),
+        stop=stop_after_attempt(_MAX_HTTP_ATTEMPTS),
+        before=_make_before_attempt(_MAX_HTTP_ATTEMPTS),
+        before_sleep=make_before_sleep_log(logger, _MAX_HTTP_ATTEMPTS),
         reraise=True,
     )
     async def complete(

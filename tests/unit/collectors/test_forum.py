@@ -10,8 +10,6 @@ from craft_dashboard.collectors.forum import (
     ForumCollector,
     _add_months,
     _flatten_categories,
-    _is_retriable,
-    _retry_after_seconds,
 )
 from craft_dashboard.config import ForumConfig
 from craft_dashboard.models.forum import ForumBackfillState, ForumTopic
@@ -128,42 +126,6 @@ class TestFlattenCategories:
 
     def test_empty_payload(self) -> None:
         assert _flatten_categories({}) == []
-
-
-class TestRetryPredicates:
-    """Tests for _is_retriable / _retry_after_seconds."""
-
-    def test_retries_on_429(self) -> None:
-        request = httpx.Request("GET", "https://forum.example.io")
-        exc = httpx.HTTPStatusError(
-            "429", request=request, response=httpx.Response(429, request=request)
-        )
-        assert _is_retriable(exc) is True
-
-    def test_does_not_retry_on_404(self) -> None:
-        request = httpx.Request("GET", "https://forum.example.io")
-        exc = httpx.HTTPStatusError(
-            "404", request=request, response=httpx.Response(404, request=request)
-        )
-        assert _is_retriable(exc) is False
-
-    def test_retries_on_transport_error(self) -> None:
-        assert _is_retriable(httpx.ConnectTimeout("timeout")) is True
-
-    def test_retry_after_seconds_parses_header(self) -> None:
-        request = httpx.Request("GET", "https://forum.example.io")
-        response = httpx.Response(429, request=request, headers={"Retry-After": "12"})
-        exc = httpx.HTTPStatusError("429", request=request, response=response)
-        assert _retry_after_seconds(exc) == 12.0
-
-    def test_retry_after_seconds_missing_header(self) -> None:
-        request = httpx.Request("GET", "https://forum.example.io")
-        response = httpx.Response(429, request=request)
-        exc = httpx.HTTPStatusError("429", request=request, response=response)
-        assert _retry_after_seconds(exc) is None
-
-    def test_retry_after_seconds_non_status_error(self) -> None:
-        assert _retry_after_seconds(httpx.ConnectTimeout("timeout")) is None
 
 
 @pytest.fixture

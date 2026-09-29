@@ -2,127 +2,93 @@
 
 ## Prerequisites
 
-You need these on your local machine:
+Install these tools on your development machine:
 
-- Python 3.12+
-- [uv](https://astral.sh/uv) (Python package manager)
-- Docker Engine and Docker Compose
+- Python 3.12 or newer
+- [uv](https://astral.sh/uv)
+- Podman with `podman compose`
 - git
 
-PostgreSQL runs in a Docker container — you do not need to install it locally.
-Unit and integration tests use SQLite in-memory databases and do not need
-Docker.
+The repository contains `docker-compose.yml`, and local documentation uses Podman to run it. PostgreSQL runs in the Compose stack; pytest uses local test databases and fixtures.
 
 ## Setup
 
-```
+From the repository root:
+
+```bash
 make setup
+cp .env.example .env
 ```
 
-This runs `uv sync` and installs all dev, lint, and type-checking dependencies.
+Fill in `.env` only for features that need external services. Local Compose supplies `DATABASE_URL` for the app container.
 
-## Running the dev server
+## Running locally
 
+From the repository root:
+
+```bash
+podman compose up --build
 ```
-docker compose up --build
+
+Open `http://localhost:8000/`.
+
+For hot reload against an already available database, run:
+
+```bash
+make dev
 ```
 
-This starts the app on `http://localhost:8000` with PostgreSQL via Docker
-Compose. The database credentials are hardcoded in `docker-compose.yml`
-(user: `craft_dashboard`, password: `devpassword`).
+Apply migrations manually with:
 
-For non-Docker development (e.g. `make dev` with hot reload), you still need
-a `.env` file — but `DATABASE_URL` is set by Docker Compose and does not need
-to be in `.env`. Copy `.env.example` to `.env` and fill in your API tokens.
-For deep evaluation, a dev worker maintains its own bare mirrors under
-`~/.cache/craft-dashboard/mirrors` by default; populate them with
-`craft-dashboard mirrors sync`, or override the location with
-`CRAFT_DASHBOARD_MIRROR_DIR`.
+```bash
+make migrate
+```
+
+The container also runs `alembic upgrade head` during startup.
 
 ## Tests
 
+From the repository root:
+
+```bash
+make test
+make test-cov
+make test-e2e
 ```
-make test          # all tests (unit + integration, excludes e2e)
-make test-cov      # same, with coverage report
-make test-e2e      # end-to-end tests (requires Docker, see below)
-```
+
+`make test` runs the pytest suite under `tests/`. End-to-end tests live under `tests/end_to_end/` and run only through `make test-e2e`.
 
 Run a specific test file or test:
 
-```
+```bash
 uv run pytest tests/unit/test_config.py -v
-uv run pytest -k "test_dashboard_shows_project" -v
+uv run pytest tests/unit/test_config.py::TestDashboardConfig::test_load_config_from_file -v
+uv run pytest -k test_dashboard_shows_project -v
 ```
 
-### Test layout
+## Formatting, linting, and type checking
 
-Tests are in `tests/` and split into three categories:
+From the repository root:
 
-- `tests/unit/` -- fast, no database, no HTTP. Tests individual functions and
-  classes in isolation.
-- `tests/integration/` -- uses an in-memory SQLite database and FastAPI's
-  `TestClient`. Tests routes, templates, and queries against real (but
-  ephemeral) data.
-- `tests/end_to_end/` -- requires Docker (builds and runs the app via Docker
-  Compose). Uses `requests` and Puppeteer for browser-level checks. Marked with
-  `@pytest.mark.e2e` and `@pytest.mark.slow`.
-
-Integration tests patch SQLAlchemy's SQLite type compiler to handle JSONB
-columns as TEXT. This happens in `tests/integration/conftest.py`.
-
-### pytest markers
-
-- `e2e` -- end-to-end tests (skipped unless `CRAFT_DASHBOARD_E2E=1`)
-- `slow` -- tests that take a long time
-
-## Linting and formatting
-
-```
-make format        # auto-fix with ruff
-make lint          # check with ruff + ty (type checker)
+```bash
+make format
+make lint
 ```
 
-The project uses ruff for both formatting and linting. Line length is 88
-characters. Type checking is done with ty (not mypy).
-
-After making changes, run in this order:
-
-1. `make format`
-2. `make lint`
-3. `make test`
+`make format` runs Ruff fixes and formatting. `make lint` runs Ruff checks, Ruff format diff, the documentation drift checker, and ty.
 
 ## Project layout
 
-```
-craft_dashboard/          # main Python package
-  app.py                  # FastAPI app factory
-  auth.py                 # admin token verification
-  cli.py                  # click CLI entry point
-  config.py               # TOML config loader (craft-dashboard.toml)
-  database.py             # SQLAlchemy engine/session setup
-  dependencies.py         # FastAPI dependency injection (DB session)
-  enums.py                # IssueState, IssueType, IssueSource
-  settings.py             # pydantic-settings (env vars / .env)
-  models/                 # SQLAlchemy ORM models
-  repositories/           # data access layer (query helpers)
-  routes/                 # FastAPI route handlers
-  services/               # business logic (admin operations)
-  collectors/             # data collection (GitHub, Launchpad, deps, snapshots)
-  llm/                    # LLM evaluation (OpenRouter, local)
-  utils/                  # shared utilities (retention, etc.)
-  templates/              # Jinja2 HTML templates
-  static/                 # CSS, JS, favicon
-
-scripts/                  # standalone scripts (run via docker compose exec)
-  llm/                    # LLM evaluation CLI and orchestration
-tests/                    # pytest test suite
-alembic/                  # database migration files
+```text
+craft_dashboard/          FastAPI app, models, routes, collectors, services, LLM code, templates, and static assets
+scripts/                  Operational scripts and LLM worker commands
+alembic/                  Alembic migrations
+tests/unit/               Unit tests
+tests/integration/        Integration tests
+tests/end_to_end/         Browser-level tests
+Dockerfile                OCI image build
+docker-compose.yml        Local app and PostgreSQL stack
+craft-dashboard.toml      Project, maintainer, forum, and filtering configuration
 ```
 
-### Docker files
-
-```
-Dockerfile                # multi-stage build for the app container
-.dockerignore             # files excluded from Docker build context
-docker-compose.yml        # Docker Compose stack (app + postgres)
-```
+See [reference.md](reference.md) for command and environment variable details.
