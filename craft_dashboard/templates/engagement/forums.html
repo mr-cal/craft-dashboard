@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Engagement - craft-dashboard{% endblock %}
 {% block head %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="/static/vendor/chart.umd.min.js"></script>
 {% endblock %}
 
 {% block layout %}
@@ -93,7 +93,7 @@
 
 {% block scripts %}
 <script>
-  window.ENGAGEMENT_FORUMS = {{ forums_json | safe }};
+  window.ENGAGEMENT_FORUMS = {{ forums | tojson }};
 </script>
 <script type="module" src="/static/js/engagement.js?v={{ cache_bust }}"></script>
 {% endblock %}

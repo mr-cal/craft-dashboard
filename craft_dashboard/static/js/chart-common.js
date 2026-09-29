@@ -2,6 +2,8 @@
 // and the Engagement/Forums page (engagement.js), to avoid duplicating
 // theme handling, checkbox rendering, and rolling-average math.
 
+import { chartDataTablePlugin } from "/static/js/chart-a11y.js";
+
 export const CHART_COLORS = {
   palette: [
     "#E95420", "#0E8420", "#0066CC", "#772953", "#AEA79F",
@@ -23,6 +25,8 @@ export function getThemeColors(rootElement) {
 // Creates a small "chart registry" object bound to a single page's
 // document.documentElement, holding the list of registered charts and
 // providing theme-aware helpers that operate on them.
+Chart.register(chartDataTablePlugin);
+
 export function createChartRegistry(rootElement) {
   const registeredCharts = [];
 

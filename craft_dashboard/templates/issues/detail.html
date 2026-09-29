@@ -211,14 +211,15 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
 <script src="/static/js/table-interact.js"></script>
 <script>
 (function () {
   var el = document.getElementById("issue-body");
   if (!el || !el.textContent.trim()) return;
   var raw = el.textContent;
-  el.innerHTML = marked.parse(raw);
+  el.innerHTML = DOMPurify.sanitize(marked.parse(raw));
 })();
 </script>
 {% endblock %}

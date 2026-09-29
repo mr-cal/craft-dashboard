@@ -101,7 +101,7 @@ query($owner: String!, $name: String!, $after: String, $states: [PullRequestStat
 }
 """
 
-_RELEASES_AND_BRANCHES_QUERY = """
+_RELEASES_QUERY = """
 query($owner: String!, $name: String!, $after: String) {
   rateLimit { cost remaining resetAt }
   repository(owner: $owner, name: $name) {
@@ -109,10 +109,28 @@ query($owner: String!, $name: String!, $after: String) {
       pageInfo { hasNextPage endCursor }
       nodes { tagName isPrerelease isDraft createdAt publishedAt }
     }
-    refs(refPrefix: "refs/heads/", query: "hotfix/", first: 100) {
+  }
+}
+"""
+
+_HOTFIX_BRANCHES_QUERY = """
+query($owner: String!, $name: String!, $after: String) {
+  rateLimit { cost remaining resetAt }
+  repository(owner: $owner, name: $name) {
+    refs(refPrefix: "refs/heads/", query: "hotfix/", first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
       nodes { name }
     }
-    tags: refs(refPrefix: "refs/tags/", first: 100, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) {
+  }
+}
+"""
+
+_TAGS_QUERY = """
+query($owner: String!, $name: String!, $after: String) {
+  rateLimit { cost remaining resetAt }
+  repository(owner: $owner, name: $name) {
+    tags: refs(refPrefix: "refs/tags/", first: 100, after: $after, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
       nodes {
         name
         target {
@@ -366,6 +384,135 @@ def paginated_pull_requests(
         after = page_info["endCursor"]
 
 
+def _log_cost(data: dict[str, Any], label: str, owner: str, name: str) -> None:
+    """Log the rate-limit cost of one GraphQL page."""
+    cost = GraphQLCost.from_response(data["rateLimit"])
+    logger.debug(
+        "GraphQL %s page for %s/%s: cost=%d remaining=%d reset_at=%s",
+        label,
+        owner,
+        name,
+        cost.cost,
+        cost.remaining,
+        cost.reset_at,
+    )
+
+
+def _fetch_release_nodes(
+    requester: "Requester",
+    owner: str,
+    name: str,
+    known_since: datetime | None,
+) -> list[dict[str, Any]]:
+    """Fetch release nodes newest-first, stopping at ``known_since``."""
+    after: str | None = None
+    releases: list[dict[str, Any]] = []
+
+    while True:
+        data = _graphql_query(
+            requester,
+            _RELEASES_QUERY,
+            {"owner": owner, "name": name, "after": after},
+            owner=owner,
+            name=name,
+        )
+        _log_cost(data, "releases", owner, name)
+
+        page = data["repository"]["releases"]
+        reached_known = False
+        for node in page["nodes"]:
+            created_at = _parse_graphql_datetime(node["createdAt"])
+            if (
+                known_since is not None
+                and created_at is not None
+                and created_at <= known_since
+            ):
+                reached_known = True
+                break
+            releases.append(node)
+
+        if reached_known or not page["pageInfo"]["hasNextPage"]:
+            return releases
+        after = page["pageInfo"]["endCursor"]
+
+
+def _fetch_hotfix_branch_names(
+    requester: "Requester",
+    owner: str,
+    name: str,
+) -> list[str]:
+    """Fetch every ``hotfix/`` branch name, following cursors to the end.
+
+    Fetching only the first page silently truncated repositories with more
+    than 100 hotfix branches, producing incomplete release dashboards with no
+    error.
+    """
+    after: str | None = None
+    branch_names: list[str] = []
+
+    while True:
+        data = _graphql_query(
+            requester,
+            _HOTFIX_BRANCHES_QUERY,
+            {"owner": owner, "name": name, "after": after},
+            owner=owner,
+            name=name,
+        )
+        _log_cost(data, "hotfix branches", owner, name)
+
+        page = (data["repository"] or {}).get("refs") or {}
+        branch_names.extend(ref["name"] for ref in page.get("nodes", []))
+
+        page_info = page.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            return branch_names
+        after = page_info["endCursor"]
+
+
+def _fetch_tag_nodes(
+    requester: "Requester",
+    owner: str,
+    name: str,
+    known_since: datetime | None,
+) -> list[dict[str, Any]]:
+    """Fetch tag nodes newest-first, stopping once they predate ``known_since``.
+
+    Tags are ordered by commit date descending, so once a page yields a tag at
+    or before the watermark every later tag is already known and pagination can
+    stop. Without a cutoff this walks the repository's full tag history.
+    """
+    after: str | None = None
+    tag_nodes: list[dict[str, Any]] = []
+
+    while True:
+        data = _graphql_query(
+            requester,
+            _TAGS_QUERY,
+            {"owner": owner, "name": name, "after": after},
+            owner=owner,
+            name=name,
+        )
+        _log_cost(data, "tags", owner, name)
+
+        page = (data["repository"] or {}).get("tags") or {}
+        reached_known = False
+        for node in page.get("nodes", []):
+            tag_nodes.append(node)
+            created_at = _parse_graphql_datetime(_extract_tag_date(node.get("target")))
+            if (
+                known_since is not None
+                and created_at is not None
+                and created_at <= known_since
+            ):
+                reached_known = True
+                break
+
+        page_info = page.get("pageInfo") or {}
+        if reached_known or not page_info.get("hasNextPage"):
+            return tag_nodes
+        after = page_info["endCursor"]
+
+
 def paginated_releases_and_branches(
     requester: "Requester",
     owner: str,
@@ -374,12 +521,15 @@ def paginated_releases_and_branches(
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Fetch releases (newest-first) and hotfix branch names for one repo.
 
-    Pagination stops early once a release's ``createdAt`` falls at or before
-    ``known_since`` (the latest ``released_at`` already stored for this repo),
-    since releases are fetched newest-first and everything after that point
-    is already known. The ``refs`` (hotfix branches) query only runs on the
-    first page — branch listings don't need "since" filtering since
-    ``refs(first: 100)`` is cheap and branches are typically few.
+    Release pagination stops early once a release's ``createdAt`` falls at or
+    before ``known_since`` (the latest ``released_at`` already stored for this
+    repo), since releases are fetched newest-first and everything after that
+    point is already known.
+
+    Hotfix branches and tags are fetched by their own cursor-following queries.
+    Each is a separate ``refs`` connection, and GitHub caps a connection page at
+    100 nodes, so a repository with more than 100 tags or hotfix branches must
+    be paginated or its data is silently truncated.
 
     Args:
         requester: ``Github.requester``.
@@ -394,53 +544,9 @@ def paginated_releases_and_branches(
         branch name list).
 
     """
-    after: str | None = None
-    releases: list[dict[str, Any]] = []
-    branch_names: list[str] = []
-    raw_tag_nodes: list[dict[str, Any]] = []
-    first_page = True
-
-    while True:
-        data = _graphql_query(
-            requester,
-            _RELEASES_AND_BRANCHES_QUERY,
-            {"owner": owner, "name": name, "after": after},
-            owner=owner,
-            name=name,
-        )
-        cost = GraphQLCost.from_response(data["rateLimit"])
-        logger.debug(
-            "GraphQL releases page for %s/%s: cost=%d remaining=%d reset_at=%s",
-            owner,
-            name,
-            cost.cost,
-            cost.remaining,
-            cost.reset_at,
-        )
-        repo = data["repository"]
-        if first_page:
-            branch_names = [
-                ref["name"] for ref in (repo.get("refs") or {}).get("nodes", [])
-            ]
-            raw_tag_nodes = (repo.get("tags") or {}).get("nodes", [])
-            first_page = False
-
-        page = repo["releases"]
-        reached_known = False
-        for node in page["nodes"]:
-            created_at = _parse_graphql_datetime(node["createdAt"])
-            if (
-                known_since is not None
-                and created_at is not None
-                and created_at <= known_since
-            ):
-                reached_known = True
-                break
-            releases.append(node)
-
-        if reached_known or not page["pageInfo"]["hasNextPage"]:
-            break
-        after = page["pageInfo"]["endCursor"]
+    releases = _fetch_release_nodes(requester, owner, name, known_since)
+    branch_names = _fetch_hotfix_branch_names(requester, owner, name)
+    raw_tag_nodes = _fetch_tag_nodes(requester, owner, name, known_since)
 
     # Fall back to git tags for releases missing a formal GitHub release entity.
     # Restrict strictly to 'X.Y.Z' or 'vX.Y.Z' syntax.

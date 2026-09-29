@@ -694,8 +694,7 @@ class TestAdminPage:
         )
         assert "maintainAspectRatio: false" in response.text
         assert (
-            '<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>'
-            in response.text
+            '<script src="/static/vendor/chart.umd.min.js"></script>' in response.text
         )
         # Ensure col-12 is used instead of bare col inside the chart rows
         assert (

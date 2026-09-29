@@ -3,7 +3,6 @@
 See plans/33-forum-activity-tracker.md for the full design.
 """
 
-import json
 from collections import defaultdict
 from datetime import timedelta
 from typing import TYPE_CHECKING
@@ -52,7 +51,7 @@ async def forums_page(
     return templates.TemplateResponse(
         request,
         "engagement/forums.html",
-        {"forums": forums, "forums_json": json.dumps(forums)},
+        {"forums": forums},
     )
 
 

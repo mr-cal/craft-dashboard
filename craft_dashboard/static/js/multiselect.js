@@ -186,6 +186,12 @@
 
     // Initialize state
     updateDisplay();
+
+    // Exposed so code that sets the checkboxes directly (e.g. restoring
+    // filter state on browser back/forward) can refresh the summary label
+    // without dispatching a `change` event, which htmx would turn into an
+    // extra table request per control.
+    container.refreshMultiselectDisplay = updateDisplay;
   }
 
   function closeAll() {

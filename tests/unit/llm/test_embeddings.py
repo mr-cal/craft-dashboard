@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
-from craft_dashboard.llm.embeddings import EmbeddingClient
+from craft_dashboard.llm.embeddings import _MAX_TRUNCATE_RETRIES, EmbeddingClient
 
 
 def _make_response(
@@ -135,3 +135,50 @@ def test_init_with_missing_ca_cert_raises(tmp_path):
         FileNotFoundError, match="Embedding CA certificate file not found"
     ):
         EmbeddingClient(ca_cert=str(nonexistent))
+
+
+async def test_embed_batch_does_not_retry_on_unrelated_token_error():
+    """B8: a 400 that merely mentions 'token' must not trigger truncation.
+
+    An auth-token error is not retryable, and the old substring check recursed
+    on it, issuing a billable request per halving.
+    """
+    err_response = httpx.Response(
+        400,
+        text='{"error":{"message":"Invalid API token supplied.","code":"invalid_api_key"}}',
+        request=httpx.Request("POST", "http://x"),
+    )
+    with patch(
+        "httpx.AsyncClient.post",
+        new_callable=AsyncMock,
+        side_effect=[err_response],
+    ) as mock_post:
+        client = EmbeddingClient(base_url="http://localhost:11434/v1")
+        try:
+            with pytest.raises(httpx.HTTPStatusError):
+                await client.embed_batch(["x" * 200000])
+        finally:
+            await client.close()
+    assert mock_post.call_count == 1
+
+
+async def test_embed_batch_truncation_retries_are_bounded():
+    """B8: repeated context-length 400s stop after a fixed number of attempts."""
+    err_response = httpx.Response(
+        400,
+        text='{"error":{"message":"maximum context length exceeded"}}',
+        request=httpx.Request("POST", "http://x"),
+    )
+    with patch(
+        "httpx.AsyncClient.post",
+        new_callable=AsyncMock,
+        return_value=err_response,
+    ) as mock_post:
+        client = EmbeddingClient(base_url="http://localhost:11434/v1")
+        try:
+            with pytest.raises(httpx.HTTPStatusError):
+                await client.embed_batch(["x" * 10_000_000])
+        finally:
+            await client.close()
+    # One initial request plus at most _MAX_TRUNCATE_RETRIES retries.
+    assert mock_post.call_count == _MAX_TRUNCATE_RETRIES + 1

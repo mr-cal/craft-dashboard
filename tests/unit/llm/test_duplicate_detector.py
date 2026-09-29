@@ -52,7 +52,7 @@ async def test_check_duplicates_returns_none_when_no_candidates():
         find_similar_fn=find_similar,
     )
 
-    assert result == {"candidates_compared": 0}
+    assert result == {"candidates_compared": 0, "candidates_failed": 0}
     llm_client.complete.assert_not_awaited()
 
 
@@ -117,7 +117,7 @@ async def test_check_duplicates_skips_low_confidence():
 
     # confidence 50 < threshold 70, so no duplicate found
     assert "duplicate_of_issue_id" not in (result or {})
-    assert result == {"candidates_compared": 1}
+    assert result == {"candidates_compared": 1, "candidates_failed": 0}
 
 
 @pytest.mark.asyncio
@@ -174,7 +174,9 @@ async def test_check_duplicates_handles_llm_error_gracefully():
         find_similar_fn=find_similar,
     )
 
-    assert result == {"candidates_compared": 1}
+    # B14: a candidate whose LLM call failed is reported as failed, not
+    # compared, so callers can tell "no duplicates" from "could not check".
+    assert result == {"candidates_compared": 0, "candidates_failed": 1}
 
 
 @pytest.mark.asyncio

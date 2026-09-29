@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 from craft_dashboard.collectors.forum import (
+    _CUTOFF_PAGE_STREAK,
     ForumCollector,
     _add_months,
     _flatten_categories,
@@ -296,15 +297,27 @@ class TestBackfillNextBatch:
     async def test_marks_category_done_when_cutoff_reached(
         self, collector: ForumCollector, test_db_session: AsyncSession
     ) -> None:
-        """years_lookback=1: a topic older than that stops the category."""
+        """years_lookback=1: a run of below-cutoff pages stops the category.
+
+        B11: one below-cutoff page is not enough. Discourse's `order=created`
+        listing is not strictly monotonic, and because progress is persisted,
+        stopping on the first old topic would abandon the rest of the
+        category's history permanently.
+        """
         collector.years_lookback = 1
-        old_topic = _make_topic(1, created_at="2000-01-01T00:00:00.000Z")
         responses = iter(
             [
                 _single_category_response(),
-                _category_page_response(
-                    "https://forum.example.io", "bugs", 7, [old_topic], more=True
-                ),
+                *[
+                    _category_page_response(
+                        "https://forum.example.io",
+                        "bugs",
+                        7,
+                        [_make_topic(i, created_at="2000-01-01T00:00:00.000Z")],
+                        more=True,
+                    )
+                    for i in range(_CUTOFF_PAGE_STREAK)
+                ],
             ]
         )
 
@@ -321,6 +334,46 @@ class TestBackfillNextBatch:
             select(ForumBackfillState).where(ForumBackfillState.forum == "snapcraft")
         )
         assert state.category_progress["7"]["done"] is True
+
+    async def test_single_old_page_does_not_end_the_category(
+        self, collector: ForumCollector, test_db_session: AsyncSession
+    ) -> None:
+        """B11: one below-cutoff page only advances the streak counter."""
+        collector.years_lookback = 1
+        responses = iter(
+            [
+                _single_category_response(),
+                _category_page_response(
+                    "https://forum.example.io",
+                    "bugs",
+                    7,
+                    [_make_topic(1, created_at="2000-01-01T00:00:00.000Z")],
+                    more=True,
+                ),
+                # The next page is back above the cutoff, proving the listing
+                # was not monotonic and the category was not exhausted.
+                _category_page_response(
+                    "https://forum.example.io",
+                    "bugs",
+                    7,
+                    [_make_topic(2)],
+                    more=False,
+                ),
+            ]
+        )
+
+        async def _fake_get(_self, url, params=None, **_kw):
+            return next(responses)
+
+        with (
+            patch("httpx.AsyncClient.get", new=_fake_get),
+            patch("craft_dashboard.collectors.forum.insert", new=sqlite_insert),
+        ):
+            count = await collector.backfill_next_batch("snapcraft", test_db_session)
+
+        # Both pages were fetched and upserted; the category only ended
+        # because `more_topics_url` ran out, not because of the cutoff.
+        assert count == 2
 
     async def test_fully_drains_a_single_large_category_within_budget(
         self, collector: ForumCollector, test_db_session: AsyncSession
@@ -449,11 +502,18 @@ class TestBackfillNextBatch:
     async def test_already_done_categories_are_skipped(
         self, collector: ForumCollector, test_db_session: AsyncSession
     ) -> None:
-        """A category marked done makes no further HTTP requests."""
+        """A recently-completed category makes no further HTTP requests."""
         state = ForumBackfillState(
             forum="snapcraft",
             categories_cache=["bugs"],
-            category_progress={"7": {"next_page": 5, "done": True}},
+            categories_cached_at=datetime.now(tz=UTC),
+            category_progress={
+                "7": {
+                    "next_page": 5,
+                    "done": True,
+                    "done_at": datetime.now(tz=UTC).isoformat(),
+                }
+            },
         )
         test_db_session.add(state)
         await test_db_session.commit()
@@ -591,3 +651,72 @@ class TestRefreshRecent:
 
         assert "Forum refresh: snapcraft" in caplog.text
         assert "topics updated" in caplog.text
+
+
+class TestCategoryRevalidation:
+    """B11/B12: completed categories are eventually walked again."""
+
+    async def test_category_done_without_timestamp_is_revalidated(
+        self, collector: ForumCollector, test_db_session: AsyncSession
+    ) -> None:
+        """Progress written before the streak fix has no `done_at`.
+
+        Those categories may have been abandoned mid-history, so they are
+        revalidated once rather than trusted forever.
+        """
+        state = ForumBackfillState(
+            forum="snapcraft",
+            categories_cache=["bugs"],
+            categories_cached_at=datetime.now(tz=UTC),
+            category_progress={"7": {"next_page": 5, "done": True}},
+        )
+        test_db_session.add(state)
+        await test_db_session.commit()
+
+        collector.years_lookback = 50
+        responses = iter(
+            [
+                _single_category_response(),
+                _category_page_response(
+                    "https://forum.example.io", "bugs", 7, [_make_topic(1)], more=False
+                ),
+            ]
+        )
+
+        async def _fake_get(_self, url, params=None, **_kw):
+            return next(responses)
+
+        with (
+            patch("httpx.AsyncClient.get", new=_fake_get),
+            patch("craft_dashboard.collectors.forum.insert", new=sqlite_insert),
+        ):
+            count = await collector.backfill_next_batch("snapcraft", test_db_session)
+
+        assert count == 1
+
+    async def test_stale_category_progress_is_pruned_on_refresh(
+        self, collector: ForumCollector, test_db_session: AsyncSession
+    ) -> None:
+        """B12: progress for categories that no longer exist is dropped."""
+        state = ForumBackfillState(
+            forum="snapcraft",
+            categories_cache=["gone"],
+            category_progress={
+                "7": {"next_page": 1, "done": False},
+                "999": {"next_page": 3, "done": True},
+            },
+        )
+        test_db_session.add(state)
+        await test_db_session.commit()
+
+        async def _fake_get(_self, url, params=None, **_kw):
+            return _single_category_response()
+
+        with patch("httpx.AsyncClient.get", new=_fake_get):
+            await collector.refresh_categories("snapcraft", test_db_session)
+
+        refreshed = await test_db_session.scalar(
+            select(ForumBackfillState).where(ForumBackfillState.forum == "snapcraft")
+        )
+        assert set(refreshed.category_progress) == {"7"}
+        assert refreshed.categories_cached_at is not None

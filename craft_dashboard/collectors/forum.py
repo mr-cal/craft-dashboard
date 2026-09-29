@@ -37,7 +37,7 @@ sees a topic older than any configured lookback cutoff.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import httpx
@@ -76,6 +76,51 @@ DEFAULT_YEARS_LOOKBACK = 15
 #: indefinitely; progress is resumed on the next call via the persisted
 #: per-category page cursor.
 DEFAULT_MAX_REQUESTS_PER_BATCH = 300
+
+#: Number of *consecutive* pages that must be entirely older than the
+#: lookback cutoff before a category is considered fully backfilled.
+#: Discourse does not guarantee that a `order=created` listing is strictly
+#: monotonic (pinned topics, bumped or moved topics, and slug changes all
+#: perturb it), so stopping on the first below-cutoff page would abandon the
+#: remaining history permanently, because `category_progress` is persisted.
+_CUTOFF_PAGE_STREAK = 3
+
+#: How long a category stays "done" before the backfill revalidates it.
+#: Categories can gain older topics after the fact (topics moved between
+#: categories keep their original `created_at`), and a category marked done
+#: by an earlier, buggier run would otherwise never be revisited.
+_CATEGORY_REVALIDATION_INTERVAL = timedelta(days=30)
+
+#: How stale the cached category list may become before the backfill warns.
+#: `refresh_categories` is expected to run before every backfill batch; if
+#: `categories_cached_at` falls behind, new categories are not entering
+#: backfill and removed ones are lingering in persisted progress.
+_CATEGORY_CACHE_TTL = timedelta(days=1)
+
+
+def _mark_category_done(cat_progress: dict, now: datetime) -> None:
+    """Mark a category fully backfilled and stamp it for later revalidation."""
+    cat_progress["done"] = True
+    cat_progress["below_cutoff_pages"] = 0
+    cat_progress["done_at"] = now.isoformat()
+
+
+def _needs_revalidation(cat_progress: dict, now: datetime) -> bool:
+    """Return whether a completed category is due to be walked again.
+
+    Categories with no `done_at` were completed by an earlier version that
+    could stop mid-history, so they are always revalidated once.
+    """
+    done_at_raw = cat_progress.get("done_at")
+    if not isinstance(done_at_raw, str):
+        return True
+    try:
+        done_at = datetime.fromisoformat(done_at_raw)
+    except ValueError:
+        return True
+    if done_at.tzinfo is None:
+        done_at = done_at.replace(tzinfo=UTC)
+    return now - done_at > _CATEGORY_REVALIDATION_INTERVAL
 
 
 def _is_retriable(exc: BaseException) -> bool:
@@ -274,8 +319,33 @@ class ForumCollector:
         slugs = sorted({c["slug"] for c in categories})
 
         state = await self._get_backfill_state(forum, session)
+        previous_slugs = set(state.categories_cache or [])
         state.categories_cache = slugs
         state.categories_cached_at = datetime.now(tz=UTC)
+
+        # Reconcile persisted backfill progress with the live category set.
+        # Without this, categories deleted or merged upstream keep their
+        # progress rows forever (skewing the "N/M complete" signal), and the
+        # cached list drifts silently out of step with what backfill walks.
+        live_keys = {str(c["id"]) for c in categories}
+        progress = dict(state.category_progress or {})
+        removed = [key for key in progress if key not in live_keys]
+        for key in removed:
+            del progress[key]
+        if removed:
+            state.category_progress = progress
+
+        added = sorted(set(slugs) - previous_slugs)
+        if added or removed:
+            logger.info(
+                "Forum categories changed: %s — %d added (%s), "
+                "%d stale progress entries pruned",
+                forum,
+                len(added),
+                ", ".join(added) or "none",
+                len(removed),
+            )
+
         await session.commit()
         logger.info("Forum categories cached: %s — %d categories", forum, len(slugs))
         return len(slugs)
@@ -361,12 +431,33 @@ class ForumCollector:
         progress: dict[str, dict] = dict(state.category_progress or {})
         topics_upserted = 0
         requests_made = 0
+        now = datetime.now(tz=UTC)
+
+        # `categories_cached_at` is the freshness signal for the category set
+        # the backfill walks. If it falls behind, new categories never enter
+        # backfill and removed ones linger in persisted progress.
+        cached_at = state.categories_cached_at
+        if cached_at is None or now - cached_at > _CATEGORY_CACHE_TTL:
+            logger.warning(
+                "Forum category cache for %s is stale (cached_at=%s); "
+                "run refresh_categories before backfilling",
+                forum,
+                cached_at,
+            )
 
         for category_id, slug in category_map.items():
             if requests_made >= max_requests:
                 break
             cat_key = str(category_id)
             cat_progress = dict(progress.get(cat_key, {"next_page": 0, "done": False}))
+
+            if cat_progress.get("done") and _needs_revalidation(cat_progress, now):
+                logger.info(
+                    "Forum backfill: revalidating completed category %s/%s",
+                    forum,
+                    slug,
+                )
+                cat_progress = {"next_page": 0, "done": False}
 
             # Keep paging through *this* category until it's done or the
             # batch's request budget runs out, rather than moving on after
@@ -381,18 +472,30 @@ class ForumCollector:
                 requests_made += 1
 
                 if not topics:
-                    cat_progress["done"] = True
+                    _mark_category_done(cat_progress, now)
                     break
 
                 topics_upserted += await self._upsert_topics(
                     forum, slug, config.base_url, topics, session
                 )
-                oldest_seen = min(
+                newest_seen = max(
                     _parse_discourse_datetime(t["created_at"]) for t in topics
                 )
-                reached_cutoff = oldest_seen.date() < oldest_target
-                if more_url is None or reached_cutoff:
-                    cat_progress["done"] = True
+                # Require a run of consecutive fully-below-cutoff pages before
+                # concluding the category's remaining history is out of scope.
+                # A single below-cutoff topic proves nothing: Discourse's
+                # `order=created` listing is not strictly monotonic, and
+                # because progress is persisted, stopping early abandons the
+                # rest of the category permanently.
+                if newest_seen.date() < oldest_target:
+                    streak = int(cat_progress.get("below_cutoff_pages", 0)) + 1
+                    cat_progress["below_cutoff_pages"] = streak
+                else:
+                    streak = 0
+                    cat_progress["below_cutoff_pages"] = 0
+
+                if more_url is None or streak >= _CUTOFF_PAGE_STREAK:
+                    _mark_category_done(cat_progress, now)
                 else:
                     cat_progress["next_page"] = page + 1
 

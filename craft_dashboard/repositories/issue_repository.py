@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Integer as SAInteger
-from sqlalchemy import bindparam, cast, func, or_, select
+from sqlalchemy import bindparam, case, cast, func, or_, select
 from sqlalchemy import text as sa_text
 
 from craft_dashboard.models.issue import Issue
@@ -35,6 +35,33 @@ _VALID_SORT_FIELDS = _SCORE_SORT_FIELDS | {
     "author",
     "number",
 }
+
+# Upper bound on how many issues a single page may materialize. `items_per_page`
+# of 0 means "all", which without a cap lets one request load every matching
+# issue into memory and render it. Use the CSV export for genuinely unbounded
+# result sets.
+MAX_ITEMS_PER_PAGE = 2000
+
+
+def _numeric_external_id(dialect_name: str) -> ColumnElement[Any]:
+    """Return an ordering expression that sorts ``external_id`` numerically.
+
+    ``external_id`` is a free-form string: GitHub uses issue numbers, but
+    Launchpad and forum sources can supply non-numeric identifiers. Casting the
+    column unconditionally makes PostgreSQL raise ``invalid input syntax for
+    integer`` and fail the whole request, so non-numeric values are nulled out
+    and sorted last instead.
+    """
+    if dialect_name == "postgresql":
+        is_numeric = Issue.external_id.op("~")("^[0-9]+$")
+    else:
+        # SQLite (used by the test suite) has no regex operator, but GLOB can
+        # assert that the value contains no non-digit character.
+        is_numeric = Issue.external_id.op("NOT GLOB")("*[^0-9]*") & (
+            Issue.external_id != ""
+        )
+    return case((is_numeric, cast(Issue.external_id, SAInteger)), else_=None)
+
 
 # Bookkeeping model_name values written by the eval worker claim/release
 # flow (see routes/eval_api.py). These aren't real evaluations and should
@@ -387,7 +414,11 @@ class IssueRepository:
 
         count_query = select(func.count()).select_from(query.subquery())
         total = await self.session.scalar(count_query) or 0
-        if filters.items_per_page <= 0:
+        # `items_per_page <= 0` means "All" in the UI. Honour it as a single
+        # page, but still cap the SQL so one request cannot materialize the
+        # entire issue table.
+        unbounded = filters.items_per_page <= 0
+        if unbounded:
             total_pages = 1
             page = 1
         else:
@@ -416,18 +447,24 @@ class IssueRepository:
             col = Issue.author
             query = query.order_by(col.asc() if not sort_desc else col.desc())
         elif sort_field == "number":
-            numeric_id = cast(Issue.external_id, SAInteger)
+            numeric_id = _numeric_external_id(self.session.bind.dialect.name)
             if sort_desc:
-                query = query.order_by(Project.name.desc(), numeric_id.desc())
+                query = query.order_by(
+                    Project.name.desc(), numeric_id.desc().nulls_last()
+                )
             else:
-                query = query.order_by(Project.name.asc(), numeric_id.asc())
+                query = query.order_by(
+                    Project.name.asc(), numeric_id.asc().nulls_last()
+                )
         elif sort_field in _SCORE_SORT_FIELDS:
             score_order = func.coalesce(LLMEvaluation.scores[sort_field].as_float(), 0)
             query = query.order_by(
                 score_order.asc() if sort_desc else score_order.desc()
             )
 
-        if filters.items_per_page > 0:
+        if unbounded:
+            query = query.limit(MAX_ITEMS_PER_PAGE)
+        else:
             offset = (page - 1) * filters.items_per_page
             query = query.offset(offset).limit(filters.items_per_page)
 

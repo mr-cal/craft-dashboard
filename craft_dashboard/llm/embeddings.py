@@ -17,6 +17,63 @@ HTTP_PAYMENT_REQUIRED = 402
 HTTP_FORBIDDEN = 403
 _MIN_TRUNCATE_LEN = 1000
 
+#: Maximum number of halve-and-retry attempts for a single batch. Each attempt
+#: is a billable request, so an unbounded recursion on a 400 that merely
+#: mentions "token" (an auth-token error, for example) would loop until the
+#: inputs fell below `_MIN_TRUNCATE_LEN`.
+_MAX_TRUNCATE_RETRIES = 4
+
+#: Provider error codes/types that specifically mean "input too long".
+#: Matched against the structured error object before falling back to prose.
+_CONTEXT_LENGTH_ERROR_CODES = frozenset(
+    {
+        "context_length_exceeded",
+        "string_above_max_length",
+        "invalid_request_error",
+        "max_tokens_exceeded",
+    }
+)
+
+#: Narrow phrases used only when the provider returns no structured error code.
+_CONTEXT_LENGTH_PHRASES = (
+    "context length",
+    "context_length",
+    "maximum context",
+    "too many tokens",
+    "token limit",
+    "exceeds the maximum",
+    "input is too long",
+    "maximum input length",
+    "maximum input size",
+)
+
+
+def _is_context_length_error(response: httpx.Response) -> bool:
+    """Return whether a 400 response specifically indicates over-long input.
+
+    Prefers the provider's structured error object; only falls back to matching
+    prose when no code or type is present. A bare substring check for "token"
+    also matches authentication-token errors, which are not retryable.
+    """
+    error: object = None
+    try:
+        error = (response.json() or {}).get("error")
+    except ValueError:
+        error = None
+
+    if isinstance(error, dict):
+        for key in ("code", "type"):
+            value = error.get(key)
+            if isinstance(value, str) and value in _CONTEXT_LENGTH_ERROR_CODES:
+                return True
+        message = error.get("message")
+        if isinstance(message, str):
+            lowered = message.lower()
+            return any(phrase in lowered for phrase in _CONTEXT_LENGTH_PHRASES)
+
+    lowered = response.text.lower()
+    return any(phrase in lowered for phrase in _CONTEXT_LENGTH_PHRASES)
+
 
 class EmbeddingClient:
     """Compute embeddings using an OpenAI-compatible /v1/embeddings endpoint."""
@@ -100,7 +157,11 @@ class EmbeddingClient:
         return embeddings
 
     async def embed_batch_with_usage(
-        self, texts: list[str], *, dimensions: int | None = None
+        self,
+        texts: list[str],
+        *,
+        dimensions: int | None = None,
+        _truncate_attempt: int = 0,
     ) -> tuple[list[list[float]], int]:
         """Compute embeddings for multiple texts and return (embeddings, total_tokens)."""
         # If embed_batch was patched/mocked in tests, delegate to it
@@ -127,16 +188,24 @@ class EmbeddingClient:
             error_body = response.text
             if (
                 response.status_code == HTTP_BAD_REQUEST
-                and "token" in error_body.lower()
+                and _truncate_attempt < _MAX_TRUNCATE_RETRIES
+                and _is_context_length_error(response)
                 and any(len(t) > _MIN_TRUNCATE_LEN for t in texts)
             ):
                 logger.warning(
-                    "Embedding input exceeded model token limit (%s); truncating input texts and retrying.",
+                    "Embedding input exceeded model token limit (%s); truncating "
+                    "input texts and retrying (attempt %d of %d).",
                     error_body,
+                    _truncate_attempt + 1,
+                    _MAX_TRUNCATE_RETRIES,
                 )
-                truncated_texts = [t[: len(t) // 2] for t in texts]
+                truncated_texts = [
+                    t[: max(len(t) // 2, _MIN_TRUNCATE_LEN)] for t in texts
+                ]
                 return await self.embed_batch_with_usage(
-                    truncated_texts, dimensions=dimensions
+                    truncated_texts,
+                    dimensions=dimensions,
+                    _truncate_attempt=_truncate_attempt + 1,
                 )
             if response.status_code in (HTTP_PAYMENT_REQUIRED, HTTP_FORBIDDEN):
                 raise LLMQuotaError(

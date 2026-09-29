@@ -7,9 +7,11 @@ from unittest.mock import MagicMock
 
 import pytest
 from craft_dashboard.collectors.github_graphql import (
+    _HOTFIX_BRANCHES_QUERY,
     _ISSUES_QUERY,
     _PULL_REQUESTS_QUERY,
-    _RELEASES_AND_BRANCHES_QUERY,
+    _RELEASES_QUERY,
+    _TAGS_QUERY,
     _graphql_query,
     _summarize_graphql_errors,
     classify_pr_ci_checks,
@@ -365,6 +367,146 @@ class TestPaginatedPullRequests:
 
 
 class TestPaginatedReleasesAndBranches:
+    def test_paginates_hotfix_branches_beyond_the_first_page(self) -> None:
+        """B6: `refs(first: 100)` had no cursor, silently capping at 100.
+
+        Repositories with more than 100 hotfix branches lost the remainder with
+        no error, producing incomplete release dashboards.
+        """
+        requester = MagicMock()
+        no_releases = (
+            {},
+            {
+                "data": {
+                    "rateLimit": {"cost": 1, "remaining": 4995, "resetAt": None},
+                    "repository": {
+                        "releases": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [],
+                        }
+                    },
+                }
+            },
+        )
+        branches_page_1 = (
+            {},
+            {
+                "data": {
+                    "rateLimit": {"cost": 1, "remaining": 4995, "resetAt": None},
+                    "repository": {
+                        "refs": {
+                            "pageInfo": {"hasNextPage": True, "endCursor": "CUR1"},
+                            "nodes": [{"name": f"hotfix/{i}"} for i in range(100)],
+                        }
+                    },
+                }
+            },
+        )
+        branches_page_2 = (
+            {},
+            {
+                "data": {
+                    "rateLimit": {"cost": 1, "remaining": 4995, "resetAt": None},
+                    "repository": {
+                        "refs": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [{"name": "hotfix/100"}, {"name": "hotfix/101"}],
+                        }
+                    },
+                }
+            },
+        )
+        no_tags = (
+            {},
+            {
+                "data": {
+                    "rateLimit": {"cost": 1, "remaining": 4995, "resetAt": None},
+                    "repository": {
+                        "tags": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [],
+                        }
+                    },
+                }
+            },
+        )
+        requester.graphql_query.side_effect = [
+            no_releases,
+            branches_page_1,
+            branches_page_2,
+            no_tags,
+        ]
+
+        _, branch_names = paginated_releases_and_branches(
+            requester, owner="canonical", name="repo", known_since=None
+        )
+
+        assert len(branch_names) == 102
+        assert branch_names[-1] == "hotfix/101"
+
+    def test_paginates_tags_beyond_the_first_page(self) -> None:
+        """B6: the aliased `tags: refs(first: 100)` connection had no cursor."""
+        requester = MagicMock()
+
+        def _page(cursor: str | None, tags: list[str]) -> tuple[dict, dict]:
+            return (
+                {},
+                {
+                    "data": {
+                        "rateLimit": {"cost": 1, "remaining": 4995, "resetAt": None},
+                        "repository": {
+                            "tags": {
+                                "pageInfo": {
+                                    "hasNextPage": cursor is not None,
+                                    "endCursor": cursor,
+                                },
+                                "nodes": [
+                                    {
+                                        "name": tag,
+                                        "target": {
+                                            "committedDate": "2025-01-01T00:00:00Z"
+                                        },
+                                    }
+                                    for tag in tags
+                                ],
+                            }
+                        },
+                    }
+                },
+            )
+
+        empty = (
+            {},
+            {
+                "data": {
+                    "rateLimit": {"cost": 1, "remaining": 4995, "resetAt": None},
+                    "repository": {
+                        "releases": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [],
+                        },
+                        "refs": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [],
+                        },
+                    },
+                }
+            },
+        )
+        requester.graphql_query.side_effect = [
+            empty,
+            empty,
+            _page("CUR1", ["1.0.0"]),
+            _page(None, ["2.0.0"]),
+        ]
+
+        releases, _ = paginated_releases_and_branches(
+            requester, owner="canonical", name="repo", known_since=None
+        )
+
+        # Both pages' semver tags become synthetic releases.
+        assert {r["tagName"] for r in releases} == {"1.0.0", "2.0.0"}
+
     def test_returns_releases_and_hotfix_branch_names(self) -> None:
         requester = MagicMock()
         requester.graphql_query.return_value = (
@@ -397,6 +539,24 @@ class TestPaginatedReleasesAndBranches:
 
     def test_stops_paginating_once_known_release_reached(self) -> None:
         requester = MagicMock()
+        empty_refs = (
+            {},
+            {
+                "data": {
+                    "rateLimit": {"cost": 1, "remaining": 4995, "resetAt": None},
+                    "repository": {
+                        "refs": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [],
+                        },
+                        "tags": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [],
+                        },
+                    },
+                }
+            },
+        )
         requester.graphql_query.side_effect = [
             (
                 {},
@@ -414,11 +574,12 @@ class TestPaginatedReleasesAndBranches:
                                     _release_node("v2.0.0", "2025-01-10T00:00:00Z"),
                                 ],
                             },
-                            "refs": {"nodes": []},
                         },
                     }
                 },
-            )
+            ),
+            empty_refs,
+            empty_refs,
         ]
 
         releases, _ = paginated_releases_and_branches(
@@ -429,7 +590,9 @@ class TestPaginatedReleasesAndBranches:
         )
 
         assert [r["tagName"] for r in releases] == ["v3.0.0"]
-        assert requester.graphql_query.call_count == 1
+        # One releases page (stopped at the watermark), plus one page each for
+        # the hotfix-branch and tag queries.
+        assert requester.graphql_query.call_count == 3
 
     def test_falls_back_to_semver_git_tags_when_no_release_entity(self) -> None:
         requester = MagicMock()
@@ -755,17 +918,13 @@ class TestNodeLimits:
         assert max_nodes_per_page == 15_600
         assert max_nodes_per_page < 500_000
 
-    def test_releases_and_branches_query_stays_under_github_node_limit(self) -> None:
-        sizes = _extract_pagination_limits(_RELEASES_AND_BRANCHES_QUERY)
-
-        # This query has two top-level sibling connections under repository:
-        # - releases(first: 20) with no nested connections -> 20 * 1 = 20
-        # - refs(..., first: 100) with no nested connections -> 100 * 1 = 100
-        # Total worst case per query page = 20 + 100 = 120 nodes.
-        max_nodes_per_page = sizes["releases"] + sizes["refs"]
-
-        assert max_nodes_per_page == 120
-        assert max_nodes_per_page < 500_000
+    def test_releases_and_branches_queries_stay_under_github_node_limit(self) -> None:
+        # Releases, hotfix branches, and tags are now three separate queries so
+        # each `refs` connection can follow its own cursor. Each is well under
+        # GitHub's node limit on its own.
+        assert _extract_pagination_limits(_RELEASES_QUERY)["releases"] == 20
+        assert _extract_pagination_limits(_HOTFIX_BRANCHES_QUERY)["refs"] == 100
+        assert _extract_pagination_limits(_TAGS_QUERY)["refs"] == 100
 
     def test_queries_lock_in_all_page_size_arguments(self) -> None:
         assert _extract_pagination_limits(_ISSUES_QUERY) == {
@@ -804,13 +963,19 @@ class TestNodeLimits:
             ("checkRuns", "first", 20),
         ]
 
-        assert _extract_pagination_limits(_RELEASES_AND_BRANCHES_QUERY) == {
-            "releases": 20,
-            "refs": 100,
-        }
-
-        assert _extract_pagination_arguments(_RELEASES_AND_BRANCHES_QUERY) == [
+        assert _extract_pagination_limits(_RELEASES_QUERY) == {"releases": 20}
+        assert _extract_pagination_arguments(_RELEASES_QUERY) == [
             ("releases", "first", 20),
+        ]
+
+        assert _extract_pagination_limits(_HOTFIX_BRANCHES_QUERY) == {"refs": 100}
+        assert _extract_pagination_arguments(_HOTFIX_BRANCHES_QUERY) == [
             ("refs", "first", 100),
+        ]
+
+        # The tags query aliases the connection (`tags: refs(...)`), so the
+        # extractor still reports the underlying `refs` field name.
+        assert _extract_pagination_limits(_TAGS_QUERY) == {"refs": 100}
+        assert _extract_pagination_arguments(_TAGS_QUERY) == [
             ("refs", "first", 100),
         ]

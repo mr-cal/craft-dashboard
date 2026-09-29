@@ -675,7 +675,6 @@ async def trends_chart_partial(
     Embeds chart data as inline JS so Chart.js can render without a second request.
     """
     templates: Jinja2Templates = request.app.state.templates
-    import json
 
     chart_data = await _get_trend_chart_data(session, project)
     if chart_data is None:
@@ -684,7 +683,7 @@ async def trends_chart_partial(
     return templates.TemplateResponse(
         request,
         "stats/partials/trend_chart.html",
-        {"chart_data_json": json.dumps(chart_data), "project": project},
+        {"chart_data": chart_data, "project": project},
     )
 
 

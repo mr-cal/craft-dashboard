@@ -22,16 +22,56 @@ try {
   const forums = window.ENGAGEMENT_FORUMS || [];
   const forumData = {}; // name -> { weeks, all, categories }
   const forumCharts = {}; // name -> Chart
+  const forumErrors = {}; // name -> error message, for forums whose fetch failed
+
+  const EMPTY_SERIES = { weeks: [], all: [], categories: {} };
 
   async function loadForum(forum) {
-    const response = await fetch(`/engagement/forums/data?forum=${encodeURIComponent(forum.name)}`);
-    if (!response.ok) {
-      // No data yet (e.g. backfill hasn't run) — leave the chart empty
-      // rather than failing the whole page.
-      forumData[forum.name] = { weeks: [], all: [], categories: {} };
-      return;
+    try {
+      const response = await fetch(
+        `/engagement/forums/data?forum=${encodeURIComponent(forum.name)}`
+      );
+      if (!response.ok) {
+        forumData[forum.name] = EMPTY_SERIES;
+        forumErrors[forum.name] =
+          `The server returned ${response.status} ${response.statusText}.`;
+        return;
+      }
+      forumData[forum.name] = await response.json();
+    } catch (error) {
+      console.error(`Failed to load forum data for ${forum.name}`, error);
+      forumData[forum.name] = EMPTY_SERIES;
+      forumErrors[forum.name] =
+        "The request failed, which usually means a network problem.";
     }
-    forumData[forum.name] = await response.json();
+  }
+
+  // An empty chart is indistinguishable from a forum with no activity, so a
+  // failed fetch has to say so explicitly rather than rendering nothing.
+  function renderForumError(forum, message) {
+    const wrapper = document
+      .getElementById(`engagement-${forum.name}-chart`)
+      ?.closest("[data-engagement-chart-wrapper]");
+    if (!wrapper) return;
+
+    const notification = document.createElement("div");
+    notification.className = "p-notification--negative";
+    notification.setAttribute("role", "alert");
+
+    const content = document.createElement("div");
+    content.className = "p-notification__content";
+
+    const title = document.createElement("h5");
+    title.className = "p-notification__title";
+    title.textContent = `Unable to load ${forum.display_name}`;
+
+    const text = document.createElement("p");
+    text.className = "p-notification__message";
+    text.textContent = `${message} Reload the page to try again.`;
+
+    content.append(title, text);
+    notification.appendChild(content);
+    wrapper.replaceChildren(notification);
   }
 
   // Slice a forum's day-bucketed data to [startDate, endDate], returning a
@@ -65,6 +105,9 @@ try {
 
   function updateForumChart(forum) {
     const chart = forumCharts[forum.name];
+    // Forums whose data failed to load show an error notice instead of a
+    // chart, so there is nothing to update.
+    if (!chart) return;
     const raw = forumData[forum.name];
     const data = currentRange ? sliceForumData(raw, currentRange.startDate, currentRange.endDate) : raw;
 
@@ -139,6 +182,10 @@ try {
   await Promise.all(forums.map(loadForum));
 
   forums.forEach((forum) => {
+    if (forumErrors[forum.name]) {
+      renderForumError(forum, forumErrors[forum.name]);
+      return;
+    }
     const chart = createLineChart(
       `engagement-${forum.name}-chart`,
       `New topics per week (${ROLLING_WINDOW_WEEKS}-week avg)`,

@@ -4,10 +4,12 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 from craft_dashboard.collectors.launchpad import (
+    _WATERMARK_OVERLAP,
     LaunchpadCollector,
     _fetch_bug_comments,
     _map_lp_status,
 )
+from craft_dashboard.llm.content_hash import compute_content_hash
 
 
 class TestMapLpStatus:
@@ -302,8 +304,13 @@ class TestCollectBugsIncremental:
             "First run should not pass modified_since"
         )
 
-    async def test_subsequent_run_passes_modified_since(self, mocker) -> None:
-        """On subsequent runs, searchTasks is called WITH modified_since=last_fetched."""
+    async def test_subsequent_run_passes_watermark_minus_overlap(self, mocker) -> None:
+        """Subsequent runs pass modified_since = watermark - overlap window.
+
+        B7: the floor comes from `collection_watermarks` (written only after a
+        project finishes successfully), not from `max(Issue.last_fetched_at)`,
+        which a partially-failed run would advance.
+        """
         collector = LaunchpadCollector(projects=["snapcraft"])
         mock_project = MagicMock()
         mock_project.searchTasks.return_value = []
@@ -311,9 +318,9 @@ class TestCollectBugsIncremental:
         mock_lp.projects.__getitem__.return_value = mock_project
         mocker.patch.object(collector, "_get_launchpad", return_value=mock_lp)
 
-        last_fetched = datetime(2024, 5, 1, 12, 0, 0, tzinfo=UTC)
+        last_collected = datetime(2024, 5, 1, 12, 0, 0, tzinfo=UTC)
         mock_session = AsyncMock()
-        mock_session.scalar.return_value = last_fetched
+        mock_session.scalar.return_value = last_collected
 
         await collector.collect_bugs("snapcraft", 1, mock_session)
 
@@ -321,7 +328,25 @@ class TestCollectBugsIncremental:
         assert "modified_since" in call_kwargs, (
             "Subsequent run should pass modified_since"
         )
-        assert call_kwargs["modified_since"] == last_fetched
+        assert call_kwargs["modified_since"] == last_collected - _WATERMARK_OVERLAP
+
+    async def test_watermark_is_read_from_collection_watermarks(self, mocker) -> None:
+        """B7: the incremental floor must not come from Issue.last_fetched_at."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        mock_project = MagicMock()
+        mock_project.searchTasks.return_value = []
+        mock_lp = MagicMock()
+        mock_lp.projects.__getitem__.return_value = mock_project
+        mocker.patch.object(collector, "_get_launchpad", return_value=mock_lp)
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = None
+
+        await collector.collect_bugs("snapcraft", 1, mock_session)
+
+        rendered = str(mock_session.scalar.call_args.args[0])
+        assert "collection_watermarks" in rendered
+        assert "max(" not in rendered.lower()
 
 
 def _make_mock_message(owner_link: str | None, content: str, created: datetime):
@@ -708,7 +733,11 @@ class TestCollectBugsIssueActivity:
         )
 
         mock_result = MagicMock()
-        mock_result.one_or_none.return_value = (datetime(2024, 1, 1, tzinfo=UTC), None)
+        mock_result.one_or_none.return_value = (
+            datetime(2024, 1, 1, tzinfo=UTC),
+            None,
+            "previous-hash",
+        )
 
         session = AsyncMock()
         session.scalar.return_value = None
@@ -723,3 +752,62 @@ class TestCollectBugsIssueActivity:
         ]
         assert len(activities) == 1
         assert activities[0].change_type == "closed"
+
+    async def _run_with_existing(self, mocker, existing_row) -> list:
+        """Collect one unchanged-content bug against a given stored row."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        mock_task = self._make_mock_task(123, status="New")
+        mocker.patch.object(
+            collector,
+            "_get_launchpad",
+            return_value=MagicMock(
+                projects={
+                    "snapcraft": MagicMock(
+                        searchTasks=MagicMock(return_value=[mock_task])
+                    )
+                }
+            ),
+        )
+        mocker.patch(
+            "craft_dashboard.collectors.launchpad._fetch_bug_comments", return_value=[]
+        )
+
+        mock_result = MagicMock()
+        mock_result.one_or_none.return_value = existing_row
+
+        session = AsyncMock()
+        session.scalar.return_value = None
+        session.execute.return_value = mock_result
+
+        await collector.collect_bugs("snapcraft", 1, session, collection_run_id=99)
+
+        return [
+            arg[0]
+            for arg, _ in session.add.call_args_list
+            if hasattr(arg[0], "change_type")
+        ]
+
+    async def test_no_activity_when_content_is_unchanged(self, mocker) -> None:
+        """B13: re-fetching a bug whose content did not change records nothing.
+
+        The incremental query re-returns bugs for reasons we do not store (and
+        always re-covers the overlap window), so an unconditional insert would
+        fabricate 'updated' events and grow the table without bound.
+        """
+        unchanged_hash = compute_content_hash(
+            "Activity test bug", "Test description", "open", [], comments=[]
+        )
+        activities = await self._run_with_existing(
+            mocker, (datetime(2024, 1, 1, tzinfo=UTC), None, unchanged_hash)
+        )
+
+        assert activities == []
+
+    async def test_activity_recorded_when_content_changed(self, mocker) -> None:
+        """B13: a genuine content change still records change_type='updated'."""
+        activities = await self._run_with_existing(
+            mocker, (datetime(2024, 1, 1, tzinfo=UTC), None, "stale-hash")
+        )
+
+        assert len(activities) == 1
+        assert activities[0].change_type == "updated"

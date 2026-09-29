@@ -1,7 +1,7 @@
 """Launchpad data collector for bugs."""
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -21,6 +21,12 @@ logger = logging.getLogger(__name__)
 #: matching the shape (but not necessarily the count) of GitHub's
 #: `_fetch_issue_comments`.
 _MAX_COMMENTS = 50
+
+#: Overlap subtracted from the stored watermark when computing
+#: `modified_since`. Launchpad's `date_last_updated` and our own clock can
+#: drift, and a bug modified during the seconds around a run boundary would
+#: otherwise fall between two windows and never be re-fetched.
+_WATERMARK_OVERLAP = timedelta(hours=1)
 
 _OPEN_STATUSES = frozenset(
     {
@@ -147,13 +153,15 @@ class LaunchpadCollector:
 
         """
         from sqlalchemy import (
-            func,
             select,
         )
         from sqlalchemy.dialects.postgresql import (
             insert,
         )
 
+        from craft_dashboard.models.collection_watermark import (
+            CollectionWatermark,
+        )
         from craft_dashboard.models.issue import (
             Issue,
         )
@@ -164,27 +172,38 @@ class LaunchpadCollector:
         lp = self._get_launchpad()
         project = lp.projects[lp_project_name]
 
-        # Incremental fetch: only retrieve bugs modified since last collection.
-        # On the first run (no prior data) we fetch everything.
-        last_fetched = await session.scalar(
-            select(func.max(Issue.last_fetched_at))
-            .where(Issue.project_id == project_id)
-            .where(Issue.source == "launchpad")
+        # Incremental fetch: only retrieve bugs modified since the last
+        # *successful* collection. The watermark is written by the collection
+        # driver only after the whole project finishes, so a run that dies
+        # partway through does not advance it. Deriving the floor from
+        # `max(Issue.last_fetched_at)` instead would advance it on every
+        # partial run, permanently skipping bugs modified in the gap.
+        # On the first run (no watermark) we fetch everything.
+        last_collected = await session.scalar(
+            select(CollectionWatermark.last_collected_at).where(
+                CollectionWatermark.project_id == project_id,
+                CollectionWatermark.source == "launchpad",
+            )
         )
 
         search_kwargs: dict = {"status": list(_OPEN_STATUSES | _CLOSED_STATUSES)}
-        if last_fetched is not None:
-            search_kwargs["modified_since"] = last_fetched
+        if last_collected is not None:
+            modified_since = last_collected - _WATERMARK_OVERLAP
+            search_kwargs["modified_since"] = modified_since
             logger.info(
-                "Incremental Launchpad fetch for %s since %s",
+                "Incremental Launchpad fetch for %s since %s "
+                "(watermark %s minus %s overlap)",
                 lp_project_name,
-                last_fetched,
+                modified_since,
+                last_collected,
+                _WATERMARK_OVERLAP,
             )
         else:
-            logger.info("Full Launchpad fetch for %s (first run)", lp_project_name)
+            logger.info("Full Launchpad fetch for %s (no watermark)", lp_project_name)
 
         bug_tasks = project.searchTasks(**search_kwargs)
         count = 0
+        activity_recorded = 0
 
         for task in bug_tasks:
             bug = task.bug
@@ -206,7 +225,9 @@ class LaunchpadCollector:
                 comments = []
 
             existing = await session.execute(
-                select(Issue.last_fetched_at, Issue.closed_at).where(
+                select(
+                    Issue.last_fetched_at, Issue.closed_at, Issue.content_hash
+                ).where(
                     Issue.project_id == project_id,
                     Issue.source == "launchpad",
                     Issue.external_id == str(bug.id),
@@ -218,34 +239,46 @@ class LaunchpadCollector:
                 else None
             )
             if existing_row and isinstance(existing_row, (tuple, list)):
-                last_fetched_item, previous_closed_at = (
-                    existing_row[0],
-                    existing_row[1],
-                )
+                last_fetched_item, previous_closed_at, previous_hash = existing_row
             else:
-                last_fetched_item, previous_closed_at = None, None
+                last_fetched_item, previous_closed_at, previous_hash = None, None, None
+
+            content_hash = compute_content_hash(
+                bug.title, bug.description, state, labels, comments=comments
+            )
+
+            # Only record activity when something actually changed. The
+            # incremental query re-fetches bugs whose Launchpad metadata moved
+            # for reasons we do not store (and re-fetches the overlap window
+            # every run), so an unconditional insert would fabricate a stream
+            # of "updated" events and grow `issue_activity` without bound.
+            change_type: str | None
             if last_fetched_item is None:
                 change_type = "created"
             elif state == "closed" and previous_closed_at is None:
                 change_type = "closed"
-            else:
+            elif previous_hash != content_hash:
                 change_type = "updated"
+            else:
+                change_type = None
 
-            occurred_at = (
-                bug.date_last_updated.replace(tzinfo=UTC)
-                if bug.date_last_updated
-                else datetime.now(tz=UTC)
-            )
-            session.add(
-                IssueActivity(
-                    project_id=project_id,
-                    issue_number=bug.id,
-                    change_type=change_type,
-                    title=(bug.title or "")[:200],
-                    occurred_at=occurred_at,
-                    collection_run_id=collection_run_id,
+            if change_type is not None:
+                occurred_at = (
+                    bug.date_last_updated.replace(tzinfo=UTC)
+                    if bug.date_last_updated
+                    else datetime.now(tz=UTC)
                 )
-            )
+                session.add(
+                    IssueActivity(
+                        project_id=project_id,
+                        issue_number=bug.id,
+                        change_type=change_type,
+                        title=(bug.title or "")[:200],
+                        occurred_at=occurred_at,
+                        collection_run_id=collection_run_id,
+                    )
+                )
+                activity_recorded += 1
 
             stmt = insert(Issue).values(
                 project_id=project_id,
@@ -271,9 +304,7 @@ class LaunchpadCollector:
                 else None,
                 url=bug.web_link,
                 metadata_={"importance": task.importance, "status": task.status},
-                content_hash=compute_content_hash(
-                    bug.title, bug.description, state, labels, comments=comments
-                ),
+                content_hash=content_hash,
                 last_fetched_at=datetime.now(tz=UTC),
                 collection_run_id=collection_run_id,
             )
@@ -293,6 +324,9 @@ class LaunchpadCollector:
 
         await session.commit()
         logger.info(
-            "Collected %d bugs from Launchpad project %s", count, lp_project_name
+            "Collected %d bugs from Launchpad project %s (%d activity events)",
+            count,
+            lp_project_name,
+            activity_recorded,
         )
         return count

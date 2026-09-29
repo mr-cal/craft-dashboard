@@ -77,14 +77,20 @@ class DuplicateDetector:
             - duplicate_of_project_name: str
             - confidence: int (0-100)
             - reason: str
-            - candidates_compared: int
+            - candidates_compared: int (candidates actually checked by the LLM)
+            - candidates_failed: int (candidates skipped due to provider errors)
 
         """
         candidates = await find_similar_fn(
             embedding=embedding,
             exclude_issue_id=issue_id,
         )
-        candidates_compared = len(candidates)
+        # Counted as candidates are actually checked, not up front: the loop
+        # skips candidates whose LLM call fails, and reporting them as
+        # "compared" makes a total provider outage indistinguishable from a
+        # clean "no duplicates found" result.
+        candidates_compared = 0
+        candidates_failed = 0
 
         for candidate in candidates:
             messages = build_duplicate_check_prompt(
@@ -109,12 +115,17 @@ class DuplicateDetector:
                     candidate["project_name"],
                     candidate["external_id"],
                 )
+                candidates_failed += 1
                 continue
 
             parsed = _parse_json_response(response.content)
+            if parsed is None:
+                candidates_failed += 1
+                continue
+
+            candidates_compared += 1
             if (
-                parsed
-                and parsed.get("is_duplicate")
+                parsed.get("is_duplicate")
                 and parsed.get("confidence", 0) >= self.confidence_threshold
             ):
                 return {
@@ -124,9 +135,13 @@ class DuplicateDetector:
                     "confidence": parsed["confidence"],
                     "reason": parsed.get("reason", ""),
                     "candidates_compared": candidates_compared,
+                    "candidates_failed": candidates_failed,
                 }
 
-        return {"candidates_compared": candidates_compared}
+        return {
+            "candidates_compared": candidates_compared,
+            "candidates_failed": candidates_failed,
+        }
 
     async def rewrite_summary(
         self,

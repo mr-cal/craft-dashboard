@@ -31,6 +31,10 @@
     container.querySelectorAll(".multiselect__option input").forEach((option) => {
       option.checked = selectedValues.has(option.value);
     });
+
+    if (typeof container.refreshMultiselectDisplay === "function") {
+      container.refreshMultiselectDisplay();
+    }
   }
 
   function applyFiltersFromUrl(urlValue) {
@@ -101,10 +105,49 @@
     updateIssuesExportLink(responseUrl);
   }
 
+  function resetFiltersNotInUrl(url) {
+    // Fields absent from the URL must fall back to their defaults, otherwise
+    // navigating back to an unfiltered view would leave stale values in the
+    // controls even though the table no longer reflects them.
+    filterBar.querySelectorAll("input[name], select[name]").forEach((field) => {
+      if (field.type === "hidden" && field.id.endsWith("-hidden")) {
+        return;
+      }
+      if (url.searchParams.get(field.name)) {
+        return;
+      }
+      if (field.tagName === "SELECT") {
+        const fallback = Array.from(field.options).find((opt) => opt.defaultSelected);
+        field.value = fallback ? fallback.value : field.options[0]?.value ?? "";
+      } else {
+        field.value = field.defaultValue;
+      }
+    });
+  }
+
+  function restoreStateFromHistory() {
+    const url = new URL(window.location.href);
+    resetFiltersNotInUrl(url);
+    applyFiltersFromUrl(url.href);
+    updateIssuesExportLink(url.href);
+
+    // One coordinated request rather than letting each control fire its own:
+    // the table must end up matching the URL the user navigated to.
+    if (typeof htmx === "undefined") {
+      return;
+    }
+    const tableUrl = buildFilteredUrl(url.href, "/issues/table");
+    htmx.ajax("GET", `${tableUrl.pathname}${tableUrl.search}`, {
+      target: "#issue-table",
+      swap: "outerHTML",
+    });
+  }
+
   window.updateIssuesExportLink = updateIssuesExportLink;
 
   applyFiltersFromUrl(window.location.href);
   updateIssuesExportLink();
 
   document.body.addEventListener("htmx:afterSettle", syncBrowserUrl);
+  window.addEventListener("popstate", restoreStateFromHistory);
 })();
