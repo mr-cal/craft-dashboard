@@ -18,8 +18,9 @@ All SQL lives here. Nothing above this layer builds queries.
   and JSON operators.
 - Every query that can return the full table needs a `LIMIT`. A user-supplied
   page size of 0 means "the server's maximum", not "unbounded".
-- Exclusion and filter semantics are duplicated across several modules. Prefer
-  extending a shared helper over adding a seventh copy.
+- Exclusion predicates live in `issue_filters.py` and are shared by routes,
+  services, repositories and the evaluation queue. Every query that reads
+  issues or issue activity must apply one of them; never write a seventh copy.
 
 ## Tests
 

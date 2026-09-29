@@ -38,11 +38,11 @@ from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.rate_limit import limiter, local_aware_limit
-from craft_dashboard.repositories.issue_link_repository import IssueLinkRepository
-from craft_dashboard.repositories.issue_repository import (
-    IssueRepository,
-    _build_excluded_issues_condition,
+from craft_dashboard.repositories.issue_filters import (
+    build_excluded_issues_condition,
 )
+from craft_dashboard.repositories.issue_link_repository import IssueLinkRepository
+from craft_dashboard.repositories.issue_repository import IssueRepository
 from craft_dashboard.services import eval_activity
 from craft_dashboard.settings import Settings
 
@@ -111,7 +111,7 @@ async def _maybe_record_queue_snapshot(
     now = datetime.now(tz=UTC)
 
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    excl = _build_excluded_issues_condition(filtered_issues or {})
+    excl = build_excluded_issues_condition(filtered_issues or {})
 
     base_query = (
         select(Issue.id)
@@ -744,7 +744,7 @@ async def issue_detail_lookup(
         )
         .where(Issue.external_id == external_id)
     )
-    excl = _build_excluded_issues_condition(get_config(request).filtered_issues)
+    excl = build_excluded_issues_condition(get_config(request).filtered_issues)
     if excl is not None:
         query_stmt = query_stmt.where(excl)
     if project_name:
@@ -827,7 +827,7 @@ async def eval_status(
 
     now = datetime.now(tz=UTC)
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    excl = _build_excluded_issues_condition(get_config(request).filtered_issues)
+    excl = build_excluded_issues_condition(get_config(request).filtered_issues)
     latest_eval_ids = (
         select(
             LLMEvaluation.issue_id,

@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, TypedDict
 from typing import cast as typing_cast
 
-from sqlalchemy import String, cast, func, literal, or_, select
+from sqlalchemy import String, cast, func, literal, select
 from sqlalchemy.orm import aliased
 
 from craft_dashboard.collectors.github import GitHubCollector, RateLimitStatus
@@ -22,8 +22,9 @@ from craft_dashboard.models.issue_activity import IssueActivity
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.refresh_schedule import RefreshSchedule
-from craft_dashboard.repositories.issue_repository import (
-    _build_excluded_issues_condition,
+from craft_dashboard.repositories.issue_filters import (
+    build_excluded_activity_condition,
+    build_excluded_issues_condition,
 )
 from craft_dashboard.services.eval_activity import (
     ACTIVITY_STALE_AFTER,
@@ -34,7 +35,6 @@ from craft_dashboard.settings import Settings
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
-    from sqlalchemy.sql.elements import ColumnElement
 
 
 class TokenStats(TypedDict):
@@ -227,30 +227,6 @@ def _ensure_utc(value: datetime | None) -> datetime | None:
     return value.replace(tzinfo=UTC)
 
 
-def _build_excluded_activity_condition(
-    filtered_issues: dict[str, list[str]],
-) -> ColumnElement[bool] | None:
-    """Return a NOT(...) clause excluding configured issue numbers from IssueActivity.
-
-    Mirrors ``issue_repository._build_excluded_issues_condition`` but matches on
-    ``IssueActivity.issue_number`` (an integer column) instead of
-    ``Issue.external_id``, since the activity feed query only outer-joins
-    ``Issue`` (the issue row may no longer exist) and must not depend on that
-    join to apply the exclusion. Requires ``Project`` to already be joined in
-    the calling query. Returns None when filtered_issues is empty.
-    """
-    conditions = [
-        (Project.name == project_name)
-        & cast(IssueActivity.issue_number, String).in_(ids)
-        for project_name, ids in filtered_issues.items()
-        if ids
-    ]
-    if not conditions:
-        return None
-    combined = or_(*conditions) if len(conditions) > 1 else conditions[0]
-    return ~combined
-
-
 class AdminService:
     """Service for admin dashboard data access."""
 
@@ -400,7 +376,7 @@ class AdminService:
         filtered_counts: dict[int, int] = {}
         run_ids = [run.id for run in runs]
         if run_ids and filtered_issues:
-            excl = _build_excluded_issues_condition(filtered_issues)
+            excl = build_excluded_issues_condition(filtered_issues)
             if excl is not None:
                 # `excl` is a NOT(...) clause excluding filtered issues; negate
                 # it to count only the filtered-out issues per run.
@@ -466,7 +442,7 @@ class AdminService:
                 & (Issue.external_id == cast(IssueActivity.issue_number, String)),
             )
         )
-        excl = _build_excluded_activity_condition(filtered_issues or {})
+        excl = build_excluded_activity_condition(filtered_issues or {})
         if excl is not None:
             query = query.where(excl)
 
@@ -540,7 +516,7 @@ class AdminService:
             are included with change_type "unchanged".
 
         """
-        excl = _build_excluded_issues_condition(filtered_issues or {})
+        excl = build_excluded_issues_condition(filtered_issues or {})
 
         total_query = (
             select(func.count())
@@ -908,7 +884,7 @@ class AdminService:
             )
             .where(Project.category != "aggregate")
         )
-        excl = _build_excluded_issues_condition(filtered_issues or {})
+        excl = build_excluded_issues_condition(filtered_issues or {})
         if excl is not None:
             query = query.where(excl)
 

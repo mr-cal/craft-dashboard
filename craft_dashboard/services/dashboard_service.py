@@ -10,8 +10,8 @@ from sqlalchemy import func, select
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
-from craft_dashboard.repositories.issue_repository import (
-    _build_excluded_issues_condition,
+from craft_dashboard.repositories.issue_filters import (
+    build_excluded_issues_condition,
 )
 from craft_dashboard.services.dashboard.badges import (
     RELEASE_RED_DAYS_THRESHOLD,
@@ -132,7 +132,7 @@ class DashboardService:
         now = _normalize_now(now)
         thirty_days_ago = now - timedelta(days=30)
         one_year_ago = now - timedelta(days=365)
-        excl = _build_excluded_issues_condition(config.filtered_issues)
+        excl = build_excluded_issues_condition(config.filtered_issues)
         maintainers_set = set(config.maintainers + config.launchpad_maintainers)
 
         project_count = (
@@ -405,7 +405,7 @@ class DashboardService:
     ) -> TriageResponsivenessData:
         """Fetch metrics for the Triage and Responsiveness dashboard."""
         now = now or datetime.now(tz=UTC)
-        excl = _build_excluded_issues_condition(config.filtered_issues)
+        excl = build_excluded_issues_condition(config.filtered_issues)
 
         velocity, awaiting_prs = await self._fetch_triage_velocity(config, now, excl)
 

@@ -580,7 +580,7 @@ class TestQueueDepthSnapshot:
         app, token = _create_eval_app(test_db_session)
         # A non-empty `filtered_issues` config is what triggers the
         # `Project.name`-referencing exclusion clause in the query — without
-        # it, `_build_excluded_issues_condition` returns None and the
+        # it, `build_excluded_issues_condition` returns None and the
         # cartesian-product bug this test guards against never manifests.
         app.state.config = DashboardConfig(
             maintainers=["alice", "bob"],

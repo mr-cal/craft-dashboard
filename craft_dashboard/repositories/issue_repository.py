@@ -15,6 +15,7 @@ from craft_dashboard.models.issue_link import IssueLink
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.models.views import IssueFilters, IssueQueryResult, IssueView
+from craft_dashboard.repositories.issue_filters import build_excluded_issues_condition
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -155,25 +156,6 @@ def _serialize_evaluation(evaluation: LLMEvaluation) -> dict[str, Any]:
     }
 
 
-def _build_excluded_issues_condition(
-    filtered_issues: dict[str, list[str]],
-) -> ColumnElement[bool] | None:
-    """Return a NOT(...) clause excluding configured issue numbers.
-
-    Returns None when filtered_issues is empty (no WHERE clause needed).
-    Requires that Issue and Project are already joined in the calling query.
-    """
-    conditions = [
-        (Project.name == project_name) & Issue.external_id.in_(ids)
-        for project_name, ids in filtered_issues.items()
-        if ids
-    ]
-    if not conditions:
-        return None
-    combined = or_(*conditions) if len(conditions) > 1 else conditions[0]
-    return ~combined
-
-
 def _apply_common_filters(
     query: Select,
     filters: IssueFilters,
@@ -192,7 +174,7 @@ def _apply_common_filters(
     and that LLMEvaluation is outer-joined if filters.action or
     filters.llm_status may be used.
     """
-    excl = _build_excluded_issues_condition(filtered_issues)
+    excl = build_excluded_issues_condition(filtered_issues)
     if excl is not None:
         query = query.where(excl)
 

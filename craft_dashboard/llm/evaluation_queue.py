@@ -21,8 +21,8 @@ from craft_dashboard.llm.evaluator import (
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
-from craft_dashboard.repositories.issue_repository import (
-    _build_excluded_issues_condition,
+from craft_dashboard.repositories.issue_filters import (
+    build_excluded_issues_condition,
 )
 
 if TYPE_CHECKING:
@@ -109,7 +109,7 @@ def build_pending_evaluation_query(  # noqa: PLR0913
         .options(defer(latest_evaluation.summary_embedding))
     )
 
-    excl = _build_excluded_issues_condition(filtered_issues or {})
+    excl = build_excluded_issues_condition(filtered_issues or {})
     if excl is not None:
         query = query.where(excl)
 
