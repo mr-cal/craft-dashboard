@@ -3,6 +3,10 @@
 Business logic that spans repositories: dashboard metrics, admin operations,
 stats aggregation, evaluation queue state.
 
+Homepage and triage metrics live in `dashboard/`, one module per metric group
+(`velocity`, `throughput`, `volume`, `untriaged`, `releases`, `spotlights`,
+`health`), with `dashboard_service.py` orchestrating them.
+
 ## Contract
 
 - May import: `repositories`, `models`, `config`, `settings`.
