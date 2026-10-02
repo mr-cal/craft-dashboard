@@ -100,6 +100,8 @@ def format_issue_context(
     body: str | None,
     issue_type: str,
     labels: list[str],
+    project: str | None = None,
+    external_id: str | int | None = None,
     age_days: int = 0,
     last_activity_days: int = 0,
     comment_count: int = 0,
@@ -114,6 +116,8 @@ def format_issue_context(
     type_label = "Pull Request" if issue_type == "pull_request" else "Issue"
     label_str = ", ".join(labels) if labels else "none"
     comments_text = _format_comments(comments or [])
+    project_line = f"Project: {project}\n" if project else ""
+    number_line = f"Number: #{external_id}\n" if external_id is not None else ""
     state_line = f"State: {state}\n" if state else ""
     closing_refs_text = _format_closing_references(closing_references or [])
     pr_details_text = (
@@ -121,6 +125,8 @@ def format_issue_context(
     )
 
     return (
+        f"{project_line}"
+        f"{number_line}"
         f"Type: {type_label}\n"
         f"{state_line}"
         f"Title: {title}\n"
@@ -395,6 +401,8 @@ def build_open_evaluate_prompt(
     body: str | None,
     issue_type: str,
     labels: list[str],
+    project: str | None = None,
+    external_id: str | int | None = None,
     age_days: int = 0,
     last_activity_days: int = 0,
     comment_count: int = 0,
@@ -416,6 +424,8 @@ def build_open_evaluate_prompt(
         body=body,
         issue_type=issue_type,
         labels=labels,
+        project=project,
+        external_id=external_id,
         age_days=age_days,
         last_activity_days=last_activity_days,
         comment_count=comment_count,
@@ -439,6 +449,8 @@ def build_closed_evaluate_prompt(
     issue_type: str,
     state: str,
     labels: list[str],
+    project: str | None = None,
+    external_id: str | int | None = None,
     age_days: int = 0,
     last_activity_days: int = 0,
     comment_count: int = 0,
@@ -455,6 +467,8 @@ def build_closed_evaluate_prompt(
         issue_type=issue_type,
         state=state,
         labels=labels,
+        project=project,
+        external_id=external_id,
         age_days=age_days,
         last_activity_days=last_activity_days,
         comment_count=comment_count,

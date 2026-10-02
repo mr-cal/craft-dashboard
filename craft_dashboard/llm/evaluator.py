@@ -22,16 +22,16 @@ from craft_dashboard.llm.tools import TOOL_SCHEMAS
 from craft_dashboard.models.issue import Issue
 
 #: Evaluation version produced by the current open-issue *scoring* prompt.
-OPEN_ISSUE_EVAL_VERSION: int = 6
+OPEN_ISSUE_EVAL_VERSION: int = 7
 
 #: Evaluation version produced by the current open-PR *scoring* prompt.
-OPEN_PR_EVAL_VERSION: int = 6
+OPEN_PR_EVAL_VERSION: int = 7
 
 #: Evaluation version produced by the current closed-issue *summary* prompt.
-CLOSED_ISSUE_EVAL_VERSION: int = 5
+CLOSED_ISSUE_EVAL_VERSION: int = 6
 
 #: Evaluation version produced by the current closed-PR *summary* prompt.
-CLOSED_PR_EVAL_VERSION: int = 5
+CLOSED_PR_EVAL_VERSION: int = 6
 
 
 def current_version_for_item(*, state: str, is_pr: bool) -> int:
@@ -377,6 +377,7 @@ class IssueEvaluator:
         existing_hash: str | None = None,
         closing_references: list[IssueComment] | None = None,
         project: str | None = None,
+        external_id: str | int | None = None,
         tool_ctx: ToolContext | None = None,
     ) -> EvaluationResult | None:
         """Evaluate a single issue or PR.
@@ -420,6 +421,7 @@ class IssueEvaluator:
                 pr_details=pr_details,
                 current_hash=current_hash,
                 project=project,
+                external_id=external_id,
                 tool_ctx=tool_ctx,
             )
 
@@ -439,6 +441,7 @@ class IssueEvaluator:
             pr_details=pr_details,
             current_hash=current_hash,
             project=project,
+            external_id=external_id,
             tool_ctx=tool_ctx,
         )
 
@@ -460,6 +463,7 @@ class IssueEvaluator:
         pr_details: IssueDetails | None,
         current_hash: str,
         project: str | None = None,
+        external_id: str | int | None = None,
         tool_ctx: ToolContext | None = None,
     ) -> EvaluationResult:
         """Evaluate a closed issue or merged PR."""
@@ -469,6 +473,8 @@ class IssueEvaluator:
             issue_type=issue_type,
             state=normalized_state,
             labels=label_names,
+            project=project,
+            external_id=external_id,
             age_days=age_days,
             last_activity_days=last_activity_days,
             author=author,
@@ -541,6 +547,7 @@ class IssueEvaluator:
         pr_details: IssueDetails | None,
         current_hash: str,
         project: str | None = None,
+        external_id: str | int | None = None,
         tool_ctx: ToolContext | None = None,
     ) -> EvaluationResult:
         """Evaluate an open issue or PR."""
@@ -549,6 +556,8 @@ class IssueEvaluator:
             body=body,
             issue_type=issue_type,
             labels=label_names,
+            project=project,
+            external_id=external_id,
             age_days=age_days,
             last_activity_days=last_activity_days,
             author=author,

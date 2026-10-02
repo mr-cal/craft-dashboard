@@ -353,6 +353,7 @@ def _start_evaluation(
         closing_references=issue_data.get("closing_references"),
         pr_details=issue_data.get("pr_details"),
         project=issue_data["project_name"],
+        external_id=issue_data.get("external_id"),
         tool_ctx=tool_ctx,
     )
 

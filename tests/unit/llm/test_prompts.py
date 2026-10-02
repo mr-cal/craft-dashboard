@@ -207,6 +207,24 @@ class TestBuildOpenEvaluatePrompt:
         )
         assert "should_not_appear" not in msgs[1]["content"]
 
+    def test_includes_project_and_number_when_provided(self) -> None:
+        """Project and issue number are prepended when supplied."""
+        msgs = build_open_evaluate_prompt(
+            title="Open bug",
+            body="Details",
+            issue_type="issue",
+            labels=[],
+            project="craft-parts",
+            external_id="1581",
+            age_days=1,
+            last_activity_days=1,
+            author="user",
+            is_maintainer=False,
+            comment_count=0,
+        )
+        assert "Project: craft-parts" in msgs[1]["content"]
+        assert "Number: #1581" in msgs[1]["content"]
+
     def test_issue_system_requires_reason_to_cite_specific_evidence(self) -> None:
         msgs = build_open_evaluate_prompt(
             title="T",
@@ -437,3 +455,22 @@ class TestBuildClosedEvaluatePrompt:
             comment_count=0,
         )
         assert "Review status" not in msgs[1]["content"]
+
+    def test_includes_project_and_number_when_provided(self) -> None:
+        """Project and issue number are prepended when supplied."""
+        msgs = build_closed_evaluate_prompt(
+            title="Old bug",
+            body="It crashed",
+            issue_type="issue",
+            state="closed",
+            labels=[],
+            project="rockcraft",
+            external_id=1321,
+            age_days=10,
+            last_activity_days=5,
+            author="dev",
+            is_maintainer=False,
+            comment_count=0,
+        )
+        assert "Project: rockcraft" in msgs[1]["content"]
+        assert "Number: #1321" in msgs[1]["content"]

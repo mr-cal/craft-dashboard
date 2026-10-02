@@ -75,6 +75,32 @@ class TestCreateFromDuplicateCheck:
         count = (await test_db_session.execute(select(IssueLink))).scalars().all()
         assert count == []
 
+    async def test_self_referential_duplicate_is_skipped(self, test_db_session) -> None:
+        project = make_project(id=1, name="rockcraft")
+        issue = make_issue(id=1, project_id=1, external_id="100")
+        evaluation = make_evaluation(id=1, issue_id=1)
+        await _seed(test_db_session, project, issue, evaluation)
+
+        repo = IssueLinkRepository(test_db_session)
+        duplicate_result = {
+            "duplicate_of_issue_id": 1,
+            "duplicate_of_external_id": "100",
+            "duplicate_of_project_name": "rockcraft",
+            "confidence": 95,
+            "reason": "Points to itself",
+            "candidates_compared": 1,
+        }
+
+        link = await repo.create_from_duplicate_check(
+            from_issue_id=1,
+            llm_evaluation_id=1,
+            duplicate_result=duplicate_result,
+        )
+
+        assert link is None
+        count = (await test_db_session.execute(select(IssueLink))).scalars().all()
+        assert count == []
+
 
 class TestGetLatestLinksForIssue:
     """Tests for reading only links from an issue's current evaluation."""
@@ -279,6 +305,34 @@ class TestCreateFromRelatedWork:
         assert len(links) == 1
         assert links[0].to_issue_id == to_issue.id
         assert links[0].to_ref == "snapcraft-launchpad#1876370"
+
+    async def test_self_referential_link_is_skipped(self, test_db_session) -> None:
+        """A related_work entry referencing the issue itself is ignored."""
+        project = make_project(name="rockcraft")
+        test_db_session.add(project)
+        await test_db_session.flush()
+        issue = make_issue(project_id=project.id, external_id="1108")
+        test_db_session.add(issue)
+        await test_db_session.flush()
+        evaluation = make_evaluation(issue_id=issue.id)
+        test_db_session.add(evaluation)
+        await test_db_session.flush()
+
+        repo = IssueLinkRepository(test_db_session)
+        links = await repo.create_from_related_work(
+            from_issue_id=issue.id,
+            llm_evaluation_id=evaluation.id,
+            related_work=[
+                {
+                    "kind": "superseded_by",
+                    "ref": "rockcraft#1108",
+                    "confidence": 90,
+                    "note": "references self",
+                }
+            ],
+        )
+
+        assert links == []
 
 
 class TestReconcileUnresolvedLinks:

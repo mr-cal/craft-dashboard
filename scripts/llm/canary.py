@@ -23,12 +23,14 @@ import sys
 from dataclasses import dataclass
 
 import click
+from dotenv import load_dotenv
 
 # Make the `scripts` package importable when run directly (e.g.
 # `uv run scripts/llm/canary.py`), matching scripts/run_llm.py.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
+load_dotenv(pathlib.Path(__file__).resolve().parents[2] / ".env")
 
-from scripts.llm.eval_worker import run_evaluate_loop
+from scripts.llm.eval_worker import run_evaluate_loop  # noqa: E402
 
 
 @dataclass(frozen=True)

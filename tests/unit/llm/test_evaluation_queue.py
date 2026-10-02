@@ -139,7 +139,7 @@ class TestBuildPendingEvaluationQuery:
         self, test_db_session
     ) -> None:
         """A closed issue evaluated at CLOSED_ISSUE_EVAL_VERSION remains up to date."""
-        assert CLOSED_ISSUE_EVAL_VERSION == 5
+        assert CLOSED_ISSUE_EVAL_VERSION == 6
 
         project = make_project(id=1, name="snapcraft")
         issue = make_issue(

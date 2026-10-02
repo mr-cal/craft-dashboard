@@ -49,6 +49,12 @@ class IssueLinkRepository:
         """
         if "duplicate_of_issue_id" not in duplicate_result:
             return None
+        if duplicate_result["duplicate_of_issue_id"] == from_issue_id:
+            logger.warning(
+                "Skipping self-referential duplicate_of entry for issue %d",
+                from_issue_id,
+            )
+            return None
 
         to_ref = (
             f"{duplicate_result['duplicate_of_project_name']}"
@@ -99,10 +105,18 @@ class IssueLinkRepository:
                 )
                 continue
             ref = str(entry.get("ref", "")).strip()
+            to_issue_id = await self._resolve_ref_to_issue_id(ref)
+            if to_issue_id is not None and to_issue_id == from_issue_id:
+                logger.warning(
+                    "Skipping self-referential related_work entry for issue %d (ref=%r)",
+                    from_issue_id,
+                    ref,
+                )
+                continue
             link = IssueLink(
                 from_issue_id=from_issue_id,
                 llm_evaluation_id=llm_evaluation_id,
-                to_issue_id=await self._resolve_ref_to_issue_id(ref),
+                to_issue_id=to_issue_id,
                 to_ref=ref,
                 kind=kind,
                 confidence=entry.get("confidence", 0),
