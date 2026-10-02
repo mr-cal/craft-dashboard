@@ -52,6 +52,8 @@ def format_error_body(response: httpx.Response) -> str:
             )
         return f"(HTML response from {response.url} — is the server URL correct?)"
     collapsed = " ".join(text.split())
+    if not collapsed:
+        return response.reason_phrase or "(empty response)"
     return (
         (collapsed[:_MAX_ERROR_BODY] + "…")
         if len(collapsed) > _MAX_ERROR_BODY
@@ -74,7 +76,7 @@ async def post_submission(
                 json=submission,
                 headers=runtime.headers,
             )
-            if response.status_code in {502, 503, 504} and attempt < max_retries:
+            if response.status_code in {500, 502, 503, 504} and attempt < max_retries:
                 logger.warning(
                     "%s: submit returned %d on attempt %d/%d; retrying in %ds...",
                     issue_ref,

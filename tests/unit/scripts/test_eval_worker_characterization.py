@@ -208,7 +208,7 @@ async def test_post_submission_retries_only_gateway_errors_with_exponential_slee
     assert [call.args[0] for call in sleep.await_args_list] == [2, 4]
 
 
-async def test_post_submission_does_not_retry_non_gateway_server_error(
+async def test_post_submission_retries_server_error_up_to_max_attempts(
     monkeypatch: pytest.MonkeyPatch, runtime: SimpleNamespace
 ) -> None:
     runtime.http_client.post = AsyncMock(return_value=_response(500))
@@ -223,6 +223,25 @@ async def test_post_submission_does_not_retry_non_gateway_server_error(
 
     assert response is not None
     assert response.status_code == 500
+    assert runtime.http_client.post.await_count == 3
+    assert [call.args[0] for call in sleep.await_args_list] == [2, 4]
+
+
+async def test_post_submission_does_not_retry_client_error(
+    monkeypatch: pytest.MonkeyPatch, runtime: SimpleNamespace
+) -> None:
+    runtime.http_client.post = AsyncMock(return_value=_response(400))
+    sleep = AsyncMock()
+    monkeypatch.setattr(eval_worker.asyncio, "sleep", sleep)
+
+    response = await eval_worker._post_submission(
+        runtime,
+        issue_ref="snapcraft#100",
+        submission={"issue_id": 42},
+    )
+
+    assert response is not None
+    assert response.status_code == 400
     runtime.http_client.post.assert_awaited_once()
     sleep.assert_not_awaited()
 

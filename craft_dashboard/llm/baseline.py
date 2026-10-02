@@ -106,7 +106,8 @@ async def build_round1_baseline(
         data = json.loads(raw)
         related = data.get("results", []) if isinstance(data, dict) else []
     except Exception as exc:  # noqa: BLE001
-        logger.warning("related_issues endpoint failed during baseline: %s", exc)
+        detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+        logger.warning("related_issues endpoint failed during baseline: %s", detail)
         related = []
 
     if related:

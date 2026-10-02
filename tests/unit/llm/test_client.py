@@ -9,7 +9,7 @@ from craft_dashboard.llm.client import (
     LocalLLMClient,
     OpenRouterClient,
 )
-from craft_dashboard.llm.exceptions import LLMQuotaError
+from craft_dashboard.llm.exceptions import LLMQuotaError, LLMUnavailableError
 
 
 class TestOpenRouterClient:
@@ -52,6 +52,46 @@ class TestOpenRouterClient:
 
         _args, kwargs = mock_post.call_args
         assert kwargs["json"]["reasoning"] == {"enabled": True}
+
+    @pytest.mark.asyncio
+    async def test_complete_retries_on_5xx_and_raises_unavailable(self) -> None:
+        """HTTP 5xx responses are retried and raise LLMUnavailableError."""
+        mock_response = httpx.Response(500, request=httpx.Request("POST", "http://x"))
+
+        with (
+            patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            mock_post.return_value = mock_response
+            client = OpenRouterClient(api_key="test")
+
+            with pytest.raises(LLMUnavailableError, match="OpenRouter returned 500"):
+                await client.complete(
+                    model="test/model", messages=[{"role": "user", "content": "hi"}]
+                )
+            assert mock_post.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_complete_retries_on_error_payload(self) -> None:
+        """OpenRouter returning 200 with error payload is retried and raises LLMUnavailableError."""
+        error_response = httpx.Response(
+            200,
+            json={"error": {"message": "Upstream provider timeout"}},
+            request=httpx.Request("POST", "http://x"),
+        )
+
+        with (
+            patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            mock_post.return_value = error_response
+            client = OpenRouterClient(api_key="test")
+
+            with pytest.raises(LLMUnavailableError, match="Upstream provider timeout"):
+                await client.complete(
+                    model="test/model", messages=[{"role": "user", "content": "hi"}]
+                )
+            assert mock_post.call_count == 3
 
 
 class TestQuotaError:
@@ -376,6 +416,27 @@ class TestLLMResponse:
 
         assert response.finish_reason is None
         assert response.reasoning_tokens is None
+
+    def test_from_api_response_missing_choices_raises_unavailable(self) -> None:
+        """Responses without 'choices' raise LLMUnavailableError instead of KeyError."""
+        with pytest.raises(LLMUnavailableError, match="missing 'choices'"):
+            LLMResponse.from_api_response({})
+
+    def test_from_api_response_empty_choices_raises_unavailable(self) -> None:
+        """Responses with empty 'choices' raise LLMUnavailableError instead of IndexError."""
+        with pytest.raises(LLMUnavailableError, match="missing 'choices'"):
+            LLMResponse.from_api_response({"choices": []})
+
+    def test_from_api_response_error_payload_raises_unavailable(self) -> None:
+        """Error payloads from provider raise LLMUnavailableError with the error message."""
+        api_data = {"error": {"message": "Provider rate limit exceeded", "code": 429}}
+        with pytest.raises(LLMUnavailableError, match="Provider rate limit exceeded"):
+            LLMResponse.from_api_response(api_data)
+
+    def test_from_api_response_non_dict_raises_unavailable(self) -> None:
+        """Non-dict responses raise LLMUnavailableError."""
+        with pytest.raises(LLMUnavailableError, match="API response is not a dict"):
+            LLMResponse.from_api_response("invalid")  # type: ignore[arg-type]
 
 
 class TestOpenRouterClientRetryLogging:

@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from craft_dashboard.llm.baseline import (
     BaselineError,
@@ -166,3 +167,27 @@ class TestBuildRound1Baseline:
             )
         assert "craft_parts\t12 files" in baseline
         assert "## Related issues" not in baseline
+
+    @pytest.mark.asyncio
+    async def test_related_issues_failure_logs_exception_type_for_empty_str(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Exceptions with empty str() representation (like ConnectTimeout) must log type name."""
+        with (
+            patch_repo_layout({"craft_parts": 12}),
+            patch_grep_repo([]),
+            patch(
+                "craft_dashboard.llm.baseline._dispatch_http_tool",
+                new=AsyncMock(side_effect=httpx.ConnectTimeout("")),
+            ),
+        ):
+            await build_round1_baseline(
+                _tool_ctx(),
+                project="craft-parts",
+                title="parse_manifest raises KeyError",
+                body=None,
+            )
+        assert (
+            "related_issues endpoint failed during baseline: ConnectTimeout"
+            in caplog.text
+        )

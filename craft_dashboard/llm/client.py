@@ -37,6 +37,7 @@ HTTP_OK = 200
 HTTP_UNAUTHORIZED = 401
 HTTP_PAYMENT_REQUIRED = 402
 HTTP_FORBIDDEN = 403
+HTTP_SERVER_ERROR = 500
 #: Retry budget for a single provider request. Kept small: completions are
 #: slow and billable, so a long retry chain costs real money and stalls the
 #: evaluation queue behind one bad request.
@@ -257,14 +258,28 @@ class LLMResponse:
     @classmethod
     def from_api_response(cls, data: dict) -> LLMResponse:
         """Parse an LLM API response dict."""
+        if not isinstance(data, dict):
+            raise LLMUnavailableError(
+                f"API response is not a dict: {type(data).__name__}"
+            )
+        if "error" in data:
+            err = data["error"]
+            err_msg = (
+                err.get("message", str(err)) if isinstance(err, dict) else str(err)
+            )
+            raise LLMUnavailableError(f"LLM API returned error: {err_msg}")
+        choices = data.get("choices")
+        if not choices:
+            raise LLMUnavailableError(f"LLM API response missing 'choices': {data}")
+
         # Some providers (and thinking models under certain conditions, e.g.
         # hitting max_tokens or triggering content filters) return a null
         # message content instead of an empty string. Coerce to "" so
         # downstream parsing can treat it as an unparsable response instead
         # of crashing on None.
-        choice = data["choices"][0]
-        message = choice["message"]
-        content = message["content"] or ""
+        choice = choices[0]
+        message = choice.get("message") or {}
+        content = message.get("content") or ""
         usage = data.get("usage", {})
         completion_details = usage.get("completion_tokens_details") or {}
         tool_calls = message.get("tool_calls")
@@ -388,7 +403,11 @@ class OpenRouterClient:
                 )
 
     @retry(
-        retry=retry_if_exception(is_retriable_http_error),
+        retry=retry_if_exception(
+            lambda exc: (
+                is_retriable_http_error(exc) or isinstance(exc, LLMUnavailableError)
+            )
+        ),
         # Honor Retry-After: OpenRouter sends it on 429, and backing off for
         # less simply gets the next request rejected too.
         wait=make_wait_honoring_retry_after(
@@ -456,6 +475,11 @@ class OpenRouterClient:
                 err_msg = response.text
             raise LLMQuotaError(
                 f"OpenRouter budget or permission limit reached: {err_msg or response.text}"
+            )
+        if response.status_code >= HTTP_SERVER_ERROR:
+            raise LLMUnavailableError(
+                f"OpenRouter returned {response.status_code} — "
+                "the service or upstream provider may be down or overloaded"
             )
 
         response.raise_for_status()
