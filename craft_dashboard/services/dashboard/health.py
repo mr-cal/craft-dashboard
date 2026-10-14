@@ -144,4 +144,7 @@ def build_project_health_rows(
         row_data = _health_row(p, counts, release, config)
         category = resolve_project_category(p, config)
         buckets.get(category, buckets["other"]).append(row_data)
+    # Libraries have no curated display order, so show them alphabetically
+    # rather than in whatever order collection happened to write them.
+    buckets["library"].sort(key=lambda row: row["name"])
     return buckets

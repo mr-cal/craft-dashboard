@@ -1378,6 +1378,21 @@ class TestProjectHealthRows:
             "rockcraft",
         ]
 
+    async def test_library_rows_are_alphabetical_regardless_of_display_order(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        await _add_project(test_db_session, "craft-parts", "library", 1)
+        await _add_project(test_db_session, "charmcraft", "library", 2)
+        await _add_project(test_db_session, "black", "library", 3)
+
+        metrics = await _metrics(test_db_session)
+
+        assert [p["name"] for p in metrics["library_projects"]] == [
+            "black",
+            "charmcraft",
+            "craft-parts",
+        ]
+
     async def test_untriaged_percentage_is_over_issues_plus_prs_rounded_to_one_dp(
         self, test_db_session: AsyncSession
     ) -> None:
