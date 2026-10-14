@@ -63,6 +63,7 @@ if TYPE_CHECKING:
 _CollectedItem = GHIssue | GraphQLIssueAdapter | GraphQLPullRequestAdapter
 
 _PROGRESS_LOG_INTERVAL_SECONDS = 30
+_MAX_RATE_LIMIT_SLEEP_SECONDS = 180
 _REST_RATE_LIMIT_CHECK_INTERVAL = 25
 _MAX_REST_LOOKBACK_DAYS = 90
 
@@ -158,18 +159,64 @@ class GitHubCollector:
         """Check GitHub REST (core) and GraphQL API rate limit status."""
         overview = self.gh.get_rate_limit()
         core = overview.resources.core
-        graphql = overview.resources.graphql
+        gql_remaining = int(overview.resources.graphql.remaining)
+        gql_limit = int(overview.resources.graphql.limit)
+        gql_reset = cast(datetime | None, overview.resources.graphql.reset)
+
+        # REST /rate_limit endpoint often lags behind actual GraphQL quota.
+        # Query GraphQL rateLimit directly to obtain authoritative remaining/reset values.
+        if hasattr(self.gh, "requester") and hasattr(
+            self.gh.requester, "graphql_query"
+        ):
+            try:
+                _headers, res = self.gh.requester.graphql_query(
+                    "query { rateLimit { limit remaining resetAt } }", {}
+                )
+                if isinstance(res, dict):
+                    rl_data = res.get("data", {})
+                    if isinstance(rl_data, dict):
+                        rl_block = rl_data.get("rateLimit", {})
+                        if isinstance(rl_block, dict):
+                            if "remaining" in rl_block and isinstance(
+                                rl_block["remaining"], int
+                            ):
+                                gql_remaining = rl_block["remaining"]
+                            if "limit" in rl_block and isinstance(
+                                rl_block["limit"], int
+                            ):
+                                gql_limit = rl_block["limit"]
+                            if rl_block.get("resetAt") and isinstance(
+                                rl_block["resetAt"], str
+                            ):
+                                gql_reset = datetime.fromisoformat(
+                                    rl_block["resetAt"].replace("Z", "+00:00")
+                                )
+            except Exception as exc:  # noqa: BLE001 - fallback to REST overview or headers on any GraphQL error
+                headers = getattr(exc, "headers", None)
+                if isinstance(headers, dict):
+                    raw_rem = headers.get("x-ratelimit-remaining")
+                    if isinstance(raw_rem, str | int) and str(raw_rem).isdigit():
+                        gql_remaining = int(raw_rem)
+                    raw_lim = headers.get("x-ratelimit-limit")
+                    if isinstance(raw_lim, str | int) and str(raw_lim).isdigit():
+                        gql_limit = int(raw_lim)
+                    raw_reset = headers.get("x-ratelimit-reset")
+                    if isinstance(raw_reset, str | int) and str(raw_reset).isdigit():
+                        gql_reset = datetime.fromtimestamp(int(raw_reset), tz=UTC)
+
         return {
             "core_remaining": int(core.remaining),
             "core_limit": int(core.limit),
             "core_reset": cast(datetime | None, core.reset),
-            "graphql_remaining": int(graphql.remaining),
-            "graphql_limit": int(graphql.limit),
-            "graphql_reset": cast(datetime | None, graphql.reset),
+            "graphql_remaining": gql_remaining,
+            "graphql_limit": gql_limit,
+            "graphql_reset": gql_reset,
         }
 
     def wait_for_rate_limit(
-        self, resource: Literal["core", "graphql"] = "core", threshold: int = 100
+        self,
+        resource: Literal["core", "graphql"] = "core",
+        threshold: int | None = None,
     ) -> None:
         """Sleep until the given resource's rate limit resets, if nearly exhausted.
 
@@ -177,8 +224,12 @@ class GitHubCollector:
             resource: Which budget to check — "core" for REST calls (e.g.
                 repo.compare()), "graphql" for GraphQL queries.
             threshold: Sleep if remaining requests fall at or below this value.
+                Defaults to 100 for core and 20 for graphql.
 
         """
+        effective_threshold = (
+            threshold if threshold is not None else (100 if resource == "core" else 20)
+        )
         quota = self.check_rate_limit()
         if resource == "core":
             remaining = quota["core_remaining"]
@@ -189,7 +240,7 @@ class GitHubCollector:
             limit = quota["graphql_limit"]
             reset_at = quota["graphql_reset"]
 
-        if remaining >= threshold:
+        if remaining >= effective_threshold:
             return
 
         if reset_at is None:
@@ -201,6 +252,14 @@ class GitHubCollector:
         sleep_seconds = max(0, int((reset_time - datetime.now(UTC)).total_seconds()))
         if sleep_seconds == 0:
             return
+
+        if sleep_seconds > _MAX_RATE_LIMIT_SLEEP_SECONDS:
+            raise RateLimitError(
+                resource=resource,
+                remaining=remaining,
+                limit=limit,
+                reset_at=reset_time,
+            )
 
         logger.warning(
             "GitHub %s rate limit low (%d/%d remaining); sleeping for %ds until %s",

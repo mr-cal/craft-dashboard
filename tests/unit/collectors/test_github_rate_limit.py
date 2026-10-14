@@ -166,3 +166,58 @@ class TestGitHubRateLimit:
         assert exc_info.value.resource == "core"
         assert exc_info.value.remaining == 0
         assert exc_info.value.limit == 5000
+
+    def test_wait_for_rate_limit_raises_when_sleep_exceeds_threshold(self) -> None:
+        collector = GitHubCollector(token=_TOKEN, org="canonical")
+        collector.check_rate_limit = MagicMock(
+            return_value={
+                "core_remaining": 0,
+                "core_limit": 5000,
+                "core_reset": datetime(2025, 1, 10, 12, 10, 0, tzinfo=UTC),
+                "graphql_remaining": 250,
+                "graphql_limit": 5000,
+                "graphql_reset": datetime(2025, 1, 10, 13, 0, tzinfo=UTC),
+            }
+        )
+
+        with (
+            patch("craft_dashboard.collectors.github.datetime", FrozenDateTime),
+            pytest.raises(RateLimitError, match="rate limit exhausted"),
+        ):
+            collector.wait_for_rate_limit(resource="core", threshold=100)
+
+    def test_check_rate_limit_queries_graphql_directly(self) -> None:
+        collector = GitHubCollector(token=_TOKEN, org="canonical")
+        collector.gh = MagicMock()
+        collector.gh.get_rate_limit.return_value = SimpleNamespace(
+            resources=SimpleNamespace(
+                core=SimpleNamespace(
+                    remaining=100,
+                    limit=5000,
+                    reset=datetime(2025, 1, 10, 12, 30, tzinfo=UTC),
+                ),
+                graphql=SimpleNamespace(
+                    remaining=999,
+                    limit=5000,
+                    reset=datetime(2025, 1, 10, 12, 45, tzinfo=UTC),
+                ),
+            )
+        )
+        collector.gh.requester = MagicMock()
+        collector.gh.requester.graphql_query.return_value = (
+            {},
+            {
+                "data": {
+                    "rateLimit": {
+                        "limit": 5000,
+                        "remaining": 42,
+                        "resetAt": "2025-01-10T12:55:00Z",
+                    }
+                }
+            },
+        )
+
+        result = collector.check_rate_limit()
+
+        assert result["graphql_remaining"] == 42
+        assert result["graphql_reset"] == datetime(2025, 1, 10, 12, 55, tzinfo=UTC)

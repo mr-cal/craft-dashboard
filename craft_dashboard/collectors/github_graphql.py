@@ -8,6 +8,7 @@ the data so callers can track the GraphQL budget without an extra request.
 
 import logging
 import re
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -30,6 +31,8 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+_MAX_RATE_LIMIT_RETRY_SLEEP_SECONDS = 30
 
 _ISSUES_QUERY = """
 query($owner: String!, $name: String!, $after: String, $since: DateTime, $states: [IssueState!] = [OPEN]) {
@@ -238,7 +241,33 @@ def _graphql_query(
         if exc.status in (400, 403) and (
             "rate limit" in summary.lower() or "rate_limit" in summary.lower()
         ):
-            raise RateLimitError(resource="graphql", remaining=0, limit=5000) from exc
+            reset_at: datetime | None = None
+            if exc.headers and "x-ratelimit-reset" in exc.headers:
+                raw_reset = exc.headers["x-ratelimit-reset"]
+                if str(raw_reset).isdigit():
+                    reset_ts = int(raw_reset)
+                    reset_at = datetime.fromtimestamp(reset_ts, tz=UTC)
+                    sleep_seconds = reset_ts - int(time.time())
+                    if 0 <= sleep_seconds <= _MAX_RATE_LIMIT_RETRY_SLEEP_SECONDS:
+                        logger.warning(
+                            "GraphQL rate limit reached; sleeping %ds until reset at %s",
+                            sleep_seconds + 1,
+                            reset_at.isoformat(),
+                        )
+                        time.sleep(sleep_seconds + 1)
+                        try:
+                            _, retry_response = requester.graphql_query(
+                                query, variables
+                            )
+                            return retry_response["data"]
+                        except GithubException:
+                            pass
+            raise RateLimitError(
+                resource="graphql",
+                remaining=0,
+                limit=5000,
+                reset_at=reset_at,
+            ) from exc
         raise GithubException(exc.status, headers=exc.headers, message=summary) from exc
 
 

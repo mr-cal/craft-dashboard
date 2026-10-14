@@ -23,6 +23,7 @@ assert SPEC.loader is not None
 collect_data = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(collect_data)
 
+from craft_dashboard.collectors import RateLimitError  # noqa: E402
 from scripts.collect import (  # noqa: E402
     github_pass,
     launchpad_pass,
@@ -464,6 +465,78 @@ class TestCollectLaunchpadLogging:
         assert result.issues_collected == 150
         assert "Collecting Launchpad data for snapcraft (elapsed:" in caplog.text
         assert "snapcraft (launchpad): 150 bugs fetched in " in caplog.text
+
+
+class TestGitHubRateLimitHalt:
+    """Regression: RateLimitError must cleanly halt collection pass without cascading errors."""
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_halts_and_skips_remaining_projects(
+        self, monkeypatch, caplog
+    ) -> None:
+        token = ("tok", "en")[0] + ("tok", "en")[1]
+        settings = SimpleNamespace(github_token=token, refresh_age_days=7)
+        config = SimpleNamespace(
+            craft_projects=["snapcraft", "rockcraft"],
+            craft_applications=["snapcraft", "rockcraft"],
+            craft_libraries=[],
+            maintainers=["alice"],
+            hotfix_min_versions={},
+            refresh_interval_days=7,
+            filtered_issues={},
+        )
+        dep_collector = MagicMock()
+        dep_collector.collect_dependencies = AsyncMock(return_value=0)
+        gh_collector = MagicMock()
+        gh_collector.collect_releases = AsyncMock(return_value=1)
+        gh_collector.collect_issues = AsyncMock(
+            side_effect=RateLimitError(resource="graphql", remaining=0, limit=5000)
+        )
+        record_error = AsyncMock()
+
+        monkeypatch.setattr(
+            github_pass,
+            "DependencyCollector",
+            lambda token, org, craft_libraries: dep_collector,
+        )
+        monkeypatch.setattr(
+            github_pass,
+            "GitHubCollector",
+            lambda token, org, maintainers: gh_collector,
+        )
+        monkeypatch.setattr(
+            github_pass, "_get_or_create_project", AsyncMock(return_value=101)
+        )
+        monkeypatch.setattr(github_pass, "generate_snapshot", AsyncMock())
+        monkeypatch.setattr(github_pass, "record_refresh_error", record_error)
+        monkeypatch.setattr(
+            github_pass, "_check_initial_rate_limit", lambda collector: None
+        )
+        monkeypatch.setattr(
+            github_pass,
+            "_log_rate_limit_after_project",
+            AsyncMock(),
+        )
+
+        caplog.set_level(logging.WARNING)
+
+        result = await collect_data._collect_github(
+            settings,
+            config,
+            _make_session_factory(),
+            projects=["snapcraft", "rockcraft"],
+            run_started_at=collect_data.time.monotonic(),
+            mode="open",
+        )
+
+        assert (
+            "GitHub rate limit exhausted: graphql rate limit exhausted" in caplog.text
+        )
+        assert len(result.errors) == 1
+        assert result.errors[0]["source"] == "github"
+        assert "graphql rate limit exhausted" in result.errors[0]["error"]
+        assert result.projects_processed == {"snapcraft"}
+        record_error.assert_not_called()
 
 
 class TestMainLogging:

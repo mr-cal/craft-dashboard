@@ -111,18 +111,6 @@ def _check_initial_rate_limit(collector: GitHubCollector) -> None:
         gql_lim,
         gql_res,
     )
-    if core_rem <= 0:
-        raise RateLimitError(
-            resource="core",
-            remaining=core_rem,
-            limit=core_lim,
-        )
-    if gql_rem <= 0:
-        raise RateLimitError(
-            resource="graphql",
-            remaining=gql_rem,
-            limit=gql_lim,
-        )
     collector.wait_for_rate_limit(resource="core")
     collector.wait_for_rate_limit(resource="graphql")
 
@@ -158,18 +146,6 @@ async def _log_rate_limit_after_project(
         gql_rem,
         gql_lim,
     )
-    if core_rem <= 0:
-        raise RateLimitError(
-            resource="core",
-            remaining=core_rem,
-            limit=core_lim,
-        )
-    if gql_rem <= 0:
-        raise RateLimitError(
-            resource="graphql",
-            remaining=gql_rem,
-            limit=gql_lim,
-        )
     collector.wait_for_rate_limit(resource="core")
     collector.wait_for_rate_limit(resource="graphql")
 
@@ -206,6 +182,8 @@ async def _collect_project_dependencies(
             dependency_count,
             _format_duration(time.monotonic() - dep_started_at),
         )
+    except RateLimitError:
+        raise
     except Exception:  # noqa: BLE001 - per-project isolation; other projects still collect
         logger.warning(
             "Failed to collect dependencies for %s",
@@ -239,6 +217,8 @@ async def _collect_project_releases(
             release_count,
             _format_duration(time.monotonic() - releases_started_at),
         )
+    except RateLimitError:
+        raise
     except Exception:  # noqa: BLE001 - per-project isolation; other projects still collect
         logger.warning(
             "Failed to collect releases for %s",
@@ -319,6 +299,8 @@ async def _collect_open_issues(
                 ok_session,
                 issues_collected=open_collected,
             )
+    except RateLimitError:
+        raise
     except Exception as exc:
         logger.exception("Failed to collect open GitHub issues for %s", project_name)
         error_summary = _summarize_exception(exc)
@@ -455,6 +437,8 @@ async def _collect_all_issues(
             project_name,
             _format_duration(time.monotonic() - project_started_at),
         )
+    except RateLimitError:
+        raise
     except Exception as exc:
         logger.exception("Failed to collect GitHub data for %s", project_name)
         error_summary = _summarize_exception(exc)
