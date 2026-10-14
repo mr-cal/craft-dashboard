@@ -12,7 +12,8 @@
       an hourly rotation picks exactly one project/source pair — whichever
       has gone longest without a full refresh (open + closed issues) — and
       fully refreshes it. This table shows that rotation order: the top row
-      is up next.
+      is up next. Consecutive failure counters track active unbroken failures,
+      while 24h errors reflect recent intermittent issues.
     </p>
   </div>
   <div class="col">
@@ -22,10 +23,11 @@
         <tr>
           <th style="width: 14%;">Project</th>
           <th style="width: 10%;">Source</th>
-          <th style="width: 28%;">Last full refresh</th>
-          <th style="width: 28%;">Next full refresh</th>
-          <th style="width: 10%;">Full-refresh failures</th>
-          <th style="width: 10%;">Open-poll failures</th>
+          <th style="width: 25%;">Last full refresh</th>
+          <th style="width: 25%;">Next full refresh</th>
+          <th style="width: 8%;" title="Consecutive failures on the hourly full refresh. Resets to 0 on success.">Full failures</th>
+          <th style="width: 8%;" title="Consecutive failures on the 10-minute open-issue poll. Resets to 0 on success.">Poll failures</th>
+          <th style="width: 10%;" title="Total errors recorded in collection runs over the last 24 hours">Errors (24h)</th>
         </tr>
       </thead>
       <tbody>
@@ -66,14 +68,21 @@
           </td>
           <td>
             {% if entry.consecutive_failures > 0 %}
-            <span style="color:var(--app-caution);" title="{{ entry.last_error or '' }}">{{ entry.consecutive_failures }}</span>
+            <span style="color:var(--color-error, #c0392b);" title="{{ entry.last_error or '' }}">{{ entry.consecutive_failures }}</span>
             {% else %}
             0
             {% endif %}
           </td>
           <td>
             {% if entry.open_poll_consecutive_failures > 0 %}
-            <span style="color:var(--app-caution);" title="{{ entry.open_poll_last_error or '' }}">{{ entry.open_poll_consecutive_failures }}</span>
+            <span style="color:var(--app-caution, #e67e22);" title="{{ entry.open_poll_last_error or '' }}">{{ entry.open_poll_consecutive_failures }}</span>
+            {% else %}
+            0
+            {% endif %}
+          </td>
+          <td>
+            {% if entry.recent_failures_24h > 0 %}
+            <span style="color:var(--app-caution, #e67e22);" title="Last error: {{ entry.recent_last_error or '' }}">{{ entry.recent_failures_24h }} ⚠</span>
             {% else %}
             0
             {% endif %}

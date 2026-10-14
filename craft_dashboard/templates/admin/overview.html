@@ -181,7 +181,7 @@
   <div class="col">
     <h3>Refresh schedule</h3>
     <p>
-      Open issues refresh every 10 minutes. Each hour, the project that has gone longest without a full sync (open and closed issues) is refreshed. The top row is up next in the rotation.
+      Open issues refresh every 10 minutes. Each hour, the project that has gone longest without a full sync (open and closed issues) is refreshed. The top row is up next in the rotation. Failure counters track consecutive failures; projects with recent intermittent failures in the last 24 hours show a caution indicator.
     </p>
   </div>
   <div class="col">
@@ -194,7 +194,7 @@
           <th>Last open poll</th>
           <th>Last full refresh</th>
           <th>Next full refresh</th>
-          <th>Failures</th>
+          <th title="Consecutive failures on the latest runs. Transient failures that succeed on the next run reset to 0.">Consecutive failures</th>
         </tr>
       </thead>
       <tbody>
@@ -261,6 +261,10 @@
                 Poll: {{ entry.open_poll_consecutive_failures }}
               </span>
               {% endif %}
+            {% elif entry.recent_failures_24h > 0 %}
+              <span style="color: var(--app-caution, #e67e22);" title="Recovered. {{ entry.recent_failures_24h }} error{{ 's' if entry.recent_failures_24h != 1 else '' }} in last 24h. Last: {{ entry.recent_last_error or '' }}">
+                0 ({{ entry.recent_failures_24h }} in 24h ⚠)
+              </span>
             {% else %}
               <span style="color: var(--color-success, #27ae60);">0</span>
             {% endif %}

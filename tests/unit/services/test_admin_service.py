@@ -266,6 +266,68 @@ class TestAdminService:
         assert refresh_list[1]["hours_since_last"] == 122  # 5 days 2 hours ago
         assert refresh_list[2]["hours_since_last"] == 26  # 1 day 2 hours ago
 
+    async def test_get_project_refresh_list_aggregates_recent_failures_24h(
+        self, test_db_session
+    ) -> None:
+        """Recent failures and last errors from collection runs in the last 24h are aggregated."""
+        await _seed_admin_data(test_db_session)
+        now = datetime(2025, 1, 10, 12, 0, tzinfo=UTC)
+
+        test_db_session.add_all(
+            [
+                CollectionRun(
+                    source="github",
+                    started_at=now - timedelta(hours=2),
+                    finished_at=now - timedelta(hours=2) + timedelta(minutes=5),
+                    status="completed",
+                    projects_processed=2,
+                    issues_collected=10,
+                    errors=[
+                        {"project": "charmcraft", "error": "502 Bad Gateway"},
+                        {"project": "snapcraft", "error": "Rate limit exceeded"},
+                    ],
+                ),
+                CollectionRun(
+                    source="github",
+                    started_at=now - timedelta(hours=1),
+                    finished_at=now - timedelta(hours=1) + timedelta(minutes=5),
+                    status="completed",
+                    projects_processed=2,
+                    issues_collected=10,
+                    errors=[
+                        {"project": "charmcraft", "error": "504 Gateway Timeout"},
+                    ],
+                ),
+                # Run older than 24h should not be counted
+                CollectionRun(
+                    source="github",
+                    started_at=now - timedelta(hours=25),
+                    finished_at=now - timedelta(hours=25) + timedelta(minutes=5),
+                    status="completed",
+                    projects_processed=2,
+                    issues_collected=10,
+                    errors=[
+                        {"project": "charmcraft", "error": "Old error"},
+                    ],
+                ),
+            ]
+        )
+        await test_db_session.flush()
+
+        with patch(
+            "craft_dashboard.services.admin_service.datetime", FrozenStatsDateTime
+        ):
+            FrozenStatsDateTime.frozen_now = now
+            refresh_list = await AdminService(
+                test_db_session
+            ).get_project_refresh_list()
+
+        by_proj = {e["project"]: e for e in refresh_list if e["source"] == "github"}
+        assert by_proj["charmcraft"]["recent_failures_24h"] == 2
+        assert by_proj["charmcraft"]["recent_last_error"] == "504 Gateway Timeout"
+        assert by_proj["snapcraft"]["recent_failures_24h"] == 1
+        assert by_proj["snapcraft"]["recent_last_error"] == "Rate limit exceeded"
+
     async def test_get_project_names_excludes_aggregate_projects(
         self, test_db_session
     ) -> None:

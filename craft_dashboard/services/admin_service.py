@@ -76,6 +76,8 @@ class ProjectRefreshEntry(TypedDict):
     last_open_poll_issues_collected: int | None
     last_full_refresh_issues_collected: int | None
     last_full_refresh_duration_seconds: float | None
+    recent_failures_24h: int
+    recent_last_error: str | None
 
 
 class CollectionRunSummary(TypedDict):
@@ -305,6 +307,31 @@ class AdminService:
             )
         )
         now = datetime.now(UTC)
+        recent_cutoff = now - timedelta(hours=24)
+        recent_runs_res = await self.session.execute(
+            select(CollectionRun.source, CollectionRun.errors)
+            .where(
+                CollectionRun.started_at >= recent_cutoff,
+                CollectionRun.errors.is_not(None),
+            )
+            .order_by(CollectionRun.started_at.desc())
+        )
+        recent_failures_count: dict[tuple[str, str], int] = {}
+        recent_last_errors: dict[tuple[str, str], str] = {}
+        for source, run_errors in recent_runs_res:
+            if not isinstance(run_errors, list):
+                continue
+            for err in run_errors:
+                if isinstance(err, dict):
+                    proj = err.get("project")
+                    if proj:
+                        key = (proj, source)
+                        recent_failures_count[key] = (
+                            recent_failures_count.get(key, 0) + 1
+                        )
+                        if key not in recent_last_errors and err.get("error"):
+                            recent_last_errors[key] = str(err["error"])
+
         # Hourly rotation cron runs at minute 17 of every hour.
         if now.minute < _HOURLY_ROTATION_CRON_MINUTE:
             next_base = now.replace(
@@ -320,6 +347,7 @@ class AdminService:
             last_refreshed = _ensure_utc(row.last_refreshed_at)
             next_at = next_base + timedelta(hours=index)
             hours_until = max(1, round((next_at - now).total_seconds() / 3600))
+            key = (row.name, row.source)
             entries.append(
                 {
                     "project": row.name,
@@ -337,6 +365,8 @@ class AdminService:
                     "last_open_poll_issues_collected": row.last_open_poll_issues_collected,
                     "last_full_refresh_issues_collected": row.last_full_refresh_issues_collected,
                     "last_full_refresh_duration_seconds": row.last_full_refresh_duration_seconds,
+                    "recent_failures_24h": recent_failures_count.get(key, 0),
+                    "recent_last_error": recent_last_errors.get(key),
                 }
             )
         return entries
