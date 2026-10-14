@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 
 from github import GithubException
 
+from craft_dashboard.collectors import RateLimitError
+
 if TYPE_CHECKING:
     from github.Requester import Requester
 
@@ -66,7 +68,7 @@ _PULL_REQUESTS_QUERY = """
 query($owner: String!, $name: String!, $after: String, $states: [PullRequestState!] = [OPEN]) {
   rateLimit { cost remaining resetAt }
   repository(owner: $owner, name: $name) {
-    pullRequests(first: 50, after: $after, states: $states, orderBy: {field: UPDATED_AT, direction: DESC}) {
+    pullRequests(first: 25, after: $after, states: $states, orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
         number
@@ -233,6 +235,10 @@ def _graphql_query(
                 summary,
             )
             return partial_data
+        if exc.status in (400, 403) and (
+            "rate limit" in summary.lower() or "rate_limit" in summary.lower()
+        ):
+            raise RateLimitError(resource="graphql", remaining=0, limit=5000) from exc
         raise GithubException(exc.status, headers=exc.headers, message=summary) from exc
 
 

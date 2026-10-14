@@ -95,19 +95,36 @@ def _get_dep_branches(
 def _check_initial_rate_limit(collector: GitHubCollector) -> None:
     """Log the starting API quota and refuse to start with an exhausted one."""
     rate_limit = collector.check_rate_limit()
+    core_rem = int(rate_limit.get("core_remaining", 5000))
+    core_lim = int(rate_limit.get("core_limit", 5000))
+    core_res = rate_limit.get("core_reset")
+    gql_rem = int(rate_limit.get("graphql_remaining", 5000))
+    gql_lim = int(rate_limit.get("graphql_limit", 5000))
+    gql_res = rate_limit.get("graphql_reset")
+
     logger.info(
-        "GitHub API quota: %d/%d remaining (reset at %s)",
-        rate_limit["core_remaining"],
-        rate_limit["core_limit"],
-        rate_limit["core_reset"],
+        "GitHub API quota: REST %d/%d (resets %s), GraphQL %d/%d (resets %s)",
+        core_rem,
+        core_lim,
+        core_res,
+        gql_rem,
+        gql_lim,
+        gql_res,
     )
-    if int(rate_limit["core_remaining"]) <= 0:
+    if core_rem <= 0:
         raise RateLimitError(
             resource="core",
-            remaining=int(rate_limit["core_remaining"]),
-            limit=int(rate_limit["core_limit"]),
+            remaining=core_rem,
+            limit=core_lim,
         )
-    collector.wait_for_rate_limit()
+    if gql_rem <= 0:
+        raise RateLimitError(
+            resource="graphql",
+            remaining=gql_rem,
+            limit=gql_lim,
+        )
+    collector.wait_for_rate_limit(resource="core")
+    collector.wait_for_rate_limit(resource="graphql")
 
 
 async def _log_rate_limit_after_project(
@@ -120,19 +137,41 @@ async def _log_rate_limit_after_project(
             collector.check_rate_limit,
             f"check_rate_limit after {project_name}",
         )
-        logger.info(
-            "GitHub API quota after %s: %d/%d remaining",
-            project_name,
-            rate_limit["core_remaining"],
-            rate_limit["core_limit"],
-        )
-        collector.wait_for_rate_limit()
     except GithubException as exc:
         logger.warning(
             "Could not check GitHub rate limit after %s: %s",
             project_name,
             _summarize_exception(exc),
         )
+        return
+
+    core_rem = int(rate_limit.get("core_remaining", 5000))
+    core_lim = int(rate_limit.get("core_limit", 5000))
+    gql_rem = int(rate_limit.get("graphql_remaining", 5000))
+    gql_lim = int(rate_limit.get("graphql_limit", 5000))
+
+    logger.info(
+        "GitHub API quota after %s: REST %d/%d, GraphQL %d/%d",
+        project_name,
+        core_rem,
+        core_lim,
+        gql_rem,
+        gql_lim,
+    )
+    if core_rem <= 0:
+        raise RateLimitError(
+            resource="core",
+            remaining=core_rem,
+            limit=core_lim,
+        )
+    if gql_rem <= 0:
+        raise RateLimitError(
+            resource="graphql",
+            remaining=gql_rem,
+            limit=gql_lim,
+        )
+    collector.wait_for_rate_limit(resource="core")
+    collector.wait_for_rate_limit(resource="graphql")
 
 
 async def _collect_project_dependencies(
@@ -464,87 +503,96 @@ async def _collect_github(
     _check_initial_rate_limit(collector)
 
     project_list = projects if projects else config.craft_projects
-    for i, project_name in enumerate(project_list):
-        async with session_factory() as session:
-            category = (
-                "application"
-                if project_name in config.craft_applications
-                else ("library" if project_name in config.craft_libraries else "other")
-            )
-            project_id = await _get_or_create_project(
-                session, project_name, category, i
-            )
-            stats.projects_processed.add(project_name)
-            project_started_at = time.monotonic()
-            elapsed = ""
-            if run_started_at is not None:
-                elapsed = (
-                    f" (elapsed: {_format_duration(time.monotonic() - run_started_at)})"
+    try:
+        for i, project_name in enumerate(project_list):
+            async with session_factory() as session:
+                category = (
+                    "application"
+                    if project_name in config.craft_applications
+                    else (
+                        "library" if project_name in config.craft_libraries else "other"
+                    )
+                )
+                project_id = await _get_or_create_project(
+                    session, project_name, category, i
+                )
+                stats.projects_processed.add(project_name)
+                project_started_at = time.monotonic()
+                elapsed = ""
+                if run_started_at is not None:
+                    elapsed = f" (elapsed: {_format_duration(time.monotonic() - run_started_at)})"
+
+                logger.info("Collecting GitHub data for %s%s", project_name, elapsed)
+
+                await _collect_project_dependencies(
+                    settings, config, project_name, project_id, session
+                )
+                await _collect_project_releases(
+                    collector, project_name, project_id, session
                 )
 
-            logger.info("Collecting GitHub data for %s%s", project_name, elapsed)
+                # Phase A — open issues, in every mode but "full". "open" stops
+                # here; "all" continues into the full pass below.
+                if mode != "full":
+                    await _collect_open_issues(
+                        collector,
+                        config,
+                        session,
+                        session_factory,
+                        project_name,
+                        project_id,
+                        stats,
+                        bots,
+                        limit,
+                        collection_run_id,
+                    )
+                    if mode == "open":
+                        logger.info(
+                            "Completed GitHub open-issue collection for %s in %s",
+                            project_name,
+                            _format_duration(time.monotonic() - project_started_at),
+                        )
+                        await _log_rate_limit_after_project(collector, project_name)
+                        await asyncio.sleep(1)
+                        continue
 
-            await _collect_project_dependencies(
-                settings, config, project_name, project_id, session
-            )
-            await _collect_project_releases(
-                collector, project_name, project_id, session
-            )
+                # Phase B — open plus closed, gated by the refresh schedule in
+                # "full" mode and forced in "all" mode.
+                if not await _is_full_pass_due(
+                    session,
+                    project_name,
+                    project_id,
+                    project_started_at,
+                    mode,
+                    force_schedule,
+                ):
+                    continue
 
-            # Phase A — open issues, in every mode but "full". "open" stops
-            # here; "all" continues into the full pass below.
-            if mode != "full":
-                await _collect_open_issues(
+                await _collect_all_issues(
                     collector,
+                    settings,
                     config,
                     session,
                     session_factory,
                     project_name,
                     project_id,
+                    project_started_at,
                     stats,
                     bots,
                     limit,
                     collection_run_id,
+                    full_refresh,
                 )
-                if mode == "open":
-                    logger.info(
-                        "Completed GitHub open-issue collection for %s in %s",
-                        project_name,
-                        _format_duration(time.monotonic() - project_started_at),
-                    )
-                    continue
 
-            # Phase B — open plus closed, gated by the refresh schedule in
-            # "full" mode and forced in "all" mode.
-            if not await _is_full_pass_due(
-                session,
-                project_name,
-                project_id,
-                project_started_at,
-                mode,
-                force_schedule,
-            ):
-                continue
+                await _log_rate_limit_after_project(collector, project_name)
 
-            await _collect_all_issues(
-                collector,
-                settings,
-                config,
-                session,
-                session_factory,
-                project_name,
-                project_id,
-                project_started_at,
-                stats,
-                bots,
-                limit,
-                collection_run_id,
-                full_refresh,
-            )
-
-            await _log_rate_limit_after_project(collector, project_name)
-
-            # Avoid GitHub secondary rate limits between repos
-            await asyncio.sleep(1)
+                # Avoid GitHub secondary rate limits between repos
+                await asyncio.sleep(1)
+    except RateLimitError as exc:
+        logger.warning(
+            "GitHub rate limit exhausted: %s; stopping collection pass",
+            exc,
+        )
+        stats.errors.append({"source": "github", "error": str(exc)})
 
     return stats

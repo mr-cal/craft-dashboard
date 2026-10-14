@@ -903,7 +903,7 @@ class TestNodeLimits:
         #   contributes 1 commit node + (1 * 10) checkSuites nodes
         #   + (1 * 10 * 20) checkRuns nodes = 211 nodes.
         # Per PR = 1 PR node + 20 + 10 + 20 + 50 + 211 = 312.
-        # Per page = 50 * 312 = 15,600 nodes.
+        # Per page = 25 * 312 = 7,800 nodes.
         max_nodes_per_page = sizes["pullRequests"] * (
             1
             + sizes["labels"]
@@ -915,7 +915,7 @@ class TestNodeLimits:
             + sizes["commits"] * sizes["checkSuites"] * sizes["checkRuns"]
         )
 
-        assert max_nodes_per_page == 15_600
+        assert max_nodes_per_page == 7_800
         assert max_nodes_per_page < 500_000
 
     def test_releases_and_branches_queries_stay_under_github_node_limit(self) -> None:
@@ -942,7 +942,7 @@ class TestNodeLimits:
         ]
 
         assert _extract_pagination_limits(_PULL_REQUESTS_QUERY) == {
-            "pullRequests": 50,
+            "pullRequests": 25,
             "labels": 20,
             "comments": 10,
             "reviews": 20,
@@ -953,7 +953,7 @@ class TestNodeLimits:
         }
 
         assert _extract_pagination_arguments(_PULL_REQUESTS_QUERY) == [
-            ("pullRequests", "first", 50),
+            ("pullRequests", "first", 25),
             ("labels", "first", 20),
             ("comments", "last", 10),
             ("reviews", "last", 20),

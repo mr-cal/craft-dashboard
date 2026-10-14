@@ -57,6 +57,20 @@ async def _retry_github(coro_fn: object, description: str) -> object:
             if isinstance(result, collections.abc.Coroutine):
                 return await result
         except GithubException as exc:
+            error_str = _summarize_exception(exc).lower()
+            if "rate limit" in error_str or "rate_limit" in error_str:
+                from craft_dashboard.collectors import RateLimitError
+
+                raise RateLimitError(
+                    resource=(
+                        "graphql"
+                        if "graphql" in str(exc).lower()
+                        or "graphql" in description.lower()
+                        else "core"
+                    ),
+                    remaining=0,
+                    limit=5000,
+                ) from exc
             if attempt == _GITHUB_RETRY_ATTEMPTS - 1:
                 raise
             sleep = _GITHUB_RETRY_BASE_SLEEP * (2**attempt)
