@@ -251,8 +251,21 @@ class TestDashboardSemanticStructure:
         assert doc.text("[data-testid='throughput-total-30d']") == "0"
         assert doc.text("[data-testid='untriaged-issues-new']") == "+0"
         assert doc.attr("[data-testid='untriaged-issues-new']", "class") == ""
+        assert doc.text("[data-testid='volume-total']") == "0 open"
         assert doc.text("[data-testid='volume-total-net']") == "0 in 30d"
         assert doc.count("[data-testid='aging-pr-row']") == 0
+
+    def test_volume_combined_total_mirrors_issues_and_prs(
+        self, test_db_session, seeded
+    ) -> None:
+        """Combined total renders '<OPEN> (+X in 30d) / <CLOSED> closed' mirroring issues/PRs."""
+        doc = parse_html(self._render(test_db_session))
+        # Seeded data has: 2 open issues, 1 open PR, 1 closed issue -> 3 open, 1 closed
+        assert doc.text("[data-testid='volume-issues-open']") == "2 open"
+        assert doc.text("[data-testid='volume-prs-open']") == "1 open"
+        assert doc.text("[data-testid='volume-total']") == "3 open"
+        kpi_volume = doc.require("#kpi-volume")
+        assert "/ 1 closed" in kpi_volume.text
 
     def test_volume_net_tooltip_is_precomputed(self) -> None:
         """The net-change tooltip is rendered by Python, not assembled in Jinja."""

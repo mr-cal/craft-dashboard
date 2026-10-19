@@ -161,11 +161,11 @@
         <span class="kpi-metric-label">Combined Total:</span>
         <div class="kpi-metric-values">
           <span class="kpi-main-val" data-testid="volume-total">{{ view.volume.combined.total }}</span>
-          <span class="kpi-sub-text">work items (<span class="{{ view.volume.combined.net.css_class }}"
-                                                      data-testid="volume-total-net"
-                                                      title="{{ view.volume.combined.net.tooltip }}"
-                                                      data-tooltip="{{ view.volume.combined.net.tooltip }}"
-                                                      tabindex="0">{{ view.volume.combined.net.text }}</span>)</span>
+          <span class="kpi-sub-text">(<span class="{{ view.volume.combined.net.css_class }}"
+                                            data-testid="volume-total-net"
+                                            title="{{ view.volume.combined.net.tooltip }}"
+                                            data-tooltip="{{ view.volume.combined.net.tooltip }}"
+                                            tabindex="0">{{ view.volume.combined.net.text }}</span>) / {{ view.volume.combined.closed }} closed</span>
         </div>
       </div>
     </div>

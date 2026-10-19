@@ -83,6 +83,8 @@ async def compute_volume(
         ("pull_request", "merged"), 0
     )
     total_items = open_issues + closed_issues + open_prs + closed_prs
+    open_total = open_issues + open_prs
+    closed_total = closed_issues + closed_prs
     total_30d_closed = issues_30d + prs_30d
 
     created_30d_rows = await _created_counts_by_type(session, excl, thirty_days_ago)
@@ -108,6 +110,8 @@ async def compute_volume(
         "created_prs_30d": created_prs_30d,
         "net_open_prs_30d": net_open_prs_30d,
         "total_items": total_items,
+        "open_total": open_total,
+        "closed_total": closed_total,
         "total_30d_closed": total_30d_closed,
         "open_total_30d": net_open_total_30d,
         "created_total_30d": created_total_30d,

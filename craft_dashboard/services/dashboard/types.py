@@ -63,6 +63,8 @@ class VolumeStats(TypedDict):
     created_prs_30d: int
     net_open_prs_30d: int
     total_items: int
+    open_total: int
+    closed_total: int
     total_30d_closed: int
     open_total_30d: int
     created_total_30d: int

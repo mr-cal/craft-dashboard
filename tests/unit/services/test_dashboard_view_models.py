@@ -23,6 +23,7 @@ from craft_dashboard.services.dashboard.view_models import (
     build_throughput_delta,
     build_untriaged_card,
     build_velocity_card,
+    build_volume_card,
 )
 from craft_dashboard.utils.formatting import format_age_days, format_count
 
@@ -185,6 +186,73 @@ class TestUntriagedCard:
         assert card.issues.new_30d_css_class == expected
         assert card.issues.new_30d_text == f"+{new_30d}"
         assert card.issues.count == "1,234"
+
+
+class TestVolumeCard:
+    """All-time volume card formatting for issues, PRs, and combined totals."""
+
+    def test_combined_total_mirrors_issues_and_prs(self) -> None:
+        card = build_volume_card(
+            {
+                "open_issues": 1200,
+                "closed_issues": 3400,
+                "issues_30d_closed": 50,
+                "open_issues_30d": 10,
+                "created_issues_30d": 60,
+                "net_open_issues_30d": 10,
+                "open_prs": 300,
+                "closed_prs": 700,
+                "prs_30d_closed": 20,
+                "open_prs_30d": 5,
+                "created_prs_30d": 25,
+                "net_open_prs_30d": 5,
+                "total_items": 5600,
+                "open_total": 1500,
+                "closed_total": 4100,
+                "total_30d_closed": 70,
+                "open_total_30d": 15,
+                "created_total_30d": 85,
+                "net_open_total_30d": 15,
+            }
+        )
+
+        assert card.issues.total == "1,200 open"
+        assert card.issues.closed == "3,400"
+        assert card.issues.net.text == "+10 in 30d"
+
+        assert card.prs.total == "300 open"
+        assert card.prs.closed == "700"
+        assert card.prs.net.text == "+5 in 30d"
+
+        assert card.combined.total == "1,500 open"
+        assert card.combined.closed == "4,100"
+        assert card.combined.net.text == "+15 in 30d"
+
+    def test_combined_total_fallback_without_explicit_totals(self) -> None:
+        card = build_volume_card(
+            {
+                "open_issues": 10,
+                "closed_issues": 20,
+                "issues_30d_closed": 3,
+                "open_issues_30d": 1,
+                "created_issues_30d": 4,
+                "net_open_issues_30d": 1,
+                "open_prs": 5,
+                "closed_prs": 6,
+                "prs_30d_closed": 2,
+                "open_prs_30d": 1,
+                "created_prs_30d": 1,
+                "net_open_prs_30d": -1,
+                "total_items": 41,
+                "total_30d_closed": 5,
+                "open_total_30d": 2,
+                "created_total_30d": 5,
+                "net_open_total_30d": 0,
+            }  # type: ignore[typeddict-item]
+        )
+
+        assert card.combined.total == "15 open"
+        assert card.combined.closed == "26"
 
 
 class TestSpotlightViews:
@@ -455,7 +523,8 @@ class TestBuildDashboardView:
         assert view.throughput.total_365d == "1,500"
         assert view.throughput.delta is not None
         assert view.volume.combined.net.css_class == NEUTRAL_CSS
-        assert view.volume.combined.closed is None
+        assert view.volume.combined.total == "15 open"
+        assert view.volume.combined.closed == "26"
         assert view.volume.issues.total == "10 open"
         assert len(view.application_projects) == 1
         assert view.least_recent_apps == []

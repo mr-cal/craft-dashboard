@@ -222,8 +222,12 @@ def build_volume_card(volume: VolumeStats) -> VolumeCardView:
             ),
         ),
         combined=VolumeRowView(
-            total=format_count(volume["total_items"]),
-            closed=None,
+            total=f"{format_count(volume.get('open_total', volume['open_issues'] + volume['open_prs']))} open",
+            closed=format_count(
+                volume.get(
+                    "closed_total", volume["closed_issues"] + volume["closed_prs"]
+                )
+            ),
             net=build_net_change(
                 volume["net_open_total_30d"],
                 volume["created_total_30d"],
