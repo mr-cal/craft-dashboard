@@ -38,6 +38,11 @@ check:  ## Format, lint, and run fast tests — the default pre-commit gate
 	$(MAKE) lint
 	$(MAKE) test-fast
 
+.PHONY: dist
+dist:  ## Build source distribution and wheel packages, and verify with twine
+	uv build
+	uvx twine check dist/*
+
 .PHONY: test-cov
 test-cov:  ## Run tests with coverage report
 	uv run pytest --cov=$(PROJECT) --cov-report=html --cov-report=term-missing

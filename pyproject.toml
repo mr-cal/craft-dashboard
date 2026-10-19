@@ -25,12 +25,20 @@ dependencies = [
 ]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
-    "License :: OSI Approved :: GNU General Public License (GPL)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
 ]
 requires-python = ">=3.12"
 readme = { file = "README.md", content-type = "text/markdown" }
+license = "LGPL-3.0-only"
+authors = [
+    { name = "Callahan Kovacs", email = "callahan.kovacs@canonical.com" },
+]
+
+[project.urls]
+Homepage = "https://craft-dashboard.name"
+Repository = "https://github.com/mr-cal/craft-dashboard"
+Issues = "https://github.com/mr-cal/craft-dashboard/issues"
 
 [project.scripts]
 craft-dashboard = "craft_dashboard.cli:main"
@@ -85,6 +93,12 @@ git_describe_command = [
 [tool.setuptools.packages.find]
 include = ["craft_dashboard*", "scripts*"]
 namespaces = false
+
+[tool.setuptools.package-data]
+craft_dashboard = [
+    "templates/**/*",
+    "static/**/*",
+]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
