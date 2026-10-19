@@ -214,6 +214,45 @@ def format_tool_args_compact(args: dict[str, Any] | None, *, max_len: int = 40) 
     return ", ".join(parts)
 
 
+def humanize_tool_call(
+    name: str, arguments: dict[str, Any] | None = None, *, max_len: int = 40
+) -> str:
+    """Format a tool invocation into a concise, human-readable action description."""
+    args = arguments or {}
+
+    def _trunc(val: str, *, prefix: bool = False) -> str:
+        if len(val) <= max_len:
+            return val
+        return "…" + val[-(max_len - 1) :] if prefix else val[: max_len - 1] + "…"
+
+    query = _trunc(str(args["query"])) if args.get("query") else None
+    path = _trunc(str(args["path"]), prefix=True) if args.get("path") else None
+    num = args.get("number") or args.get("issue_id")
+
+    labels = {
+        "grep_repo": f"grepping repo for '{query}'" if query else "grepping repo",
+        "git_log_search": (
+            f"searching git log for '{query}'" if query else "searching git log"
+        ),
+        "git_log_path": (
+            f"searching git log for {path}" if path else "searching git log"
+        ),
+        "read_file": f"reading {path}" if path else "reading file",
+        "repo_layout": (
+            f"inspecting layout of {path}" if path else "inspecting repo layout"
+        ),
+        "related_issues": (
+            f"searching related issues for '{query}'"
+            if query
+            else "searching related issues"
+        ),
+        "issue_detail": (
+            f"reading issue details (#{num})" if num else "reading issue details"
+        ),
+    }
+    return labels.get(name, name.replace("_", " "))
+
+
 def _needs_reevaluation(
     existing_hash: str | None,
     current_hash: str,
@@ -793,6 +832,7 @@ class IssueEvaluator:
         total_prompt_tokens = 0
         total_completion_tokens = 0
         total_cost_usd: float | None = None
+        current_action = "analyzing issue"
 
         for _round_number in range(1, max_rounds + 1):
             if _round_number > 1 and self.tool_call_delay > 0:
@@ -825,7 +865,7 @@ class IssueEvaluator:
                         phase="llm_call",
                         round_num=_round_number,
                         max_rounds=max_rounds,
-                        detail=f"calling {active_model}",
+                        detail=current_action,
                     )
                 )
             t_llm = time.monotonic()
@@ -910,6 +950,7 @@ class IssueEvaluator:
                     "tool_calls": response.tool_calls,
                 }
             )
+            tool_actions: list[str] = []
             for call in response.tool_calls:
                 name = call["function"]["name"]
                 arguments_raw = call["function"].get("arguments") or "{}"
@@ -921,6 +962,7 @@ class IssueEvaluator:
                 tool_repr = (
                     f"{name}({formatted_args})" if formatted_args else f"{name}()"
                 )
+                tool_actions.append(humanize_tool_call(name, arguments))
                 if on_step is not None:
                     on_step(
                         EvaluationStepEvent(
@@ -975,6 +1017,9 @@ class IssueEvaluator:
                     }
                 )
 
+            current_action = (
+                ", ".join(tool_actions) if tool_actions else "analyzing issue"
+            )
             rounds_completed += 1
             if total_tokens >= MAX_TOOL_TOKENS:
                 break

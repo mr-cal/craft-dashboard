@@ -28,9 +28,8 @@ from dotenv import load_dotenv
 # Make the `scripts` package importable when run directly (e.g.
 # `uv run scripts/llm/canary.py`), matching scripts/run_llm.py.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
-load_dotenv(pathlib.Path(__file__).resolve().parents[2] / ".env")
 
-from scripts.llm.eval_worker import run_evaluate_loop  # noqa: E402
+from scripts.llm.eval_worker import run_evaluate_loop
 
 
 @dataclass(frozen=True)
@@ -211,4 +210,5 @@ def cli(
 
 
 if __name__ == "__main__":
+    load_dotenv(pathlib.Path(__file__).resolve().parents[2] / ".env")
     cli()

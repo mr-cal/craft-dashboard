@@ -21,6 +21,7 @@ import secrets
 import signal
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -36,6 +37,7 @@ from craft_dashboard.llm.evaluator import (
     EvaluationDiscarded,  # noqa: F401 - re-exported for callers and tests
     EvaluationStepEvent,
     IssueEvaluator,
+    humanize_tool_call,
 )
 from craft_dashboard.llm.exceptions import LLMQuotaError
 from craft_dashboard.llm.preflight import run_preflight
@@ -387,18 +389,21 @@ def _install_eval_progress(
     issue_ref: str,
     worker_name: str = "worker-1",
     worker_index: int = 1,
+    get_round_prefix: Callable[[], str] | None = None,
 ) -> None:
     """Route the LLM client's retry notifications into the progress bar."""
 
     def _on_eval_attempt(attempt: int, total: int, *, _ref: str = issue_ref) -> None:
-        _notify_worker_step(
-            runtime,
-            worker_index=worker_index,
-            worker_name=worker_name,
-            issue_ref=_ref,
-            step=f"eval attempt {attempt}/{total}…",
-            log_milestone=(attempt > 1),
-        )
+        if attempt > 1:
+            prefix = get_round_prefix() if get_round_prefix else ""
+            _notify_worker_step(
+                runtime,
+                worker_index=worker_index,
+                worker_name=worker_name,
+                issue_ref=_ref,
+                step=f"{prefix}eval attempt {attempt}/{total}…",
+                log_milestone=True,
+            )
 
     runtime.client.retry_callback = _on_eval_attempt
 
@@ -545,6 +550,7 @@ async def _evaluate_issue(
 
     issue_ref = issue_ref_for(issue_data)
     normalized_state = issue_data["state"].lower()
+    active_round_prefix = [""]
 
     _notify_worker_step(
         runtime,
@@ -552,13 +558,13 @@ async def _evaluate_issue(
         worker_name=worker_name,
         issue_ref=issue_ref,
         step="evaluating…",
-        log_milestone=True,
     )
     _install_eval_progress(
         runtime,
         issue_ref=issue_ref,
         worker_name=worker_name,
         worker_index=worker_index,
+        get_round_prefix=lambda: active_round_prefix[0],
     )
 
     started_at = time.monotonic()
@@ -574,6 +580,7 @@ async def _evaluate_issue(
         round_info = (
             f"round {event.round_num}/{event.max_rounds}: " if event.round_num else ""
         )
+        active_round_prefix[0] = round_info
         if event.phase == "baseline":
             _notify_worker_step(
                 runtime,
@@ -591,24 +598,33 @@ async def _evaluate_issue(
                 issue_ref=issue_ref,
                 step="repo baseline ready",
                 elapsed=event.elapsed,
-                log_milestone=True,
-            )
-        elif event.phase == "llm_call":
-            _notify_worker_step(
-                runtime,
-                worker_index=worker_index,
-                worker_name=worker_name,
-                issue_ref=issue_ref,
-                step=f"{round_info}{event.detail}…",
-                reset_timer=True,
             )
         elif event.phase == "tool_start":
+            step_detail = (
+                humanize_tool_call(event.tool_name, event.tool_args)
+                if event.tool_name
+                else event.detail
+            )
             _notify_worker_step(
                 runtime,
                 worker_index=worker_index,
                 worker_name=worker_name,
                 issue_ref=issue_ref,
-                step=f"{round_info}tool {event.detail}…",
+                step=f"{round_info}{step_detail}…",
+                reset_timer=True,
+            )
+        elif event.phase == "llm_call":
+            step_detail = (
+                "analyzing issue"
+                if event.detail.startswith("calling ")
+                else event.detail
+            )
+            _notify_worker_step(
+                runtime,
+                worker_index=worker_index,
+                worker_name=worker_name,
+                issue_ref=issue_ref,
+                step=f"{round_info}{step_detail}…",
                 reset_timer=True,
             )
         elif event.phase == "tool_done":
@@ -619,7 +635,6 @@ async def _evaluate_issue(
                 issue_ref=issue_ref,
                 step=f"{round_info}{event.detail}",
                 elapsed=event.elapsed,
-                log_milestone=True,
             )
         elif event.phase == "synthesis":
             _notify_worker_step(
@@ -629,7 +644,6 @@ async def _evaluate_issue(
                 issue_ref=issue_ref,
                 step=f"{round_info}synthesizing evaluation…",
                 reset_timer=True,
-                log_milestone=True,
             )
         elif event.phase == "tool_delay":
             _notify_worker_step(
@@ -637,7 +651,7 @@ async def _evaluate_issue(
                 worker_index=worker_index,
                 worker_name=worker_name,
                 issue_ref=issue_ref,
-                step=f"tool delay: {event.detail}…",
+                step=f"{round_info}tool delay: {event.detail}…",
                 reset_timer=True,
             )
 
@@ -734,6 +748,7 @@ async def _evaluate_issue(
 
         submitted = True
     finally:
+        runtime.client.retry_callback = None
         if not submitted:
             await _release_claim(
                 runtime,

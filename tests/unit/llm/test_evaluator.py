@@ -14,6 +14,7 @@ from craft_dashboard.llm.evaluator import (
     _needs_reevaluation,
     _parse_evaluation_response,
     format_tool_args_compact,
+    humanize_tool_call,
 )
 from craft_dashboard.llm.tool_dispatch import ToolContext
 
@@ -1486,3 +1487,48 @@ class TestEvaluationStepEvents:
         assert len(tool_start_events) == 1
         assert tool_start_events[0].tool_name == "search_code"
         assert 'query="find_me"' in tool_start_events[0].detail
+
+        llm_call_events = [e for e in events if e.phase == "llm_call"]
+        assert len(llm_call_events) == 2
+        assert llm_call_events[0].detail == "analyzing issue"
+        assert llm_call_events[1].detail == "search code"
+
+
+def test_humanize_tool_call_formats_known_tools() -> None:
+    assert (
+        humanize_tool_call("grep_repo", {"query": "parse_craft"})
+        == "grepping repo for 'parse_craft'"
+    )
+    assert humanize_tool_call("grep_repo", {}) == "grepping repo"
+    assert (
+        humanize_tool_call("git_log_search", {"query": "bugfix"})
+        == "searching git log for 'bugfix'"
+    )
+    assert humanize_tool_call("git_log_search", {}) == "searching git log"
+    assert (
+        humanize_tool_call("git_log_path", {"path": "src/main.py"})
+        == "searching git log for src/main.py"
+    )
+    assert (
+        humanize_tool_call("read_file", {"path": "snap/snapcraft.yaml"})
+        == "reading snap/snapcraft.yaml"
+    )
+    assert (
+        humanize_tool_call("repo_layout", {"path": "parts"})
+        == "inspecting layout of parts"
+    )
+    assert humanize_tool_call("repo_layout", {}) == "inspecting repo layout"
+    assert (
+        humanize_tool_call("related_issues", {"query": "crash"})
+        == "searching related issues for 'crash'"
+    )
+    assert (
+        humanize_tool_call("issue_detail", {"number": 123})
+        == "reading issue details (#123)"
+    )
+    assert (
+        humanize_tool_call("issue_detail", {"issue_id": 456})
+        == "reading issue details (#456)"
+    )
+    assert humanize_tool_call("issue_detail", {}) == "reading issue details"
+    assert humanize_tool_call("custom_tool", {}) == "custom tool"

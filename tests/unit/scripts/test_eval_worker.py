@@ -914,4 +914,128 @@ async def test_evaluate_issue_wires_step_events(
         call.kwargs.get("description", "")
         for call in base_runtime.progress.update.call_args_list
     ]
-    assert any("git_log" in desc for desc in descriptions)
+    assert any("git log" in desc for desc in descriptions)
+
+
+@pytest.mark.asyncio
+async def test_evaluate_issue_prints_only_on_completion_not_intermediate_rounds(
+    base_runtime: SimpleNamespace,
+) -> None:
+    """Intermediate tool rounds must update the worker line without printing console lines."""
+    captured_on_step = None
+
+    async def mock_evaluate(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal captured_on_step
+        captured_on_step = kwargs.get("on_step")
+        if captured_on_step:
+            captured_on_step(
+                eval_worker.EvaluationStepEvent(
+                    phase="baseline_done",
+                    detail="repo baseline ready",
+                    elapsed=1.0,
+                )
+            )
+            captured_on_step(
+                eval_worker.EvaluationStepEvent(
+                    phase="tool_start",
+                    round_num=1,
+                    max_rounds=4,
+                    tool_name="issue_detail",
+                    tool_args={"number": 100},
+                    detail="issue_detail(number=100)",
+                )
+            )
+            # Tenacity invokes retry_callback before attempt 1; it should not overwrite the step description
+            if base_runtime.client.retry_callback:
+                base_runtime.client.retry_callback(1, 3)
+            captured_on_step(
+                eval_worker.EvaluationStepEvent(
+                    phase="tool_done",
+                    round_num=1,
+                    max_rounds=4,
+                    tool_name="git_grep",
+                    detail="git_grep completed (120 bytes)",
+                    elapsed=0.4,
+                )
+            )
+            captured_on_step(
+                eval_worker.EvaluationStepEvent(
+                    phase="synthesis",
+                    round_num=2,
+                    max_rounds=4,
+                    detail="synthesizing evaluation…",
+                )
+            )
+        return {
+            **SAMPLE_EVALUATE_RESULT,
+            "tool_context": SimpleNamespace(touched_paths=set()),
+        }
+
+    base_runtime.evaluator.evaluate = mock_evaluate
+
+    with patch(
+        "scripts.llm.eval_worker._post_submission",
+        new=AsyncMock(return_value=_response(200)),
+    ):
+        await eval_worker._evaluate_issue(
+            base_runtime,
+            issue_data=_make_issue(repo_shas={"snapcraft": "a" * 40}),
+            worker_name="worker-1",
+            worker_index=1,
+        )
+
+    # console.print must be called exactly once, solely for completion
+    assert base_runtime.progress.console.print.call_count == 1
+    printed_completion = base_runtime.progress.console.print.call_args[0][0]
+    assert "snapcraft#100" in printed_completion
+    assert "needs_triage" in printed_completion
+
+    # Meanwhile, the in-progress worker line descriptions must have captured the rounds
+    descriptions = [
+        call.kwargs.get("description", "")
+        for call in base_runtime.progress.update.call_args_list
+    ]
+    assert any("round 1/4" in desc for desc in descriptions)
+    assert any(
+        "round 1/4: reading issue details (#100)…" in desc for desc in descriptions
+    )
+    assert not any("eval attempt 1/3" in desc for desc in descriptions)
+    assert any("round 2/4" in desc for desc in descriptions)
+
+
+def test_install_eval_progress_ignores_attempt_one_and_reports_retries() -> None:
+    progress_mock = MagicMock()
+    runtime = SimpleNamespace(
+        client=SimpleNamespace(retry_callback=None),
+        progress=progress_mock,
+        worker_tasks={1: 10},
+        overall_id=0,
+    )
+
+    prefix = ["round 3/5: "]
+    eval_worker._install_eval_progress(
+        runtime,
+        issue_ref="starflow#200",
+        worker_name="worker-1",
+        worker_index=1,
+        get_round_prefix=lambda: prefix[0],
+    )
+
+    callback = runtime.client.retry_callback
+    assert callback is not None
+
+    # Initial attempt 1 must not overwrite the step description or log to console
+    callback(1, 3)
+    progress_mock.update.assert_not_called()
+    progress_mock.console.print.assert_not_called()
+
+    # Retry attempt 2 must update the worker description and log milestone to console
+    callback(2, 3)
+    progress_mock.update.assert_called_once()
+    desc = progress_mock.update.call_args.kwargs.get("description", "")
+    assert "starflow#200" in desc
+    assert "round 3/5: eval attempt 2/3…" in desc
+    progress_mock.console.print.assert_called_once()
+    printed = progress_mock.console.print.call_args[0][0]
+    assert "starflow#200" in printed
+    assert "round 3/5: eval attempt 2/3…" in printed
