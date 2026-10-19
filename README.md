@@ -1,10 +1,15 @@
 # craft-dashboard
 
-craft-dashboard is a FastAPI dashboard for the \*craft project family. It collects issue, pull request, release, dependency, Launchpad, and Discourse forum data into PostgreSQL, runs LLM evaluations through an HTTP pull API, and renders project health views with Jinja2 templates.
+**[craft-dashboard.name](https://craft-dashboard.name)** is a unified dashboard for
+tracking work across Canonical's Starcraft tools (Snapcraft, Charmcraft, Rockcraft, and
+core libraries).
 
-## Quick start
+Maintainers use it to monitor project health, catch aging pull requests, and flag
+projects overdue for release. It runs LLM evaluations over incoming issues and PRs to
+help prioritize triage, and tracks community engagement on Discourse.
 
-From the repository root:
+
+## Local development
 
 ```bash
 make setup
@@ -12,9 +17,9 @@ cp .env.example .env
 podman compose up --build
 ```
 
-The local app listens at `http://localhost:8000/`. The Compose stack starts PostgreSQL and runs Alembic migrations during app startup.
+The local app listens at `http://localhost:8000/`.
 
-Useful checks:
+Useful targets:
 
 ```bash
 make format
@@ -24,9 +29,7 @@ make test
 
 ## Documentation
 
-| File | Use it for |
-|---|---|
-| [Development](docs/development.md) | Local setup, running the app, tests, linting, and single-test commands. |
-| [Operations](docs/operations.md) | Collection, evaluation, backups, project changes, mirror sync, and deployment recipes. |
-| [Reference](docs/reference.md) | Environment variables, commands, schedules, tables, and HTTP endpoints. |
-| [Architecture](docs/architecture.md) | Data flow, evaluation design, versioning, and deployment shape. |
+* [Development](docs/development.md)
+* [Operations](docs/operations.md)
+* [Reference](docs/reference.md)
+* [Architecture](docs/architecture.md)
