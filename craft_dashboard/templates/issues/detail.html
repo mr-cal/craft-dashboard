@@ -50,6 +50,9 @@
     {% if current_evaluation.suggested_action_reason %}
     <p><strong>Reason:</strong> {{ current_evaluation.suggested_action_reason }}</p>
     {% endif %}
+    {% if current_evaluation.evaluated_by %}
+    <p><strong>Evaluated by:</strong> <code>{{ current_evaluation.evaluated_by }}</code></p>
+    {% endif %}
     <div class="issue-detail-scores">
       {% for score_key, score_value in (current_evaluation.scores or {}).items() %}
       {% set score_name = score_key|replace("_", " ")|title %}

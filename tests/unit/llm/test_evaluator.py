@@ -8,10 +8,12 @@ import pytest
 from craft_dashboard.llm.client import LLMResponse
 from craft_dashboard.llm.evaluator import (
     EvaluationDiscarded,
+    EvaluationStepEvent,
     IssueEvaluator,
     _compute_content_hash,
     _needs_reevaluation,
     _parse_evaluation_response,
+    format_tool_args_compact,
 )
 from craft_dashboard.llm.tool_dispatch import ToolContext
 
@@ -1320,3 +1322,167 @@ class TestComputeContentHash:
         )
 
         assert hash_a == hash_b
+
+
+class TestFormatToolArgsCompact:
+    """Tests for format_tool_args_compact."""
+
+    def test_search_code_formatting(self) -> None:
+        formatted = format_tool_args_compact(
+            {"query": "build_packages", "project": "snapcraft"}
+        )
+        assert formatted == 'query="build_packages", project="snapcraft"'
+
+    def test_query_truncation(self) -> None:
+        long_query = "a" * 60
+        formatted = format_tool_args_compact({"query": long_query})
+        assert formatted == f'query="{"a" * 37}..."'
+
+    def test_read_file_with_path_and_revision(self) -> None:
+        formatted = format_tool_args_compact({"path": "craft.yaml", "revision": "main"})
+        assert 'path="craft.yaml"' in formatted
+        assert 'revision="main"' in formatted
+
+    def test_git_log_with_limit(self) -> None:
+        formatted = format_tool_args_compact({"limit": 10})
+        assert formatted == "limit=10"
+
+    def test_empty_arguments(self) -> None:
+        assert format_tool_args_compact({}) == ""
+        assert format_tool_args_compact(None) == ""
+
+    def test_fallback_first_argument(self) -> None:
+        formatted = format_tool_args_compact({"custom_field": "val123"})
+        assert formatted == 'custom_field="val123"'
+
+
+class TestEvaluationStepEvents:
+    """Tests for on_step callback integration in IssueEvaluator."""
+
+    @pytest.mark.asyncio
+    async def test_on_step_emitted_during_closed_evaluation(self) -> None:
+        mock_response = LLMResponse(
+            content='{"summary": "Fixed by PR #42."}',
+            total_tokens=150,
+            prompt_tokens=100,
+            completion_tokens=50,
+            model="test-model",
+        )
+        mock_client = MagicMock()
+        mock_client.complete = AsyncMock(return_value=mock_response)
+        evaluator = IssueEvaluator(
+            client=mock_client, model_summary="test-model", model_scoring="test-model"
+        )
+        events: list[EvaluationStepEvent] = []
+
+        await evaluator.evaluate(
+            title="Old bug",
+            body="It crashed.",
+            issue_type="issue",
+            state="closed",
+            labels=[],
+            age_days=365,
+            last_activity_days=300,
+            author="bob",
+            is_maintainer=False,
+            comment_count=2,
+            on_step=events.append,
+        )
+
+        phases = [e.phase for e in events]
+        assert "llm_call" in phases
+        assert "synthesis" in phases
+
+    @pytest.mark.asyncio
+    async def test_on_step_emitted_during_tool_loop(self) -> None:
+        tool_call_response = LLMResponse(
+            content="",
+            prompt_tokens=10,
+            completion_tokens=10,
+            total_tokens=20,
+            model="scoring-model",
+            tool_calls=[
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "search_code",
+                        "arguments": '{"query": "find_me"}',
+                    },
+                }
+            ],
+        )
+        final_response = LLMResponse(
+            content=json.dumps(
+                {
+                    "summary": "Step events summary.",
+                    "scores": {
+                        "actionability": 70,
+                        "complexity": 10,
+                        "impact": 10,
+                        "confidence": 10,
+                    },
+                    "suggested_action": "needs_triage",
+                    "suggested_action_reason": "reason",
+                }
+            ),
+            prompt_tokens=20,
+            completion_tokens=20,
+            total_tokens=40,
+            model="scoring-model",
+        )
+        mock_client = AsyncMock()
+        mock_client.complete.side_effect = [tool_call_response, final_response]
+        evaluator = IssueEvaluator(
+            client=mock_client,
+            model_summary="summary-model",
+            model_scoring="scoring-model",
+        )
+        events: list[EvaluationStepEvent] = []
+
+        with (
+            patch(
+                "craft_dashboard.llm.evaluator.dispatch_tool_call",
+                new=AsyncMock(return_value="matched result"),
+            ),
+            patch(
+                "craft_dashboard.llm.baseline.reader.repo_layout",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "craft_dashboard.llm.baseline.reader.grep_repo",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch(
+                "craft_dashboard.llm.baseline._dispatch_http_tool",
+                new=AsyncMock(return_value='{"results": []}'),
+            ),
+        ):
+            await evaluator.evaluate(
+                title="t",
+                body="b",
+                issue_type="issue",
+                state="open",
+                labels=[],
+                age_days=1,
+                last_activity_days=1,
+                author="a",
+                is_maintainer=False,
+                comment_count=0,
+                project="craft-parts",
+                tool_ctx=_tool_ctx(),
+                on_step=events.append,
+            )
+
+        phases = [e.phase for e in events]
+        assert "baseline" in phases
+        assert "baseline_done" in phases
+        assert "llm_call" in phases
+        assert "tool_start" in phases
+        assert "tool_done" in phases
+        assert "synthesis" in phases
+
+        tool_start_events = [e for e in events if e.phase == "tool_start"]
+        assert len(tool_start_events) == 1
+        assert tool_start_events[0].tool_name == "search_code"
+        assert 'query="find_me"' in tool_start_events[0].detail

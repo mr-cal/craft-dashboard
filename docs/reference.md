@@ -15,7 +15,8 @@ Application settings come from `craft_dashboard/settings.py` and `.env.example`.
 | `PORT` | `8000` | App port setting used by settings consumers. |
 | `CONFIG_FILE` | `craft-dashboard.toml` | TOML config path. |
 | `LOG_LEVEL` | `INFO` | Python logging level. |
-| `EVAL_API_TOKEN` | empty | Bearer token for `/api/eval/*`. |
+| `EVAL_API_TOKEN` | empty | Shared evaluation bearer token fallback for `/api/eval/*`. |
+| `EVAL_MIN_WORKER_VERSION` | `0.0.0` | Minimum worker SemVer required by `/api/eval/*`. |
 | `EVAL_TRANSCRIPT_RETENTION_DAYS` | `30` | Retention window for non-latest evaluation transcripts. |
 | `EVAL_RETENTION_DAYS` | `90` | Retention window for superseded evaluations. Evaluations marked `latest` are never deleted. |
 | `EVAL_DAILY_SPEND_CAP_USD` | `0.0` | Daily evaluation spend cap; zero disables the cap. |
@@ -37,14 +38,15 @@ The LLM worker also reads these variables in `scripts/llm/cli.py`:
 
 | Variable | Purpose |
 |---|---|
-| `DASHBOARD_URL` | Base URL for the evaluation HTTP API. |
+| `CRAFT_DASHBOARD_URL` / `DASHBOARD_URL` | Base URL for the evaluation HTTP API. |
+| `CRAFT_EVAL_TOKEN` / `EVAL_API_TOKEN` | Bearer token for the evaluation HTTP API. |
+| `CRAFT_DASHBOARD_CA_CERT` / `DASHBOARD_CA_CERT` | CA certificate for the dashboard server. |
 | `LLM_BASE_URL` | OpenAI-compatible LLM endpoint. |
-| `LLM_API_KEY` | LLM provider API key. |
+| `LLM_API_KEY` | LLM provider API token. |
 | `LLM_MODEL` | Single model used for summary and scoring when split models are unset. |
 | `LLM_MODEL_SUMMARY` | Summary model override. |
 | `LLM_MODEL_SCORING` | Scoring model override. |
 | `LLM_CA_CERT` | CA certificate for the LLM endpoint. |
-| `DASHBOARD_CA_CERT` | CA certificate for the dashboard server. |
 | `COPILOT_ACP_MODEL` | Model name for the `copilot-acp` backend. |
 | `LLM_CONFIG_ERROR_DELAY_SECONDS` | Delay before worker exit on configuration errors. |
 
@@ -120,9 +122,13 @@ The LLM worker also reads these variables in `scripts/llm/cli.py`:
 
 | Command | Options |
 |---|---|
-| `scripts/run_llm.py evaluate` | `--interval`, `--limit`/`--max-evaluations`, `--project`, `--open-only`/`--all-issues`, `--force`, `--incomplete`, `--stale-days`, `--issue`, `--concurrency`, `--llm-backend openrouter|local|copilot-acp`, `--verbose`, `--log`, `--slow-eval`, `--min-delay`, `--max-delay`, `--tool-delay` |
-| `scripts/run_llm.py clear-evaluations` | `--project`, `--yes`/`-y` |
+| `scripts/run_llm.py evaluate` / `craft-eval evaluate` | `--server`, `--token`, `--ca-cert`, `--env-file`, `--interval`, `--limit`/`--max-evaluations`, `--project`, `--open-only`/`--all-issues`, `--force`, `--incomplete`, `--stale-days`, `--issue`, `--concurrency`, `--llm-backend openrouter|local|copilot-acp`, `--verbose`, `--log`, `--slow-eval`, `--min-delay`, `--max-delay`, `--tool-delay` |
+| `scripts/run_llm.py status` / `craft-eval status` | `--server`, `--token`, `--ca-cert`, `--env-file`, `--llm-backend` |
+| `scripts/run_llm.py clear-evaluations` / `craft-eval clear` | `--server`, `--token`, `--ca-cert`, `--env-file`, `--project`, `--issue`, `--evaluated-by`, `--stale-days`, `--incomplete`, `--yes` |
 | `scripts/llm/canary.py` | `--server`, `--token`, repeatable `--issue`, `--model-summary`, `--model-scoring`, `--openrouter-api-key`, `--llm-backend openrouter|local`, `--timeout-seconds` |
+| `scripts/manage_eval_tokens.py create` | `--id`, `--name`, `--permissions` |
+| `scripts/manage_eval_tokens.py list` | `--stats` |
+| `scripts/manage_eval_tokens.py revoke` | `--id` |
 
 ## Cron schedule
 
@@ -147,7 +153,8 @@ Table names come from `craft_dashboard/models/`.
 |---|---|---|
 | `projects` | `project.py` | Tracked projects and display metadata. |
 | `issues` | `issue.py` | GitHub issues, GitHub PRs, and Launchpad bugs. |
-| `llm_evaluations` | `llm_evaluation.py` | Evaluation results, versions, costs, locks, hashes, and embeddings. |
+| `eval_api_tokens` | `eval_token.py` | Evaluation API tokens, permission scopes, and usage timestamps. |
+| `llm_evaluations` | `llm_evaluation.py` | Evaluation results, versions, costs, locks, hashes, embeddings, and evaluating token ID. |
 | `evaluation_transcripts` | `evaluation_transcript.py` | Stored evaluation transcripts. |
 | `snapshots` | `snapshot.py` | Daily project metrics for trends. |
 | `releases` | `release.py` | Release and branch release data. |
@@ -197,6 +204,7 @@ Endpoint list comes from `craft_dashboard/routes/` and `craft_dashboard/app.py`.
 | `GET` | `/admin/recent-evaluations` | Recent evaluations partial. |
 | `GET` | `/admin/collection-runs/{run_id}/issues` | Issues collected by a run. |
 | `POST` | `/admin/refresh` | Queue data refresh. |
+| `POST` | `/admin/keys/revoke` | Revoke an evaluation API token. |
 | `GET` | `/admin/health` | Detailed admin health JSON. |
 | `GET` | `/admin/logs` | Recent service logs. |
 | `GET` | `/api/eval/next` | Lease the next evaluation item. |
@@ -212,7 +220,7 @@ Endpoint list comes from `craft_dashboard/routes/` and `craft_dashboard/app.py`.
 | `DELETE` | `/api/eval/clear` | Delete evaluations. |
 | `POST` | `/api/eval/clear` | Delete evaluations. |
 
-`/admin/*` mutation endpoints require admin authentication. `/api/eval/*` endpoints require `EVAL_API_TOKEN`.
+`/admin/*` mutation endpoints require admin authentication. `/api/eval/*` endpoints require an evaluation bearer token.
 
 ## CI and image publishing
 
@@ -221,3 +229,4 @@ Endpoint list comes from `craft_dashboard/routes/` and `craft_dashboard/app.py`.
 | `.github/workflows/ci.yml` | Push and pull request to `main` | Runs setup, lint, and tests. |
 | `.github/workflows/e2e.yml` | Push, pull request, manual | Runs end-to-end tests. |
 | `.github/workflows/publish.yml` | Push to `main` | Builds and pushes the GHCR image and dispatches `craft-dashboard-updated` to `mr-cal/vps-infra`. |
+| `.github/workflows/release-publish.yaml` | Tag push (`*.*.*`) | Builds and publishes `craft-eval` to PyPI and creates a GitHub release. |

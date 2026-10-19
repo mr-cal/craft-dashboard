@@ -114,6 +114,7 @@ class Runtime:
         slow_eval: bool = False,
         min_delay: float = 25.0,
         max_delay: float = 55.0,
+        worker_tasks: dict[int, TaskID] | None = None,
     ) -> None:
         self.client = client
         self.evaluator = evaluator
@@ -134,6 +135,7 @@ class Runtime:
         self.slow_eval = slow_eval
         self.min_delay = min_delay
         self.max_delay = max_delay
+        self.worker_tasks = worker_tasks or {}
         #: True for a single-target ``--issue ... --force`` run (e.g. the
         #: canary script). In that mode there is only ever one issue to
         #: evaluate, and a claimed-then-discarded/failed/skipped issue is

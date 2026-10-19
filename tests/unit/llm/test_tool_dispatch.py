@@ -99,7 +99,7 @@ def tool_context(bare_mirror: Path, sample_repo_shas: list[str]) -> ToolContext:
         allowed_projects={"sample-project": "canonical"},
         pinned_shas={"sample-project": sample_repo_shas[-1]},
         eval_server_base_url="http://testserver",
-        eval_api_token="test-token",  # noqa: S106
+        eval_api_token="test-token",
         issue_id=1,
     )
 
@@ -115,7 +115,7 @@ def _multi_project_ctx() -> ToolContext:
         },
         pinned_shas={},
         eval_server_base_url="http://testserver",
-        eval_api_token="test-token",  # noqa: S106
+        eval_api_token="test-token",
         issue_id=1,
         default_project="snapcraft",
     )
@@ -143,7 +143,7 @@ class TestResolveProjects:
             allowed_projects={"craft-parts": "canonical", "snapcraft": "canonical"},
             pinned_shas={},
             eval_server_base_url="http://testserver",
-            eval_api_token="test-token",  # noqa: S106
+            eval_api_token="test-token",
             issue_id=1,
         )
 

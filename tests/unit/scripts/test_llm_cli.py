@@ -108,6 +108,143 @@ class TestClearEvaluationsCommand:
             headers=headers,
         )
 
+    @pytest.mark.asyncio
+    async def test_count_and_delete_with_fine_grained_filters(self) -> None:
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_get_resp = MagicMock()
+        mock_get_resp.json.return_value = {"count": 10}
+        mock_get_resp.raise_for_status = MagicMock()
+        mock_client.get.return_value = mock_get_resp
+
+        mock_del_resp = MagicMock()
+        mock_del_resp.json.return_value = {"deleted": 10}
+        mock_del_resp.raise_for_status = MagicMock()
+        mock_client.request.return_value = mock_del_resp
+
+        count = await _count_evaluations(
+            mock_client,
+            project="rockcraft",
+            headers={"Authorization": "Bearer tok"},
+            issue="101",
+            evaluated_by="worker-test",
+            stale_days=14,
+            incomplete=True,
+        )
+        assert count == 10
+        mock_client.get.assert_awaited_once_with(
+            "/api/eval/clear",
+            params={
+                "project": "rockcraft",
+                "issue": "101",
+                "evaluated_by": "worker-test",
+                "stale_days": 14,
+                "incomplete": True,
+            },
+            headers={"Authorization": "Bearer tok"},
+        )
+
+        deleted = await _delete_evaluations(
+            mock_client,
+            project="rockcraft",
+            headers={"Authorization": "Bearer tok"},
+            issue="101",
+            evaluated_by="worker-test",
+            stale_days=14,
+            incomplete=True,
+        )
+        assert deleted == 10
+        mock_client.request.assert_awaited_once_with(
+            "DELETE",
+            "/api/eval/clear",
+            params={
+                "project": "rockcraft",
+                "issue": "101",
+                "evaluated_by": "worker-test",
+                "stale_days": 14,
+                "incomplete": True,
+            },
+            headers={"Authorization": "Bearer tok"},
+        )
+
+
+class TestStatusCliCommand:
+    def test_status_missing_token_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("EVAL_API_TOKEN", raising=False)
+        monkeypatch.delenv("CRAFT_EVAL_TOKEN", raising=False)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status"])
+        assert result.exit_code != 0
+        assert "Token Auth:" in result.output
+        assert "MISSING" in result.output
+
+    def test_status_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CRAFT_EVAL_TOKEN", "test-token")
+        monkeypatch.setenv("CRAFT_DASHBOARD_URL", "http://testserver")
+
+        mock_status_resp = MagicMock()
+        mock_status_resp.status_code = 200
+        mock_status_resp.json.return_value = {
+            "authenticated_as": "test-bot",
+            "permissions": ["eval:write"],
+            "min_worker_version": "0.1.0",
+            "pending": 5,
+            "total_open": 50,
+            "total_evaluated": 45,
+            "evaluated_today": 2,
+        }
+
+        mock_projects_resp = MagicMock()
+        mock_projects_resp.status_code = 200
+        mock_projects_resp.json.return_value = {"projects": {"snapcraft": "canonical"}}
+
+        async def _mock_get(url, **kwargs):
+            if "status" in url:
+                return mock_status_resp
+            return mock_projects_resp
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=_mock_get)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        monkeypatch.setattr(
+            "scripts.llm.cli.httpx.AsyncClient", lambda **kw: mock_client
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status"])
+        assert result.exit_code == 0
+        assert "Authenticated as 'test-bot'" in result.output
+        assert "Compatible" in result.output
+        assert "All core checks passed" in result.output
+
+    def test_status_upgrade_required_426(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CRAFT_EVAL_TOKEN", "test-token")
+        monkeypatch.setenv("CRAFT_DASHBOARD_URL", "http://testserver")
+
+        mock_status_resp = MagicMock()
+        mock_status_resp.status_code = 426
+        mock_status_resp.headers = {"content-type": "application/json"}
+        mock_status_resp.json.return_value = {
+            "detail": "Worker version 0.1.0 is outdated. Minimum is 0.5.0.",
+            "remedy": "Run 'uvx --upgrade craft-eval' to update.",
+        }
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_status_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        monkeypatch.setattr(
+            "scripts.llm.cli.httpx.AsyncClient", lambda **kw: mock_client
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status"])
+        assert result.exit_code != 0
+        assert "UPGRADE REQUIRED" in result.output
+        assert "uvx --upgrade craft-eval" in result.output
+
 
 class TestEvaluateCliCommand:
     def test_copilot_acp_missing_model_env(

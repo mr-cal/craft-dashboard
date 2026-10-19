@@ -7,18 +7,20 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from packaging.version import InvalidVersion
+from packaging.version import parse as parse_version
 from pydantic import BaseModel, Field
 from scripts.llm.validation import validate_evaluation_result
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
+from starlette import status
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-from craft_dashboard.auth import verify_eval_token
 from craft_dashboard.dependencies import get_config, get_db_session
 from craft_dashboard.git_mirrors import reader as mirror_reader
 from craft_dashboard.git_mirrors.paths import canonical_git_project_name
@@ -38,12 +40,19 @@ from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
 from craft_dashboard.rate_limit import limiter, local_aware_limit
+from craft_dashboard.repositories.eval_token_repository import EvalTokenRepository
 from craft_dashboard.repositories.issue_filters import (
     build_excluded_issues_condition,
 )
 from craft_dashboard.repositories.issue_link_repository import IssueLinkRepository
 from craft_dashboard.repositories.issue_repository import IssueRepository
 from craft_dashboard.services import eval_activity
+from craft_dashboard.services.eval_auth_service import (
+    AuthenticatedToken,
+    EvalAuthService,
+    InsufficientPermissionsError,
+    InvalidTokenError,
+)
 from craft_dashboard.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -180,10 +189,75 @@ class EvalResultSubmission(BaseModel):
     evidence_paths: list[dict[str, str]] = Field(default_factory=list)
 
 
-def _require_eval_auth(request: Request, authorization: str = "") -> None:
-    """Require a valid eval API bearer token."""
-    eval_api_token = request.app.state.settings.eval_api_token
-    verify_eval_token(authorization, eval_api_token)
+def _check_worker_version(
+    x_worker_version: str | None,
+    min_version_str: str,
+) -> None:
+    """Validate client worker version against minimum required version using SemVer."""
+    if not min_version_str or min_version_str == "0.0.0":
+        return
+
+    if not x_worker_version:
+        raise HTTPException(
+            status_code=status.HTTP_426_UPGRADE_REQUIRED,
+            detail={
+                "detail": f"Worker version header missing. Minimum required version is '{min_version_str}'.",
+                "min_version": min_version_str,
+                "current_version": None,
+                "remedy": "Run 'uvx --upgrade craft-eval' or 'uv tool upgrade craft-eval' to update.",
+            },
+        )
+
+    try:
+        current_v = parse_version(x_worker_version)
+        min_v = parse_version(min_version_str)
+    except InvalidVersion as exc:
+        raise HTTPException(
+            status_code=status.HTTP_426_UPGRADE_REQUIRED,
+            detail={
+                "detail": f"Invalid worker version '{x_worker_version}'. Minimum required version is '{min_version_str}'.",
+                "min_version": min_version_str,
+                "current_version": x_worker_version,
+                "remedy": "Run 'uvx --upgrade craft-eval' or 'uv tool upgrade craft-eval' to update.",
+            },
+        ) from exc
+
+    if current_v < min_v:
+        raise HTTPException(
+            status_code=status.HTTP_426_UPGRADE_REQUIRED,
+            detail={
+                "detail": f"Worker version '{x_worker_version}' is outdated. Minimum required version is '{min_version_str}'.",
+                "min_version": min_version_str,
+                "current_version": x_worker_version,
+                "remedy": "Run 'uvx --upgrade craft-eval' or 'uv tool upgrade craft-eval' to update.",
+            },
+        )
+
+
+async def _require_eval_auth(
+    authorization: str,
+    session: AsyncSession,
+    *,
+    required_permission: str = "eval:write",
+) -> AuthenticatedToken:
+    """Require a valid eval API bearer token and verify permission scope."""
+    service = EvalAuthService(session)
+    try:
+        auth_token = await service.authenticate_token(authorization)
+        if required_permission:
+            service.check_permission(auth_token, required_permission)
+    except InvalidTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+    except InsufficientPermissionsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    else:
+        return auth_token
 
 
 def _current_content_hash(issue: Issue) -> str:
@@ -336,6 +410,7 @@ async def next_issue(
     request: Request,
     *,
     authorization: str = Header(default=""),
+    x_worker_version: str | None = Header(default=None, alias="X-Worker-Version"),
     project: str = Query(default=""),
     open_only: bool = Query(default=True),
     force: bool = Query(default=False),
@@ -347,7 +422,10 @@ async def next_issue(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any] | Response:
     """Return the next issue that needs evaluation, if any."""
-    _require_eval_auth(request, authorization)
+    _check_worker_version(
+        x_worker_version, request.app.state.settings.eval_min_worker_version
+    )
+    await _require_eval_auth(authorization, session)
     eval_activity.record_next_call()
     await _maybe_record_queue_snapshot(
         session, filtered_issues=get_config(request).filtered_issues
@@ -445,10 +523,14 @@ async def submit_result(
     payload: EvalResultSubmission,
     *,
     authorization: str = Header(default=""),
+    x_worker_version: str | None = Header(default=None, alias="X-Worker-Version"),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Store an evaluation result for an issue."""
-    _require_eval_auth(request, authorization)
+    _check_worker_version(
+        x_worker_version, request.app.state.settings.eval_min_worker_version
+    )
+    auth_token = await _require_eval_auth(authorization, session)
 
     issue = await session.get(Issue, payload.issue_id)
     if issue is None:
@@ -556,6 +638,7 @@ async def submit_result(
         latest=True,
         eval_locked_until=None,
         summary_embedding=summary_embedding,
+        evaluated_by=auth_token.id,
     )
     session.add(evaluation)
     await session.flush()
@@ -599,14 +682,13 @@ async def submit_result(
 
 @router.post("/release")
 async def release_claim(
-    request: Request,
     payload: EvalReleaseRequest,
     *,
     authorization: str = Header(default=""),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Release a claimed issue without recording an LLM evaluation."""
-    _require_eval_auth(request, authorization)
+    await _require_eval_auth(authorization, session)
 
     latest_evaluation = await session.scalar(
         select(LLMEvaluation).where(
@@ -641,7 +723,7 @@ async def _find_related_issues(
     query: str,
     session: AsyncSession,
 ) -> dict[str, Any]:
-    _require_eval_auth(request, authorization)
+    await _require_eval_auth(authorization, session)
     settings = request.app.state.settings
     if not settings.embedding_api_key:
         raise HTTPException(
@@ -725,7 +807,7 @@ async def issue_detail_lookup(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Resolve a repo issue reference for the eval issue-detail tool."""
-    _require_eval_auth(request, authorization)
+    await _require_eval_auth(authorization, session)
     project_name, external_id = _parse_issue_ref(ref)
 
     query_stmt = (
@@ -790,10 +872,10 @@ class QuotaPauseReport(BaseModel):
 
 @router.post("/quota-pause")
 async def report_quota_pause(
-    request: Request,
     payload: QuotaPauseReport,
     *,
     authorization: str = Header(default=""),
+    session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, str]:
     """Record that a worker has paused evaluation until an LLM quota resets.
 
@@ -805,7 +887,7 @@ async def report_quota_pause(
     bare "stalled", which would otherwise be indistinguishable from a
     genuinely broken worker.
     """
-    _require_eval_auth(request, authorization)
+    await _require_eval_auth(authorization, session)
     eval_activity.set_quota_pause_until(payload.resume_at)
     return {"status": "recorded"}
 
@@ -815,15 +897,19 @@ async def eval_status(
     request: Request,
     *,
     authorization: str = Header(default=""),
+    x_worker_version: str | None = Header(default=None, alias="X-Worker-Version"),
     project: str = Query(default=""),
     open_only: bool = Query(default=True),
     force: bool = Query(default=False),
     incomplete: bool = Query(default=False),
     stale_days: int = Query(default=0),
     session: AsyncSession = Depends(get_db_session),
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """Return summary counts for the eval queue."""
-    _require_eval_auth(request, authorization)
+    _check_worker_version(
+        x_worker_version, request.app.state.settings.eval_min_worker_version
+    )
+    auth_token = await _require_eval_auth(authorization, session)
 
     now = datetime.now(tz=UTC)
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -966,18 +1052,20 @@ async def eval_status(
         "evaluated_today": evaluated_today or 0,
         "total_evaluated": total_evaluated or 0,
         "total_open": total_open or 0,
+        "authenticated_as": auth_token.id,
+        "permissions": list(auth_token.permissions),
+        "min_worker_version": request.app.state.settings.eval_min_worker_version,
     }
 
 
 @router.get("/projects")
 async def get_projects(
-    request: Request,
     *,
     authorization: str = Header(default=""),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Return project org mappings for evaluation workers."""
-    _require_eval_auth(request, authorization)
+    await _require_eval_auth(authorization, session)
     result = await session.execute(select(Project.name, Project.github_org))
     project_orgs = dict(result.tuples().all())
     return {"projects": project_orgs}
@@ -985,50 +1073,79 @@ async def get_projects(
 
 @router.get("/clear")
 async def get_clear_evaluations_count(
-    request: Request,
     *,
     authorization: str = Header(default=""),
     project: str = Query(default=""),
+    issue: str = Query(default=""),
+    evaluated_by: str = Query(default=""),
+    stale_days: int = Query(default=0, ge=0),
+    incomplete: bool = Query(default=False),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Return count of evaluations that would be cleared."""
-    _require_eval_auth(request, authorization)
-    if project:
-        query = (
-            select(func.count(LLMEvaluation.id))
-            .join(Issue, LLMEvaluation.issue_id == Issue.id)
-            .join(Project, Issue.project_id == Project.id)
-            .where(Project.name == project)
+    auth_token = await _require_eval_auth(authorization, session)
+    try:
+        effective_evaluated_by = EvalAuthService.resolve_clearance_scope(
+            auth_token, evaluated_by or None
         )
-    else:
-        query = select(func.count(LLMEvaluation.id))
+    except InsufficientPermissionsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
 
-    count = await session.scalar(query) or 0
-    return {"count": count, "project": project or None}
+    repo = EvalTokenRepository(session)
+    count = await repo.count_evaluations(
+        project=project or None,
+        issue_number=issue or None,
+        evaluated_by=effective_evaluated_by,
+        stale_days=stale_days or None,
+        incomplete=incomplete,
+    )
+    resp_data: dict[str, Any] = {"count": count, "project": project or None}
+    if issue:
+        resp_data["issue"] = issue
+    if effective_evaluated_by:
+        resp_data["evaluated_by"] = effective_evaluated_by
+    return resp_data
 
 
 @router.delete("/clear")
 @router.post("/clear")
 async def clear_evaluations(
-    request: Request,
     *,
     authorization: str = Header(default=""),
     project: str = Query(default=""),
+    issue: str = Query(default=""),
+    evaluated_by: str = Query(default=""),
+    stale_days: int = Query(default=0, ge=0),
+    incomplete: bool = Query(default=False),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Delete stored LLM evaluations, optionally scoped to a project."""
-    _require_eval_auth(request, authorization)
-    if project:
-        issue_ids = (
-            select(Issue.id)
-            .join(Project, Issue.project_id == Project.id)
-            .where(Project.name == project)
+    auth_token = await _require_eval_auth(authorization, session)
+    try:
+        effective_evaluated_by = EvalAuthService.resolve_clearance_scope(
+            auth_token, evaluated_by or None
         )
-        statement = delete(LLMEvaluation).where(LLMEvaluation.issue_id.in_(issue_ids))
-    else:
-        statement = delete(LLMEvaluation)
+    except InsufficientPermissionsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
 
-    result = await session.execute(statement)
+    repo = EvalTokenRepository(session)
+    deleted = await repo.delete_evaluations(
+        project=project or None,
+        issue_number=issue or None,
+        evaluated_by=effective_evaluated_by,
+        stale_days=stale_days or None,
+        incomplete=incomplete,
+    )
     await session.commit()
-    deleted = getattr(result, "rowcount", 0) or 0
-    return {"deleted": deleted, "project": project or None}
+    resp_data: dict[str, Any] = {"deleted": deleted, "project": project or None}
+    if issue:
+        resp_data["issue"] = issue
+    if effective_evaluated_by:
+        resp_data["evaluated_by"] = effective_evaluated_by
+    return resp_data

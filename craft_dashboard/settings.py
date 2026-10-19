@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # Eval API token for /api/eval/* endpoints (pull-based evaluation)
     eval_api_token: str = ""
 
+    # Minimum worker version required to claim or submit evaluations
+    eval_min_worker_version: str = "0.0.0"
+
     # Retention window (days) for evaluation transcripts belonging to
     # superseded (non-latest) evaluations. latest=True transcripts are kept
     # indefinitely regardless.

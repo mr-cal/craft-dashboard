@@ -9,9 +9,14 @@ import urllib.parse
 from typing import TYPE_CHECKING
 
 import requests
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Form, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 from github import GithubException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -21,7 +26,9 @@ from starlette.exceptions import HTTPException
 
 from craft_dashboard.auth import get_admin_bearer_token, verify_admin_token
 from craft_dashboard.dependencies import get_config, get_db_session
+from craft_dashboard.repositories.eval_token_repository import EvalTokenRepository
 from craft_dashboard.services import AdminService
+from craft_dashboard.services.eval_auth_service import evict_eval_token
 
 if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
@@ -201,6 +208,9 @@ async def admin_evaluations_page(
         days=7,
         warn_threshold=settings.commit_scanner_daily_invalidation_warn_threshold,
     )
+    token_repo = EvalTokenRepository(session)
+    eval_tokens = await token_repo.list_tokens(include_revoked=True)
+    token_stats = await token_repo.get_evaluation_counts_by_token()
 
     return templates.TemplateResponse(
         request,
@@ -226,7 +236,28 @@ async def admin_evaluations_page(
             "commit_scan_history": commit_scan_history,
             "commit_scan_summary": commit_scan_summary,
             "outdated_evaluation_counts": outdated_evaluation_counts,
+            "eval_tokens": eval_tokens,
+            "token_stats": token_stats,
         },
+    )
+
+
+@router.post("/keys/revoke")
+async def revoke_eval_token(
+    request: Request,
+    token_id: str = Form(...),
+    authorization: str = Header(default=""),
+    session: AsyncSession = Depends(get_db_session),
+) -> RedirectResponse:
+    """Revoke an evaluation API token."""
+    _require_admin_auth(request, authorization)
+    repo = EvalTokenRepository(session)
+    revoked = await repo.revoke_token(token_id)
+    if revoked:
+        await session.commit()
+        evict_eval_token(token_id)
+    return RedirectResponse(
+        url="/admin/evaluations", status_code=status.HTTP_303_SEE_OTHER
     )
 
 

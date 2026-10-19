@@ -306,4 +306,60 @@
     {% endif %}
   </div>
 </div>
+
+<hr class="p-rule" />
+
+<div class="row">
+  <div class="col-12">
+    <h3>Evaluation API Tokens</h3>
+    <p>Registered API tokens used for evaluation workers and background runs.</p>
+    {% if eval_tokens %}
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Prefix</th>
+          <th>Permissions</th>
+          <th>Status</th>
+          <th>Evaluations</th>
+          <th>Last Used</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for token in eval_tokens %}
+        <tr>
+          <td><code>{{ token.id }}</code></td>
+          <td>{{ token.name }}</td>
+          <td><code>{{ token.token_prefix }}</code></td>
+          <td>{{ token.permissions | join(", ") }}</td>
+          <td>
+            {% if token.is_active %}
+            <span class="p-status-label--positive">Active</span>
+            {% else %}
+            <span class="p-status-label--negative">Revoked</span>
+            {% endif %}
+          </td>
+          <td style="text-align: right;">{{ "{:,}".format(token_stats.get(token.id, 0)) }}</td>
+          <td>{{ token.last_used_at | local_datetime if token.last_used_at else "Never" }}</td>
+          <td>
+            {% if token.is_active %}
+            <form method="POST" action="/admin/keys/revoke" style="margin: 0;" onsubmit="return confirm('Revoke evaluation token {{ token.id }}?');">
+              <input type="hidden" name="token_id" value="{{ token.id }}">
+              <button type="submit" class="p-button--negative p-button--inline u-no-margin--bottom" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">Revoke</button>
+            </form>
+            {% else %}
+            <span class="u-text--muted">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>No evaluation tokens found.</p>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

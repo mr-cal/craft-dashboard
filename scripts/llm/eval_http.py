@@ -23,6 +23,9 @@ HTTP_OK = httpx.codes.OK
 HTTP_NO_CONTENT = httpx.codes.NO_CONTENT
 HTTP_CONFLICT = httpx.codes.CONFLICT
 HTTP_TOO_MANY = httpx.codes.TOO_MANY_REQUESTS
+HTTP_UPGRADE_REQUIRED = httpx.codes.UPGRADE_REQUIRED
+HTTP_UNAUTHORIZED = httpx.codes.UNAUTHORIZED
+HTTP_FORBIDDEN = httpx.codes.FORBIDDEN
 
 _MAX_ERROR_BODY = 200
 
@@ -189,6 +192,34 @@ async def log_queue_status(
         status_resp = await http_client.get(
             "/api/eval/status", params=params, headers=headers
         )
+        if status_resp.status_code == HTTP_UPGRADE_REQUIRED:
+            try:
+                err = status_resp.json()
+                detail_val = err.get("detail", "Worker upgrade required.")
+                if isinstance(detail_val, dict):
+                    detail = detail_val.get("detail", str(detail_val))
+                    remedy = detail_val.get(
+                        "remedy",
+                        err.get("remedy", "Run 'uvx --upgrade craft-eval' to update."),
+                    )
+                else:
+                    detail = str(detail_val)
+                    remedy = err.get(
+                        "remedy", "Run 'uvx --upgrade craft-eval' to update."
+                    )
+                raise RuntimeError(f"Upgrade Required (HTTP 426): {detail}\n{remedy}")
+            except (ValueError, KeyError):
+                raise RuntimeError(
+                    f"Upgrade Required (HTTP 426): {format_error_body(status_resp)}"
+                )
+        if status_resp.status_code == HTTP_UNAUTHORIZED:
+            raise RuntimeError(
+                "Authentication failed (HTTP 401): Invalid or revoked evaluation token."
+            )
+        if status_resp.status_code == HTTP_FORBIDDEN:
+            raise RuntimeError(
+                "Forbidden (HTTP 403): Token lacks evaluation worker permissions."
+            )
         if status_resp.status_code == HTTP_OK:
             status_data = status_resp.json()
             server_pending = status_data.get("pending", 0)

@@ -1,9 +1,11 @@
 """Shared factories for test models."""
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from craft_dashboard.llm.content_hash import compute_content_hash
+from craft_dashboard.models.eval_token import EvalApiToken
 from craft_dashboard.models.issue import Issue
 from craft_dashboard.models.llm_evaluation import LLMEvaluation
 from craft_dashboard.models.project import Project
@@ -125,5 +127,30 @@ def make_evaluation(
         issue_data_hash=issue_data_hash or f"hash-{issue_id}",
         eval_type=eval_type,
         latest=latest,
+        **kwargs,
+    )
+
+
+def make_eval_token(
+    *,
+    token_id: str = "test-token",
+    name: str = "Test Token",
+    raw_token: str = "test-eval-token",
+    permissions: list[str] | None = None,
+    is_active: bool = True,
+    **kwargs: Any,
+) -> EvalApiToken:
+    """Build an EvalApiToken model with sensible defaults for tests."""
+    resolved_id = kwargs.pop("id", token_id)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    token_prefix = f"{raw_token[:8]}..."
+    perms = ["eval:write", "eval:admin"] if permissions is None else permissions
+    return EvalApiToken(
+        id=resolved_id,
+        name=name,
+        token_hash=token_hash,
+        token_prefix=token_prefix,
+        permissions=perms,
+        is_active=is_active,
         **kwargs,
     )

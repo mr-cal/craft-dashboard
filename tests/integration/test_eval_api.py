@@ -41,9 +41,16 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
     from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.factories import make_evaluation, make_issue, make_project
+from tests.factories import make_eval_token, make_evaluation, make_issue, make_project
 
 _TEST_EVAL_TOKEN = "test-eval-token"
+
+
+@pytest.fixture(autouse=True)
+async def _seed_test_eval_token(test_db_session: AsyncSession) -> None:
+    token = make_eval_token(raw_token=_TEST_EVAL_TOKEN)
+    test_db_session.add(token)
+    await test_db_session.commit()
 
 
 @asynccontextmanager
@@ -1823,6 +1830,40 @@ class TestEvalResultIntegration:
         assert transcript.rounds_used == 1
         assert transcript.model_name == "scoring-model"
 
+    def test_submit_result_stamps_evaluated_by(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        issue = asyncio.get_event_loop().run_until_complete(
+            _seed_open_issue(test_db_session, external_id="504")
+        )
+        app, token = _create_eval_app(test_db_session)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/eval/result",
+                json={
+                    "issue_id": issue.id,
+                    "content_hash": issue.content_hash,
+                    "summary": "Testing evaluated_by field stamping on result submission.",
+                    "scores": {
+                        "impact": 50,
+                        "complexity": 30,
+                        "actionability": 70,
+                        "confidence": 80,
+                    },
+                    "suggested_action": "keep_open",
+                    "suggested_action_reason": "Valid reason.",
+                    "related_work": [],
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert response.status_code == 200
+        evaluations = asyncio.get_event_loop().run_until_complete(
+            _all_evaluations(test_db_session)
+        )
+        assert evaluations[0].evaluated_by == "test-token"
+
 
 class TestRelatedIssuesEndpoint:
     """Integration tests for GET /api/eval/related."""
@@ -2245,7 +2286,39 @@ class TestEvalStatusIntegration:
             "evaluated_today": 1,
             "total_evaluated": 1,
             "total_open": 4,
+            "authenticated_as": "test-token",
+            "permissions": ["eval:write", "eval:admin"],
+            "min_worker_version": "0.0.0",
         }
+
+    def test_status_enforces_worker_semver_gating(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        app, token = _create_eval_app(test_db_session)
+        app.state.settings.eval_min_worker_version = "0.5.0"
+        headers = {"Authorization": f"Bearer {token}"}
+
+        with TestClient(app) as client:
+            resp_missing = client.get("/api/eval/status", headers=headers)
+            assert resp_missing.status_code == 426
+            assert (
+                "Worker version header missing"
+                in resp_missing.json()["detail"]["detail"]
+            )
+
+            resp_old = client.get(
+                "/api/eval/status",
+                headers={**headers, "X-Worker-Version": "0.4.9"},
+            )
+            assert resp_old.status_code == 426
+            assert resp_old.json()["detail"]["min_version"] == "0.5.0"
+            assert resp_old.json()["detail"]["current_version"] == "0.4.9"
+
+            resp_ok = client.get(
+                "/api/eval/status",
+                headers={**headers, "X-Worker-Version": "0.5.0"},
+            )
+            assert resp_ok.status_code == 200
 
 
 class TestEvalProjectsIntegration:
@@ -2652,3 +2725,70 @@ class TestClearEvaluationsEndpoint:
             _all_evaluations(test_db_session)
         )
         assert len(evals) == 0
+
+    def test_clear_evaluations_scoped_permissions(
+        self, test_db_session: AsyncSession
+    ) -> None:
+        worker_token_raw = "worker-token-secret"
+        worker_token = make_eval_token(
+            id="worker-bob",
+            name="Bob Worker",
+            raw_token=worker_token_raw,
+            permissions=["eval:write"],
+        )
+        test_db_session.add(worker_token)
+        project = make_project(id=1, name="snapcraft")
+        issue1 = make_issue(id=1, project_id=1, external_id="101")
+        issue2 = make_issue(id=2, project_id=1, external_id="102")
+        eval1 = make_evaluation(
+            id=1, issue_id=1, latest=True, evaluated_by="worker-bob"
+        )
+        eval2 = make_evaluation(
+            id=2, issue_id=2, latest=True, evaluated_by="test-token"
+        )
+        asyncio.get_event_loop().run_until_complete(
+            _seed_entities(test_db_session, project, issue1, issue2, eval1, eval2)
+        )
+
+        app, admin_token_raw = _create_eval_app(test_db_session)
+        worker_headers = {"Authorization": f"Bearer {worker_token_raw}"}
+        admin_headers = {"Authorization": f"Bearer {admin_token_raw}"}
+
+        with TestClient(app) as client:
+            # Worker querying clear without evaluated_by parameter is automatically scoped to their own token
+            resp = client.get("/api/eval/clear", headers=worker_headers)
+            assert resp.status_code == 200
+            assert resp.json()["count"] == 1
+            assert resp.json()["evaluated_by"] == "worker-bob"
+
+            # Worker trying to clear someone else's evaluations gets 403
+            resp = client.get(
+                "/api/eval/clear",
+                params={"evaluated_by": "test-token"},
+                headers=worker_headers,
+            )
+            assert resp.status_code == 403
+            assert (
+                "Non-admin tokens can only clear their own evaluations"
+                in resp.json()["detail"]
+            )
+
+            # Worker deleting own evaluations succeeds
+            resp = client.delete(
+                "/api/eval/clear",
+                headers=worker_headers,
+            )
+            assert resp.status_code == 200
+            assert resp.json()["deleted"] == 1
+
+            # test-token evaluation is untouched
+            evals = asyncio.get_event_loop().run_until_complete(
+                _all_evaluations(test_db_session)
+            )
+            assert len(evals) == 1
+            assert evals[0].evaluated_by == "test-token"
+
+            # Admin can clear test-token evaluation
+            resp = client.delete("/api/eval/clear", headers=admin_headers)
+            assert resp.status_code == 200
+            assert resp.json()["deleted"] == 1

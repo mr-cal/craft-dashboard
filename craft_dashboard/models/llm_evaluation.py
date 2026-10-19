@@ -22,6 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from craft_dashboard.models.base import Base
 
 if TYPE_CHECKING:
+    from craft_dashboard.models.eval_token import EvalApiToken
     from craft_dashboard.models.issue import Issue
 
 
@@ -103,9 +104,18 @@ class LLMEvaluation(Base):
     summary_embedding: Mapped[list[float] | None] = mapped_column(
         Vector(1024), nullable=True
     )
+    evaluated_by: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("eval_api_tokens.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # Relationships
     issue: Mapped["Issue"] = relationship(back_populates="evaluations")
+    eval_token: Mapped["EvalApiToken | None"] = relationship(
+        back_populates="evaluations"
+    )
 
     def __repr__(self) -> str:
         """Return a string representation."""

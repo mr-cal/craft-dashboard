@@ -8,7 +8,7 @@ import pathlib
 from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any, Self
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -121,6 +121,7 @@ def base_runtime() -> SimpleNamespace:
         params={},
         progress=MagicMock(update=MagicMock(), console=MagicMock(print=MagicMock())),
         overall_id=0,
+        worker_tasks={1: 1},
         timing=MagicMock(add=MagicMock()),
         state=SimpleNamespace(
             release=AsyncMock(),
@@ -137,6 +138,9 @@ def base_runtime() -> SimpleNamespace:
         allowed_projects={"snapcraft": "canonical/snapcraft"},
         eval_server_base_url="http://localhost:8000",
         single_issue=False,
+        slow_eval=False,
+        min_delay=25.0,
+        max_delay=55.0,
     )
 
 
@@ -839,3 +843,75 @@ async def test_circuit_breaker_trips_on_consecutive_failures(
     assert run_state.consecutive_failures == 1
     await run_state.complete(prompt_tokens=10, completion_tokens=10)
     assert run_state.consecutive_failures == 0
+
+
+def test_notify_worker_step_updates_subtask_and_prints_milestone(
+    base_runtime: SimpleNamespace,
+) -> None:
+    eval_worker._notify_worker_step(
+        base_runtime,
+        worker_index=1,
+        worker_name="worker-1",
+        issue_ref="craft-parts#123",
+        step="round 1/20: tool git_log(limit=10)…",
+        log_milestone=True,
+    )
+
+    base_runtime.progress.update.assert_called()
+    update_kwargs = base_runtime.progress.update.call_args.kwargs
+    assert "description" in update_kwargs
+    assert "craft-parts#123" in update_kwargs["description"]
+    assert "git_log" in update_kwargs["description"]
+
+    base_runtime.progress.console.print.assert_called_once()
+    printed = base_runtime.progress.console.print.call_args[0][0]
+    assert "[bold]worker-1[/bold]" in printed
+    assert "craft-parts#123" in printed
+    assert "git_log" in printed
+
+
+@pytest.mark.asyncio
+async def test_evaluate_issue_wires_step_events(
+    base_runtime: SimpleNamespace,
+) -> None:
+    captured_on_step = None
+
+    async def mock_evaluate(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal captured_on_step
+        captured_on_step = kwargs.get("on_step")
+        if captured_on_step:
+            captured_on_step(
+                eval_worker.EvaluationStepEvent(
+                    phase="tool_start",
+                    round_num=1,
+                    max_rounds=20,
+                    tool_name="git_log",
+                    tool_args={"limit": 5},
+                    detail="git_log(limit=5)",
+                )
+            )
+        return {
+            **SAMPLE_EVALUATE_RESULT,
+            "tool_context": SimpleNamespace(touched_paths=set()),
+        }
+
+    base_runtime.evaluator.evaluate = mock_evaluate
+
+    with patch(
+        "scripts.llm.eval_worker._post_submission",
+        new=AsyncMock(return_value=_response(200)),
+    ):
+        await eval_worker._evaluate_issue(
+            base_runtime,
+            issue_data=_make_issue(repo_shas={"snapcraft": "a" * 40}),
+            worker_name="worker-1",
+            worker_index=1,
+        )
+
+    assert captured_on_step is not None
+    # Progress update must have received the tool step
+    descriptions = [
+        call.kwargs.get("description", "")
+        for call in base_runtime.progress.update.call_args_list
+    ]
+    assert any("git_log" in desc for desc in descriptions)

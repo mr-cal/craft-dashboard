@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from craft_dashboard.app import create_app
 from craft_dashboard.config import DashboardConfig
 from craft_dashboard.dependencies import get_db_session
@@ -22,7 +23,7 @@ from craft_dashboard.settings import Settings
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from tests.factories import make_evaluation, make_issue, make_project
+from tests.factories import make_eval_token, make_evaluation, make_issue, make_project
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -31,6 +32,13 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 _AUTH = {"Authorization": "Bearer test-eval-token"}
+
+
+@pytest.fixture(autouse=True)
+async def _seed_test_token(test_db_session: AsyncSession) -> None:
+    token = make_eval_token(raw_token="test-eval-token")
+    test_db_session.add(token)
+    await test_db_session.commit()
 
 
 async def _seed(session: AsyncSession, *entities: object) -> None:

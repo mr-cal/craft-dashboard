@@ -95,13 +95,25 @@ The collector implementation documents the Discourse endpoint choices in `craft_
 
 ## Run LLM evaluation
 
-Working directory: `$REPO`.
+Working directory: `$REPO` for repository commands, or any directory when using `uvx`.
+
+Check worker readiness and server connectivity:
+
+```bash
+uvx craft-eval status --server "$DASHBOARD_URL" --token "$EVAL_API_TOKEN"
+```
 
 Start the HTTP polling worker with configured environment variables:
 
 ```bash
 cd "$REPO"
 uv run scripts/run_llm.py evaluate
+```
+
+Or run directly with `uvx`:
+
+```bash
+uvx craft-eval evaluate --server "$DASHBOARD_URL" --token "$EVAL_API_TOKEN"
 ```
 
 Run a bounded batch:
@@ -125,6 +137,13 @@ cd "$REPO"
 uv run scripts/run_llm.py evaluate --llm-backend local
 ```
 
+Clear stored evaluations:
+
+```bash
+cd "$REPO"
+uv run scripts/run_llm.py clear --project snapcraft --yes
+```
+
 Production worker invocation:
 
 ```bash
@@ -134,10 +153,38 @@ ssh "$VPS_HOST" "podman exec -i $APP_CONTAINER $APP_PYTHON /app/scripts/run_llm.
 Check queue status:
 
 ```bash
-curl -fsS "$DASHBOARD_URL/api/eval/status"   -H "Authorization: Bearer $EVAL_API_TOKEN"
+curl -fsS "$DASHBOARD_URL/api/eval/status" \
+  -H "Authorization: Bearer $EVAL_API_TOKEN"
 ```
 
 See [reference.md](reference.md#llm-evaluation) for flags and required environment variables.
+
+## Manage evaluation API tokens
+
+Working directory: `$REPO`.
+
+Create a token for a coworker or worker:
+
+```bash
+cd "$REPO"
+uv run scripts/manage_eval_tokens.py create --id stormclanker --name "Stormclanker Worker" --permissions eval:write
+```
+
+List active tokens and evaluation counts:
+
+```bash
+cd "$REPO"
+uv run scripts/manage_eval_tokens.py list --stats
+```
+
+Revoke a token:
+
+```bash
+cd "$REPO"
+uv run scripts/manage_eval_tokens.py revoke --id stormclanker
+```
+
+Tokens can also be reviewed and revoked by authenticated administrators in `/admin/evaluations`.
 
 ## Staged evaluation rollout
 

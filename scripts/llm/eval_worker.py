@@ -34,6 +34,7 @@ from craft_dashboard.git_mirrors.paths import (
 from craft_dashboard.git_mirrors.sync import sync_mirror
 from craft_dashboard.llm.evaluator import (
     EvaluationDiscarded,  # noqa: F401 - re-exported for callers and tests
+    EvaluationStepEvent,
     IssueEvaluator,
 )
 from craft_dashboard.llm.exceptions import LLMQuotaError
@@ -42,13 +43,22 @@ from craft_dashboard.settings import Settings
 from rich.console import Console
 
 from scripts.eval_timing import PHASE_EVALUATE, TimingHistory
-from scripts.llm.console import format_elapsed, make_progress, setup_rich_logging
+from scripts.llm.console import (
+    add_worker_task,
+    format_elapsed,
+    make_progress,
+    setup_rich_logging,
+    update_worker_step,
+)
 from scripts.llm.eval_failures import classify_evaluation_error
 from scripts.llm.eval_http import (
     HTTP_CONFLICT,
+    HTTP_FORBIDDEN,
     HTTP_NO_CONTENT,
     HTTP_OK,
     HTTP_TOO_MANY,
+    HTTP_UNAUTHORIZED,
+    HTTP_UPGRADE_REQUIRED,
     fetch_project_orgs,
     format_error_body,
     log_queue_status,
@@ -82,9 +92,10 @@ from scripts.llm.worker_runtime import (
     start_keyboard_monitor,
     timed,
 )
+from scripts.llm.worker_version import get_worker_version
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable
+    from collections.abc import Awaitable, Callable
 
     from craft_dashboard.llm.client import LLMClient
 
@@ -280,6 +291,23 @@ async def _fetch_next_issue(
     elif response.status_code == HTTP_NO_CONTENT:
         logger.info("No work available, polling in %ds", runtime.poll_interval)
         sleep_seconds = runtime.poll_interval
+    elif response.status_code == HTTP_UPGRADE_REQUIRED:
+        detail = _format_error_body(response)
+        logger.error("Upgrade required (HTTP 426): %s. Halting worker.", detail)
+        shutdown_state["requested"] = True
+        return None
+    elif response.status_code == HTTP_UNAUTHORIZED:
+        logger.error(
+            "Authentication failed (HTTP 401): Invalid or revoked evaluation token. Halting worker."
+        )
+        shutdown_state["requested"] = True
+        return None
+    elif response.status_code == HTTP_FORBIDDEN:
+        logger.error(
+            "Forbidden (HTTP 403): Token lacks evaluation worker permissions. Halting worker."
+        )
+        shutdown_state["requested"] = True
+        return None
     elif response.status_code == HTTP_TOO_MANY:
         logger.warning(
             "Rate limited by server, backing off %ds", runtime.poll_interval * 6
@@ -315,13 +343,61 @@ async def _fetch_next_issue(
     return None
 
 
-def _install_eval_progress(runtime: _Runtime, *, issue_ref: str) -> None:
+def _notify_worker_step(
+    runtime: _Runtime,
+    *,
+    worker_index: int = 1,
+    worker_name: str = "worker-1",
+    step: str,
+    issue_ref: str | None = None,
+    reset_timer: bool = True,
+    log_milestone: bool = False,
+    elapsed: float | None = None,
+) -> None:
+    """Update a worker subtask description and optionally log a milestone line."""
+    worker_tasks = getattr(runtime, "worker_tasks", None) or {}
+    task_id = worker_tasks.get(worker_index)
+    if task_id is not None:
+        update_worker_step(
+            runtime.progress,
+            task_id,
+            worker_name=worker_name,
+            step=step,
+            issue_ref=issue_ref,
+            reset_timer=reset_timer,
+        )
+    else:
+        desc = f"[dim]{worker_name}:[/dim] {step}"
+        if issue_ref:
+            desc = f"[dim]{issue_ref} ({worker_name}):[/dim] {step}"
+        runtime.progress.update(runtime.overall_id, description=desc)
+
+    if log_milestone:
+        now_str = datetime.now(tz=UTC).strftime("%H:%M:%S")
+        elapsed_str = f" ({_format_elapsed(elapsed)})" if elapsed is not None else ""
+        issue_part = f" [cyan]{issue_ref}[/cyan]:" if issue_ref else ":"
+        runtime.progress.console.print(
+            f"[dim]{now_str}[/dim] [bold]{worker_name}[/bold]{issue_part} {step}{elapsed_str}"
+        )
+
+
+def _install_eval_progress(
+    runtime: _Runtime,
+    *,
+    issue_ref: str,
+    worker_name: str = "worker-1",
+    worker_index: int = 1,
+) -> None:
     """Route the LLM client's retry notifications into the progress bar."""
 
     def _on_eval_attempt(attempt: int, total: int, *, _ref: str = issue_ref) -> None:
-        runtime.progress.update(
-            runtime.overall_id,
-            description=f"[dim]{_ref}:[/dim] eval… ({attempt}/{total} attempts)",
+        _notify_worker_step(
+            runtime,
+            worker_index=worker_index,
+            worker_name=worker_name,
+            issue_ref=_ref,
+            step=f"eval attempt {attempt}/{total}…",
+            log_milestone=(attempt > 1),
         )
 
     runtime.client.retry_callback = _on_eval_attempt
@@ -333,6 +409,7 @@ def _start_evaluation(
     issue_data: dict[str, Any],
     state: str,
     tool_ctx: object,
+    on_step: Callable[[EvaluationStepEvent], None] | None = None,
 ) -> Awaitable[dict[str, Any] | None]:
     """Return the evaluator coroutine for one claimed issue."""
     author = issue_data.get("author") or ""
@@ -355,6 +432,7 @@ def _start_evaluation(
         project=issue_data["project_name"],
         external_id=issue_data.get("external_id"),
         tool_ctx=tool_ctx,
+        on_step=on_step,
     )
 
 
@@ -364,6 +442,7 @@ async def _submit_evaluation(
     issue_ref: str,
     worker_name: str,
     submission: dict[str, Any],
+    worker_index: int = 1,
 ) -> tuple[bool | None, str]:
     """POST a finished evaluation and map the response to an outcome.
 
@@ -372,9 +451,12 @@ async def _submit_evaluation(
     ``_evaluate_issue`` must return and the second is the release reason to
     record for the still-held claim.
     """
-    runtime.progress.update(
-        runtime.overall_id,
-        description=f"[dim]{issue_ref} ({worker_name}):[/dim] posting eval…",
+    _notify_worker_step(
+        runtime,
+        worker_index=worker_index,
+        worker_name=worker_name,
+        issue_ref=issue_ref,
+        step="submitting evaluation…",
     )
     submit_response = await _post_submission(
         runtime,
@@ -414,6 +496,8 @@ async def _record_completion(
     submission: dict[str, Any],
     started_at: float,
     evaluate_elapsed: float,
+    worker_name: str = "worker-1",
+    worker_index: int = 1,
 ) -> None:
     """Advance the run counters and print the one-line result summary."""
     completed = await runtime.state.complete(
@@ -436,6 +520,13 @@ async def _record_completion(
         f"  [dim]{submission['prompt_tokens']} in / {submission['completion_tokens']} out"
         f"  eval {_format_elapsed(evaluate_elapsed)}[/dim]"
     )
+    _notify_worker_step(
+        runtime,
+        worker_index=worker_index,
+        worker_name=worker_name,
+        step="idle",
+        reset_timer=False,
+    )
 
     if runtime.issue_limit > 0 and completed >= runtime.issue_limit:
         logger.info("Done: evaluated %d issues", runtime.issue_limit)
@@ -447,6 +538,7 @@ async def _evaluate_issue(
     *,
     issue_data: dict[str, Any],
     worker_name: str,
+    worker_index: int = 1,
 ) -> bool:
     """Evaluate one claimed issue, embed the summary, and submit the result."""
     warn_on_hash_mismatch(issue_data)
@@ -454,11 +546,20 @@ async def _evaluate_issue(
     issue_ref = issue_ref_for(issue_data)
     normalized_state = issue_data["state"].lower()
 
-    runtime.progress.update(
-        runtime.overall_id,
-        description=f"[dim]{issue_ref} ({worker_name}):[/dim] eval…",
+    _notify_worker_step(
+        runtime,
+        worker_index=worker_index,
+        worker_name=worker_name,
+        issue_ref=issue_ref,
+        step="evaluating…",
+        log_milestone=True,
     )
-    _install_eval_progress(runtime, issue_ref=issue_ref)
+    _install_eval_progress(
+        runtime,
+        issue_ref=issue_ref,
+        worker_name=worker_name,
+        worker_index=worker_index,
+    )
 
     started_at = time.monotonic()
     tool_ctx = build_tool_context(
@@ -468,6 +569,77 @@ async def _evaluate_issue(
         eval_server_base_url=runtime.eval_server_base_url,
         headers=runtime.headers,
     )
+
+    def _on_eval_step(event: EvaluationStepEvent) -> None:
+        round_info = (
+            f"round {event.round_num}/{event.max_rounds}: " if event.round_num else ""
+        )
+        if event.phase == "baseline":
+            _notify_worker_step(
+                runtime,
+                worker_index=worker_index,
+                worker_name=worker_name,
+                issue_ref=issue_ref,
+                step="building repo baseline…",
+                reset_timer=True,
+            )
+        elif event.phase == "baseline_done":
+            _notify_worker_step(
+                runtime,
+                worker_index=worker_index,
+                worker_name=worker_name,
+                issue_ref=issue_ref,
+                step="repo baseline ready",
+                elapsed=event.elapsed,
+                log_milestone=True,
+            )
+        elif event.phase == "llm_call":
+            _notify_worker_step(
+                runtime,
+                worker_index=worker_index,
+                worker_name=worker_name,
+                issue_ref=issue_ref,
+                step=f"{round_info}{event.detail}…",
+                reset_timer=True,
+            )
+        elif event.phase == "tool_start":
+            _notify_worker_step(
+                runtime,
+                worker_index=worker_index,
+                worker_name=worker_name,
+                issue_ref=issue_ref,
+                step=f"{round_info}tool {event.detail}…",
+                reset_timer=True,
+            )
+        elif event.phase == "tool_done":
+            _notify_worker_step(
+                runtime,
+                worker_index=worker_index,
+                worker_name=worker_name,
+                issue_ref=issue_ref,
+                step=f"{round_info}{event.detail}",
+                elapsed=event.elapsed,
+                log_milestone=True,
+            )
+        elif event.phase == "synthesis":
+            _notify_worker_step(
+                runtime,
+                worker_index=worker_index,
+                worker_name=worker_name,
+                issue_ref=issue_ref,
+                step=f"{round_info}synthesizing evaluation…",
+                reset_timer=True,
+                log_milestone=True,
+            )
+        elif event.phase == "tool_delay":
+            _notify_worker_step(
+                runtime,
+                worker_index=worker_index,
+                worker_name=worker_name,
+                issue_ref=issue_ref,
+                step=f"tool delay: {event.detail}…",
+                reset_timer=True,
+            )
 
     submitted = False
     release_reason = "evaluation_incomplete"
@@ -481,10 +653,18 @@ async def _evaluate_issue(
                     issue_data=issue_data,
                     state=normalized_state,
                     tool_ctx=tool_ctx,
+                    on_step=_on_eval_step,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - one bad issue must not stop the worker
-            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            _notify_worker_step(
+                runtime,
+                worker_index=worker_index,
+                worker_name=worker_name,
+                issue_ref=issue_ref,
+                step=f"evaluation error ({exc})",
+                log_milestone=True,
+            )
             failure = classify_evaluation_error(
                 exc,
                 issue_ref=issue_ref,
@@ -505,10 +685,24 @@ async def _evaluate_issue(
             await _release_and_maybe_stop(runtime)
             return True
 
+        _notify_worker_step(
+            runtime,
+            worker_index=worker_index,
+            worker_name=worker_name,
+            issue_ref=issue_ref,
+            step="validating output…",
+        )
         try:
             validate_result(result, issue_data=issue_data, state=normalized_state)
         except LLMValidationError as exc:
-            runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+            _notify_worker_step(
+                runtime,
+                worker_index=worker_index,
+                worker_name=worker_name,
+                issue_ref=issue_ref,
+                step="evaluation validation failed",
+                log_milestone=True,
+            )
             logger.warning(
                 "%s: evaluation discarded (validation failed: %s); "
                 "releasing claim, submitting nothing",
@@ -531,6 +725,7 @@ async def _evaluate_issue(
             runtime,
             issue_ref=issue_ref,
             worker_name=worker_name,
+            worker_index=worker_index,
             submission=submission,
         )
         if outcome is not None:
@@ -546,11 +741,20 @@ async def _evaluate_issue(
                 issue_ref=issue_ref,
                 reason=release_reason,
             )
+            _notify_worker_step(
+                runtime,
+                worker_index=worker_index,
+                worker_name=worker_name,
+                step="idle",
+                reset_timer=False,
+            )
 
     await _record_completion(
         runtime,
         issue_data=issue_data,
         issue_ref=issue_ref,
+        worker_name=worker_name,
+        worker_index=worker_index,
         submission=submission,
         started_at=started_at,
         evaluate_elapsed=evaluate_elapsed,
@@ -563,12 +767,17 @@ async def _run_issue_preflight(
     *,
     issue_data: dict[str, Any],
     worker_name: str,
+    worker_index: int = 1,
 ) -> bool:
     """Return whether a claimed issue passed preflight."""
     issue_ref = issue_ref_for(issue_data)
-    runtime.progress.update(
-        runtime.overall_id,
-        description=f"[dim]{issue_ref} ({worker_name}):[/dim] preflight…",
+    _notify_worker_step(
+        runtime,
+        worker_index=worker_index,
+        worker_name=worker_name,
+        issue_ref=issue_ref,
+        step="preflight check…",
+        reset_timer=True,
     )
 
     async def _sync_claimed_repo(project: str) -> bool:
@@ -620,7 +829,14 @@ async def _run_issue_preflight(
         issue_ref,
         result.reason,
     )
-    runtime.progress.update(runtime.overall_id, description="Evaluating issues")
+    _notify_worker_step(
+        runtime,
+        worker_index=worker_index,
+        worker_name=worker_name,
+        issue_ref=issue_ref,
+        step=f"preflight blocked ({result.reason})",
+        log_milestone=True,
+    )
     await _release_and_maybe_stop(runtime)
     # A released claim is immediately re-offered by ``/next``, so without a
     # backoff here a persistent preflight failure (e.g. the embedding
@@ -631,7 +847,12 @@ async def _run_issue_preflight(
     return False
 
 
-async def _pace_after_success(runtime: _Runtime) -> None:
+async def _pace_after_success(
+    runtime: _Runtime,
+    *,
+    worker_name: str = "worker-1",
+    worker_index: int = 1,
+) -> None:
     """Sleep a randomised pacing delay between evaluations in slow-eval mode."""
     if (
         runtime.slow_eval
@@ -639,11 +860,21 @@ async def _pace_after_success(runtime: _Runtime) -> None:
         and (runtime.issue_limit <= 0 or runtime.state.evaluated < runtime.issue_limit)
     ):
         delay = secrets.SystemRandom().uniform(runtime.min_delay, runtime.max_delay)
-        runtime.progress.update(
-            runtime.overall_id,
-            description=f"[dim]Pacing delay: sleeping {delay:.1f}s…[/dim]",
+        _notify_worker_step(
+            runtime,
+            worker_index=worker_index,
+            worker_name=worker_name,
+            step=f"pacing delay ({delay:.1f}s remaining)…",
+            reset_timer=True,
         )
         await _sleep_until_next_poll(delay)
+        _notify_worker_step(
+            runtime,
+            worker_index=worker_index,
+            worker_name=worker_name,
+            step="idle",
+            reset_timer=False,
+        )
 
 
 async def _worker_loop(
@@ -653,31 +884,64 @@ async def _worker_loop(
     worker_name = f"worker-{worker_index}"
     while not shutdown_state["requested"]:
         if paused_state["paused"]:
+            _notify_worker_step(
+                runtime,
+                worker_index=worker_index,
+                worker_name=worker_name,
+                step="paused",
+                reset_timer=False,
+            )
             await asyncio.sleep(0.5)
             continue
         if not await runtime.state.reserve():
             return
 
-        runtime.progress.update(
-            runtime.overall_id, description=f"{worker_name}: getting issue…"
+        _notify_worker_step(
+            runtime,
+            worker_index=worker_index,
+            worker_name=worker_name,
+            step="getting issue…",
+            reset_timer=True,
         )
         issue_data = await _fetch_next_issue(runtime, server_url=server_url)
         if issue_data is None:
+            _notify_worker_step(
+                runtime,
+                worker_index=worker_index,
+                worker_name=worker_name,
+                step="idle (no work)",
+                reset_timer=False,
+            )
             continue
         if not await _run_issue_preflight(
             runtime,
             issue_data=issue_data,
             worker_name=worker_name,
+            worker_index=worker_index,
         ):
             continue
         success = await _evaluate_issue(
-            runtime, issue_data=issue_data, worker_name=worker_name
+            runtime,
+            issue_data=issue_data,
+            worker_name=worker_name,
+            worker_index=worker_index,
         )
         if not success:
             if not shutdown_state["requested"]:
+                _notify_worker_step(
+                    runtime,
+                    worker_index=worker_index,
+                    worker_name=worker_name,
+                    step=f"backing off ({_FAILURE_BACKOFF_SECONDS}s)…",
+                    reset_timer=True,
+                )
                 await _sleep_until_next_poll(_FAILURE_BACKOFF_SECONDS)
             continue
-        await _pace_after_success(runtime)
+        await _pace_after_success(
+            runtime,
+            worker_name=worker_name,
+            worker_index=worker_index,
+        )
 
 
 def _reset_process_state() -> None:
@@ -778,7 +1042,10 @@ async def run_evaluate_loop(
 
     server_url = server.rstrip("/")
     verify = resolve_server_verify(server_ca_cert)
-    headers = {"Authorization": "Bearer " + token}
+    headers = {
+        "Authorization": "Bearer " + token,
+        "X-Worker-Version": get_worker_version(),
+    }
     params = build_queue_params(
         project=project,
         open_only=open_only,
@@ -859,6 +1126,10 @@ async def run_evaluate_loop(
             state = _RunState(limit=limit)
             with progress:
                 overall_id = progress.add_task("Evaluating issues", total=task_total)
+                worker_tasks = {
+                    index: add_worker_task(progress, index)
+                    for index in range(1, concurrency + 1)
+                }
                 runtime = _Runtime(
                     client=llm_client,
                     evaluator=evaluator,
@@ -867,6 +1138,7 @@ async def run_evaluate_loop(
                     params=params,
                     progress=progress,
                     overall_id=overall_id,
+                    worker_tasks=worker_tasks,
                     timing=timing,
                     state=state,
                     poll_interval=poll_interval,

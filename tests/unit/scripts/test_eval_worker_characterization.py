@@ -460,5 +460,7 @@ async def test_run_evaluate_loop_passes_filters_concurrency_and_issue_limit_to_r
     # NOTE: looks suspect -- targeted issue runs force limit=1 but do not pass
     # single_issue=True into _Runtime, despite _Runtime documenting that mode.
     assert runtime.single_issue is False
-    assert progress.add_task.call_args.kwargs["total"] == 1
+    # First task is the overall progress bar; subsequent tasks are per-worker lines
+    assert progress.add_task.call_args_list[0].kwargs["total"] == 1
+    assert len(progress.add_task.call_args_list) == 1 + 3
     client.close.assert_awaited_once()

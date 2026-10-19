@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from rich.logging import RichHandler
 from rich.progress import (
@@ -105,6 +106,68 @@ def format_elapsed(seconds: float) -> str:
     return f"{minutes}m{remaining:02d}s"
 
 
+class ConditionalBarColumn(BarColumn):
+    """Bar column that renders only for overall tasks, not worker subtasks."""
+
+    def render(self, task: RichTask) -> Text:
+        """Render progress bar for overall task, blank for worker subtasks."""
+        if task.fields.get("is_worker"):
+            return Text("")
+        return super().render(task)
+
+
+class ConditionalTaskProgressColumn(TaskProgressColumn):
+    """Percentage column that renders only for overall tasks."""
+
+    def render(self, task: RichTask) -> Text:
+        """Render completion percentage for overall task, blank for worker subtasks."""
+        if task.fields.get("is_worker"):
+            return Text("")
+        return super().render(task)
+
+
+class ConditionalMofNCompleteColumn(MofNCompleteColumn):
+    """M of N column that renders only for overall tasks."""
+
+    def render(self, task: RichTask) -> Text:
+        """Render M of N count for overall task, blank for worker subtasks."""
+        if task.fields.get("is_worker"):
+            return Text("")
+        return super().render(task)
+
+
+class ConditionalTimeElapsedColumn(TimeElapsedColumn):
+    """Time elapsed column that renders only for overall tasks."""
+
+    def render(self, task: RichTask) -> Text:
+        """Render elapsed time for overall task, blank for worker subtasks."""
+        if task.fields.get("is_worker"):
+            return Text("")
+        return super().render(task)
+
+
+class ConditionalTimeRemainingColumn(TimeRemainingColumn):
+    """Time remaining column that renders only for overall tasks."""
+
+    def render(self, task: RichTask) -> Text:
+        """Render remaining time for overall task, blank for worker subtasks."""
+        if task.fields.get("is_worker"):
+            return Text("")
+        return super().render(task)
+
+
+class StepElapsedColumn(ProgressColumn):
+    """Elapsed time column for active worker steps."""
+
+    def render(self, task: RichTask) -> Text:
+        """Render elapsed step duration for worker subtasks."""
+        started_at = task.fields.get("step_started_at")
+        if not started_at or not task.fields.get("is_worker"):
+            return Text("")
+        elapsed = max(0.0, time.monotonic() - float(started_at))
+        return Text(f"[{format_elapsed(elapsed)}]", style="dim cyan")
+
+
 class TimingEtaColumn(ProgressColumn):
     """ETA column backed by persistent :class:`TimingHistory`.
 
@@ -137,6 +200,8 @@ class TimingEtaColumn(ProgressColumn):
 
     def render(self, task: RichTask) -> Text:
         """Render the ETA for the given Rich task."""
+        if task.fields.get("is_worker"):
+            return Text("")
         if task.finished:
             return Text("—")
         if task.total is None:
@@ -170,19 +235,59 @@ def make_progress(
     eta_col: ProgressColumn = (
         TimingEtaColumn(timing, phase, concurrency)
         if timing is not None and phase is not None
-        else TimeRemainingColumn()
+        else ConditionalTimeRemainingColumn()
     )
     return Progress(
         SpinnerColumn(),
-        TextColumn("[bold]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        MofNCompleteColumn(),
+        TextColumn("{task.description}"),
+        ConditionalBarColumn(),
+        ConditionalTaskProgressColumn(),
+        ConditionalMofNCompleteColumn(),
         eta_col,
-        TimeElapsedColumn(),
+        ConditionalTimeElapsedColumn(),
+        StepElapsedColumn(),
         console=console,
         transient=False,
     )
+
+
+def add_worker_task(
+    progress: Progress,
+    worker_index: int,
+    *,
+    worker_name: str | None = None,
+) -> TaskID:
+    """Add a persistent indeterminate subtask for one evaluation worker."""
+    name = worker_name or f"worker-{worker_index}"
+    return progress.add_task(
+        f"  [dim]{name}:[/dim] idle",
+        total=None,
+        is_worker=True,
+        worker_index=worker_index,
+        worker_name=name,
+        step_started_at=None,
+    )
+
+
+def update_worker_step(
+    progress: Progress,
+    task_id: TaskID,
+    *,
+    worker_name: str,
+    step: str,
+    issue_ref: str | None = None,
+    reset_timer: bool = True,
+) -> None:
+    """Update a worker subtask description and optionally reset its step timer."""
+    prefix = f"  [dim]{worker_name}:[/dim]"
+    if issue_ref:
+        desc = f"{prefix} [cyan]{issue_ref}[/cyan] | {step}"
+    else:
+        desc = f"{prefix} {step}"
+    kwargs: dict[str, Any] = {"description": desc}
+    if reset_timer:
+        kwargs["step_started_at"] = time.monotonic()
+    progress.update(task_id, **kwargs)
 
 
 class ProgressTracker:

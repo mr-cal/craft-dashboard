@@ -4,6 +4,9 @@ import asyncio
 import hashlib
 import json
 import logging
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, TypedDict
 
 from sqlalchemy import and_, case, or_
@@ -153,6 +156,62 @@ class EvaluationResult(TypedDict):
     issue_data_hash: str
     related_work: list[dict[str, Any]]
     transcript: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class EvaluationStepEvent:
+    """Event emitted at key milestones during issue evaluation."""
+
+    phase: str
+    round_num: int | None = None
+    max_rounds: int | None = None
+    tool_name: str | None = None
+    tool_args: dict[str, Any] | None = None
+    detail: str = ""
+    elapsed: float | None = None
+
+
+def format_tool_args_compact(args: dict[str, Any] | None, *, max_len: int = 40) -> str:
+    """Format tool arguments into a compact, human-readable string."""
+    if not args:
+        return ""
+    priority_keys = [
+        "query",
+        "pattern",
+        "path",
+        "symbol",
+        "commit_sha",
+        "ref",
+        "repo",
+        "repos",
+        "pickaxe",
+        "start_line",
+        "end_line",
+        "max_count",
+    ]
+    seen = set()
+    parts: list[str] = []
+    max_list_items = 2
+
+    def _fmt_val(val: object) -> str:
+        if isinstance(val, str):
+            if len(val) > max_len:
+                return json.dumps(val[: max_len - 3] + "...")
+            return json.dumps(val)
+        if isinstance(val, list):
+            if len(val) > max_list_items:
+                return f"[{', '.join(repr(x) for x in val[:max_list_items])}, +{len(val) - max_list_items} more]"
+            return json.dumps(val)
+        return str(val)
+
+    for k in priority_keys:
+        if k in args:
+            seen.add(k)
+            parts.append(f"{k}={_fmt_val(args[k])}")
+    for k, v in args.items():
+        if k not in seen:
+            parts.append(f"{k}={_fmt_val(v)}")
+    return ", ".join(parts)
 
 
 def _needs_reevaluation(
@@ -343,6 +402,7 @@ class IssueEvaluator:
         model_summary: str = "google/gemini-flash-1.5",
         model_scoring: str = "google/gemini-flash-1.5",
         tool_call_delay: float = 0.0,
+        on_step: Callable[[EvaluationStepEvent], None] | None = None,
     ) -> None:
         """Initialize the evaluator.
 
@@ -351,12 +411,14 @@ class IssueEvaluator:
             model_summary: Model used for closed/merged summary-only calls.
             model_scoring: Model used for open-item scoring/tool-calling calls.
             tool_call_delay: Delay in seconds to wait before subsequent tool-calling rounds.
+            on_step: Optional callback receiving EvaluationStepEvent milestones.
 
         """
         self.client = client
         self.model_summary = model_summary
         self.model_scoring = model_scoring
         self.tool_call_delay = tool_call_delay
+        self.on_step = on_step
         self._tool_ctx: ToolContext | None = None
 
     async def evaluate(
@@ -379,6 +441,7 @@ class IssueEvaluator:
         project: str | None = None,
         external_id: str | int | None = None,
         tool_ctx: ToolContext | None = None,
+        on_step: Callable[[EvaluationStepEvent], None] | None = None,
     ) -> EvaluationResult | None:
         """Evaluate a single issue or PR.
 
@@ -403,6 +466,7 @@ class IssueEvaluator:
             return None
 
         logger.debug("Evaluating: %s", title)
+        step_callback = on_step or self.on_step
 
         if normalized_state in {"closed", "merged"}:
             return await self._evaluate_closed(
@@ -423,6 +487,7 @@ class IssueEvaluator:
                 project=project,
                 external_id=external_id,
                 tool_ctx=tool_ctx,
+                on_step=step_callback,
             )
 
         return await self._evaluate_open(
@@ -443,6 +508,7 @@ class IssueEvaluator:
             project=project,
             external_id=external_id,
             tool_ctx=tool_ctx,
+            on_step=step_callback,
         )
 
     async def _evaluate_closed(
@@ -465,6 +531,7 @@ class IssueEvaluator:
         project: str | None = None,
         external_id: str | int | None = None,
         tool_ctx: ToolContext | None = None,
+        on_step: Callable[[EvaluationStepEvent], None] | None = None,
     ) -> EvaluationResult:
         """Evaluate a closed issue or merged PR."""
         messages = build_closed_evaluate_prompt(
@@ -491,14 +558,32 @@ class IssueEvaluator:
                 messages,
                 model=self.model_summary,
                 max_rounds=MAX_CLOSED_TOOL_ROUNDS,
+                on_step=on_step,
             )
         else:
+            if on_step is not None:
+                on_step(
+                    EvaluationStepEvent(
+                        phase="llm_call",
+                        detail=f"calling {self.model_summary}",
+                    )
+                )
+            t0 = time.monotonic()
             response = await self.client.complete(
                 model=self.model_summary,
                 messages=messages,
                 max_tokens=MAX_EVAL_TOKENS,
                 response_format={"type": "json_object"},
             )
+            llm_elapsed = time.monotonic() - t0
+            if on_step is not None:
+                on_step(
+                    EvaluationStepEvent(
+                        phase="synthesis",
+                        detail=f"response received ({response.completion_tokens} tokens)",
+                        elapsed=llm_elapsed,
+                    )
+                )
             parsed = _parse_evaluation_response(response.content)
 
         if parsed is None or not (parsed.get("summary") or "").strip():
@@ -549,6 +634,7 @@ class IssueEvaluator:
         project: str | None = None,
         external_id: str | int | None = None,
         tool_ctx: ToolContext | None = None,
+        on_step: Callable[[EvaluationStepEvent], None] | None = None,
     ) -> EvaluationResult:
         """Evaluate an open issue or PR."""
         messages = build_open_evaluate_prompt(
@@ -571,12 +657,29 @@ class IssueEvaluator:
         transcript = None
         if project and tool_ctx:
             self._tool_ctx = tool_ctx
+            if on_step is not None:
+                on_step(
+                    EvaluationStepEvent(
+                        phase="baseline",
+                        detail="building repository baseline context",
+                    )
+                )
+            t0 = time.monotonic()
             try:
                 baseline = await build_round1_baseline(
                     tool_ctx, project=project, title=title, body=body
                 )
             except BaselineError as exc:
                 raise EvaluationDiscarded(str(exc)) from exc
+            base_elapsed = time.monotonic() - t0
+            if on_step is not None:
+                on_step(
+                    EvaluationStepEvent(
+                        phase="baseline_done",
+                        detail="repository baseline context built",
+                        elapsed=base_elapsed,
+                    )
+                )
             messages.append(
                 {
                     "role": "user",
@@ -591,14 +694,32 @@ class IssueEvaluator:
                 messages,
                 model=self.model_scoring,
                 max_rounds=MAX_TOOL_ROUNDS,
+                on_step=on_step,
             )
         else:
+            if on_step is not None:
+                on_step(
+                    EvaluationStepEvent(
+                        phase="llm_call",
+                        detail=f"calling {self.model_scoring}",
+                    )
+                )
+            t0 = time.monotonic()
             response = await self.client.complete(
                 model=self.model_scoring,
                 messages=messages,
                 max_tokens=MAX_EVAL_TOKENS,
                 response_format={"type": "json_object"},
             )
+            llm_elapsed = time.monotonic() - t0
+            if on_step is not None:
+                on_step(
+                    EvaluationStepEvent(
+                        phase="synthesis",
+                        detail=f"response received ({response.completion_tokens} tokens)",
+                        elapsed=llm_elapsed,
+                    )
+                )
             parsed = _parse_evaluation_response(response.content)
 
         if parsed is None or not (parsed.get("summary") or "").strip():
@@ -659,6 +780,7 @@ class IssueEvaluator:
         messages: list[dict[str, Any]],
         model: str | None = None,
         max_rounds: int = MAX_TOOL_ROUNDS,
+        on_step: Callable[[EvaluationStepEvent], None] | None = None,
     ) -> tuple[ParsedEvaluation | None, Any, dict[str, Any]]:
         """Run the bounded tool-calling loop for issue/PR evaluation."""
         if self._tool_ctx is None:  # pragma: no cover
@@ -678,6 +800,16 @@ class IssueEvaluator:
                     "Pacing intra-issue tool turns: sleeping %.1fs...",
                     self.tool_call_delay,
                 )
+                if on_step is not None:
+                    on_step(
+                        EvaluationStepEvent(
+                            phase="tool_delay",
+                            round_num=_round_number,
+                            max_rounds=max_rounds,
+                            detail=f"sleeping {self.tool_call_delay:.1f}s",
+                            elapsed=self.tool_call_delay,
+                        )
+                    )
                 await asyncio.sleep(self.tool_call_delay)
 
             logger.debug(
@@ -687,6 +819,16 @@ class IssueEvaluator:
                 active_model,
                 MAX_EVAL_TOKENS,
             )
+            if on_step is not None:
+                on_step(
+                    EvaluationStepEvent(
+                        phase="llm_call",
+                        round_num=_round_number,
+                        max_rounds=max_rounds,
+                        detail=f"calling {active_model}",
+                    )
+                )
+            t_llm = time.monotonic()
             response = await self.client.complete(
                 model=active_model,
                 messages=messages,
@@ -694,6 +836,17 @@ class IssueEvaluator:
                 tools=TOOL_SCHEMAS,
                 tool_choice="auto",
             )
+            llm_elapsed = time.monotonic() - t_llm
+            if on_step is not None:
+                on_step(
+                    EvaluationStepEvent(
+                        phase="llm_done",
+                        round_num=_round_number,
+                        max_rounds=max_rounds,
+                        detail=f"response received ({response.completion_tokens} tokens)",
+                        elapsed=llm_elapsed,
+                    )
+                )
             total_tokens += response.total_tokens
             total_prompt_tokens += response.prompt_tokens
             total_completion_tokens += response.completion_tokens
@@ -714,6 +867,16 @@ class IssueEvaluator:
                     response.completion_tokens,
                     response.finish_reason,
                 )
+                if on_step is not None:
+                    on_step(
+                        EvaluationStepEvent(
+                            phase="synthesis",
+                            round_num=_round_number,
+                            max_rounds=max_rounds,
+                            detail=f"final response received ({response.completion_tokens} tokens)",
+                            elapsed=llm_elapsed,
+                        )
+                    )
                 response.total_tokens = total_tokens
                 response.prompt_tokens = total_prompt_tokens
                 response.completion_tokens = total_completion_tokens
@@ -754,6 +917,22 @@ class IssueEvaluator:
                     arguments = json.loads(arguments_raw)
                 except json.JSONDecodeError:
                     arguments = {}
+                formatted_args = format_tool_args_compact(arguments)
+                tool_repr = (
+                    f"{name}({formatted_args})" if formatted_args else f"{name}()"
+                )
+                if on_step is not None:
+                    on_step(
+                        EvaluationStepEvent(
+                            phase="tool_start",
+                            round_num=_round_number,
+                            max_rounds=max_rounds,
+                            tool_name=name,
+                            tool_args=arguments,
+                            detail=tool_repr,
+                        )
+                    )
+                t_tool = time.monotonic()
                 try:
                     result = await dispatch_tool_call(
                         self._tool_ctx, name=name, arguments=arguments
@@ -762,10 +941,23 @@ class IssueEvaluator:
                     raise EvaluationDiscarded(
                         f"tool {name!r} failed after preflight: {exc}"
                     ) from exc
+                tool_elapsed = time.monotonic() - t_tool
                 result_bytes = result.encode("utf-8", errors="replace")
                 truncated = result_bytes[:TOOL_RESULT_MAX_BYTES].decode(
                     "utf-8", errors="replace"
                 )
+                if on_step is not None:
+                    on_step(
+                        EvaluationStepEvent(
+                            phase="tool_done",
+                            round_num=_round_number,
+                            max_rounds=max_rounds,
+                            tool_name=name,
+                            tool_args=arguments,
+                            detail=f"{name} completed ({len(result_bytes)} bytes)",
+                            elapsed=tool_elapsed,
+                        )
+                    )
                 rounds.append(
                     {
                         "tool": name,
@@ -792,6 +984,15 @@ class IssueEvaluator:
             max_rounds,
             total_tokens,
         )
+        if on_step is not None:
+            on_step(
+                EvaluationStepEvent(
+                    phase="limit_reached",
+                    round_num=max_rounds,
+                    max_rounds=max_rounds,
+                    detail="tool limit reached; requesting final JSON",
+                )
+            )
         if self.tool_call_delay > 0:
             logger.debug(
                 "Pacing intra-issue tool turns: sleeping %.1fs before final response...",
@@ -808,6 +1009,7 @@ class IssueEvaluator:
                 ),
             }
         )
+        t_final = time.monotonic()
         response = await self.client.complete(
             model=active_model,
             messages=messages,
@@ -815,6 +1017,17 @@ class IssueEvaluator:
             tool_choice="none",
             response_format={"type": "json_object"},
         )
+        final_elapsed = time.monotonic() - t_final
+        if on_step is not None:
+            on_step(
+                EvaluationStepEvent(
+                    phase="synthesis",
+                    round_num=max_rounds,
+                    max_rounds=max_rounds,
+                    detail=f"final response received ({response.completion_tokens} tokens)",
+                    elapsed=final_elapsed,
+                )
+            )
         total_tokens += response.total_tokens
         total_prompt_tokens += response.prompt_tokens
         total_completion_tokens += response.completion_tokens

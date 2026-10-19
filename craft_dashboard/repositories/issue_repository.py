@@ -153,6 +153,7 @@ def _serialize_evaluation(evaluation: LLMEvaluation) -> dict[str, Any]:
         "eval_version": evaluation.eval_version,
         "issue_data_hash": evaluation.issue_data_hash,
         "evidence_generation": evaluation.evidence_generation,
+        "evaluated_by": evaluation.evaluated_by,
     }
 
 

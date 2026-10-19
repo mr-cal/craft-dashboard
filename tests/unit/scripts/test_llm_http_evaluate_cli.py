@@ -16,10 +16,9 @@ def test_help_lists_http_evaluate_options() -> None:
     result = runner.invoke(cli, ["evaluate", "--help"])
 
     assert result.exit_code == 0
-    assert "--server" not in result.output
-    assert "--token" not in result.output
-    assert "--ca-cert" not in result.output
-    assert "--server-ca-cert" not in result.output
+    assert "--server" in result.output
+    assert "--token" in result.output
+    assert "--ca-cert" in result.output
     assert "--interval" in result.output
     assert "--concurrency" in result.output
     assert "--log" in result.output
