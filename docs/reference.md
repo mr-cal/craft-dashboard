@@ -100,35 +100,41 @@ The LLM worker also reads these variables in `scripts/llm/cli.py`:
 
 ### `craft-dashboard`
 
-| Command | Options |
+Run `<command> --help` for options.
+
+| Command | Purpose |
 |---|---|
-| `craft-dashboard serve` | `--host`, `--port`, `--reload` |
-| `craft-dashboard collect` | `--source github|launchpad|all`, `--config-file`, `--limit`, `--verbose` |
-| `craft-dashboard mirrors sync` | `--config-file` |
-| `craft-dashboard commit-scanner run` | `--config-file`, `--dry-run`, `--top-k`, `--threshold` |
+| `craft-dashboard serve` | Start the web application. |
+| `craft-dashboard collect` | Collect issue, PR, and release data. |
+| `craft-dashboard mirrors sync` | Clone or update bare git mirrors. |
+| `craft-dashboard commit-scanner run` | Scan commits to invalidate stale evaluations. |
 
 ### Data collection
 
-| Script | Options |
+Run `<script> --help` for options.
+
+| Script | Purpose |
 |---|---|
-| `scripts/collect_data.py` | `--source github|launchpad|all`, `--limit`, repeatable `--project`, `--verbose`/`-v`, `--full-refresh`, `--force-schedule`, `--mode open|full|all|rotation` |
-| `scripts/collect_forum_data.py` | `--mode backfill|refresh|all`, repeatable `--forum`, `--refresh-interval-days`, `--years-lookback`, `--max-requests-per-batch`, `--verbose`/`-v` |
-| `scripts/backfill_snapshots.py` | No Click options. Uses `DATABASE_URL`. |
-| `scripts/gc.py` | `--dry-run` reports what each retention policy would remove. |
+| `scripts/collect_data.py` | Collect GitHub and Launchpad issues and pull requests. |
+| `scripts/collect_forum_data.py` | Collect Discourse forum posts and topics. |
+| `scripts/backfill_snapshots.py` | Backfill daily metrics snapshots from issue history. |
+| `scripts/gc.py` | Clean up superseded transcripts and historical evaluations. |
 | `scripts/gc_transcripts.py` | Compatibility alias for `scripts/gc.py`. |
-| `scripts/lp_bug_report.py` | No Click options. Uses `DATABASE_URL`. |
+| `scripts/lp_bug_report.py` | Generate Launchpad bug reports. |
 
 ### LLM evaluation
 
-| Command | Options |
+Run `<command> --help` for options.
+
+| Command | Purpose |
 |---|---|
-| `craft-dashboard eval run` / `scripts/run_llm.py evaluate` | `--server`, `--token`, `--ca-cert`, `--env-file`, `--interval`, `--limit`/`--max-evaluations`, `--project`, `--open-only`, `--force`, `--incomplete`, `--stale-days`, `--issue`, `--concurrency`, `--llm-backend openrouter|local|copilot-acp`, `--verbose`, `--log`, `--slow-eval`, `--min-delay`, `--max-delay`, `--tool-delay` |
-| `craft-dashboard eval status` / `scripts/run_llm.py status` | `--server`, `--token`, `--ca-cert`, `--env-file`, `--llm-backend` |
-| `craft-dashboard eval clear` / `scripts/run_llm.py clear-evaluations` | `--server`, `--token`, `--ca-cert`, `--env-file`, `--project`, `--issue`, `--evaluated-by`, `--stale-days`, `--incomplete`, `--yes` |
-| `scripts/llm/canary.py` | `--server`, `--token`, repeatable `--issue`, `--model-summary`, `--model-scoring`, `--openrouter-api-key`, `--llm-backend openrouter|local`, `--timeout-seconds` |
-| `scripts/manage_eval_tokens.py create` | `--id`, `--name`, `--permissions` |
-| `scripts/manage_eval_tokens.py list` | `--stats` |
-| `scripts/manage_eval_tokens.py revoke` | `--id` |
+| `craft-dashboard eval run` / `scripts/run_llm.py evaluate` | Continuous HTTP evaluation worker. |
+| `craft-dashboard eval status` / `scripts/run_llm.py status` | Check worker connectivity and queue status. |
+| `craft-dashboard eval clear` / `scripts/run_llm.py clear-evaluations` | Delete stored evaluations by project or filter. |
+| `scripts/llm/canary.py` | Canary evaluation for specific issues. |
+| `scripts/manage_eval_tokens.py create` | Create an evaluation bearer token. |
+| `scripts/manage_eval_tokens.py list` | List evaluation bearer tokens and stats. |
+| `scripts/manage_eval_tokens.py revoke` | Revoke an evaluation bearer token. |
 
 ## Cron schedule
 

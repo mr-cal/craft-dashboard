@@ -167,7 +167,7 @@ Create a token for a coworker or worker:
 
 ```bash
 cd "$REPO"
-uv run scripts/manage_eval_tokens.py create --id stormclanker --name "Stormclanker Worker" --permissions eval:write
+uv run scripts/manage_eval_tokens.py create --id stormclanker --name "Stormclanker Worker"
 ```
 
 List active tokens and evaluation counts:
