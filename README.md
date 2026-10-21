@@ -46,8 +46,8 @@ EVAL_API_TOKEN=<token>
 
 # Local OpenAI-compatible server:
 LLM_BASE_URL=http://localhost:11434/v1
-LLM_API_KEY=none
-LLM_MODEL=qwen2.5:72b
+LLM_API_KEY=...
+LLM_MODEL=qwen/qwen3.8-27b
 
 # Or OpenRouter:
 # LLM_BASE_URL=https://openrouter.ai/api/v1
