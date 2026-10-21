@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from launchpadlib.launchpad import Launchpad
     from lazr.restfulclient.resource import Entry
 
+from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from craft_dashboard.collectors import ISSUE_UPSERT_FIELDS
@@ -249,7 +250,7 @@ class LaunchpadCollector:
                 if existing is not None and hasattr(existing, "one_or_none")
                 else None
             )
-            if existing_row and isinstance(existing_row, (tuple, list)):
+            if existing_row and isinstance(existing_row, (Row, tuple, list)):
                 last_fetched_item, previous_closed_at, previous_hash = existing_row
             else:
                 last_fetched_item, previous_closed_at, previous_hash = None, None, None

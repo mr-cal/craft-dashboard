@@ -10,6 +10,7 @@ from craft_dashboard.collectors.launchpad import (
     _map_lp_status,
 )
 from craft_dashboard.llm.content_hash import compute_content_hash
+from sqlalchemy import create_engine, text
 
 
 class TestMapLpStatus:
@@ -828,3 +829,20 @@ class TestCollectBugsIssueActivity:
 
         assert len(activities) == 1
         assert activities[0].change_type == "updated"
+
+    async def test_no_activity_when_existing_is_sqlalchemy_row(self, mocker) -> None:
+        """SQLAlchemy Row objects (which do not inherit from tuple) unpack correctly."""
+        unchanged_hash = compute_content_hash(
+            "Activity test bug", "Test description", "open", [], comments=[]
+        )
+        engine = create_engine("sqlite:///:memory:")
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT '2024-01-01T00:00:00+00:00' AS last_fetched_at, NULL AS closed_at, :h AS content_hash"
+                ),
+                {"h": unchanged_hash},
+            ).one()
+
+        activities = await self._run_with_existing(mocker, row)
+        assert activities == []
