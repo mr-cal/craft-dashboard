@@ -16,6 +16,9 @@ export ADMIN_TOKEN=<admin-token>
 export EVAL_API_TOKEN=<eval-api-token>
 export BACKUP_FILE=<path-to-backup.sql.gz>
 export VPS_INFRA=<path-to-your-vps-infra-checkout>
+
+# Helper function to run scripts inside the production app container:
+vps_exec() { ssh "$VPS_HOST" "podman exec -i $APP_CONTAINER $APP_PYTHON /app/$*"; }
 ```
 
 Use the live values from `.env.llm`, `.env`, or the VPS environment. Do not paste hosts, IP addresses, or container names into commands; update the variables.
@@ -48,13 +51,13 @@ podman compose exec -T app python scripts/collect_data.py --source all --mode al
 Production open-issue refresh:
 
 ```bash
-ssh "$VPS_HOST" "podman exec -i $APP_CONTAINER $APP_PYTHON /app/scripts/collect_data.py --source github --mode open"
+vps_exec scripts/collect_data.py --source github --mode open
 ```
 
 Production rotation refresh:
 
 ```bash
-ssh "$VPS_HOST" "podman exec -i $APP_CONTAINER $APP_PYTHON /app/scripts/collect_data.py --mode rotation"
+vps_exec scripts/collect_data.py --mode rotation
 ```
 
 Useful filters:
@@ -81,7 +84,7 @@ podman compose exec -T app python scripts/collect_forum_data.py --mode all
 Production combined backfill and refresh:
 
 ```bash
-ssh "$VPS_HOST" "podman exec -i $APP_CONTAINER $APP_PYTHON /app/scripts/collect_forum_data.py --mode all"
+vps_exec scripts/collect_forum_data.py --mode all
 ```
 
 Limit a run to one forum:
@@ -97,20 +100,20 @@ The collector implementation documents the Discourse endpoint choices in `craft_
 
 Working directory: `$REPO` for repository commands, or any directory when using `uvx`.
 
-Check worker readiness and server connectivity:
+Check worker readiness, server connectivity, and queue depth:
 
 ```bash
-uvx craft-dashboard eval status --server "$DASHBOARD_URL" --token "$EVAL_API_TOKEN"
+uv run craft-dashboard eval status --server "$DASHBOARD_URL" --token "$EVAL_API_TOKEN"
 ```
 
 Start the HTTP polling worker with configured environment variables:
 
 ```bash
 cd "$REPO"
-uv run scripts/run_llm.py evaluate
+uv run craft-dashboard eval run
 ```
 
-Or run directly with `uvx`:
+Or run directly with `uvx` without checking out the repository:
 
 ```bash
 uvx craft-dashboard eval run --server "$DASHBOARD_URL" --token "$EVAL_API_TOKEN"
@@ -120,41 +123,34 @@ Run a bounded batch:
 
 ```bash
 cd "$REPO"
-uv run scripts/run_llm.py evaluate --project snapcraft --limit 10
+uv run craft-dashboard eval run --project snapcraft --limit 10
 ```
 
 Run one issue:
 
 ```bash
 cd "$REPO"
-uv run scripts/run_llm.py evaluate --project snapcraft --issue 1068
+uv run craft-dashboard eval run --project snapcraft --issue 1068
 ```
 
 Run with a local OpenAI-compatible backend:
 
 ```bash
 cd "$REPO"
-uv run scripts/run_llm.py evaluate --llm-backend local
+uv run craft-dashboard eval run --llm-backend local
 ```
 
 Clear stored evaluations:
 
 ```bash
 cd "$REPO"
-uv run scripts/run_llm.py clear --project snapcraft --yes
+uv run craft-dashboard eval clear --project snapcraft --yes
 ```
 
 Production worker invocation:
 
 ```bash
-ssh "$VPS_HOST" "podman exec -i $APP_CONTAINER $APP_PYTHON /app/scripts/run_llm.py evaluate"
-```
-
-Check queue status:
-
-```bash
-curl -fsS "$DASHBOARD_URL/api/eval/status" \
-  -H "Authorization: Bearer $EVAL_API_TOKEN"
+ssh "$VPS_HOST" "podman exec -i $APP_CONTAINER craft-dashboard eval run"
 ```
 
 See [reference.md](reference.md#llm-evaluation) for flags and required environment variables.
@@ -173,7 +169,7 @@ uv run scripts/manage_eval_tokens.py create --id test-bot --name "Test Bot"
 Production token creation:
 
 ```bash
-ssh "$VPS_HOST" "podman exec -i $APP_CONTAINER $APP_PYTHON /app/scripts/manage_eval_tokens.py create --id test-bot --name 'Test Bot'"
+vps_exec scripts/manage_eval_tokens.py create --id test-bot --name 'Test Bot'
 ```
 
 List active tokens and evaluation counts:
@@ -186,7 +182,7 @@ uv run scripts/manage_eval_tokens.py list --stats
 Production list:
 
 ```bash
-ssh "$VPS_HOST" "podman exec -i $APP_CONTAINER $APP_PYTHON /app/scripts/manage_eval_tokens.py list --stats"
+vps_exec scripts/manage_eval_tokens.py list --stats
 ```
 
 Revoke a token:
@@ -199,7 +195,7 @@ uv run scripts/manage_eval_tokens.py revoke --id test-bot
 Production revoke:
 
 ```bash
-ssh "$VPS_HOST" "podman exec -i $APP_CONTAINER $APP_PYTHON /app/scripts/manage_eval_tokens.py revoke --id test-bot"
+vps_exec scripts/manage_eval_tokens.py revoke --id test-bot
 ```
 
 Tokens can also be reviewed and revoked by authenticated administrators in `/admin/evaluations`.
@@ -208,11 +204,11 @@ Tokens can also be reviewed and revoked by authenticated administrators in `/adm
 
 Working directory: `$REPO`.
 
-1. Evaluate explicit canary issues without changing version constants:
+1. Test explicit issues without changing version constants:
 
    ```bash
    cd "$REPO"
-   uv run scripts/llm/canary.py      --server "$DASHBOARD_URL"      --token "$EVAL_API_TOKEN"      --issue snapcraft:6381      --issue craft-parts:766
+   uv run craft-dashboard eval run --server "$DASHBOARD_URL" --token "$EVAL_API_TOKEN" --project snapcraft --issue 6381 --force
    ```
 
 2. Review the generated issue detail pages in the dashboard.
@@ -222,11 +218,16 @@ Working directory: `$REPO`.
 
    ```bash
    cd "$REPO"
-   uv run scripts/run_llm.py evaluate --limit 50
+   uv run craft-dashboard eval run --limit 50
    ```
 
 6. Review evaluation quality, cost, queue depth, and errors in `/admin/evaluations`.
-7. Run the continuous worker without `--limit` when the batch looks correct.
+7. Run the continuous worker without `--limit` when the batch looks correct:
+
+   ```bash
+   cd "$REPO"
+   uv run craft-dashboard eval run
+   ```
 
 To stop a rollout, stop the worker, revert the code change that changed the version constant, deploy, and demote any bad `llm_evaluations.latest` rows only after identifying their replacement rows.
 

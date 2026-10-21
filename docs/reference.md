@@ -2,53 +2,11 @@
 
 ## Environment variables
 
-Application settings come from `craft_dashboard/settings.py` and `.env.example`.
+Application and worker settings are configured via environment variables or a `.env` file. Annotated settings, default values, and operational descriptions are documented in [`.env.example`](../.env.example).
 
-| Variable | Default | Purpose |
-|---|---:|---|
-| `DATABASE_URL` | `postgresql+asyncpg://localhost/craft_dashboard` | SQLAlchemy async database URL. |
-| `GITHUB_TOKEN` | empty | GitHub API token for collectors. |
-| `EMBEDDING_API_KEY` | empty | OpenRouter API key for semantic search and evaluation embeddings. |
-| `ADMIN_TOKEN` | empty | Admin UI and admin API bearer token. |
-| `DEBUG` | `false` | Enables FastAPI debug mode. |
-| `HOST` | loopback interface | App host setting used by settings consumers. |
-| `PORT` | `8000` | App port setting used by settings consumers. |
-| `CONFIG_FILE` | `craft-dashboard.toml` | TOML config path. |
-| `LOG_LEVEL` | `INFO` | Python logging level. |
-| `EVAL_API_TOKEN` | empty | Shared evaluation bearer token fallback for `/api/eval/*`. |
-| `EVAL_MIN_WORKER_VERSION` | `0.0.0` | Minimum worker SemVer required by `/api/eval/*`. |
-| `EVAL_TRANSCRIPT_RETENTION_DAYS` | `30` | Retention window for non-latest evaluation transcripts. |
-| `EVAL_RETENTION_DAYS` | `90` | Retention window for superseded evaluations. Evaluations marked `latest` are never deleted. |
-| `EVAL_DAILY_SPEND_CAP_USD` | `0.0` | Daily evaluation spend cap; zero disables the cap. |
-| `RELATED_ISSUES_TOP_N` | `10` | Related-issue result limit on issue detail pages. |
-| `RELATED_ISSUES_SIMILARITY_THRESHOLD` | `0.70` | Related-issue embedding similarity floor. |
-| `SEMANTIC_SEARCH_EMBEDDING_MODEL` | `openai/text-embedding-3-small` | Embedding model for issue search and summaries. |
-| `SEMANTIC_SEARCH_TOP_N` | `10` | Semantic issue-search result limit. |
-| `SEMANTIC_SEARCH_SIMILARITY_THRESHOLD` | `0.25` | Semantic issue-search similarity floor. |
-| `DB_POOL_SIZE` | `5` | SQLAlchemy pool size. |
-| `DB_MAX_OVERFLOW` | `10` | SQLAlchemy pool overflow. |
-| `REFRESH_AGE_DAYS` | `7` | GitHub issue refresh age window. |
-| `CRAFT_DASHBOARD_MIRROR_DIR` | `~/.cache/craft-dashboard/mirrors` | Bare git mirror directory. |
-| `CRAFT_DASHBOARD_GIT_CONCURRENCY` | `2` | Concurrent git subprocess limit. |
-| `COMMIT_SCANNER_TOP_K` | `10` | Semantic candidates per scanned commit. |
-| `COMMIT_SCANNER_SIMILARITY_THRESHOLD` | `0.70` | Commit scanner semantic similarity floor. |
-| `COMMIT_SCANNER_DAILY_INVALIDATION_WARN_THRESHOLD` | `200` | Admin warning threshold for daily invalidations. |
-
-The LLM worker also reads these variables in `scripts/llm/cli.py`:
-
-| Variable | Purpose |
-|---|---|
-| `CRAFT_DASHBOARD_URL` / `DASHBOARD_URL` | Base URL for the evaluation HTTP API. |
-| `CRAFT_EVAL_TOKEN` / `EVAL_API_TOKEN` | Bearer token for the evaluation HTTP API. |
-| `CRAFT_DASHBOARD_CA_CERT` / `DASHBOARD_CA_CERT` | CA certificate for the dashboard server. |
-| `LLM_BASE_URL` | OpenAI-compatible LLM endpoint. |
-| `LLM_API_KEY` | LLM provider API token. |
-| `LLM_MODEL` | Single model used for summary and scoring when split models are unset. |
-| `LLM_MODEL_SUMMARY` | Summary model override. |
-| `LLM_MODEL_SCORING` | Scoring model override. |
-| `LLM_CA_CERT` | CA certificate for the LLM endpoint. |
-| `COPILOT_ACP_MODEL` | Model name for the `copilot-acp` backend. |
-| `LLM_CONFIG_ERROR_DELAY_SECONDS` | Delay before worker exit on configuration errors. |
+Programmatic definitions and types live in:
+- `craft_dashboard/settings.py` for application, database, semantic search, and collector settings.
+- `scripts/llm/cli.py` for evaluation worker backend and HTTP connection settings.
 
 ## Configuration file
 
@@ -113,7 +71,6 @@ Run `<command> --help` for options.
 | `craft-dashboard eval run` / `scripts/run_llm.py evaluate` | Continuous HTTP evaluation worker. |
 | `craft-dashboard eval status` / `scripts/run_llm.py status` | Check worker connectivity and queue status. |
 | `craft-dashboard eval clear` / `scripts/run_llm.py clear-evaluations` | Delete stored evaluations by project or filter. |
-| `scripts/llm/canary.py` | Canary evaluation for specific issues. |
 | `scripts/manage_eval_tokens.py create` | Create an evaluation bearer token. |
 | `scripts/manage_eval_tokens.py list` | List evaluation bearer tokens and stats. |
 | `scripts/manage_eval_tokens.py revoke` | Revoke an evaluation bearer token. |

@@ -1,31 +1,31 @@
 # Repository map
 
-Start here, then read the `AGENTS.md` in whichever package you are changing.
+Quick navigation guide. See [docs/architecture.md](docs/architecture.md) for architectural design and layering rules.
+Read the `AGENTS.md` in whichever package you are changing for contracts and invariants.
 `agents.md` at the root holds the workflow rules.
 
 ## Request path
 
+Data flows strictly rightwards:
 ```
 routes/ -> services/ -> repositories/ -> models/ -> PostgreSQL
 ```
 
 Imports only ever point right. `import-linter` contracts in `pyproject.toml`
-fail the build when they do not.
+enforce this.
 
-## Packages
+## Packages and contracts
 
-| Path | Role |
-|---|---|
-| `craft_dashboard/routes/` | FastAPI handlers, one module per page |
-| `craft_dashboard/services/` | Business logic and aggregation |
-| `craft_dashboard/repositories/` | All SQL |
-| `craft_dashboard/models/` | SQLAlchemy ORM models |
-| `craft_dashboard/collectors/` | GitHub, Launchpad, and Discourse ingestion |
-| `craft_dashboard/llm/` | Model clients, prompts, embeddings, evaluation |
-| `craft_dashboard/commit_scanner/` | Maps new commits to issues worth re-evaluating |
-| `craft_dashboard/git_mirrors/` | Bare mirror clone, fetch, and read-only access |
-| `craft_dashboard/templates/` | Jinja2 templates |
-| `craft_dashboard/static/` | CSS, JS, and vendored frontend libraries |
+| Path | Role | Contract file |
+|---|---|---|
+| `craft_dashboard/routes/` | FastAPI handlers, one module per page | `craft_dashboard/routes/AGENTS.md` |
+| `craft_dashboard/services/` | Business logic and aggregation | `craft_dashboard/services/AGENTS.md` |
+| `craft_dashboard/repositories/` | All SQL | `craft_dashboard/repositories/AGENTS.md` |
+| `craft_dashboard/models/` | SQLAlchemy ORM models | `docs/architecture.md` |
+| `craft_dashboard/collectors/` | GitHub, Launchpad, and Discourse ingestion | `craft_dashboard/collectors/AGENTS.md` |
+| `craft_dashboard/llm/` | Model clients, prompts, embeddings, evaluation | `craft_dashboard/llm/AGENTS.md` |
+| `scripts/llm/` | Operator entry points for evaluation worker | `scripts/llm/AGENTS.md` |
+| `scripts/collect/` | Operator entry points for data collection | `scripts/collect/AGENTS.md` |
 
 ## Shared modules
 

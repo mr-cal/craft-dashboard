@@ -18,9 +18,6 @@ production data and spend money.
   - `eval_failures.py` — classifies an exception raised during evaluation
     into a release reason plus "is this a quota exhaustion?".
   - `eval_startup.py` — backend client construction and one-time setup.
-- `canary.py` — evaluates a small explicit set of issues one at a time against
-  the real pipeline, for validating a prompt or model change before a full
-  rollout.
 
 ## Invariants
 

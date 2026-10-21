@@ -13,6 +13,38 @@ External APIs ── collectors ── PostgreSQL ── FastAPI/Jinja2 ── b
 
 The web app serves database-backed pages and JSON endpoints. External API calls happen in scripts and workers, not during dashboard page rendering. This keeps request latency tied to database queries and template rendering.
 
+## Request path and layering
+
+Data flows strictly rightwards:
+
+```text
+routes/ ──> services/ ──> repositories/ ──> models/ ──> PostgreSQL
+```
+
+Imports only ever point right. Routes must not build database queries directly, repositories do not import services or routes, and collectors are independent of the web layer. `import-linter` contracts in `pyproject.toml` enforce these boundaries.
+
+## Package organization
+
+| Path | Role |
+|---|---|
+| `craft_dashboard/routes/` | FastAPI handlers, one module per page |
+| `craft_dashboard/services/` | Business logic and cross-repository aggregation |
+| `craft_dashboard/repositories/` | Database access and SQL queries |
+| `craft_dashboard/models/` | SQLAlchemy ORM models |
+| `craft_dashboard/collectors/` | External data ingestion (GitHub, Launchpad, Discourse) |
+| `craft_dashboard/llm/` | LLM client, prompts, embeddings, evaluation |
+| `craft_dashboard/commit_scanner/` | Commit analyzer identifying issues for re-evaluation |
+| `craft_dashboard/git_mirrors/` | Bare git mirror management |
+| `craft_dashboard/templates/` | Jinja2 templates |
+| `craft_dashboard/static/` | CSS, JS, and vendored frontend libraries |
+
+Shared modules:
+- `craft_dashboard/settings.py`: Environment-backed configuration.
+- `craft_dashboard/config.py`: `craft-dashboard.toml` project and filter configuration.
+- `craft_dashboard/http_retry.py`: Shared retry policy for outbound HTTP.
+- `craft_dashboard/rate_limit.py`: Shared slowapi rate limiter.
+- `craft_dashboard/db.py`: Async engine and session factory.
+
 ## Collection pipeline
 
 `scripts/collect_data.py` loads `craft-dashboard.toml`, creates or updates project rows, and collects GitHub issues, GitHub pull requests, releases, dependencies, and Launchpad bugs. GitHub collection uses open, full, all, and rotation modes. Watermarks and refresh schedules keep repeated runs incremental where the selected mode supports it.

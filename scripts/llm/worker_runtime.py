@@ -136,8 +136,8 @@ class Runtime:
         self.min_delay = min_delay
         self.max_delay = max_delay
         self.worker_tasks = worker_tasks or {}
-        #: True for a single-target ``--issue ... --force`` run (e.g. the
-        #: canary script). In that mode there is only ever one issue to
+        #: True for a single-target ``--issue ... --force`` run.
+        #: In that mode there is only ever one issue to
         #: evaluate, and a claimed-then-discarded/failed/skipped issue is
         #: never re-offered by ``/next`` (the server sees it as already
         #: attempted), so any terminal outcome — not just success — must

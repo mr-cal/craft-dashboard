@@ -63,12 +63,12 @@ make test-e2e
 
 `make test` runs the pytest suite under `tests/`. End-to-end tests live under `tests/end_to_end/` and run only through `make test-e2e`.
 
-Run a specific test file or test:
+Run a specific test file, class, method, or keyword:
 
 ```bash
 uv run pytest tests/unit/test_config.py -v
-uv run pytest tests/unit/test_config.py::TestDashboardConfig::test_load_config_from_file -v
-uv run pytest -k test_dashboard_shows_project -v
+uv run pytest tests/unit/<test_file>.py::<TestClass>::<test_method> -v
+uv run pytest -k "<filter-expression>" -v
 ```
 
 ## Formatting, linting, and type checking
