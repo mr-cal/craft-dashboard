@@ -306,6 +306,42 @@ class TestCreateFromRelatedWork:
         assert links[0].to_issue_id == to_issue.id
         assert links[0].to_ref == "snapcraft-launchpad#1876370"
 
+    async def test_resolves_launchpad_bug_from_plain_snapcraft_ref(
+        self, test_db_session
+    ) -> None:
+        """A ref using 'snapcraft#<id>' falls back to 'snapcraft (launchpad)' if present."""
+        gh_project = make_project(name="snapcraft")
+        lp_project = make_project(name="snapcraft (launchpad)")
+        test_db_session.add_all([gh_project, lp_project])
+        await test_db_session.flush()
+
+        from_issue = make_issue(project_id=lp_project.id, external_id="1774254")
+        to_issue = make_issue(project_id=lp_project.id, external_id="1661787")
+        test_db_session.add_all([from_issue, to_issue])
+        await test_db_session.flush()
+
+        evaluation = make_evaluation(issue_id=from_issue.id)
+        test_db_session.add(evaluation)
+        await test_db_session.flush()
+
+        repo = IssueLinkRepository(test_db_session)
+        links = await repo.create_from_related_work(
+            from_issue_id=from_issue.id,
+            llm_evaluation_id=evaluation.id,
+            related_work=[
+                {
+                    "kind": "related_to",
+                    "ref": "snapcraft#1661787",
+                    "confidence": 65,
+                    "note": "Open LP report",
+                }
+            ],
+        )
+
+        assert len(links) == 1
+        assert links[0].to_issue_id == to_issue.id
+        assert links[0].to_ref == "snapcraft (launchpad)#1661787"
+
     async def test_self_referential_link_is_skipped(self, test_db_session) -> None:
         """A related_work entry referencing the issue itself is ignored."""
         project = make_project(name="rockcraft")
@@ -375,6 +411,40 @@ class TestReconcileUnresolvedLinks:
         reconciled = await repo.reconcile_unresolved_links()
         assert reconciled == 1
         assert links[0].to_issue_id == to_issue.id
+
+    async def test_reconciles_snapcraft_ref_to_launchpad_issue(
+        self, test_db_session
+    ) -> None:
+        lp_project = make_project(name="snapcraft (launchpad)")
+        test_db_session.add(lp_project)
+        await test_db_session.flush()
+
+        from_issue = make_issue(project_id=lp_project.id, external_id="1774254")
+        to_issue = make_issue(project_id=lp_project.id, external_id="1661787")
+        test_db_session.add_all([from_issue, to_issue])
+        await test_db_session.flush()
+
+        evaluation = make_evaluation(issue_id=from_issue.id)
+        test_db_session.add(evaluation)
+        await test_db_session.flush()
+
+        link = IssueLink(
+            from_issue_id=from_issue.id,
+            llm_evaluation_id=evaluation.id,
+            to_issue_id=None,
+            to_ref="snapcraft#1661787",
+            kind="related_to",
+            confidence=65,
+            source="evaluator",
+        )
+        test_db_session.add(link)
+        await test_db_session.flush()
+
+        repo = IssueLinkRepository(test_db_session)
+        reconciled = await repo.reconcile_unresolved_links()
+        assert reconciled == 1
+        assert link.to_issue_id == to_issue.id
+        assert link.to_ref == "snapcraft (launchpad)#1661787"
 
     async def test_unknown_kind_is_skipped_not_raised(self, test_db_session) -> None:
         """A hallucinated kind value must not crash the whole submission.

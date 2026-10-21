@@ -143,6 +143,7 @@ def _format_duration_seconds(seconds: float) -> str:
 
 
 _format_age_days = format_age_days
+_MIN_LAUNCHPAD_BUG_ID = 100_000
 
 
 def _ref_external_url(ref: str | None) -> str | None:
@@ -162,6 +163,13 @@ def _ref_external_url(ref: str | None) -> str | None:
         return f"https://bugs.launchpad.net/{lp_name}/+bug/{external_id}"
     project_name = prefix.rsplit("/", 1)[-1].strip()
     org = prefix.rsplit("/", 1)[0].strip() if "/" in prefix else "canonical"
+    if (
+        project_name in ("snapcraft", "lp", "launchpad")
+        and external_id.isdigit()
+        and int(external_id) >= _MIN_LAUNCHPAD_BUG_ID
+    ):
+        lp_name = "snapcraft" if project_name in ("lp", "launchpad") else project_name
+        return f"https://bugs.launchpad.net/{lp_name}/+bug/{external_id}"
     return f"https://github.com/{org}/{project_name}/issues/{external_id}"
 
 

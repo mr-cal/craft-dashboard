@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_MIN_LAUNCHPAD_BUG_ID = 100_000
+
 
 class IssueLinkRepository:
     """Read/write access to issue_links."""
@@ -105,7 +107,7 @@ class IssueLinkRepository:
                 )
                 continue
             ref = str(entry.get("ref", "")).strip()
-            to_issue_id = await self._resolve_ref_to_issue_id(ref)
+            to_issue_id, canonical_ref = await self._resolve_ref(ref)
             if to_issue_id is not None and to_issue_id == from_issue_id:
                 logger.warning(
                     "Skipping self-referential related_work entry for issue %d (ref=%r)",
@@ -113,11 +115,20 @@ class IssueLinkRepository:
                     ref,
                 )
                 continue
+            stored_ref = (
+                canonical_ref
+                if (
+                    to_issue_id
+                    and " (launchpad)" in canonical_ref
+                    and "launchpad" not in ref
+                )
+                else ref
+            )
             link = IssueLink(
                 from_issue_id=from_issue_id,
                 llm_evaluation_id=llm_evaluation_id,
                 to_issue_id=to_issue_id,
-                to_ref=ref,
+                to_ref=stored_ref,
                 kind=kind,
                 confidence=entry.get("confidence", 0),
                 note=entry.get("note") or None,
@@ -130,23 +141,58 @@ class IssueLinkRepository:
             await self.session.flush()
         return links
 
-    async def _resolve_ref_to_issue_id(self, ref: str) -> int | None:
-        """Resolve a project-qualified issue ref to an existing DB issue id."""
+    async def _resolve_ref(self, ref: str) -> tuple[int | None, str]:
+        """Resolve a project-qualified issue ref to (issue_id, canonical_ref).
+
+        Handles aliases such as 'snapcraft-launchpad' and falls back to check
+        the '(launchpad)' variant if a Launchpad bug is referenced without the
+        explicit Launchpad suffix (and vice-versa).
+        """
         if "#" not in ref:
-            return None
+            return None, ref
         prefix, _, external_id = ref.rpartition("#")
         if not prefix or not external_id:
-            return None
-        project_name = prefix.rsplit("/", 1)[-1]
+            return None, ref
+        project_name = prefix.rsplit("/", 1)[-1].strip()
         if project_name == "snapcraft-launchpad":
             project_name = "snapcraft (launchpad)"
+
         query = (
-            select(Issue.id)
+            select(Issue.id, Project.name)
             .join(Project, Issue.project_id == Project.id)
             .where(Project.name == project_name, Issue.external_id == external_id)
         )
-        result = await self.session.execute(query)
-        return result.scalar_one_or_none()
+        row = (await self.session.execute(query)).one_or_none()
+
+        if row is None:
+            alt_name = (
+                project_name.removesuffix(" (launchpad)").strip()
+                if project_name.endswith(" (launchpad)")
+                else f"{project_name} (launchpad)"
+            )
+            alt_query = (
+                select(Issue.id, Project.name)
+                .join(Project, Issue.project_id == Project.id)
+                .where(Project.name == alt_name, Issue.external_id == external_id)
+            )
+            row = (await self.session.execute(alt_query)).one_or_none()
+
+        if row is not None:
+            return row[0], f"{row[1]}#{external_id}"
+
+        if (
+            project_name == "snapcraft"
+            and external_id.isdigit()
+            and int(external_id) >= _MIN_LAUNCHPAD_BUG_ID
+        ):
+            return None, f"snapcraft (launchpad)#{external_id}"
+
+        return None, f"{project_name}#{external_id}"
+
+    async def _resolve_ref_to_issue_id(self, ref: str) -> int | None:
+        """Resolve a project-qualified issue ref to an existing DB issue id."""
+        issue_id, _ = await self._resolve_ref(ref)
+        return issue_id
 
     async def get_latest_links_for_issue(self, issue_id: int) -> list[IssueLink]:
         """Return links produced by *issue_id*'s current (latest) evaluation only.
@@ -181,10 +227,13 @@ class IssueLinkRepository:
         unlinked = list(result.scalars().all())
         reconciled = 0
         for link in unlinked:
-            resolved_id = await self._resolve_ref_to_issue_id(link.to_ref)
+            resolved_id, canonical_ref = await self._resolve_ref(link.to_ref)
             if resolved_id is not None:
                 link.to_issue_id = resolved_id
+                link.to_ref = canonical_ref
                 reconciled += 1
+            elif canonical_ref != link.to_ref:
+                link.to_ref = canonical_ref
         if reconciled:
             await self.session.flush()
         return reconciled

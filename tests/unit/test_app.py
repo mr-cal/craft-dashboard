@@ -217,6 +217,24 @@ class TestRefExternalUrl:
             == "https://bugs.launchpad.net/snapcraft/+bug/2048"
         )
 
+    def test_snapcraft_high_number_routes_to_launchpad(self) -> None:
+        assert (
+            _ref_external_url("snapcraft#1661787")
+            == "https://bugs.launchpad.net/snapcraft/+bug/1661787"
+        )
+
+    def test_snapcraft_low_number_routes_to_github(self) -> None:
+        assert (
+            _ref_external_url("snapcraft#500")
+            == "https://github.com/canonical/snapcraft/issues/500"
+        )
+
+    def test_lp_prefix_routes_to_launchpad(self) -> None:
+        assert (
+            _ref_external_url("lp#1774254")
+            == "https://bugs.launchpad.net/snapcraft/+bug/1774254"
+        )
+
     def test_invalid_refs(self) -> None:
         assert _ref_external_url(None) is None
         assert _ref_external_url("") is None
