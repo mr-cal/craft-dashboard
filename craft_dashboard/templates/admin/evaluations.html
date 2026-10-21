@@ -324,7 +324,6 @@
           <th>Status</th>
           <th>Evaluations</th>
           <th>Last Used</th>
-          <th>Action</th>
         </tr>
       </thead>
       <tbody>
@@ -343,16 +342,6 @@
           </td>
           <td style="text-align: right;">{{ "{:,}".format(token_stats.get(token.id, 0)) }}</td>
           <td>{{ token.last_used_at | local_datetime if token.last_used_at else "Never" }}</td>
-          <td>
-            {% if token.is_active %}
-            <form method="POST" action="/admin/keys/revoke" style="margin: 0;" onsubmit="return confirm('Revoke evaluation token {{ token.id }}?');">
-              <input type="hidden" name="token_id" value="{{ token.id }}">
-              <button type="submit" class="p-button--negative p-button--inline u-no-margin--bottom" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">Revoke</button>
-            </form>
-            {% else %}
-            <span class="u-text--muted">—</span>
-            {% endif %}
-          </td>
         </tr>
         {% endfor %}
       </tbody>

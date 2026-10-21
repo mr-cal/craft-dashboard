@@ -14,6 +14,8 @@ def test_manage_tokens_help() -> None:
     assert result.exit_code == 0
     assert "create" in result.output
     assert "list" in result.output
+    assert "rename" in result.output
+    assert "rotate" in result.output
     assert "revoke" in result.output
 
 
@@ -100,4 +102,60 @@ def test_revoke_token_cli() -> None:
         assert result.exit_code == 0
         assert "Revoked: Token 'worker-1' is now inactive" in result.output
         mock_repo.revoke_token.assert_awaited_once_with("worker-1")
+        mock_evict.assert_called_once_with("worker-1")
+
+
+def test_rename_token_cli() -> None:
+    runner = CliRunner()
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.rename_token = AsyncMock(return_value=True)
+
+    with (
+        patch("scripts.manage_eval_tokens.EvalTokenRepository", return_value=mock_repo),
+        patch(
+            "scripts.manage_eval_tokens._get_session_factory",
+            return_value=MagicMock(
+                return_value=AsyncMock(
+                    __aenter__=AsyncMock(return_value=mock_session),
+                    __aexit__=AsyncMock(),
+                )
+            ),
+        ),
+    ):
+        result = runner.invoke(
+            cli, ["rename", "--id", "worker-1", "--name", "New Worker Name"]
+        )
+        assert result.exit_code == 0
+        assert "Renamed token 'worker-1' to 'New Worker Name'" in result.output
+        mock_repo.rename_token.assert_awaited_once_with("worker-1", "New Worker Name")
+
+
+def test_rotate_token_cli() -> None:
+    runner = CliRunner()
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.rotate_token = AsyncMock(return_value=True)
+
+    with (
+        patch("scripts.manage_eval_tokens.EvalTokenRepository", return_value=mock_repo),
+        patch(
+            "scripts.manage_eval_tokens._get_session_factory",
+            return_value=MagicMock(
+                return_value=AsyncMock(
+                    __aenter__=AsyncMock(return_value=mock_session),
+                    __aexit__=AsyncMock(),
+                )
+            ),
+        ),
+        patch("scripts.manage_eval_tokens.evict_eval_token") as mock_evict,
+    ):
+        result = runner.invoke(cli, ["rotate", "--id", "worker-1"])
+        assert result.exit_code == 0
+        assert "Rotated secret for evaluation token 'worker-1'" in result.output
+        mock_repo.rotate_token.assert_awaited_once()
+        assert mock_repo.rotate_token.call_args.kwargs["token_id"] == "worker-1"
+        assert mock_repo.rotate_token.call_args.kwargs["token_prefix"].startswith(
+            "cde_"
+        )
         mock_evict.assert_called_once_with("worker-1")

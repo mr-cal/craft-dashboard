@@ -75,6 +75,31 @@ class EvalTokenRepository:
         result = await self.session.execute(statement)
         return bool(getattr(result, "rowcount", 0) > 0)
 
+    async def rename_token(self, token_id: str, new_name: str) -> bool:
+        """Update the human-readable description or owner name for a token."""
+        statement = (
+            update(EvalApiToken)
+            .where(EvalApiToken.id == token_id)
+            .values(name=new_name)
+        )
+        result = await self.session.execute(statement)
+        return bool(getattr(result, "rowcount", 0) > 0)
+
+    async def rotate_token(
+        self,
+        token_id: str,
+        token_hash: str,
+        token_prefix: str,
+    ) -> bool:
+        """Rotate the token secret for an existing token, keeping it active."""
+        statement = (
+            update(EvalApiToken)
+            .where(EvalApiToken.id == token_id)
+            .values(token_hash=token_hash, token_prefix=token_prefix, is_active=True)
+        )
+        result = await self.session.execute(statement)
+        return bool(getattr(result, "rowcount", 0) > 0)
+
     async def update_last_used(self, token_id: str, when: datetime) -> None:
         """Update last_used_at timestamp for a token."""
         statement = (

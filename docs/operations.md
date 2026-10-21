@@ -198,7 +198,7 @@ Production revoke:
 vps_exec scripts/manage_eval_tokens.py revoke --id test-bot
 ```
 
-Tokens can also be reviewed and revoked by authenticated administrators in `/admin/evaluations`.
+Tokens can also be reviewed in `/admin/evaluations`.
 
 ## Staged evaluation rollout
 

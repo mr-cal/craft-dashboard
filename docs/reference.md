@@ -73,6 +73,8 @@ Run `<command> --help` for options.
 | `craft-dashboard eval clear` / `scripts/run_llm.py clear-evaluations` | Delete stored evaluations by project or filter. |
 | `scripts/manage_eval_tokens.py create` | Create an evaluation bearer token. |
 | `scripts/manage_eval_tokens.py list` | List evaluation bearer tokens and stats. |
+| `scripts/manage_eval_tokens.py rename` | Rename an evaluation bearer token. |
+| `scripts/manage_eval_tokens.py rotate` | Rotate an evaluation bearer token secret. |
 | `scripts/manage_eval_tokens.py revoke` | Revoke an evaluation bearer token. |
 
 ## Cron schedule

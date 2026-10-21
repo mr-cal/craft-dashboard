@@ -191,5 +191,69 @@ def revoke_token_cmd(token_id: str) -> None:
     asyncio.run(_revoke())
 
 
+@cli.command(name="rename")
+@click.option("--id", "token_id", required=True, help="Token ID to rename")
+@click.option("--name", "new_name", required=True, help="New human-readable name")
+def rename_token_cmd(token_id: str, new_name: str) -> None:
+    """Rename an existing evaluation token."""
+
+    async def _rename() -> None:
+        session_factory = _get_session_factory()
+        async with session_factory() as session:
+            repo = EvalTokenRepository(session)
+            renamed = await repo.rename_token(token_id, new_name)
+            if not renamed:
+                console.print(f"[bold red]Error:[/] Token '{token_id}' not found.")
+                sys.exit(1)
+            await session.commit()
+
+        console.print(
+            f"[bold green]Success:[/] Renamed token '[bold]{token_id}[/]' to '[bold]{new_name}[/]'."
+        )
+
+    asyncio.run(_rename())
+
+
+@cli.command(name="rotate")
+@click.option("--id", "token_id", required=True, help="Token ID to rotate")
+@click.option(
+    "--token",
+    "custom_token",
+    default=None,
+    help="Custom secret token string. If omitted, a secure 'cde_<hex>' token is generated.",
+)
+def rotate_token_cmd(token_id: str, custom_token: str | None) -> None:
+    """Rotate the secret key for an existing evaluation token without revoking it."""
+    raw_token = custom_token or f"cde_{secrets.token_hex(24)}"
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    token_prefix = f"{raw_token[:8]}..."
+
+    async def _rotate() -> None:
+        session_factory = _get_session_factory()
+        async with session_factory() as session:
+            repo = EvalTokenRepository(session)
+            rotated = await repo.rotate_token(
+                token_id=token_id,
+                token_hash=token_hash,
+                token_prefix=token_prefix,
+            )
+            if not rotated:
+                console.print(f"[bold red]Error:[/] Token '{token_id}' not found.")
+                sys.exit(1)
+            await session.commit()
+            evict_eval_token(token_id)
+
+        console.print(
+            f"[bold green]Success:[/] Rotated secret for evaluation token '[bold]{token_id}[/]'."
+        )
+        console.print(f"Prefix:      {token_prefix}")
+        console.print(f"[bold yellow]Secret Token:[/] {raw_token}")
+        console.print(
+            "[dim]Save this token now; it cannot be viewed again once lost.[/dim]"
+        )
+
+    asyncio.run(_rotate())
+
+
 if __name__ == "__main__":
     cli()

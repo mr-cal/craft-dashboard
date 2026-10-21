@@ -127,3 +127,52 @@ async def test_count_and_delete_evaluations_fine_grained(
 
     remaining = await repo.count_evaluations()
     assert remaining == 2
+
+
+async def test_rename_token(test_db_session: AsyncSession) -> None:
+    repo = EvalTokenRepository(test_db_session)
+    token = make_eval_token(id="worker-rename", name="Old Name")
+    test_db_session.add(token)
+    await test_db_session.commit()
+
+    renamed = await repo.rename_token("worker-rename", "New Name")
+    assert renamed is True
+    await test_db_session.commit()
+
+    fetched = await repo.get_by_id("worker-rename")
+    assert fetched is not None
+    assert fetched.name == "New Name"
+
+    missing = await repo.rename_token("nonexistent", "Name")
+    assert missing is False
+
+
+async def test_rotate_token(test_db_session: AsyncSession) -> None:
+    repo = EvalTokenRepository(test_db_session)
+    token = make_eval_token(
+        id="worker-rotate",
+        raw_token="old-token-value",
+    )
+    test_db_session.add(token)
+    await test_db_session.commit()
+
+    rotated = await repo.rotate_token(
+        token_id="worker-rotate",
+        token_hash="new-hash",
+        token_prefix="cde_new...",
+    )
+    assert rotated is True
+    await test_db_session.commit()
+
+    fetched = await repo.get_by_id("worker-rotate")
+    assert fetched is not None
+    assert fetched.token_hash == "new-hash"
+    assert fetched.token_prefix == "cde_new..."
+    assert fetched.is_active is True
+
+    missing = await repo.rotate_token(
+        token_id="nonexistent",
+        token_hash="new-hash",
+        token_prefix="cde_new...",
+    )
+    assert missing is False
