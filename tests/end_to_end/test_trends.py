@@ -300,6 +300,41 @@ class TestProjectToggling:
             f"initial={result['initial_datasets']}, after={result['after_toggle_datasets']}"
         )
 
+    def test_selecting_all_projects_and_individual_project_together(
+        self, seeded_url: str
+    ) -> None:
+        """User can select both 'all-projects' and an individual project concurrently."""
+        script = make_script("""\
+    await page.goto(`${BASE}/stats/trends`, {waitUntil: 'networkidle0', timeout: 30000});
+    await page.waitForFunction(() => {
+      const el = document.getElementById('trends-loading');
+      return !el || el.style.display === 'none';
+    }, {timeout: 15000});
+
+    const selection = await page.evaluate(() => {
+      const multiselect = document.querySelector('.multiselect[data-name="trend-projects"]');
+      const allCb = multiselect.querySelector('input[value="all-projects"]');
+      const snapcraftCb = Array.from(multiselect.querySelectorAll('input')).find(cb => cb.value.includes('snapcraft'));
+      if (snapcraftCb) {
+        snapcraftCb.checked = true;
+        snapcraftCb.dispatchEvent(new Event('change', {bubbles: true}));
+      }
+      const hidden = document.getElementById('trend-projects-hidden');
+      return {
+        all_checked: allCb ? allCb.checked : false,
+        snapcraft_checked: snapcraftCb ? snapcraftCb.checked : false,
+        hidden_value: hidden ? hidden.value : '',
+      };
+    });
+
+    console.log(JSON.stringify(selection));
+""")
+        result = run_puppeteer(script, base_url=seeded_url, timeout=30)
+        assert result["all_checked"] is True, "all-projects should remain checked"
+        assert result["snapcraft_checked"] is True, "snapcraft should be checked"
+        assert "all-projects" in result["hidden_value"]
+        assert "snapcraft" in result["hidden_value"]
+
 
 # ---------------------------------------------------------------------------
 # Tests: Date range filtering

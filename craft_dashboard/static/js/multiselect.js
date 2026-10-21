@@ -104,7 +104,7 @@
         const nonAllOptions = Array.from(options).filter((cb) => cb !== allOption);
         const allSelected = nonAllOptions.length > 0 && selected.length === nonAllOptions.length;
 
-        if (allOption && allOption.checked) {
+        if (allOption && allOption.checked && selected.length === 1) {
           displaySpan.textContent = allOption.closest("label")?.textContent.trim() || "All projects";
           badgeSpan.style.display = "none";
         } else if (allSelected) {
@@ -204,21 +204,13 @@
       }
     });
 
-    // Handle checkbox changes and mutual exclusion with allOption
+    // Handle checkbox changes
     options.forEach((cb) => {
       cb.addEventListener("change", function () {
-        if (allOption) {
-          if (cb === allOption && cb.checked) {
-            options.forEach((other) => {
-              if (other !== allOption) other.checked = false;
-            });
-          } else if (cb !== allOption && cb.checked) {
-            allOption.checked = false;
-          } else if (!cb.checked) {
-            const anyChecked = Array.from(options).some((other) => other.checked);
-            if (!anyChecked) {
-              allOption.checked = true;
-            }
+        if (allOption && !cb.checked) {
+          const anyChecked = Array.from(options).some((other) => other.checked);
+          if (!anyChecked) {
+            allOption.checked = true;
           }
         }
         updateDisplay();

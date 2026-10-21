@@ -207,8 +207,10 @@ function updateClosedChart() {
 
 function updateSnapshotTable() {
   const selected = getSelectedProjects();
-  const showAll = selected.includes("all-projects");
-  const visibleProjects = order.filter(name => showAll || selected.includes(name));
+  const specificSelected = selected.filter(name => name !== "all-projects");
+  const visibleProjects = specificSelected.length > 0
+    ? order.filter(name => specificSelected.includes(name))
+    : (selected.includes("all-projects") ? order : []);
 
   const view = getCurrentView();
   const types = getSelectedTypes();
