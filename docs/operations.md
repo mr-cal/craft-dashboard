@@ -100,7 +100,7 @@ Working directory: `$REPO` for repository commands, or any directory when using 
 Check worker readiness and server connectivity:
 
 ```bash
-uvx craft-eval status --server "$DASHBOARD_URL" --token "$EVAL_API_TOKEN"
+uvx craft-dashboard eval status --server "$DASHBOARD_URL" --token "$EVAL_API_TOKEN"
 ```
 
 Start the HTTP polling worker with configured environment variables:
@@ -113,7 +113,7 @@ uv run scripts/run_llm.py evaluate
 Or run directly with `uvx`:
 
 ```bash
-uvx craft-eval evaluate --server "$DASHBOARD_URL" --token "$EVAL_API_TOKEN"
+uvx craft-dashboard eval run --server "$DASHBOARD_URL" --token "$EVAL_API_TOKEN"
 ```
 
 Run a bounded batch:

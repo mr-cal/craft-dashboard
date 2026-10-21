@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import logging
 import os
 import pathlib
@@ -389,7 +390,7 @@ def cli(ctx: click.Context) -> None:
         click.echo(ctx.get_help())
 
 
-@cli.command(name="clear-evaluations")
+@cli.command(name="clear")
 @click.option(
     "--server",
     default="",
@@ -473,7 +474,9 @@ def clear_evaluations_cmd(
     )
 
 
-cli.add_command(clear_evaluations_cmd, name="clear")
+_clear_alias = copy.copy(clear_evaluations_cmd)
+_clear_alias.hidden = True
+cli.add_command(_clear_alias, name="clear-evaluations")
 
 
 @cli.command(name="status")
@@ -540,7 +543,7 @@ def _handle_fatal_config_error(message: str) -> None:
     raise click.UsageError(message)
 
 
-@cli.command(name="evaluate")
+@cli.command(name="run")
 @click.option(
     "--server",
     default="",
@@ -581,9 +584,9 @@ def _handle_fatal_config_error(message: str) -> None:
 )
 @click.option("--project", default="", help="Only evaluate issues for this project")
 @click.option(
-    "--open-only/--all-issues",
-    default=True,
-    show_default=True,
+    "--open-only",
+    is_flag=True,
+    default=False,
     help="Only evaluate open issues",
 )
 @click.option("--force", is_flag=True, default=False, help="Force re-evaluation")
@@ -803,4 +806,6 @@ def evaluate_cmd(
     )
 
 
-cli.add_command(evaluate_cmd, name="run")
+_evaluate_alias = copy.copy(evaluate_cmd)
+_evaluate_alias.hidden = True
+cli.add_command(_evaluate_alias, name="evaluate")

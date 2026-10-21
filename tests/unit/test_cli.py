@@ -120,3 +120,22 @@ class TestCLI:
             assert mock_embedding_client.call_count == 1
             _, client_kwargs = mock_embedding_client.call_args
             assert client_kwargs["api_key"] == "embed-secret-key"
+
+    def test_eval_group_exists(self) -> None:
+        """The eval subcommand group exists and lists subcommands."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["eval", "--help"])
+        assert result.exit_code == 0
+        assert "status" in result.output
+        assert "run" in result.output
+        assert "clear" in result.output
+
+    def test_eval_run_command_exists(self) -> None:
+        """The eval run subcommand exposes runner flags."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["eval", "run", "--help"])
+        assert result.exit_code == 0
+        assert "--concurrency" in result.output
+        assert "--llm-backend" in result.output
+        assert "--open-only" in result.output
+        assert "--all-issues" not in result.output

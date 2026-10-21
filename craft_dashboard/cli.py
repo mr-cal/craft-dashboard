@@ -265,3 +265,12 @@ def commit_scanner_run(
             )
 
     asyncio.run(_run())
+
+
+def _register_llm_commands() -> None:
+    from scripts.llm.cli import cli as eval_group
+
+    main.add_command(eval_group, name="eval")
+
+
+_register_llm_commands()

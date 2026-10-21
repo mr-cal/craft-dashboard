@@ -122,9 +122,9 @@ The LLM worker also reads these variables in `scripts/llm/cli.py`:
 
 | Command | Options |
 |---|---|
-| `scripts/run_llm.py evaluate` / `craft-eval evaluate` | `--server`, `--token`, `--ca-cert`, `--env-file`, `--interval`, `--limit`/`--max-evaluations`, `--project`, `--open-only`/`--all-issues`, `--force`, `--incomplete`, `--stale-days`, `--issue`, `--concurrency`, `--llm-backend openrouter|local|copilot-acp`, `--verbose`, `--log`, `--slow-eval`, `--min-delay`, `--max-delay`, `--tool-delay` |
-| `scripts/run_llm.py status` / `craft-eval status` | `--server`, `--token`, `--ca-cert`, `--env-file`, `--llm-backend` |
-| `scripts/run_llm.py clear-evaluations` / `craft-eval clear` | `--server`, `--token`, `--ca-cert`, `--env-file`, `--project`, `--issue`, `--evaluated-by`, `--stale-days`, `--incomplete`, `--yes` |
+| `craft-dashboard eval run` / `scripts/run_llm.py evaluate` | `--server`, `--token`, `--ca-cert`, `--env-file`, `--interval`, `--limit`/`--max-evaluations`, `--project`, `--open-only`, `--force`, `--incomplete`, `--stale-days`, `--issue`, `--concurrency`, `--llm-backend openrouter|local|copilot-acp`, `--verbose`, `--log`, `--slow-eval`, `--min-delay`, `--max-delay`, `--tool-delay` |
+| `craft-dashboard eval status` / `scripts/run_llm.py status` | `--server`, `--token`, `--ca-cert`, `--env-file`, `--llm-backend` |
+| `craft-dashboard eval clear` / `scripts/run_llm.py clear-evaluations` | `--server`, `--token`, `--ca-cert`, `--env-file`, `--project`, `--issue`, `--evaluated-by`, `--stale-days`, `--incomplete`, `--yes` |
 | `scripts/llm/canary.py` | `--server`, `--token`, repeatable `--issue`, `--model-summary`, `--model-scoring`, `--openrouter-api-key`, `--llm-backend openrouter|local`, `--timeout-seconds` |
 | `scripts/manage_eval_tokens.py create` | `--id`, `--name`, `--permissions` |
 | `scripts/manage_eval_tokens.py list` | `--stats` |
@@ -229,4 +229,4 @@ Endpoint list comes from `craft_dashboard/routes/` and `craft_dashboard/app.py`.
 | `.github/workflows/ci.yml` | Push and pull request to `main` | Runs setup, lint, and tests. |
 | `.github/workflows/e2e.yml` | Push, pull request, manual | Runs end-to-end tests. |
 | `.github/workflows/publish.yml` | Push to `main` | Builds and pushes the GHCR image and dispatches `craft-dashboard-updated` to `mr-cal/vps-infra`. |
-| `.github/workflows/release-publish.yaml` | Tag push (`*.*.*`) | Builds and publishes `craft-eval` to PyPI and creates a GitHub release. |
+| `.github/workflows/release.yml` | Tag push (`*.*.*`) | Builds and publishes `craft-dashboard` to PyPI and creates a GitHub release. |

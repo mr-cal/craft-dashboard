@@ -22,6 +22,8 @@ def test_help_lists_http_evaluate_options() -> None:
     assert "--interval" in result.output
     assert "--concurrency" in result.output
     assert "--log" in result.output
+    assert "--open-only" in result.output
+    assert "--all-issues" not in result.output
     assert "continuous" in result.output.lower()
 
 
@@ -65,7 +67,40 @@ def test_evaluate_runs_with_unified_llm_config(monkeypatch) -> None:
     assert run_loop.call_args.kwargs["model_scoring"] == "local-model"
     assert run_loop.call_args.kwargs["concurrency"] == 4
     assert run_loop.call_args.kwargs["poll_interval"] == 15
+    assert run_loop.call_args.kwargs["open_only"] is False
     assert run_loop.call_args.kwargs["log"] is False
+
+
+def test_evaluate_passes_open_only_flag(monkeypatch) -> None:
+    runner = CliRunner()
+    monkeypatch.setenv("DASHBOARD_URL", "http://localhost:8000")
+    monkeypatch.setenv("EVAL_API_TOKEN", "test-token")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-api-key")
+    monkeypatch.setenv("LLM_MODEL", "local-model")
+    monkeypatch.delenv("LLM_MODEL_SUMMARY", raising=False)
+    monkeypatch.delenv("LLM_MODEL_SCORING", raising=False)
+    monkeypatch.delenv("LLM_CA_CERT", raising=False)
+    monkeypatch.delenv("DASHBOARD_CA_CERT", raising=False)
+    run_loop = AsyncMock()
+    monkeypatch.setattr("scripts.llm.cli.run_evaluate_loop", run_loop)
+
+    def _capture_run(coro):
+        coro.close()
+
+    monkeypatch.setattr("scripts.llm.cli.asyncio.run", _capture_run)
+
+    result = runner.invoke(
+        cli,
+        [
+            "evaluate",
+            "--open-only",
+        ],
+    )
+
+    assert result.exit_code == 0
+    run_loop.assert_called_once()
+    assert run_loop.call_args.kwargs["open_only"] is True
 
 
 def test_evaluate_passes_log_flag(monkeypatch) -> None:
