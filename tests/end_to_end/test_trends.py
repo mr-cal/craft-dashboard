@@ -335,6 +335,34 @@ class TestProjectToggling:
         assert "all-projects" in result["hidden_value"]
         assert "snapcraft" in result["hidden_value"]
 
+    def test_filter_controls_vertical_alignment(self, seeded_url: str) -> None:
+        """Apply and Clear buttons should vertically align with Date Range inputs."""
+        script = make_script("""\
+    await page.goto(`${BASE}/stats/trends`, {waitUntil: 'networkidle0', timeout: 30000});
+    const alignment = await page.evaluate(() => {
+      const btnApply = document.getElementById('btn-date-apply');
+      const btnReset = document.getElementById('btn-date-reset');
+      const dateInput = document.getElementById('date-start');
+      const applyRect = btnApply.getBoundingClientRect();
+      const resetRect = btnReset.getBoundingClientRect();
+      const dateRect = dateInput.getBoundingClientRect();
+      return {
+        diffApplyDate: Math.abs(applyRect.bottom - dateRect.bottom),
+        diffResetDate: Math.abs(resetRect.bottom - dateRect.bottom),
+        applyHeight: applyRect.height,
+        dateHeight: dateRect.height,
+      };
+    });
+    console.log(JSON.stringify(alignment));
+""")
+        result = run_puppeteer(script, base_url=seeded_url, timeout=30)
+        assert result["diffApplyDate"] < 1.0, (
+            f"Apply button bottom misaligned: {result}"
+        )
+        assert result["diffResetDate"] < 1.0, (
+            f"Reset button bottom misaligned: {result}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Tests: Date range filtering
