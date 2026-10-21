@@ -161,13 +161,19 @@ See [reference.md](reference.md#llm-evaluation) for flags and required environme
 
 ## Manage evaluation API tokens
 
-Working directory: `$REPO`.
+Working directory: `$REPO` for local development, or run inside the app container on production.
 
-Create a token for a coworker or worker:
+Local token creation:
 
 ```bash
 cd "$REPO"
-uv run scripts/manage_eval_tokens.py create --id stormclanker --name "Stormclanker Worker"
+uv run scripts/manage_eval_tokens.py create --id test-bot --name "Test Bot"
+```
+
+Production token creation:
+
+```bash
+ssh "$VPS_HOST" "podman exec -i $APP_CONTAINER $APP_PYTHON /app/scripts/manage_eval_tokens.py create --id test-bot --name 'Test Bot'"
 ```
 
 List active tokens and evaluation counts:
@@ -177,11 +183,23 @@ cd "$REPO"
 uv run scripts/manage_eval_tokens.py list --stats
 ```
 
+Production list:
+
+```bash
+ssh "$VPS_HOST" "podman exec -i $APP_CONTAINER $APP_PYTHON /app/scripts/manage_eval_tokens.py list --stats"
+```
+
 Revoke a token:
 
 ```bash
 cd "$REPO"
-uv run scripts/manage_eval_tokens.py revoke --id stormclanker
+uv run scripts/manage_eval_tokens.py revoke --id test-bot
+```
+
+Production revoke:
+
+```bash
+ssh "$VPS_HOST" "podman exec -i $APP_CONTAINER $APP_PYTHON /app/scripts/manage_eval_tokens.py revoke --id test-bot"
 ```
 
 Tokens can also be reviewed and revoked by authenticated administrators in `/admin/evaluations`.
