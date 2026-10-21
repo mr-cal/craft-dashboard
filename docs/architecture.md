@@ -62,7 +62,7 @@ Templates use Jinja2. HTMX powers partial updates. Chart.js renders trend and en
 
 SQLAlchemy ORM models live in `craft_dashboard/models/`. Alembic migrations live in `alembic/`. The container command runs `alembic upgrade head` before Gunicorn starts. Local development can apply the same migrations with `make migrate`.
 
-See [reference.md](reference.md#database-tables) for table names.
+See [reference.md](reference.md#database-schema) for schema details.
 
 ## Configuration
 
