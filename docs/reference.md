@@ -178,53 +178,7 @@ Table names come from `craft_dashboard/models/`.
 
 ## HTTP endpoints
 
-Endpoint list comes from `craft_dashboard/routes/` and `craft_dashboard/app.py`.
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/` | Dashboard overview. |
-| `GET` | `/health` | App and database health check. |
-| `GET` | `/issues` | Issue list page. |
-| `GET` | `/issues/table` | Issue table partial. |
-| `GET` | `/issues/{project}/{number}` | Issue detail page. |
-| `GET` | `/issues/export` | Filtered issue export. |
-| `GET` | `/stats` | Redirect to trends. |
-| `GET` | `/stats/dependencies` | Dependency page. |
-| `GET` | `/stats/dependencies/data` | Dependency JSON data. |
-| `GET` | `/stats/releases` | Release page. |
-| `GET` | `/stats/cadence` | Release cadence page. |
-| `GET` | `/stats/trends` | Trends page. |
-| `GET` | `/stats/trends/all-data` | Full trend JSON data. |
-| `GET` | `/stats/trends/data` | Per-project trend JSON data. |
-| `GET` | `/stats/trends/chart` | Trend chart partial. |
-| `GET` | `/stats/triage` | Triage summary page. |
-| `GET` | `/engagement/forums` | Forum activity page. |
-| `GET` | `/engagement/forums/data` | Forum activity JSON data. |
-| `POST` | `/admin/auth` | Create admin session. |
-| `POST` | `/admin/logout` | Clear admin session. |
-| `GET` | `/admin/status` | Collection and evaluation status JSON. |
-| `GET` | `/admin` | Admin ingestion page. |
-| `GET` | `/admin/evaluations` | Admin evaluations page. |
-| `GET` | `/admin/schedule` | Admin schedule page. |
-| `GET` | `/admin/recent-activity` | Recent activity partial. |
-| `GET` | `/admin/recent-evaluations` | Recent evaluations partial. |
-| `GET` | `/admin/collection-runs/{run_id}/issues` | Issues collected by a run. |
-| `POST` | `/admin/refresh` | Queue data refresh. |
-| `POST` | `/admin/keys/revoke` | Revoke an evaluation API token. |
-| `GET` | `/admin/health` | Detailed admin health JSON. |
-| `GET` | `/admin/logs` | Recent service logs. |
-| `GET` | `/api/eval/next` | Lease the next evaluation item. |
-| `POST` | `/api/eval/result` | Store evaluation output. |
-| `POST` | `/api/eval/release` | Release a claim. |
-| `POST` | `/api/eval/related` | Related-issue search by request body. |
-| `GET` | `/api/eval/related` | Related-issue search by query string. |
-| `GET` | `/api/eval/issue` | Resolve an issue reference. |
-| `POST` | `/api/eval/quota-pause` | Report worker quota pause. |
-| `GET` | `/api/eval/status` | Evaluation queue counts. |
-| `GET` | `/api/eval/projects` | Project org map for workers. |
-| `GET` | `/api/eval/clear` | Count evaluations to clear. |
-| `DELETE` | `/api/eval/clear` | Delete evaluations. |
-| `POST` | `/api/eval/clear` | Delete evaluations. |
+Interactive API documentation and schema specifications are served at [https://craft-dashboard.name/docs](https://craft-dashboard.name/docs) (or `/docs` on local instances).
 
 `/admin/*` mutation endpoints require admin authentication. `/api/eval/*` endpoints require an evaluation bearer token.
 
