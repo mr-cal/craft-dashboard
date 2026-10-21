@@ -88,7 +88,7 @@ it is not finished.
    other repos.
 3. No self-justification. State the procedure; do not argue that it is trustworthy.
 4. No root-cause essays. Those belong in code comments or commit messages.
-5. Facts live in exactly one place. `docs/reference.md` is authoritative.
+5. Facts live in exactly one place. Avoid duplicating facts across docs.
 6. No hardcoded hosts, IPs, or container names. Use the shell variables defined at
    the top of `docs/operations.md`.
 7. No volatile numbers: no item counts, RAM measurements, or dated benchmarks.

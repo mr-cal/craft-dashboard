@@ -46,7 +46,7 @@ enforce this.
 | `tests/unit/` | Fast, no database |
 | `tests/integration/` | Real database, still local |
 | `tests/end_to_end/` | Playwright against a container |
-| `docs/` | development, operations, reference, architecture |
+| `docs/` | development, operations, architecture |
 
 ## Where things are decided
 
@@ -54,6 +54,6 @@ enforce this.
 |---|---|
 | Which projects are tracked? | `craft-dashboard.toml` |
 | What is a hotfix? | `craft-dashboard.toml`, `[hotfix-min-versions]` |
-| How often does collection run? | `docs/reference.md` |
-| What are the environment variables? | `docs/reference.md` |
+| How often does collection run? | `docs/operations.md` |
+| What are the environment variables? | `docs/development.md` |
 | Why is it shaped this way? | `docs/architecture.md` |

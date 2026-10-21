@@ -68,7 +68,7 @@ uv run scripts/collect_data.py --source github --project snapcraft --project roc
 uv run scripts/collect_data.py --source github --limit 25 --project snapcraft -v
 ```
 
-See [reference.md](reference.md#data-collection) for all collector flags.
+See `scripts/collect_data.py --help` for all collector flags.
 
 ## Collect forum activity
 
@@ -153,7 +153,7 @@ Production worker invocation:
 ssh "$VPS_HOST" "podman exec -i $APP_CONTAINER craft-dashboard eval run"
 ```
 
-See [reference.md](reference.md#llm-evaluation) for flags and required environment variables.
+See `craft-dashboard eval run --help` for flags, and see [development.md](development.md#environment-variables) for required environment variables.
 
 ## Manage evaluation API tokens
 
@@ -372,3 +372,38 @@ Production database shell:
 ```bash
 ssh -t "$VPS_HOST" "podman exec -it $DB_CONTAINER psql -U $DB_USER $DB_NAME"
 ```
+
+## Cron schedule
+
+The repository does not contain production cron files. The deployment repository owns the schedule. Operational commands in this repository support these job shapes:
+
+| Job | Command shape |
+|---|---|
+| Open GitHub refresh | `scripts/collect_data.py --source github --mode open` |
+| Full GitHub and Launchpad refresh | `scripts/collect_data.py --source all --mode full` |
+| Rotation refresh | `scripts/collect_data.py --mode rotation` |
+| Forum collection | `scripts/collect_forum_data.py --mode all` |
+| Retention garbage collection | `scripts/gc_transcripts.py` (runs `scripts/gc.py`) |
+| Mirror sync | `craft-dashboard mirrors sync` |
+| Commit scan | `craft-dashboard commit-scanner run` |
+| Database backup | `pg_dump` against the PostgreSQL container |
+
+## Command reference
+
+Run `<command> --help` or `<script> --help` for available options.
+
+| Command or script | Purpose |
+|---|---|
+| `craft-dashboard serve` | Start the web application. |
+| `craft-dashboard collect` | Collect issue, PR, and release data. |
+| `craft-dashboard mirrors sync` | Clone or update bare git mirrors. |
+| `craft-dashboard commit-scanner run` | Scan commits to invalidate stale evaluations. |
+| `craft-dashboard eval run` | Continuous HTTP evaluation worker. |
+| `craft-dashboard eval status` | Check worker connectivity and queue status. |
+| `craft-dashboard eval clear` | Delete stored evaluations by project or filter. |
+| `scripts/collect_data.py` | Collect GitHub and Launchpad issues and pull requests. |
+| `scripts/collect_forum_data.py` | Collect Discourse forum posts and topics. |
+| `scripts/backfill_snapshots.py` | Backfill daily metrics snapshots from issue history. |
+| `scripts/gc.py` / `scripts/gc_transcripts.py` | Clean up superseded transcripts and historical evaluations. |
+| `scripts/lp_bug_report.py` | Generate Launchpad bug reports. |
+| `scripts/manage_eval_tokens.py` | Manage evaluation bearer tokens (create, list, rename, rotate, revoke). |

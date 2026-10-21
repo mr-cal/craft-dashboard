@@ -94,7 +94,7 @@ Templates use Jinja2. HTMX powers partial updates. Chart.js renders trend and en
 
 SQLAlchemy ORM models live in `craft_dashboard/models/`. Alembic migrations live in `alembic/`. The container command runs `alembic upgrade head` before Gunicorn starts. Local development can apply the same migrations with `make migrate`.
 
-See [reference.md](reference.md#database-schema) for schema details.
+See [development.md](development.md#database-schema-and-migrations) for schema details.
 
 ## Configuration
 
@@ -103,7 +103,7 @@ There are two configuration layers:
 - `craft-dashboard.toml` defines tracked projects, maintainers, bots, filters, hotfix thresholds, release seed data, and forums.
 - Environment variables configure secrets, database access, evaluation API auth, embedding services, database pool sizing, semantic search, mirrors, and commit scanning.
 
-See [reference.md](reference.md#environment-variables) for the authoritative environment variable list.
+See [development.md](development.md#environment-variables) for configuration details.
 
 ## Container and deployment flow
 

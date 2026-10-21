@@ -72,5 +72,4 @@ Deepseek v4 Pro, GPT 5.5+, and Gemini 3.8+ Flash.
 
 * [Development](docs/development.md)
 * [Operations](docs/operations.md)
-* [Reference](docs/reference.md)
 * [Architecture](docs/architecture.md)

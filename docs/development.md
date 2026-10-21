@@ -96,4 +96,53 @@ docker-compose.yml        Local app and PostgreSQL stack
 craft-dashboard.toml      Project, maintainer, forum, and filtering configuration
 ```
 
-See [reference.md](reference.md) for command and environment variable details.
+## Configuration file
+
+`craft-dashboard.toml` is loaded by `craft_dashboard/config.py`.
+
+| Key | Purpose |
+|---|---|
+| `craft-applications` | Application repositories. |
+| `craft-libraries` | Shared library repositories. |
+| `craft-other` | Other tracked repositories. |
+| `craft-projects` | GitHub repositories collected by the GitHub collector. |
+| `craft-consumers` | Projects that need additional repository context during evaluation. |
+| `refresh-interval-days` | Full-refresh interval used by schedules. |
+| `hide-prs` | Projects whose PRs are hidden from the dashboard. |
+| `hide-releases` | Projects hidden from release views. |
+| `launchpad-projects` | Launchpad projects collected as separate dashboard projects. |
+| `maintainers` | GitHub maintainers used for author classification. |
+| `launchpad-maintainers` | Launchpad maintainers used for author classification. |
+| `bots` | Bot authors used for author classification. |
+| `[issues.filter]` | Per-project issue numbers excluded from dashboard queries. |
+| `[hotfix-min-versions]` | Minimum hotfix branch versions for release tracking. |
+| `[initial-release-dates]` | Inception timestamps for release cadence. |
+| `[initial-release-tags]` | Initial tags for release cadence. |
+| `[forums.<name>]` | Discourse forum configuration. |
+
+## Environment variables
+
+Application and worker settings are configured via environment variables or a `.env` file. Annotated settings, default values, and operational descriptions are documented in [`.env.example`](../.env.example).
+
+Programmatic definitions and types live in:
+- `craft_dashboard/settings.py` for application, database, semantic search, and collector settings.
+- `scripts/llm/cli.py` for evaluation worker backend and HTTP connection settings.
+
+## Database schema and migrations
+
+SQLAlchemy ORM models defining the database schema live in `craft_dashboard/models/`. Migrations are managed with Alembic under `alembic/versions/`.
+
+## CI workflows
+
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| `.github/workflows/ci.yml` | Push and pull request to `main` | Runs setup, lint, and tests. |
+| `.github/workflows/e2e.yml` | Push, pull request, manual | Runs end-to-end tests. |
+| `.github/workflows/publish.yml` | Push to `main` | Builds and pushes the GHCR image and dispatches `craft-dashboard-updated` to `mr-cal/vps-infra`. |
+| `.github/workflows/release.yml` | Tag push (`*.*.*`) | Builds and publishes `craft-dashboard` to PyPI and creates a GitHub release. |
+
+## HTTP API documentation
+
+Interactive API documentation and OpenAPI specifications are served at `/docs` (or `https://craft-dashboard.name/docs` on production).
+
+`/admin/*` mutation endpoints require admin authentication. `/api/eval/*` endpoints require an evaluation bearer token.
