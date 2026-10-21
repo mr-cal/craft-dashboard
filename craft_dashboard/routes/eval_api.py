@@ -899,7 +899,7 @@ async def eval_status(
     authorization: str = Header(default=""),
     x_worker_version: str | None = Header(default=None, alias="X-Worker-Version"),
     project: str = Query(default=""),
-    open_only: bool = Query(default=True),
+    open_only: bool = Query(default=False),
     force: bool = Query(default=False),
     incomplete: bool = Query(default=False),
     stale_days: int = Query(default=0),
@@ -961,7 +961,7 @@ async def eval_status(
         preflight_blocked_query = preflight_blocked_query.where(excl)
     preflight_blocked = await session.scalar(preflight_blocked_query)
 
-    # Build base issue query (no latest_evaluation join — used for total_open)
+    # Build base issue query (no latest_evaluation join — used for total_issues)
     base_query = select(Issue.id).join(Project, Issue.project_id == Project.id)
     if open_only:
         base_query = base_query.where(Issue.state == "open")
@@ -969,13 +969,13 @@ async def eval_status(
         base_query = base_query.where(Project.name == project)
     if excl is not None:
         base_query = base_query.where(excl)
-    total_open = await session.scalar(
+    total_issues = await session.scalar(
         select(func.count()).select_from(base_query.subquery())
     )
 
     # Pending count depends on filter mode
     if force:
-        pending = total_open
+        pending = total_issues
     else:
         latest_evaluation = aliased(LLMEvaluation)
         pending_query = (
@@ -1051,7 +1051,8 @@ async def eval_status(
         "preflight_blocked": preflight_blocked or 0,
         "evaluated_today": evaluated_today or 0,
         "total_evaluated": total_evaluated or 0,
-        "total_open": total_open or 0,
+        "total_issues": total_issues or 0,
+        "total_open": total_issues or 0,
         "authenticated_as": auth_token.id,
         "permissions": list(auth_token.permissions),
         "min_worker_version": request.app.state.settings.eval_min_worker_version,

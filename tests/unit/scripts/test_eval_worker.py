@@ -15,6 +15,7 @@ import pytest
 from craft_dashboard.llm.acp_client import CopilotACPClient
 from craft_dashboard.llm.preflight import PreflightResult
 from scripts.llm import eval_worker
+from scripts.llm.console import update_worker_step
 
 SAMPLE_ISSUE = {
     "issue_id": 42,
@@ -1039,3 +1040,70 @@ def test_install_eval_progress_ignores_attempt_one_and_reports_retries() -> None
     printed = progress_mock.console.print.call_args[0][0]
     assert "starflow#200" in printed
     assert "round 3/5: eval attempt 2/3…" in printed
+
+
+@pytest.mark.asyncio
+async def test_record_completion_formats_tokens_with_commas(
+    base_runtime: SimpleNamespace,
+) -> None:
+    """Token counts in the completion summary must be formatted with commas."""
+    submission = {
+        "suggested_action": "needs_review",
+        "prompt_tokens": 134408,
+        "completion_tokens": 4272,
+    }
+    await eval_worker._record_completion(
+        base_runtime,
+        issue_data=_make_issue(),
+        issue_ref="craft-platforms#284",
+        submission=submission,
+        started_at=100.0,
+        evaluate_elapsed=55.0,
+        worker_name="worker-1",
+        worker_index=1,
+    )
+
+    base_runtime.progress.console.print.assert_called_once()
+    printed = base_runtime.progress.console.print.call_args[0][0]
+    assert "134,408 in / 4,272 out" in printed
+    assert "eval 55s" in printed
+
+
+def test_update_worker_step_truncates_long_step_when_console_width_bounded() -> None:
+    """Long worker steps must be truncated so the timer column is not hidden."""
+    mock_console = MagicMock()
+    mock_console.width = 100
+    mock_progress = MagicMock()
+    mock_progress.console = mock_console
+
+    very_long_step = "round 2/5: reading file /very/long/nested/path/to/some/deep/source/code/file.py"
+    update_worker_step(
+        mock_progress,
+        task_id=1,
+        worker_name="worker-1",
+        issue_ref="repo#123",
+        step=very_long_step,
+    )
+
+    mock_progress.update.assert_called_once()
+    desc = mock_progress.update.call_args.kwargs["description"]
+    assert "…" in desc
+    assert len(desc) < 100
+
+
+def test_update_worker_step_preserves_timer_when_reset_timer_false() -> None:
+    """When reset_timer is False, step_started_at must not be overwritten."""
+    mock_progress = MagicMock()
+    mock_progress.console = MagicMock()
+    mock_progress.console.width = None
+
+    update_worker_step(
+        mock_progress,
+        task_id=1,
+        worker_name="worker-1",
+        step="some step",
+        reset_timer=False,
+    )
+
+    mock_progress.update.assert_called_once()
+    assert "step_started_at" not in mock_progress.update.call_args.kwargs

@@ -280,9 +280,14 @@ async def _status_main(
                     f"  Version Check:  [OK] Compatible (server minimum: {data.get('min_worker_version')})",
                     fg="green",
                 )
+                total_issues = (
+                    data.get("total_issues")
+                    if "total_issues" in data
+                    else data.get("total_open", 0)
+                )
                 click.echo(
                     f"  Queue Status:   {data.get('pending', 0):,} issues pending / "
-                    f"{data.get('total_open', 0):,} open issues "
+                    f"{total_issues:,} issues "
                     f"({data.get('total_evaluated', 0):,} total evaluated, "
                     f"{data.get('evaluated_today', 0):,} today)"
                 )

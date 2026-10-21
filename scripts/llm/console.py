@@ -26,6 +26,7 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
+from rich.table import Column
 from rich.text import Text
 
 if TYPE_CHECKING:
@@ -157,15 +158,24 @@ class ConditionalTimeRemainingColumn(TimeRemainingColumn):
 
 
 class StepElapsedColumn(ProgressColumn):
-    """Elapsed time column for active worker steps."""
+    """Elapsed time column for active worker steps and overall task."""
+
+    def __init__(self, table_column: Column | None = None) -> None:
+        super().__init__(
+            table_column=table_column or Column(no_wrap=True, justify="right")
+        )
+        self._overall_elapsed = TimeElapsedColumn()
 
     def render(self, task: RichTask) -> Text:
-        """Render elapsed step duration for worker subtasks."""
-        started_at = task.fields.get("step_started_at")
-        if not started_at or not task.fields.get("is_worker"):
-            return Text("")
-        elapsed = max(0.0, time.monotonic() - float(started_at))
-        return Text(f"[{format_elapsed(elapsed)}]", style="dim cyan")
+        """Render elapsed duration for worker subtasks or overall task."""
+        if task.fields.get("is_worker"):
+            started_at = task.fields.get("step_started_at")
+            if not started_at:
+                return Text("")
+            elapsed = max(0.0, time.monotonic() - float(started_at))
+            return Text(f"[{format_elapsed(elapsed)}] ", style="dim cyan")
+        elapsed_text = self._overall_elapsed.render(task)
+        return Text(f"{elapsed_text} ")
 
 
 class TimingEtaColumn(ProgressColumn):
@@ -239,14 +249,14 @@ def make_progress(
     )
     return Progress(
         SpinnerColumn(),
-        TextColumn("{task.description}"),
-        ConditionalBarColumn(),
+        TextColumn("{task.description}", table_column=Column(ratio=1, no_wrap=True)),
+        ConditionalBarColumn(bar_width=16),
         ConditionalTaskProgressColumn(),
         ConditionalMofNCompleteColumn(),
         eta_col,
-        ConditionalTimeElapsedColumn(),
         StepElapsedColumn(),
         console=console,
+        expand=True,
         transient=False,
     )
 
@@ -279,6 +289,18 @@ def update_worker_step(
     reset_timer: bool = True,
 ) -> None:
     """Update a worker subtask description and optionally reset its step timer."""
+    width = getattr(getattr(progress, "console", None), "width", None)
+    if isinstance(width, int) and width > 0:
+        # Reserve width for other table columns (spinner, bar, percentages, timers, padding)
+        # so that the elapsed timer is never pushed off-screen or collapsed.
+        reserved = 54
+        visible_prefix_len = len(f"  {worker_name}: ")
+        if issue_ref:
+            visible_prefix_len += len(f"{issue_ref} | ")
+        max_step_len = max(20, width - reserved - visible_prefix_len)
+        if len(step) > max_step_len:
+            step = step[: max_step_len - 1] + "…"
+
     prefix = f"  [dim]{worker_name}:[/dim]"
     if issue_ref:
         desc = f"{prefix} [cyan]{issue_ref}[/cyan] | {step}"
@@ -287,6 +309,8 @@ def update_worker_step(
     kwargs: dict[str, Any] = {"description": desc}
     if reset_timer:
         kwargs["step_started_at"] = time.monotonic()
+    elif step.startswith("idle"):
+        kwargs["step_started_at"] = None
     progress.update(task_id, **kwargs)
 
 

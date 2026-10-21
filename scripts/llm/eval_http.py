@@ -223,19 +223,19 @@ async def log_queue_status(
         if status_resp.status_code == HTTP_OK:
             status_data = status_resp.json()
             server_pending = status_data.get("pending", 0)
-            total_open = status_data.get("total_open", 0)
-            total_evaluated = status_data.get("total_evaluated", 0)
-            already_pct = (
-                int(100 * total_evaluated / total_open) if total_open > 0 else 0
+            total_issues = (
+                status_data.get("total_issues")
+                if "total_issues" in status_data
+                else status_data.get("total_open", 0)
             )
+            total_evaluated = status_data.get("total_evaluated", 0)
             total_remaining = limit if limit > 0 else server_pending
             logger.info(
-                "Connected to %s%s — %d/%d open issues evaluated (%d%%), %d pending | backend=%s model=%s concurrency=%d",
+                "Connected to %s%s — %d/%d issues evaluated, %d pending | backend=%s model=%s concurrency=%d",
                 server_url,
                 filter_desc,
                 total_evaluated,
-                total_open,
-                already_pct,
+                total_issues,
                 server_pending,
                 llm_backend,
                 model_scoring,

@@ -402,6 +402,7 @@ def _install_eval_progress(
                 worker_name=worker_name,
                 issue_ref=_ref,
                 step=f"{prefix}eval attempt {attempt}/{total}…",
+                reset_timer=False,
                 log_milestone=True,
             )
 
@@ -462,6 +463,7 @@ async def _submit_evaluation(
         worker_name=worker_name,
         issue_ref=issue_ref,
         step="submitting evaluation…",
+        reset_timer=False,
     )
     submit_response = await _post_submission(
         runtime,
@@ -522,7 +524,7 @@ async def _record_completion(
 
     runtime.progress.console.print(
         f"{issue_label} — {action}"
-        f"  [dim]{submission['prompt_tokens']} in / {submission['completion_tokens']} out"
+        f"  [dim]{submission['prompt_tokens']:,} in / {submission['completion_tokens']:,} out"
         f"  eval {_format_elapsed(evaluate_elapsed)}[/dim]"
     )
     _notify_worker_step(
@@ -588,7 +590,7 @@ async def _evaluate_issue(
                 worker_name=worker_name,
                 issue_ref=issue_ref,
                 step="building repo baseline…",
-                reset_timer=True,
+                reset_timer=False,
             )
         elif event.phase == "baseline_done":
             _notify_worker_step(
@@ -597,6 +599,7 @@ async def _evaluate_issue(
                 worker_name=worker_name,
                 issue_ref=issue_ref,
                 step="repo baseline ready",
+                reset_timer=False,
                 elapsed=event.elapsed,
             )
         elif event.phase == "tool_start":
@@ -611,7 +614,7 @@ async def _evaluate_issue(
                 worker_name=worker_name,
                 issue_ref=issue_ref,
                 step=f"{round_info}{step_detail}…",
-                reset_timer=True,
+                reset_timer=False,
             )
         elif event.phase == "llm_call":
             step_detail = (
@@ -625,7 +628,7 @@ async def _evaluate_issue(
                 worker_name=worker_name,
                 issue_ref=issue_ref,
                 step=f"{round_info}{step_detail}…",
-                reset_timer=True,
+                reset_timer=False,
             )
         elif event.phase == "tool_done":
             _notify_worker_step(
@@ -634,6 +637,7 @@ async def _evaluate_issue(
                 worker_name=worker_name,
                 issue_ref=issue_ref,
                 step=f"{round_info}{event.detail}",
+                reset_timer=False,
                 elapsed=event.elapsed,
             )
         elif event.phase == "synthesis":
@@ -643,7 +647,7 @@ async def _evaluate_issue(
                 worker_name=worker_name,
                 issue_ref=issue_ref,
                 step=f"{round_info}synthesizing evaluation…",
-                reset_timer=True,
+                reset_timer=False,
             )
         elif event.phase == "tool_delay":
             _notify_worker_step(
@@ -652,7 +656,7 @@ async def _evaluate_issue(
                 worker_name=worker_name,
                 issue_ref=issue_ref,
                 step=f"{round_info}tool delay: {event.detail}…",
-                reset_timer=True,
+                reset_timer=False,
             )
 
     submitted = False
@@ -677,6 +681,7 @@ async def _evaluate_issue(
                 worker_name=worker_name,
                 issue_ref=issue_ref,
                 step=f"evaluation error ({exc})",
+                reset_timer=False,
                 log_milestone=True,
             )
             failure = classify_evaluation_error(
@@ -705,6 +710,7 @@ async def _evaluate_issue(
             worker_name=worker_name,
             issue_ref=issue_ref,
             step="validating output…",
+            reset_timer=False,
         )
         try:
             validate_result(result, issue_data=issue_data, state=normalized_state)
@@ -715,6 +721,7 @@ async def _evaluate_issue(
                 worker_name=worker_name,
                 issue_ref=issue_ref,
                 step="evaluation validation failed",
+                reset_timer=False,
                 log_milestone=True,
             )
             logger.warning(
@@ -1006,11 +1013,11 @@ def _log_run_totals(state: _RunState) -> None:
     """Log the token totals for a finished run, if anything was evaluated."""
     if state.evaluated > 0:
         logger.info(
-            "Run total: %d issues, %d in / %d out tokens (%d total)",
+            "Run total: %d issues, %s in / %s out tokens (%s total)",
             state.evaluated,
-            state.total_prompt_tokens,
-            state.total_completion_tokens,
-            state.total_prompt_tokens + state.total_completion_tokens,
+            f"{state.total_prompt_tokens:,}",
+            f"{state.total_completion_tokens:,}",
+            f"{state.total_prompt_tokens + state.total_completion_tokens:,}",
         )
 
 

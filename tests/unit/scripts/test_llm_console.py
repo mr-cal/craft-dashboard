@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import io
 import logging
+import time
 from typing import TYPE_CHECKING
 
 from rich.console import Console
-from rich.progress import Progress, TimeRemainingColumn
+from rich.progress import Progress, TextColumn, TimeRemainingColumn
 from scripts.eval_timing import PHASE_EVALUATE, TimingHistory
 from scripts.llm.console import (
+    StepElapsedColumn,
     TimingEtaColumn,
     format_elapsed,
     make_progress,
@@ -182,3 +184,54 @@ class TestMakeProgress:
         progress = make_progress(console, 10)
         task_id = progress.add_task("Evaluating issues", total=10, completed=0)
         assert progress.tasks[0].id == task_id
+
+    def test_progress_expands_and_sets_ratio_on_text_column(self) -> None:
+        console = Console(file=io.StringIO())
+        progress = make_progress(console, 10)
+        assert progress.expand is True
+
+        text_col = next(col for col in progress.columns if isinstance(col, TextColumn))
+        table_col = text_col.get_table_column()
+        assert table_col.ratio == 1
+        assert table_col.no_wrap is True
+
+
+class TestStepElapsedColumn:
+    """Tests for StepElapsedColumn."""
+
+    def test_renders_overall_elapsed_with_trailing_space(self) -> None:
+        console = Console(file=io.StringIO())
+        progress = Progress(console=console)
+        task_id = progress.add_task("overall", total=10)
+        task = next(t for t in progress.tasks if t.id == task_id)
+        col = StepElapsedColumn()
+        rendered = str(col.render(task))
+        # Overall elapsed renders formatted time with trailing space
+        assert rendered.endswith(" ")
+        assert "0:00" in rendered
+
+    def test_renders_worker_elapsed_with_bracket_and_trailing_space(self) -> None:
+        console = Console(file=io.StringIO())
+        progress = Progress(console=console)
+        task_id = progress.add_task(
+            "worker", is_worker=True, step_started_at=time.monotonic() - 15.0
+        )
+        task = next(t for t in progress.tasks if t.id == task_id)
+        col = StepElapsedColumn()
+        rendered = str(col.render(task))
+        assert rendered.endswith("] ")
+        assert "[15s] " in rendered
+
+    def test_renders_empty_for_idle_worker(self) -> None:
+        console = Console(file=io.StringIO())
+        progress = Progress(console=console)
+        task_id = progress.add_task("worker", is_worker=True, step_started_at=None)
+        task = next(t for t in progress.tasks if t.id == task_id)
+        col = StepElapsedColumn()
+        assert str(col.render(task)) == ""
+
+    def test_column_properties(self) -> None:
+        col = StepElapsedColumn()
+        table_col = col.get_table_column()
+        assert table_col.justify == "right"
+        assert table_col.no_wrap is True

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
-from scripts.llm.eval_http import format_error_body, post_submission
+from scripts.llm.eval_http import format_error_body, log_queue_status, post_submission
 from scripts.llm.worker_runtime import Runtime
 
 
@@ -88,6 +88,46 @@ class TestPostSubmission:
         assert response.status_code == 200
         assert mock_http.post.call_count == 2
         mock_sleep.assert_called_once_with(2)
+
+
+class TestLogQueueStatus:
+    """Tests for log_queue_status."""
+
+    @pytest.mark.asyncio
+    async def test_logs_status_without_open_and_without_percentage(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mock_http = AsyncMock()
+        mock_http.get = AsyncMock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "pending": 341,
+                    "total_issues": 1200,
+                    "total_open": 1200,
+                    "total_evaluated": 859,
+                },
+                request=httpx.Request("GET", "http://x/api/eval/status"),
+            )
+        )
+
+        with caplog.at_level("INFO"):
+            remaining = await log_queue_status(
+                http_client=mock_http,
+                server_url="https://craft-dashboard.name",
+                filter_desc="",
+                params={},
+                headers={},
+                llm_backend="openrouter",
+                model_scoring="gpt-4",
+                concurrency=5,
+                limit=0,
+            )
+
+        assert remaining == 341
+        assert "859/1200 issues evaluated, 341 pending" in caplog.text
+        assert "open issues" not in caplog.text
+        assert "%" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_does_not_retry_on_409(self) -> None:

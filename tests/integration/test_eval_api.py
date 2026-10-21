@@ -2280,16 +2280,26 @@ class TestEvalStatusIntegration:
 
         assert response.status_code == 200
         assert response.json() == {
-            "pending": 2,
+            "pending": 3,
             "locked": 1,
             "preflight_blocked": 0,
             "evaluated_today": 1,
             "total_evaluated": 1,
-            "total_open": 4,
+            "total_issues": 5,
+            "total_open": 5,
             "authenticated_as": "test-token",
             "permissions": ["eval:write", "eval:admin"],
             "min_worker_version": "0.0.0",
         }
+
+        with TestClient(app) as client:
+            open_resp = client.get(
+                "/api/eval/status?open_only=true",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        assert open_resp.status_code == 200
+        assert open_resp.json()["total_issues"] == 4
+        assert open_resp.json()["pending"] == 2
 
     def test_status_enforces_worker_semver_gating(
         self, test_db_session: AsyncSession
