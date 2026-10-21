@@ -78,25 +78,7 @@ The LLM worker also reads these variables in `scripts/llm/cli.py`:
 
 ### Make targets
 
-| Target | Command |
-|---|---|
-| `make setup` | Install dev, lint, and type dependencies. |
-| `make format` | Ruff check with fixes, then Ruff format. |
-| `make lint` | Ruff check, Ruff format diff, docs check, and ty. |
-| `make test` | Run pytest. |
-| `make test-fast` | Run unit tests in parallel. |
-| `make test-cov` | Run pytest with coverage. |
-| `make check` | Format, lint, and fast tests. |
-| `make dev` | Run Uvicorn with reload. |
-| `make dev-seeded` | Build, start, and seed a local stack for manual checks. |
-| `make dev-down` | Stop the local seeded stack and delete its volumes. |
-| `make migrate` | Run Alembic upgrade head. |
-| `make collect` | Run `scripts/collect_data.py --source all`. |
-| `make llm` | Run `scripts/run_llm.py evaluate --open-only`. |
-| `make migrate-csv` | Run CSV migration script. |
-| `make build` | Build the OCI image with Podman or Docker. |
-| `make clean` | Remove build and test artifacts. |
-| `make test-e2e` | Run end-to-end tests. |
+Run `make` or `make help` from the repository root to view all development and test targets.
 
 ### `craft-dashboard`
 
@@ -151,30 +133,9 @@ The repository does not contain production cron files. The deployment repository
 | Commit scan | `craft-dashboard commit-scanner run` |
 | Database backup | `pg_dump` against the PostgreSQL container |
 
-## Database tables
+## Database schema
 
-Table names come from `craft_dashboard/models/`.
-
-| Table | Model file | Purpose |
-|---|---|---|
-| `projects` | `project.py` | Tracked projects and display metadata. |
-| `issues` | `issue.py` | GitHub issues, GitHub PRs, and Launchpad bugs. |
-| `eval_api_tokens` | `eval_token.py` | Evaluation API tokens, permission scopes, and usage timestamps. |
-| `llm_evaluations` | `llm_evaluation.py` | Evaluation results, versions, costs, locks, hashes, embeddings, and evaluating token ID. |
-| `evaluation_transcripts` | `evaluation_transcript.py` | Stored evaluation transcripts. |
-| `snapshots` | `snapshot.py` | Daily project metrics for trends. |
-| `releases` | `release.py` | Release and branch release data. |
-| `dependencies` | `dependency.py` | Craft library dependency data. |
-| `refresh_schedule` | `refresh_schedule.py` | Project/source refresh timing and failures. |
-| `collection_watermarks` | `collection_watermark.py` | Successful collection watermarks. |
-| `collection_runs` | `collection_run.py` | Collection run health records. |
-| `issue_activities` | `issue_activity.py` | Detected issue and PR activity. |
-| `forum_topics` | `forum.py` | Discourse topics. |
-| `forum_backfill_state` | `forum.py` | Discourse backfill cursors and category cache. |
-| `eval_queue_snapshots` | `eval_queue_snapshot.py` | Evaluation queue depth history. |
-| `issue_links` | `issue_link.py` | Related-work links between issues. |
-| `commit_scan_runs` | `commit_scan_run.py` | Commit scanner run summaries. |
-| `commit_scan_evidence_paths` | `commit_scan_evidence_path.py` | Paths supporting evaluation evidence. |
+SQLAlchemy ORM models defining the database schema live in `craft_dashboard/models/`. Migrations are managed with Alembic under `alembic/versions/`.
 
 ## HTTP endpoints
 

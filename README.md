@@ -33,7 +33,7 @@ To evaluate issues and PRs:
 
 ```bash
 uvx --env-file .env craft-dashboard eval status
-uvx --env-file .env craft-dashboard eval run --llm-backend local --concurrency 5
+uvx --env-file .env craft-dashboard eval run --concurrency 5
 ```
 
 Minimum `.env` values:
