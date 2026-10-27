@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 from craft_dashboard.collectors.ci_collector import (
     CIFailureCollector,
@@ -138,6 +139,30 @@ class TestResolveSince:
         # last_fetched_at, since that run is no longer rerun-eligible.
         expected_floor = datetime.now(tz=UTC) - timedelta(days=14)
         assert abs((since - expected_floor).total_seconds()) < 5
+
+
+class TestFetchLogTail:
+    async def test_returns_empty_on_gone(self):
+        collector = CIFailureCollector(token="x")
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(410, request=request)
+        )
+        collector._http = httpx.AsyncClient(transport=transport)
+
+        assert await collector._fetch_log_tail("foo", 1) == ""
+
+    async def test_returns_empty_on_blob_storage_not_found(self):
+        # The redirect target (short-lived blob storage) can 404 if the log
+        # was evicted between the redirect being issued and the fetch
+        # landing -- a race, not a real error, and must not abort the whole
+        # project's CI collection pass the way an unhandled exception would.
+        collector = CIFailureCollector(token="x")
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(404, request=request)
+        )
+        collector._http = httpx.AsyncClient(transport=transport)
+
+        assert await collector._fetch_log_tail("foo", 1) == ""
 
 
 class TestCollect:

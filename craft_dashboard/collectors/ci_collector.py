@@ -58,6 +58,10 @@ _MAX_HTTP_ATTEMPTS = 4
 _FAILURE_CONCLUSIONS = frozenset({"failure", "timed_out", "cancelled"})
 # GitHub returns this when workflow run logs have already expired.
 _HTTP_GONE = 410
+# The redirect target (short-lived blob storage) returns this when the log
+# was evicted between the redirect being issued and the blob being fetched —
+# a race, not an error worth retrying or surfacing, same as _HTTP_GONE.
+_HTTP_NOT_FOUND = 404
 
 
 def _parse_job_variant(job_name: str) -> tuple[str, str | None]:
@@ -375,7 +379,7 @@ class CIFailureCollector:
                 async for line in response.aiter_lines():
                     tail.append(line)
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == _HTTP_GONE:
+            if exc.response.status_code in (_HTTP_GONE, _HTTP_NOT_FOUND):
                 # Logs expired (GitHub only retains them briefly); nothing
                 # to parse, not an error worth retrying or surfacing.
                 return ""
