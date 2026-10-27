@@ -1,0 +1,267 @@
+"""Pure parsing functions for CI failure signatures.
+
+Each parser takes raw text (a log tail or annotation message) and returns
+zero or more ``ParsedFailure`` records. These are pure functions deliberately
+(no network, no DB) so they can be tested directly against recorded sample
+output without mocking a collector.
+
+Signature normalization matches ``plans/44-ci-failure-catalog.md``'s Design
+Decisions: Spread signatures drop the trailing run-id suffix, pytest/Go
+signatures are kept as the stable ``path::test`` / ``package.Test``
+identifiers GitHub/the tooling already emits.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+__all__ = [
+    "ParsedFailure",
+    "detect_infra_error",
+    "parse_check_annotations",
+    "parse_go_failures",
+    "parse_linter_and_doc_failures",
+    "parse_log_tail",
+    "parse_pytest_failures",
+    "parse_spread_failures",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedFailure:
+    """A single extracted test/tool failure signature."""
+
+    test_type: str  # "pytest" | "spread" | "go" | "linter" | "infra"
+    signature: str
+    error_message: str | None = None
+    is_environmental: bool = False
+
+
+# Patterns that indicate the failure is environmental (runner/network/LXD)
+# rather than a real test assertion. Checked against the extracted error
+# message so any parser can tag a failure as `is_environmental`, not just
+# the Spread parser.
+_INFRA_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"LXDError",
+        r"forkstart",
+        r"failed to start container",
+        r"Network is unreachable",
+        r"Errno 101",
+        r"Errno 104",
+        r"Connection reset by peer",
+        r"Temporary failure in name resolution",
+        r"context deadline exceeded",
+        r"no space left on device",
+        r"disk quota exceeded",
+        r"runner has received a shutdown signal",
+        r"The runner has been deprovisioned",
+    )
+)
+
+
+def detect_infra_error(message: str) -> bool:
+    """Return whether a failure message looks environmental, not a real test failure."""
+    return any(pattern.search(message) for pattern in _INFRA_PATTERNS)
+
+
+_PYTEST_FAILED_RE = re.compile(
+    r"^FAILED\s+(?P<path>[\w./-]+\.py)::(?P<test>[\w\[\]./:-]+?)"
+    r"(?:\s+-\s+(?P<message>.*))?$"
+)
+
+
+def parse_pytest_failures(log_text: str) -> list[ParsedFailure]:
+    """Extract pytest failures from a ``FAILED <path>::<test> - <reason>`` log tail.
+
+    Matches pytest's "short test summary info" section, which lists one
+    ``FAILED`` line per failing test regardless of how it's invoked
+    (unit/integration), so this one parser covers both.
+    """
+    failures: list[ParsedFailure] = []
+    for line in log_text.splitlines():
+        match = _PYTEST_FAILED_RE.match(line.strip())
+        if not match:
+            continue
+        signature = f"{match.group('path')}::{match.group('test')}"
+        message = match.group("message")
+        failures.append(
+            ParsedFailure(
+                test_type="pytest",
+                signature=signature,
+                error_message=message,
+                is_environmental=bool(message) and detect_infra_error(message),
+            )
+        )
+    return failures
+
+
+_GO_FAIL_RE = re.compile(r"^---\s+FAIL:\s+(?P<test>\S+)\s+\(")
+_GO_PACKAGE_SUMMARY_RE = re.compile(r"^FAIL\t(?P<package>\S+)\t")
+
+
+def parse_go_failures(log_text: str) -> list[ParsedFailure]:
+    r"""Extract Go test failures as ``package.TestName``.
+
+    ``go test -v`` prints ``--- FAIL: TestName (0.01s)`` as each test
+    finishes, then one ``FAIL\t<package>\t<duration>`` summary line per
+    package once all its tests have run. The package isn't known until that
+    summary line appears, so failing test names are buffered until the next
+    package summary (or ``ok``) line resolves which package they belong to.
+    """
+    failures: list[ParsedFailure] = []
+    pending: list[str] = []
+    for line in log_text.splitlines():
+        fail_match = _GO_FAIL_RE.match(line)
+        if fail_match:
+            pending.append(fail_match.group("test"))
+            continue
+        pkg_match = _GO_PACKAGE_SUMMARY_RE.match(line)
+        if pkg_match and pending:
+            package = pkg_match.group("package")
+            failures.extend(
+                ParsedFailure(test_type="go", signature=f"{package}.{test_name}")
+                for test_name in pending
+            )
+            pending = []
+    # A log tail that was truncated before the package summary line still
+    # arrived: report bare test names rather than silently dropping them.
+    failures.extend(
+        ParsedFailure(test_type="go", signature=test_name) for test_name in pending
+    )
+    return failures
+
+
+_SPREAD_ERROR_RE = re.compile(
+    r"Error executing (?P<suite_task>[\w./:-]+)\s*\((?P<run_id>[\w-]+)\)"
+    r"(?:\s*:\s*(?P<message>.*))?"
+)
+
+
+def parse_spread_failures(log_text: str) -> list[ParsedFailure]:
+    """Extract Spread task failures as ``tests/spread/<suite>/<task>[:<variant>]``.
+
+    The trailing ``(<run-id>)`` is captured separately and discarded from the
+    signature so the same task failing on different runs is recognized as
+    the same signature rather than a new one each time.
+    """
+    failures: list[ParsedFailure] = []
+    for line in log_text.splitlines():
+        match = _SPREAD_ERROR_RE.search(line)
+        if not match:
+            continue
+        message = match.group("message")
+        is_env = bool(message) and detect_infra_error(message)
+        failures.append(
+            ParsedFailure(
+                test_type="spread",
+                signature=match.group("suite_task"),
+                error_message=message,
+                is_environmental=is_env,
+            )
+        )
+    return failures
+
+
+# Known lint/QA/docs/security tools that show up as their own failing steps
+# across the craft projects. This list is deliberately small and will need
+# to grow as new tools are observed in real failing logs -- see the open
+# question in plans/44-ci-failure-catalog.md about unconfirmed log formats.
+_LINTER_TOOL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("ruff", re.compile(r"\bruff\b.*error", re.IGNORECASE)),
+    ("osv-scanner", re.compile(r"osv-scanner", re.IGNORECASE)),
+    ("docs-lint", re.compile(r"docs-lint|linkcheck", re.IGNORECASE)),
+    ("vale", re.compile(r"\bvale\b", re.IGNORECASE)),
+    ("prettier", re.compile(r"\bprettier\b", re.IGNORECASE)),
+    ("tombi", re.compile(r"\btombi\b", re.IGNORECASE)),
+    ("conventional-commits", re.compile(r"conventional.?commits?", re.IGNORECASE)),
+)
+
+
+def parse_linter_and_doc_failures(log_text: str) -> list[ParsedFailure]:
+    """Extract known linter/QA/docs/security tool failures from a log tail.
+
+    Unlike pytest/Go/Spread, these tools don't share one output grammar, so
+    this matches a small known-tool allowlist rather than a single regex.
+    One signature is emitted per matching line (deduplicated by content).
+    """
+    seen: set[str] = set()
+    failures: list[ParsedFailure] = []
+    for line in log_text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        for tool, pattern in _LINTER_TOOL_PATTERNS:
+            if not pattern.search(stripped):
+                continue
+            signature = f"{tool}: {stripped[:200]}"
+            if signature in seen:
+                continue
+            seen.add(signature)
+            failures.append(
+                ParsedFailure(
+                    test_type="linter",
+                    signature=signature,
+                    error_message=stripped,
+                )
+            )
+            break
+    return failures
+
+
+def parse_check_annotations(
+    annotations: list[dict[str, str | int | None]],
+) -> list[ParsedFailure]:
+    """Build failures from GitHub Check Run Annotations (preferred, no log download).
+
+    Each annotation already carries structured file/line/message data, so no
+    regex extraction is needed -- the signature is simply ``path:line``.
+
+    Args:
+        annotations: Dicts with ``path``, ``start_line``, ``message``, and
+            ``annotation_level`` keys, matching the shape of
+            ``github.CheckRunAnnotation.CheckRunAnnotation.raw_data``.
+
+    """
+    failures: list[ParsedFailure] = []
+    for annotation in annotations:
+        if annotation.get("annotation_level") != "failure":
+            continue
+        path = str(annotation.get("path") or "unknown")
+        line = annotation.get("start_line")
+        message = str(annotation.get("message") or "")
+        signature = f"{path}:{line}" if line is not None else path
+        failures.append(
+            ParsedFailure(
+                test_type="annotation",
+                signature=signature,
+                error_message=message or None,
+                is_environmental=bool(message) and detect_infra_error(message),
+            )
+        )
+    return failures
+
+
+def parse_log_tail(log_text: str, *, job_name: str) -> list[ParsedFailure]:
+    """Dispatch a job's log tail to the parser(s) matching its job name.
+
+    Falls back to trying every parser when the job name doesn't hint at a
+    specific framework, since a single job can run more than one tool (e.g.
+    a combined "QA" job running both ruff and docs-lint).
+    """
+    lowered = job_name.lower()
+    results: list[ParsedFailure] = []
+    if "spread" in lowered:
+        results.extend(parse_spread_failures(log_text))
+    if any(keyword in lowered for keyword in ("pytest", "unit", "integration", "test")):
+        results.extend(parse_pytest_failures(log_text))
+    if "go" in lowered or "golang" in lowered:
+        results.extend(parse_go_failures(log_text))
+    if not results:
+        results.extend(parse_pytest_failures(log_text))
+        results.extend(parse_go_failures(log_text))
+        results.extend(parse_spread_failures(log_text))
+    results.extend(parse_linter_and_doc_failures(log_text))
+    return results

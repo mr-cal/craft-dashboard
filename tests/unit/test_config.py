@@ -186,3 +186,47 @@ class TestDashboardConfig:
 
         with pytest.raises(Exception):  # noqa: B017, PT011 - pydantic ValidationError
             load_config(config_file)
+
+    def test_load_config_ci_section(self, tmp_path: pathlib.Path) -> None:
+        """The [ci] section configures trunk branches and exclusions per project."""
+        config_file = tmp_path / "craft-dashboard.toml"
+        config_file.write_text(
+            textwrap.dedent("""\
+                craft-applications = ["snapcraft"]
+                maintainers = ["alice"]
+
+                [ci]
+                exclude-repos = ["starbase"]
+                include-fork-prs = ["snapcraft"]
+
+                [ci.trunk-branches]
+                snapcraft = ["main", "hotfix/*"]
+
+                [ci.exclude-workflows]
+                snapcraft = ["Nightly Build"]
+            """)
+        )
+
+        config = load_config(config_file)
+
+        assert config.ci.exclude_repos == ["starbase"]
+        assert config.ci.include_fork_prs == ["snapcraft"]
+        assert config.ci.trunk_branches_for("snapcraft") == ["main", "hotfix/*"]
+        # A project with no entry falls back to the default.
+        assert config.ci.trunk_branches_for("charmcraft") == ["main"]
+        assert config.ci.exclude_workflows == {"snapcraft": ["Nightly Build"]}
+
+    def test_load_config_ci_section_optional(self, tmp_path: pathlib.Path) -> None:
+        """Config loads fine with no [ci] section at all, defaulting empty."""
+        config_file = tmp_path / "craft-dashboard.toml"
+        config_file.write_text(
+            textwrap.dedent("""\
+                craft-applications = ["snapcraft"]
+                maintainers = ["alice"]
+            """)
+        )
+
+        config = load_config(config_file)
+
+        assert config.ci.trunk_branches_for("snapcraft") == ["main"]
+        assert config.ci.exclude_repos == []

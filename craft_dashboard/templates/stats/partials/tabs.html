@@ -16,5 +16,9 @@
       <a class="p-tabs__link {% if request.url.path == '/stats/triage' %}is-active{% endif %}"
          href="/stats/triage">Triage</a>
     </div>
+    <div class="p-tabs__item" role="presentation">
+      <a class="p-tabs__link {% if request.url.path.startswith('/stats/ci') %}is-active{% endif %}"
+         href="/stats/ci">CI Failures</a>
+    </div>
   </div>
 </div>

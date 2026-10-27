@@ -5,6 +5,12 @@ from craft_dashboard.models.commit_scan_evidence_path import CommitScanEvidenceP
 from craft_dashboard.models.commit_scan_run import CommitScanRun
 from craft_dashboard.models.collection_run import CollectionRun
 from craft_dashboard.models.collection_watermark import CollectionWatermark
+from craft_dashboard.models.ci_failure import (
+    CIFailureDailyCount,
+    CIJobFailure,
+    CITestFailure,
+    CIWorkflowRun,
+)
 from craft_dashboard.models.dependency import Dependency
 from craft_dashboard.models.eval_queue_snapshot import EvalQueueSnapshot
 from craft_dashboard.models.eval_token import EvalApiToken
@@ -26,6 +32,10 @@ __all__ = [
     "CommitScanRun",
     "CollectionRun",
     "CollectionWatermark",
+    "CIFailureDailyCount",
+    "CIJobFailure",
+    "CITestFailure",
+    "CIWorkflowRun",
     "Dependency",
     "EvalApiToken",
     "EvalQueueSnapshot",

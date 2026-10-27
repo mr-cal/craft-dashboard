@@ -185,3 +185,15 @@ display-name = "charmhub forums"
 base-url = "https://discourse.ubuntu.com"
 default-categories = ["rocks"]
 display-name = "discourse forums"
+
+# CI failure collection: which branches count as "main" for a project
+# (defaults to ["main"] if not listed here), workflows/repos to exclude
+# entirely, and repos where fork-PR runs should still be collected despite
+# being excluded by default (see collectors/ci_collector.py).
+[ci]
+exclude-repos = []
+include-fork-prs = []
+
+[ci.trunk-branches]
+
+[ci.exclude-workflows]

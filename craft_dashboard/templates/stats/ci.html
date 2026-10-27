@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}CI Failures - craft-dashboard{% endblock %}
+{% block content %}
+{% include "stats/partials/tabs.html" %}
+
+<h2>CI failure catalog</h2>
+<p class="p-text--default">
+  Every recurring failure signature across tracked repos' GitHub Actions runs, with exact occurrence counts and fail rates -- no automatic "flaky"/"persistent" classification, just the raw numbers to filter and sort.
+</p>
+
+<div class="filter-bar" id="ci-filters" data-shareable-url-root="/stats/ci">
+  <div class="filter-group">
+    <label for="ci-filter-project">Project</label>
+    <select name="project" id="ci-filter-project"
+            onchange="window.location.href = '/stats/ci?project=' + encodeURIComponent(this.value)">
+      <option value="" {% if not filter_project %}selected{% endif %}>All projects</option>
+      {% for p in project_names %}
+      <option value="{{ p }}" {% if p == filter_project %}selected{% endif %}>{{ p }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="filter-group">
+    <label for="ci-filter-workflow">Workflow</label>
+    <select name="workflow" id="ci-filter-workflow"
+            hx-get="/stats/ci/table"
+            hx-target="#ci-table"
+            hx-swap="outerHTML"
+            hx-include=".filter-bar [name]"
+            hx-indicator="#ci-loading-indicator"
+            hx-push-url="false"
+            {% if not filter_project %}disabled{% endif %}>
+      <option value="" {% if not filter_workflow %}selected{% endif %}>All workflows</option>
+      {% for w in workflow_names %}
+      <option value="{{ w }}" {% if w == filter_workflow %}selected{% endif %}>{{ w }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="filter-group">
+    <label for="ci-filter-branch">Branch</label>
+    <select name="branch" id="ci-filter-branch"
+            hx-get="/stats/ci/table"
+            hx-target="#ci-table"
+            hx-swap="outerHTML"
+            hx-include=".filter-bar [name]"
+            hx-indicator="#ci-loading-indicator"
+            hx-push-url="false">
+      <option value="" {% if not filter_branch %}selected{% endif %}>All</option>
+      <option value="main" {% if filter_branch == "main" %}selected{% endif %}>Main</option>
+      <option value="pr" {% if filter_branch == "pr" %}selected{% endif %}>PR</option>
+      <option value="other" {% if filter_branch == "other" %}selected{% endif %}>Other</option>
+    </select>
+  </div>
+
+  <div class="filter-group">
+    <label for="ci-filter-type">Type</label>
+    <select name="type" id="ci-filter-type"
+            hx-get="/stats/ci/table"
+            hx-target="#ci-table"
+            hx-swap="outerHTML"
+            hx-include=".filter-bar [name]"
+            hx-indicator="#ci-loading-indicator"
+            hx-push-url="false">
+      <option value="" {% if not filter_type %}selected{% endif %}>All</option>
+      <option value="pytest" {% if filter_type == "pytest" %}selected{% endif %}>Pytest</option>
+      <option value="spread" {% if filter_type == "spread" %}selected{% endif %}>Spread</option>
+      <option value="go" {% if filter_type == "go" %}selected{% endif %}>Go</option>
+      <option value="linter" {% if filter_type == "linter" %}selected{% endif %}>Linter/QA</option>
+      <option value="infra" {% if filter_type == "infra" %}selected{% endif %}>Infra</option>
+      <option value="job" {% if filter_type == "job" %}selected{% endif %}>Unparsed (job-level)</option>
+    </select>
+  </div>
+
+  <div class="filter-group">
+    <label for="ci-filter-search">Search</label>
+    <input type="search" name="search" id="ci-filter-search" placeholder="Signature... (press Enter)"
+           value="{{ filter_search or '' }}"
+           hx-get="/stats/ci/table"
+           hx-target="#ci-table"
+           hx-swap="outerHTML"
+           hx-include=".filter-bar [name]"
+           hx-indicator="#ci-loading-indicator"
+           hx-trigger="search, keyup[key=='Enter']" />
+  </div>
+
+  <input type="hidden" name="sort" value="{{ sort_by or 'fail_rate' }}" />
+
+  <div class="filter-group filter-group--actions">
+    <label>&nbsp;</label>
+    <a class="p-button" href="/stats/ci" title="Reset filters to their defaults">Reset filters</a>
+  </div>
+</div>
+
+<div id="ci-loading-indicator" class="htmx-indicator" style="text-align:center;padding:1rem;">
+  <i class="p-icon--spinner u-animation--spin"></i> Loading...
+</div>
+
+{% include "stats/partials/ci_table.html" %}
+{% endblock %}

@@ -4,8 +4,9 @@
 Runs, in order:
 
 1. transcript GC (``eval_transcript_retention_days``)
-2. embedding clearing on superseded evaluations
-3. superseded evaluation deletion (``eval_retention_days``)
+2. CI failure detail rollup/prune (``services.ci_gc``)
+3. embedding clearing on superseded evaluations
+4. superseded evaluation deletion (``eval_retention_days``)
 
 Order matters: embeddings are cleared before rows are deleted so the pgvector
 index shrinks even for rows still inside the retention window.
@@ -30,7 +31,9 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
+from craft_dashboard.config import load_config
 from craft_dashboard.database import get_engine, get_session_factory
+from craft_dashboard.services.ci_gc import run_ci_gc
 from craft_dashboard.services.evaluation_gc import (
     clear_superseded_embeddings,
     delete_superseded_evaluations,
@@ -48,6 +51,7 @@ logger = logging.getLogger(__name__)
 async def run_gc(*, dry_run: bool = False) -> None:
     """Apply every retention policy against the configured database."""
     settings = Settings()
+    config = load_config(settings.config_path)
     engine = get_engine(
         settings.database_url,
         pool_size=settings.db_pool_size,
@@ -65,6 +69,16 @@ async def run_gc(*, dry_run: bool = False) -> None:
                     retention_days=settings.eval_transcript_retention_days,
                 )
                 logger.info("Transcripts: %s %d row(s)", verb, transcripts)
+
+                ci_stats = await run_ci_gc(session, config)
+                logger.info(
+                    "CI failures: rolled up %d daily count row(s), pruned %d job "
+                    "failure(s), %d test failure(s), %d old run(s)",
+                    ci_stats.daily_counts_written,
+                    ci_stats.job_failures_pruned,
+                    ci_stats.test_failures_pruned,
+                    ci_stats.runs_pruned,
+                )
 
             embeddings = await clear_superseded_embeddings(session, dry_run=dry_run)
             logger.info(

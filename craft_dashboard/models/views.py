@@ -1,7 +1,7 @@
 """Read-only view models for templates and query results."""
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 
 
 @dataclass(frozen=True)
@@ -229,3 +229,95 @@ class DashboardView:
     application_projects: list[ProjectHealthView]
     library_projects: list[ProjectHealthView]
     other_projects: list[ProjectHealthView]
+
+
+@dataclass(frozen=True)
+class CIFilters:
+    """Filter parameters for the CI failure catalog query."""
+
+    project: str = ""
+    workflow: str = ""
+    branch_class: str = ""
+    test_type: str = ""
+    search: str = ""
+    sort_by: str = "fail_rate"
+    page: int = 1
+    items_per_page: int = 100
+
+
+# A signature's fail rate shows as "insufficient data" below this many
+# observed runs of its job/workflow, so a single unlucky run never displays
+# as "100% failing" (see plans/44-ci-failure-catalog.md, Design Decisions).
+MIN_RUNS_FOR_FAIL_RATE = 10
+
+
+@dataclass(frozen=True)
+class CIFailureRow:
+    """One aggregated row in the CI failure catalog (a signature, rolled up)."""
+
+    project_name: str
+    workflow_name: str
+    job_name: str
+    job_variant: str | None
+    test_type: str
+    signature: str
+    branch_class: str
+    occurrence_count: int
+    total_count: int
+    flip_flop_count: int
+    is_environmental: bool
+    last_seen_at: datetime | None
+    sample_error_message: str | None
+
+    @property
+    def fail_rate(self) -> float | None:
+        """Return occurrences/total, or None below the minimum sample size."""
+        if self.total_count < MIN_RUNS_FOR_FAIL_RATE:
+            return None
+        return self.occurrence_count / self.total_count
+
+
+@dataclass(frozen=True)
+class CIQueryResult:
+    """Result from a CI failure catalog query."""
+
+    rows: list[CIFailureRow]
+    total_count: int
+    total_pages: int
+    page: int
+
+
+@dataclass(frozen=True)
+class CIDailyPoint:
+    """One day's rolled-up occurrence/total counts for a signature."""
+
+    day: date
+    fail_count: int
+    total_count: int
+
+
+@dataclass(frozen=True)
+class CIRunOccurrence:
+    """One individual run within the detail-retention window for a signature."""
+
+    project_name: str
+    workflow_name: str
+    run_id: int
+    head_branch: str | None
+    branch_class: str
+    html_url: str | None
+    created_at: datetime | None
+    error_message: str | None
+
+
+@dataclass(frozen=True)
+class CISignatureDetail:
+    """Drill-down payload for a single signature: trend + recent linked runs."""
+
+    signature: str
+    test_type: str
+    job_name: str
+    job_variant: str | None
+    is_environmental: bool
+    daily_trend: list[CIDailyPoint]
+    recent_runs: list[CIRunOccurrence]

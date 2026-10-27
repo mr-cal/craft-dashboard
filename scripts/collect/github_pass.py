@@ -6,6 +6,7 @@ import time
 from datetime import UTC, datetime
 
 from craft_dashboard.collectors import RateLimitError
+from craft_dashboard.collectors.ci_collector import CIFailureCollector
 from craft_dashboard.collectors.dependencies import DependencyCollector
 from craft_dashboard.collectors.github import GitHubCollector
 from craft_dashboard.collectors.scheduler import (
@@ -222,6 +223,52 @@ async def _collect_project_releases(
     except Exception:  # noqa: BLE001 - per-project isolation; other projects still collect
         logger.warning(
             "Failed to collect releases for %s",
+            project_name,
+            exc_info=True,
+        )
+
+
+async def _collect_project_ci(
+    ci_collector: "CIFailureCollector",
+    config: object,
+    project_name: str,
+    project_id: int,
+    session: object,
+) -> None:
+    """Collect one project's CI failure data, independent of the refresh schedule.
+
+    Excluded repos skip collection entirely rather than recording an empty
+    pass, mirroring how hide-prs/hide-releases are plain display filters but
+    this is a collection-time skip -- there is nothing to backfill later for
+    an excluded repo.
+    """
+    ci_config = getattr(config, "ci", None)
+    exclude_repos = getattr(ci_config, "exclude_repos", [])
+    include_fork_prs = getattr(ci_config, "include_fork_prs", [])
+    if project_name in exclude_repos:
+        return
+    try:
+        ci_started_at = time.monotonic()
+        failure_count = await _retry_github(
+            lambda _pn=project_name, _pid=project_id, _s=session: ci_collector.collect(
+                _pn,
+                _pid,
+                _s,
+                include_fork_prs=_pn in include_fork_prs,
+            ),
+            f"collect_ci_failures({project_name})",
+        )
+        logger.info(
+            "  canonical/%s: CI failures collected (%d) in %s",
+            project_name,
+            failure_count,
+            _format_duration(time.monotonic() - ci_started_at),
+        )
+    except RateLimitError:
+        raise
+    except Exception:  # noqa: BLE001 - per-project isolation; other projects still collect
+        logger.warning(
+            "Failed to collect CI failures for %s",
             project_name,
             exc_info=True,
         )
@@ -482,6 +529,7 @@ async def _collect_github(
         org="canonical",
         maintainers=config.maintainers,
     )
+    ci_collector = CIFailureCollector(token=settings.github_token, org="canonical")
     stats = CollectionStats()
     bots = set(getattr(config, "bots", []))
     _check_initial_rate_limit(collector)
@@ -513,6 +561,9 @@ async def _collect_github(
                 )
                 await _collect_project_releases(
                     collector, project_name, project_id, session
+                )
+                await _collect_project_ci(
+                    ci_collector, config, project_name, project_id, session
                 )
 
                 # Phase A — open issues, in every mode but "full". "open" stops

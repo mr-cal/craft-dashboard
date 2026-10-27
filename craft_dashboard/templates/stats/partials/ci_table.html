@@ -1,0 +1,106 @@
+{# Partial: CI failure catalog table body, swapped via HTMX #}
+<div id="ci-table">
+  <p class="u-text--muted" style="margin-bottom:0.5rem;">
+    Showing {{ rows|length }} of {{ total_count }} signature{{ "s" if total_count != 1 else "" }}
+  </p>
+  <table role="grid" aria-label="CI failure signatures">
+    <colgroup>
+      <col class="col-signature" data-col="signature">
+      {% if not filter_project %}<col class="col-project" data-col="project">{% endif %}
+      <col class="col-workflow" data-col="workflow">
+      <col class="col-branch" data-col="branch">
+      <col class="col-occurrences" data-col="occurrences">
+      <col class="col-fail-rate" data-col="fail_rate">
+      <col class="col-last-seen" data-col="last_seen">
+    </colgroup>
+    <thead>
+      <tr>
+        {% macro sort_header(label, field, tooltip="") %}
+        {% set default_desc = field in ["fail_rate", "occurrence_count", "last_seen_at"] %}
+        {% set is_active = (sort_by == field) or (sort_by == ("-" ~ field)) %}
+        {% set is_asc = (sort_by == ("-" ~ field)) if default_desc else (sort_by == field) %}
+        {% set is_desc = (sort_by == field) if default_desc else (sort_by == ("-" ~ field)) %}
+        {% set next_sort = ("-" ~ field) if sort_by == field else field %}
+        <th {% if tooltip %}data-tooltip="{{ tooltip }}" tabindex="0"{% endif %}
+            {% if is_asc %}aria-sort="ascending"{% elif is_desc %}aria-sort="descending"{% else %}aria-sort="none"{% endif %}>
+          <a href="#"
+             hx-get="/stats/ci/table"
+             hx-target="#ci-table"
+             hx-swap="outerHTML"
+             hx-include=".filter-bar [name]:not([name='sort'])"
+             hx-vals='{"sort": "{{ next_sort }}"}'
+             hx-indicator="#ci-loading-indicator"
+             hx-push-url="false"
+             class="{% if is_active %}is-active{% endif %}"
+             aria-label="Sort by {{ label }}"
+             style="text-decoration:none;color:inherit;cursor:pointer;">
+            {{ label }}
+            {% if is_asc %} &#8593;{% elif is_desc %} &#8595;{% endif %}
+          </a>
+        </th>
+        {% endmacro %}
+        {{ sort_header("Signature", "signature") }}
+        {% if not filter_project %}<th data-col="project">Project</th>{% endif %}
+        <th data-col="workflow">Workflow / Job</th>
+        <th data-col="branch">Branch</th>
+        {{ sort_header("Occurrences", "occurrence_count", "Failures observed in the last 60 days") }}
+        {{ sort_header("Fail rate", "fail_rate", "Occurrences / total runs of this job, over the last 60 days") }}
+        {{ sort_header("Last seen", "last_seen_at") }}
+      </tr>
+    </thead>
+    <tbody>
+      {% macro ci_row(row) %}
+      <tr>
+        <td data-col="signature">
+          <a href="/stats/ci/signature?project={{ row.project_name | urlencode_path }}&workflow={{ row.workflow_name | urlencode_path }}&job={{ row.job_name | urlencode_path }}&variant={{ (row.job_variant or '') | urlencode_path }}&type={{ row.test_type | urlencode_path }}&signature={{ row.signature | urlencode_path }}&branch={{ row.branch_class | urlencode_path }}">
+            {{ row.signature|truncate(100) }}
+          </a>
+          {% if row.is_environmental %}
+          <span class="p-chip" style="margin-left:0.4rem;" title="Seen failing on main as well as PR branches">environmental</span>
+          {% endif %}
+        </td>
+        {% if not filter_project %}<td data-col="project">{{ row.project_name }}</td>{% endif %}
+        <td data-col="workflow">
+          {{ row.workflow_name }}<br>
+          <span class="u-text--muted" style="font-size:0.85em;">{{ row.job_name }}{% if row.job_variant %} ({{ row.job_variant }}){% endif %}</span>
+        </td>
+        <td data-col="branch">{{ row.branch_class }}</td>
+        <td data-col="occurrences">{{ row.occurrence_count }} / {{ row.total_count }}</td>
+        <td data-col="fail_rate">
+          {% if row.fail_rate is not none %}
+          {{ (row.fail_rate * 100)|round(0, "floor")|int }}%
+          {% else %}
+          <span class="u-text--muted" title="Fewer than 10 runs observed">insufficient data</span>
+          {% endif %}
+        </td>
+        <td data-col="last_seen">{{ row.last_seen_at.strftime("%Y-%m-%d") if row.last_seen_at else "-" }}</td>
+      </tr>
+      {% endmacro %}
+      {% for row in rows %}
+        {{ ci_row(row) }}
+      {% else %}
+      <tr>
+        <td colspan="{{ 6 if filter_project else 7 }}">
+          No recurring CI failures found matching the current filters.
+          <a href="/stats/ci">Clear all filters</a> to see all signatures.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% set base_url = "/stats/ci/table?project=" ~ (filter_project or "") ~ "&workflow=" ~ (filter_workflow or "") ~ "&branch=" ~ (filter_branch or "") ~ "&type=" ~ (filter_type or "") ~ "&search=" ~ (filter_search or "") ~ "&sort=" ~ (sort_by or "fail_rate") %}
+  {% if total_pages > 1 %}
+  <nav aria-label="Pagination">
+    <ul>
+      {% if page > 1 %}
+      <li><a href="{{ base_url }}&page={{ page - 1 }}" hx-get="{{ base_url }}&page={{ page - 1 }}" hx-target="#ci-table" hx-swap="outerHTML" hx-indicator="#ci-loading-indicator">&laquo; Previous</a></li>
+      {% endif %}
+      <li><span>Page {{ page }} of {{ total_pages }}</span></li>
+      {% if page < total_pages %}
+      <li><a href="{{ base_url }}&page={{ page + 1 }}" hx-get="{{ base_url }}&page={{ page + 1 }}" hx-target="#ci-table" hx-swap="outerHTML" hx-indicator="#ci-loading-indicator">Next &raquo;</a></li>
+      {% endif %}
+    </ul>
+  </nav>
+  {% endif %}
+</div>

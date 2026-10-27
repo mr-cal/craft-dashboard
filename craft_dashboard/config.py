@@ -40,6 +40,29 @@ class ForumConfig(BaseModel):
         return config
 
 
+class CIConfig(BaseModel):
+    """Configuration for CI failure collection.
+
+    ``trunk_branches`` defaults to ``["main"]`` for any project not listed
+    explicitly, matching the common case; only hotfix-branch-release
+    projects need an entry here.
+    """
+
+    trunk_branches: dict[str, list[str]] = Field(default_factory=dict)
+    #: Projects/workflow-name combos excluded from CI collection entirely
+    #: (noisy or irrelevant workflows that would otherwise pollute the
+    #: failure catalog), mirroring hide-prs/hide-releases.
+    exclude_workflows: dict[str, list[str]] = Field(default_factory=dict)
+    exclude_repos: list[str] = Field(default_factory=list)
+    #: Projects where fork-PR workflow runs should still be collected,
+    #: despite being excluded by default (see ci_collector.py).
+    include_fork_prs: list[str] = Field(default_factory=list)
+
+    def trunk_branches_for(self, project_name: str) -> list[str]:
+        """Return the configured trunk branches for a project, defaulting to main."""
+        return self.trunk_branches.get(project_name) or ["main"]
+
+
 class DashboardConfig(BaseModel):
     """Configuration for the craft-dashboard application."""
 
@@ -67,6 +90,7 @@ class DashboardConfig(BaseModel):
     hide_releases: list[str] = Field(default_factory=list)
     filtered_issues: dict[str, list[str]] = Field(default_factory=dict)
     forums: dict[str, ForumConfig] = Field(default_factory=dict)
+    ci: CIConfig = Field(default_factory=CIConfig)
 
     @classmethod
     def validate(cls, value: object) -> DashboardConfig:
@@ -145,6 +169,10 @@ def load_config(config_path: Path) -> DashboardConfig:
                 key.replace("-", "_"): value for key, value in forum_raw.items()
             }
             for forum_name, forum_raw in normalized["forums"].items()
+        }
+    if "ci" in normalized and isinstance(normalized["ci"], dict):
+        normalized["ci"] = {
+            key.replace("-", "_"): value for key, value in normalized["ci"].items()
         }
 
     return DashboardConfig(**normalized)
