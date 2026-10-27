@@ -20,6 +20,7 @@ class TestSettings:
         assert settings.debug is False
         assert settings.host == "127.0.0.1"
         assert settings.port == 8000
+        assert settings.eval_min_worker_version == "0.3.0"
 
     def test_settings_from_env(self, monkeypatch) -> None:
         """Settings load from environment variables."""

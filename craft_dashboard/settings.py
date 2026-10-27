@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     eval_api_token: str = ""
 
     # Minimum worker version required to claim or submit evaluations
-    eval_min_worker_version: str = "0.0.0"
+    eval_min_worker_version: str = "0.3.0"
 
     # Retention window (days) for evaluation transcripts belonging to
     # superseded (non-latest) evaluations. latest=True transcripts are kept

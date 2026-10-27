@@ -31,7 +31,10 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
     from sqlalchemy.ext.asyncio import AsyncSession
 
-_AUTH = {"Authorization": "Bearer test-eval-token"}
+_AUTH = {
+    "Authorization": "Bearer test-eval-token",
+    "X-Worker-Version": "0.3.0",
+}
 
 
 @pytest.fixture(autouse=True)

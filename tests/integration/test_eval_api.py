@@ -6,7 +6,7 @@ import asyncio
 import subprocess
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -30,7 +30,7 @@ from craft_dashboard.repositories.issue_repository import IssueRepository
 from craft_dashboard.routes import eval_api
 from craft_dashboard.services import eval_activity
 from craft_dashboard.settings import Settings
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient as FastAPITestClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -42,6 +42,18 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.factories import make_eval_token, make_evaluation, make_issue, make_project
+
+
+class TestClient(FastAPITestClient):
+    """TestClient that supplies default worker version header unless explicitly omitted."""
+
+    def request(self, method: str, url: str, **kwargs: Any) -> Any:  # type: ignore[override]
+        headers = dict(kwargs.pop("headers", None) or {})
+        headers.setdefault("X-Worker-Version", "0.3.0")
+        if headers.get("X-Worker-Version") is None:
+            del headers["X-Worker-Version"]
+        return super().request(method, url, headers=headers, **kwargs)
+
 
 _TEST_EVAL_TOKEN = "test-eval-token"
 
@@ -2289,7 +2301,7 @@ class TestEvalStatusIntegration:
             "total_open": 5,
             "authenticated_as": "test-token",
             "permissions": ["eval:write", "eval:admin"],
-            "min_worker_version": "0.0.0",
+            "min_worker_version": "0.3.0",
         }
 
         with TestClient(app) as client:
@@ -2309,7 +2321,10 @@ class TestEvalStatusIntegration:
         headers = {"Authorization": f"Bearer {token}"}
 
         with TestClient(app) as client:
-            resp_missing = client.get("/api/eval/status", headers=headers)
+            resp_missing = client.get(
+                "/api/eval/status",
+                headers={**headers, "X-Worker-Version": None},
+            )
             assert resp_missing.status_code == 426
             assert (
                 "Worker version header missing"
