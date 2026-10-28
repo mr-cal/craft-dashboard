@@ -215,6 +215,14 @@ class TestParseLinterAndDocFailures:
         )
         assert parse_linter_and_doc_failures(log) == []
 
+    def test_tombi_ignores_ansi_wrapped_command_echo(self):
+        # GitHub Actions highlights the command it's about to run in bright
+        # cyan bold (\x1b[36;1m...\x1b[0m) before executing it; a step that
+        # installs/invokes a tool by name puts that name in the echoed
+        # command, which isn't the tool's own output.
+        log = "\x1b[36;1mjob2=$(sudo snap install --no-wait --classic tombi)\x1b[0m\n"
+        assert parse_linter_and_doc_failures(log) == []
+
 
 class TestParseCheckAnnotations:
     def test_builds_signature_from_path_and_line(self):

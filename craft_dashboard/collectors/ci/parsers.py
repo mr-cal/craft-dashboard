@@ -243,6 +243,15 @@ _LINTER_TOOL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 # kept for the signature.
 _RUFF_VIOLATION_RE = re.compile(r"^(?P<path>[\w./-]+):\d+:\d+:\s+(?P<code>[A-Z]+\d+)\b")
 
+# GitHub Actions' own step-level formatting, never a tool's real output:
+# ``##[group]``/``##[endgroup]`` fold markers, and the bright-cyan-bold
+# ANSI color (``\x1b[36;1m``) the runner wraps around a step's command
+# before executing it. A tool installed via ``snap install <name>`` or
+# invoked as ``<name> scan ...`` puts its own name in that command-echo
+# line, which would otherwise match every tool pattern above and -- being
+# a different command each run -- never produce a repeatable signature.
+_GHA_STEP_BOILERPLATE_RE = re.compile(r"^##\[(?:group|endgroup)\]|\x1b\[36;1m")
+
 
 def _stable_tool_signature(tool: str, line: str, fallback: str) -> str:
     """Normalize a known tool's log line to a signature stable across runs.
@@ -273,7 +282,7 @@ def parse_linter_and_doc_failures(log_text: str) -> list[ParsedFailure]:
     failures: list[ParsedFailure] = []
     for line in log_text.splitlines():
         stripped = line.strip()
-        if not stripped:
+        if not stripped or _GHA_STEP_BOILERPLATE_RE.search(stripped):
             continue
         for tool, pattern in _LINTER_TOOL_PATTERNS:
             if not pattern.search(stripped):
