@@ -195,9 +195,10 @@ class TestCollect:
     async def test_records_job_failure_from_annotations(
         self, test_db_session, project_id
     ):
-        # job.name has no structured-parser hint (spread/pytest/go), so
-        # annotations are used directly without a log-tail download first.
-        job = _make_job(name="security-scan")
+        # job.name has no structured-parser hint (spread/pytest/go/
+        # linter/security-scan/policy), so annotations are used directly
+        # without a log-tail download first.
+        job = _make_job(name="Build artefacts")
         run = _make_run(conclusion="failure", jobs=[job])
         collector = CIFailureCollector(token="x")
         collector.gh = MagicMock()

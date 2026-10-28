@@ -141,6 +141,41 @@ class TestParseLinterAndDocFailures:
         log = "some completely unrelated log line\n"
         assert parse_linter_and_doc_failures(log) == []
 
+    def test_ruff_signature_drops_line_and_column(self):
+        # Two different violations of the same rule on the same file, but
+        # at different lines (e.g. code shifted between runs), must collapse
+        # to one signature rather than being counted as two distinct errors.
+        log = (
+            "src/foo.py:12:5: E501 line too long (92 > 88 characters)\n"
+            "src/foo.py:40:1: E501 line too long (95 > 88 characters)\n"
+        )
+        failures = parse_linter_and_doc_failures(log)
+        assert len(failures) == 1
+        assert failures[0].signature == "ruff: src/foo.py E501"
+
+    def test_ruff_signature_falls_back_when_unparseable(self):
+        log = "ruff failed with a non-standard error format\n"
+        failures = parse_linter_and_doc_failures(log)
+        assert len(failures) == 1
+        assert failures[0].signature.startswith("ruff: ruff failed")
+
+    def test_osv_scanner_signature_uses_vulnerability_id(self):
+        # Two scans flagging the same advisory in a differently-formatted
+        # table row must still collapse to one signature.
+        log = (
+            "osv-scanner: | GHSA-wq4v-7hhh-8vh4 | foo-package | 1.2.3 |\n"
+            "osv-scanner: GHSA-wq4v-7hhh-8vh4 found again in scan output\n"
+        )
+        failures = parse_linter_and_doc_failures(log)
+        assert len(failures) == 1
+        assert failures[0].signature == "osv-scanner: GHSA-wq4v-7hhh-8vh4"
+
+    def test_osv_scanner_signature_falls_back_when_no_id_found(self):
+        log = "osv-scanner: no vulnerabilities data available\n"
+        failures = parse_linter_and_doc_failures(log)
+        assert len(failures) == 1
+        assert failures[0].signature.startswith("osv-scanner: osv-scanner")
+
 
 class TestParseCheckAnnotations:
     def test_builds_signature_from_path_and_line(self):
@@ -197,6 +232,17 @@ class TestHasStructuredParserHint:
     def test_matches_go_job_name(self):
         assert has_structured_parser_hint("go-tests")
 
-    def test_does_not_match_linter_or_policy_job_names(self):
-        assert not has_structured_parser_hint("lint / files")
-        assert not has_structured_parser_hint("Security scan / OSV-scanner")
+    def test_matches_linter_and_security_scan_job_names(self):
+        # These have a dedicated log parser (parse_linter_and_doc_failures)
+        # even though they aren't a test framework -- their Check Run
+        # Annotations carry no real diagnostic content in production (see
+        # has_structured_parser_hint's docstring), so the log is the only
+        # useful signal.
+        assert has_structured_parser_hint("lint / files")
+        assert has_structured_parser_hint("Security scan / OSV-scanner")
+        assert has_structured_parser_hint("Check policy")
+        assert has_structured_parser_hint("TICS / TICS")
+
+    def test_does_not_match_generic_build_job_names(self):
+        assert not has_structured_parser_hint("Snap")
+        assert not has_structured_parser_hint("Build artefacts")

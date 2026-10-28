@@ -170,8 +170,23 @@ def parse_spread_failures(log_text: str) -> list[ParsedFailure]:
 # across the craft projects. This list is deliberately small and will need
 # to grow as new tools are observed in real failing logs -- see the open
 # question in plans/44-ci-failure-catalog.md about unconfirmed log formats.
+#
+# These parsers are these jobs' *only* source of a real signature: in
+# production, every Check Run Annotation ever recorded for a lint/QA/
+# security job has ``path == ".github/workflows/<file>.yml"`` (GitHub's own
+# generic "this step failed" marker, not the tool's own diagnostic) with a
+# message like "Process completed with exit code 1." -- no file, line, or
+# rule the tool actually flagged. Annotations only carry real content when a
+# project wires up a dedicated annotation-posting action, which none of the
+# tracked repos currently do.
 _LINTER_TOOL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("ruff", re.compile(r"\bruff\b.*error", re.IGNORECASE)),
+    # Matches both ruff's own failure-summary line and an individual
+    # violation line (``path.py:LINE:COL: CODE ...``), since ruff doesn't
+    # repeat its own name on every violation it reports.
+    (
+        "ruff",
+        re.compile(r"\bruff\b.*error|^\S+\.py:\d+:\d+:\s+[A-Z]+\d+", re.IGNORECASE),
+    ),
     ("osv-scanner", re.compile(r"osv-scanner", re.IGNORECASE)),
     ("docs-lint", re.compile(r"docs-lint|linkcheck", re.IGNORECASE)),
     ("vale", re.compile(r"\bvale\b", re.IGNORECASE)),
@@ -179,6 +194,35 @@ _LINTER_TOOL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("tombi", re.compile(r"\btombi\b", re.IGNORECASE)),
     ("conventional-commits", re.compile(r"conventional.?commits?", re.IGNORECASE)),
 )
+
+# A ruff violation line looks like "path/to/file.py:12:5: E501 message" --
+# the line:col shifts whenever code above it changes, so only path+code is
+# kept for the signature.
+_RUFF_VIOLATION_RE = re.compile(r"^(?P<path>[\w./-]+):\d+:\d+:\s+(?P<code>[A-Z]+\d+)\b")
+# OSV-scanner reports each finding against a stable vulnerability ID
+# (OSV/GitHub Security Advisory or CVE), unlike the surrounding table
+# formatting, which can shift between scans.
+_VULN_ID_RE = re.compile(
+    r"\b(?:CVE-\d{4}-\d+|GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4})\b"
+)
+
+
+def _stable_tool_signature(tool: str, line: str, fallback: str) -> str:
+    """Normalize a known tool's log line to a signature stable across runs.
+
+    Falls back to the raw truncated line when no stable identifier can be
+    extracted (unrecognized output format, or a line that doesn't carry one),
+    so an unparsed line still produces *a* signature rather than none.
+    """
+    if tool == "ruff":
+        match = _RUFF_VIOLATION_RE.match(line)
+        if match:
+            return f"ruff: {match.group('path')} {match.group('code')}"
+    elif tool == "osv-scanner":
+        match = _VULN_ID_RE.search(line)
+        if match:
+            return f"osv-scanner: {match.group(0)}"
+    return fallback
 
 
 def parse_linter_and_doc_failures(log_text: str) -> list[ParsedFailure]:
@@ -197,7 +241,9 @@ def parse_linter_and_doc_failures(log_text: str) -> list[ParsedFailure]:
         for tool, pattern in _LINTER_TOOL_PATTERNS:
             if not pattern.search(stripped):
                 continue
-            signature = f"{tool}: {stripped[:200]}"
+            signature = _stable_tool_signature(
+                tool, stripped, fallback=f"{tool}: {stripped[:200]}"
+            )
             if signature in seen:
                 continue
             seen.add(signature)
@@ -215,10 +261,14 @@ def parse_linter_and_doc_failures(log_text: str) -> list[ParsedFailure]:
 def parse_check_annotations(
     annotations: list[dict[str, str | int | None]],
 ) -> list[ParsedFailure]:
-    """Build failures from GitHub Check Run Annotations (preferred, no log download).
+    """Build failures from GitHub Check Run Annotations.
 
-    Each annotation already carries structured file/line/message data, so no
-    regex extraction is needed -- the signature is simply ``path:line``.
+    Used as a last-resort fallback for jobs with no known framework/tool
+    parser (see ``has_structured_parser_hint``), or when a known job's log
+    is unavailable: the signature is simply ``path:line``, which in
+    practice is GitHub's own generic step-failure marker rather than a
+    tool's own diagnostic (see ``_LINTER_TOOL_PATTERNS``'s comment), so it
+    carries much less signal than a parsed log line.
 
     Args:
         annotations: Dicts with ``path``, ``start_line``, ``message``, and
@@ -248,22 +298,26 @@ def parse_check_annotations(
 _SPREAD_HINTS = ("spread",)
 _PYTEST_HINTS = ("pytest", "unit", "integration", "test")
 _GO_HINTS = ("go", "golang")
+_LINTER_HINTS = ("lint", "qa", "security", "scan", "polic", "tics")
 
 
 def has_structured_parser_hint(job_name: str) -> bool:
     """Return whether ``job_name`` matches a parser with a stable signature.
 
     Used by the collector to decide whether a job's log is worth
-    downloading even when Check Run Annotations are available: spread/
-    pytest/Go parsers produce a stable test-name signature, while
-    annotations fall back to brittle ``path:line`` (see
-    ``parse_check_annotations``), which shifts on nearly every run as
-    nearby lines change. Jobs without a known structured parser (most
-    linter/QA/policy jobs) keep the annotations-first path instead, since
-    there's no stable-signature alternative worth paying a log download for.
+    downloading even when Check Run Annotations are available. In
+    production, every Check Run Annotation ever recorded carries no real
+    diagnostic content -- GitHub's own generic "this step failed" marker,
+    pointing at the workflow YAML rather than the tool's actual output (see
+    ``_LINTER_TOOL_PATTERNS``'s comment) -- so a job's log is the only
+    source of a signature worth keeping, for every known framework/tool
+    covered by a parser below, not just pytest/spread/Go.
     """
     lowered = job_name.lower()
-    return any(hint in lowered for hint in (*_SPREAD_HINTS, *_PYTEST_HINTS, *_GO_HINTS))
+    return any(
+        hint in lowered
+        for hint in (*_SPREAD_HINTS, *_PYTEST_HINTS, *_GO_HINTS, *_LINTER_HINTS)
+    )
 
 
 def parse_log_tail(log_text: str, *, job_name: str) -> list[ParsedFailure]:

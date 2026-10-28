@@ -332,15 +332,15 @@ class CIFailureCollector:
     ) -> list[Any]:
         """Return parsed failure signatures for one failed job.
 
-        Spread/pytest/Go jobs get their log tail parsed first, even when
-        annotations exist, since those parsers yield a stable test-name
-        signature while annotations fall back to ``path:line`` (see
-        ``parse_check_annotations``), which shifts on nearly every run as
-        nearby lines change -- without this, a chronically-failing test
-        never accumulates enough occurrences to be recognized as recurring.
-        Jobs without a known structured parser keep the annotations-first
-        path (structured, zero log downloads) since there's no
-        stable-signature alternative worth the download.
+        Any job hinting a known framework/tool (spread, pytest, Go,
+        linter/QA/security-scan/policy) gets its log tail parsed first, even
+        when annotations exist: in production, every Check Run Annotation
+        recorded so far carries no real diagnostic content -- GitHub's own
+        generic "this step failed" marker, pointing at the workflow YAML
+        rather than the tool's actual output -- so the log is the only
+        source of a signature worth keeping. Jobs with no known parser keep
+        the annotations-first path as a best-effort fallback, since there's
+        nothing better to try.
         """
         if has_structured_parser_hint(job.name):
             log_tail = await self._fetch_log_tail(project_name, job.id)
