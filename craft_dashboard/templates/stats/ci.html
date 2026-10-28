@@ -38,20 +38,26 @@
   </div>
 
   <div class="filter-group">
-    <label for="ci-filter-branch">Branch</label>
-    <select name="branch" id="ci-filter-branch"
-            hx-get="/stats/ci/table"
-            hx-target="#ci-table"
-            hx-swap="outerHTML"
-            hx-include=".filter-bar [name]"
-            hx-indicator="#ci-loading-indicator"
-            hx-push-url="false">
-      <option value="" {% if not filter_branch %}selected{% endif %}>All</option>
-      <option value="main" {% if filter_branch == "main" %}selected{% endif %}>Main</option>
-      <option value="pr" {% if filter_branch == "pr" %}selected{% endif %}>PR</option>
-      <option value="scheduled" {% if filter_branch == "scheduled" %}selected{% endif %}>Scheduled</option>
-      <option value="other" {% if filter_branch == "other" %}selected{% endif %}>Other</option>
-    </select>
+    <label id="ci-filter-branch-label">Branch</label>
+    <input type="hidden" name="branch" id="ci-filter-branch-value" value="{{ filter_branch }}" />
+    <div class="p-segmented-control" aria-labelledby="ci-filter-branch-label">
+      <div class="p-segmented-control__list" role="tablist">
+        {% for value, label in [("", "All"), ("main", "Main"), ("pr", "PR"), ("scheduled", "Scheduled"), ("other", "Other")] %}
+        <button type="button" role="tab"
+                class="p-segmented-control__button"
+                aria-selected="{{ 'true' if filter_branch == value else 'false' }}"
+                data-branch-value="{{ value }}"
+                hx-get="/stats/ci/table"
+                hx-target="#ci-table"
+                hx-swap="outerHTML"
+                hx-include=".filter-bar [name]"
+                hx-vals='{"branch": "{{ value }}"}'
+                hx-indicator="#ci-loading-indicator"
+                hx-push-url="false"
+                onclick="document.getElementById('ci-filter-branch-value').value = this.dataset.branchValue; this.closest('[role=tablist]').querySelectorAll('[role=tab]').forEach((b) => b.setAttribute('aria-selected', b === this)); ">{{ label }}</button>
+        {% endfor %}
+      </div>
+    </div>
   </div>
 
   <div class="filter-group">

@@ -11,6 +11,13 @@
   &middot; {{ detail.test_type }}
   {% if detail.is_environmental %}<span class="p-chip" style="margin-left:0.4rem;" title="Seen failing on main as well as PR branches">environmental</span>{% endif %}
 </p>
+{% if detail.sample_error_message %}
+<div class="p-code-snippet">
+  <pre class="p-code-snippet__block"><code>{{ detail.sample_error_message|truncate(300) }}</code></pre>
+</div>
+{% else %}
+<p class="u-text--muted">No error message recorded for this signature yet.</p>
+{% endif %}
 
 <h3>Daily fail rate (90-day rollup)</h3>
 {% if detail.daily_trend %}

@@ -257,3 +257,25 @@ async def test_signature_detail_renders_with_no_recent_runs(
     assert response.status_code == 200
     assert "No individual runs left" in response.text
     assert "AssertionError" in response.text
+
+
+@pytest.mark.asyncio
+async def test_signature_detail_shows_sample_error_message(
+    test_client: TestClient, test_db_session
+):
+    proj = _project("snapcraft")
+    test_db_session.add(proj)
+    await test_db_session.commit()
+
+    await _seed_failure(test_db_session, project=proj, run_id=1)
+
+    response = test_client.get(
+        "/stats/ci/signature"
+        "?project=snapcraft&workflow=Tests&job=unit-tests&type=pytest"
+        "&signature=" + "AssertionError%3A%20boom"
+    )
+    assert response.status_code == 200
+    # The sample error message is shown once near the signature header, in
+    # addition to the recent-runs table row -- a bare signature like
+    # ".github:98" is meaningless without the text that produced it.
+    assert response.text.count("AssertionError: boom at test_module.py:42") >= 2

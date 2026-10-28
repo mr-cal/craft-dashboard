@@ -321,3 +321,19 @@ class CISignatureDetail:
     is_environmental: bool
     daily_trend: list[CIDailyPoint]
     recent_runs: list[CIRunOccurrence]
+
+    @property
+    def sample_error_message(self) -> str | None:
+        """Return the most recent recorded error message.
+
+        Returns None if all runs in the 60-day detail window were cleared
+        before one was ever recorded.
+
+        A bare signature like ``.github:98`` is meaningless without the text
+        that produced it, so this is shown right next to the signature
+        itself rather than requiring a scroll to the recent-runs table.
+        """
+        return next(
+            (run.error_message for run in self.recent_runs if run.error_message),
+            None,
+        )
