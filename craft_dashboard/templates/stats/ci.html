@@ -49,6 +49,7 @@
       <option value="" {% if not filter_branch %}selected{% endif %}>All</option>
       <option value="main" {% if filter_branch == "main" %}selected{% endif %}>Main</option>
       <option value="pr" {% if filter_branch == "pr" %}selected{% endif %}>PR</option>
+      <option value="scheduled" {% if filter_branch == "scheduled" %}selected{% endif %}>Scheduled</option>
       <option value="other" {% if filter_branch == "other" %}selected{% endif %}>Other</option>
     </select>
   </div>

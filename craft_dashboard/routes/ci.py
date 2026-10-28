@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 router = APIRouter(prefix="/stats/ci", tags=["Stats"])
 
-VALID_BRANCH_CLASSES = {"main", "pr", "other"}
+VALID_BRANCH_CLASSES = {"main", "pr", "scheduled", "other"}
 VALID_TEST_TYPES = {"pytest", "spread", "go", "linter", "infra", "job"}
 
 

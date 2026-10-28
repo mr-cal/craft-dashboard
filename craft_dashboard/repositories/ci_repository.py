@@ -60,15 +60,20 @@ _NEVER_SEEN = datetime.min.replace(tzinfo=None)
 def branch_class_for(
     event: str, head_branch: str | None, trunk_branches: list[str]
 ) -> str:
-    """Classify a run's branch as main/pr/other, mirroring the plan's rule.
+    """Classify a run's branch as main/pr/scheduled/other, per the plan's rule.
 
     ``merge_group`` (merge-queue) runs and pushes to a configured trunk
     branch are "main"; pull_request(_target) runs not matching a trunk
-    branch are "pr"; everything else (schedule, workflow_dispatch, a push to
-    some other branch) is "other".
+    branch are "pr"; cron-triggered runs are "scheduled" (a nightly run
+    failing is a different signal from a dependency-bump branch failing, and
+    carries no PR/push context to blame); everything else (workflow_dispatch,
+    a reusable-workflow "dynamic" trigger, a push to some other branch) is
+    "other".
     """
     if event == "merge_group":
         return "main"
+    if event == "schedule":
+        return "scheduled"
     matches_trunk = bool(head_branch) and any(
         fnmatch.fnmatch(head_branch, pattern) for pattern in trunk_branches
     )

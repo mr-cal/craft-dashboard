@@ -96,8 +96,12 @@ def test_branch_class_for_merge_group_is_main():
     assert branch_class_for("merge_group", None, ["main"]) == "main"
 
 
-def test_branch_class_for_schedule_is_other():
-    assert branch_class_for("schedule", None, ["main"]) == "other"
+def test_branch_class_for_schedule_is_scheduled():
+    assert branch_class_for("schedule", None, ["main"]) == "scheduled"
+
+
+def test_branch_class_for_dynamic_is_other():
+    assert branch_class_for("dynamic", None, ["main"]) == "other"
 
 
 def test_branch_class_for_hotfix_glob():
