@@ -59,6 +59,17 @@ _INFRA_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"disk quota exceeded",
         r"runner has received a shutdown signal",
         r"The runner has been deprovisioned",
+        # GitHub Actions' own step/job-level cancellation and timeout
+        # messages -- the most common "failure" text in production by far
+        # (per-job annotations are GitHub's generic marker, never the
+        # underlying tool's own output; see parse_check_annotations). These
+        # mean a run was aborted by CI infrastructure or policy (a sibling
+        # matrix cell failing, a newer push superseding it, a stuck step
+        # hitting its timeout), not that the job's own code/tests failed.
+        r"has timed out after",
+        r"The operation was canceled",
+        r"strategy configuration was canceled because",
+        r"Canceling since a higher priority waiting request",
     )
 )
 

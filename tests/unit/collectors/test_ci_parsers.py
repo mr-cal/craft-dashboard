@@ -123,6 +123,31 @@ class TestDetectInfraError:
     def test_does_not_match_assertion_errors(self):
         assert not detect_infra_error("AssertionError: assert 1 == 2")
 
+    def test_matches_github_actions_cancellation_and_timeout_boilerplate(self):
+        # These are the actual messages observed on production annotations --
+        # GitHub's own job/step cancellation and timeout text, not the
+        # underlying tool failing. A sibling matrix cell failing or a newer
+        # push superseding a run is CI-infra noise, not a code regression.
+        assert detect_infra_error(
+            "The action 'Run tests' has timed out after 3 minutes."
+        )
+        assert detect_infra_error("The operation was canceled.")
+        assert detect_infra_error(
+            "The strategy configuration was canceled because "
+            "'build (ubuntu-22.04)' failed"
+        )
+        assert detect_infra_error(
+            "Canceling since a higher priority waiting request for "
+            "refs/pull/123/merge exists"
+        )
+
+    def test_does_not_match_generic_exit_code_message(self):
+        # "Process completed with exit code N" is GitHub's generic marker
+        # for *any* failing step, including real test/tool failures, so it
+        # must not be treated as infra noise -- it carries no signal either
+        # way about whether the failure is environmental.
+        assert not detect_infra_error("Process completed with exit code 1.")
+
 
 class TestParseLinterAndDocFailures:
     def test_extracts_known_tool_failure(self):
