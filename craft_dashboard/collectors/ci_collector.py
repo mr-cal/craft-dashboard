@@ -22,6 +22,7 @@ from sqlalchemy.dialects.postgresql import insert
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from craft_dashboard.collectors.ci.parsers import (
+    has_structured_parser_hint,
     parse_check_annotations,
     parse_log_tail,
 )
@@ -331,13 +332,30 @@ class CIFailureCollector:
     ) -> list[Any]:
         """Return parsed failure signatures for one failed job.
 
-        Prefers Check Run Annotations (structured, zero log downloads); only
-        falls back to downloading and parsing the job's log tail when no
-        annotations are available.
+        Spread/pytest/Go jobs get their log tail parsed first, even when
+        annotations exist, since those parsers yield a stable test-name
+        signature while annotations fall back to ``path:line`` (see
+        ``parse_check_annotations``), which shifts on nearly every run as
+        nearby lines change -- without this, a chronically-failing test
+        never accumulates enough occurrences to be recognized as recurring.
+        Jobs without a known structured parser keep the annotations-first
+        path (structured, zero log downloads) since there's no
+        stable-signature alternative worth the download.
         """
+        if has_structured_parser_hint(job.name):
+            log_tail = await self._fetch_log_tail(project_name, job.id)
+            parsed = parse_log_tail(log_tail, job_name=job.name) if log_tail else []
+            if parsed:
+                return parsed
+
         annotations = await self._fetch_annotations(project_name, job)
         if annotations:
             return parse_check_annotations(annotations)
+
+        if has_structured_parser_hint(job.name):
+            # Log tail was already fetched and parsed above with nothing to
+            # show for it; no need to fetch it again.
+            return []
 
         log_tail = await self._fetch_log_tail(project_name, job.id)
         if not log_tail:

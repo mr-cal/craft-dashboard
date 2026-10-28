@@ -19,6 +19,7 @@ from dataclasses import dataclass
 __all__ = [
     "ParsedFailure",
     "detect_infra_error",
+    "has_structured_parser_hint",
     "parse_check_annotations",
     "parse_go_failures",
     "parse_linter_and_doc_failures",
@@ -244,6 +245,27 @@ def parse_check_annotations(
     return failures
 
 
+_SPREAD_HINTS = ("spread",)
+_PYTEST_HINTS = ("pytest", "unit", "integration", "test")
+_GO_HINTS = ("go", "golang")
+
+
+def has_structured_parser_hint(job_name: str) -> bool:
+    """Return whether ``job_name`` matches a parser with a stable signature.
+
+    Used by the collector to decide whether a job's log is worth
+    downloading even when Check Run Annotations are available: spread/
+    pytest/Go parsers produce a stable test-name signature, while
+    annotations fall back to brittle ``path:line`` (see
+    ``parse_check_annotations``), which shifts on nearly every run as
+    nearby lines change. Jobs without a known structured parser (most
+    linter/QA/policy jobs) keep the annotations-first path instead, since
+    there's no stable-signature alternative worth paying a log download for.
+    """
+    lowered = job_name.lower()
+    return any(hint in lowered for hint in (*_SPREAD_HINTS, *_PYTEST_HINTS, *_GO_HINTS))
+
+
 def parse_log_tail(log_text: str, *, job_name: str) -> list[ParsedFailure]:
     """Dispatch a job's log tail to the parser(s) matching its job name.
 
@@ -253,11 +275,11 @@ def parse_log_tail(log_text: str, *, job_name: str) -> list[ParsedFailure]:
     """
     lowered = job_name.lower()
     results: list[ParsedFailure] = []
-    if "spread" in lowered:
+    if any(hint in lowered for hint in _SPREAD_HINTS):
         results.extend(parse_spread_failures(log_text))
-    if any(keyword in lowered for keyword in ("pytest", "unit", "integration", "test")):
+    if any(hint in lowered for hint in _PYTEST_HINTS):
         results.extend(parse_pytest_failures(log_text))
-    if "go" in lowered or "golang" in lowered:
+    if any(hint in lowered for hint in _GO_HINTS):
         results.extend(parse_go_failures(log_text))
     if not results:
         results.extend(parse_pytest_failures(log_text))

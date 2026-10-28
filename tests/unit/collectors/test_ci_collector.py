@@ -195,7 +195,9 @@ class TestCollect:
     async def test_records_job_failure_from_annotations(
         self, test_db_session, project_id
     ):
-        job = _make_job()
+        # job.name has no structured-parser hint (spread/pytest/go), so
+        # annotations are used directly without a log-tail download first.
+        job = _make_job(name="security-scan")
         run = _make_run(conclusion="failure", jobs=[job])
         collector = CIFailureCollector(token="x")
         collector.gh = MagicMock()
@@ -219,6 +221,70 @@ class TestCollect:
         )
         assert len(job_failures) == 1
         assert job_failures[0].step_name == "Run tests"
+        test_failures = (
+            (await test_db_session.execute(select(CITestFailure))).scalars().all()
+        )
+        assert test_failures[0].signature == "tests/unit/test_foo.py:10"
+
+    async def test_prefers_log_tail_signature_over_annotations_for_structured_job(
+        self, test_db_session, project_id
+    ):
+        # A job name hinting a known structured parser (pytest, here) should
+        # get its stable test-name signature even though annotations also
+        # exist -- annotations fall back to brittle path:line, which would
+        # never show this test as recurring once a nearby line shifts.
+        job = _make_job(name="unit-tests")
+        run = _make_run(conclusion="failure", jobs=[job])
+        collector = CIFailureCollector(token="x")
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value.get_workflow_runs.return_value = [run]
+        collector._fetch_log_tail = AsyncMock(
+            return_value="FAILED tests/unit/test_bar.py::test_baz - ValueError\n"
+        )
+        annotation = MagicMock()
+        annotation.raw_data = {
+            "path": "tests/unit/test_bar.py",
+            "start_line": 42,
+            "message": "ValueError",
+            "annotation_level": "failure",
+        }
+        collector.gh.get_repo.return_value.get_check_run.return_value.get_annotations.return_value = [
+            annotation
+        ]
+
+        await collector.collect("foo", project_id, test_db_session)
+
+        test_failures = (
+            (await test_db_session.execute(select(CITestFailure))).scalars().all()
+        )
+        assert test_failures[0].signature == "tests/unit/test_bar.py::test_baz"
+        assert test_failures[0].test_type == "pytest"
+
+    async def test_falls_back_to_annotations_when_structured_parser_finds_nothing(
+        self, test_db_session, project_id
+    ):
+        # The job name hints a structured parser, but the log tail yielded
+        # no match (e.g. logs already expired) -- fall back to annotations
+        # rather than recording a signature-less job failure.
+        job = _make_job(name="unit-tests")
+        run = _make_run(conclusion="failure", jobs=[job])
+        collector = CIFailureCollector(token="x")
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value.get_workflow_runs.return_value = [run]
+        collector._fetch_log_tail = AsyncMock(return_value="")
+        annotation = MagicMock()
+        annotation.raw_data = {
+            "path": "tests/unit/test_foo.py",
+            "start_line": 10,
+            "message": "AssertionError",
+            "annotation_level": "failure",
+        }
+        collector.gh.get_repo.return_value.get_check_run.return_value.get_annotations.return_value = [
+            annotation
+        ]
+
+        await collector.collect("foo", project_id, test_db_session)
+
         test_failures = (
             (await test_db_session.execute(select(CITestFailure))).scalars().all()
         )

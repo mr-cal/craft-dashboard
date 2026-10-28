@@ -3,6 +3,7 @@
 from craft_dashboard.collectors.ci.parsers import (
     ParsedFailure,
     detect_infra_error,
+    has_structured_parser_hint,
     parse_check_annotations,
     parse_go_failures,
     parse_linter_and_doc_failures,
@@ -182,3 +183,20 @@ class TestParseLogTail:
         log = "Error executing tests/spread/core24/foo (run-id)\n"
         failures = parse_log_tail(log, job_name="some-custom-job")
         assert any(f.test_type == "spread" for f in failures)
+
+
+class TestHasStructuredParserHint:
+    def test_matches_pytest_job_name(self):
+        assert has_structured_parser_hint("unit-tests (3.12)")
+
+    def test_matches_spread_job_name(self):
+        assert has_structured_parser_hint(
+            "integration-spread-tests (openstack:ubuntu-24.04-64)"
+        )
+
+    def test_matches_go_job_name(self):
+        assert has_structured_parser_hint("go-tests")
+
+    def test_does_not_match_linter_or_policy_job_names(self):
+        assert not has_structured_parser_hint("lint / files")
+        assert not has_structured_parser_hint("Security scan / OSV-scanner")
