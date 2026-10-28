@@ -201,6 +201,20 @@ class TestParseLinterAndDocFailures:
         assert len(failures) == 1
         assert failures[0].signature.startswith("osv-scanner: osv-scanner")
 
+    def test_osv_scanner_ignores_github_actions_boilerplate(self):
+        # Real production noise: every line of a job *named* osv-scanner
+        # literally contains that substring (snap install confirmation,
+        # command echo, env var dump), but none of it is an actual finding.
+        log = (
+            "##[group]Run sudo snap install osv-scanner\n"
+            "sudo snap install osv-scanner\n"
+            "osv-scanner 2.3.8 from someone installed\n"
+            "  OSV_EXTRA_ARGS: --config=osv-scanner.toml\n"
+            "osv-scanner scan --recursive --allow-no-lockfiles . \n"
+            "Complete job name: Security scan / OSV-scanner\n"
+        )
+        assert parse_linter_and_doc_failures(log) == []
+
 
 class TestParseCheckAnnotations:
     def test_builds_signature_from_path_and_line(self):
@@ -243,6 +257,34 @@ class TestParseLogTail:
         log = "Error executing tests/spread/core24/foo (run-id)\n"
         failures = parse_log_tail(log, job_name="some-custom-job")
         assert any(f.test_type == "spread" for f in failures)
+
+    def test_strips_github_actions_log_timestamps_before_parsing(self):
+        # GitHub's job-log API prefixes every real line with a timestamp;
+        # without stripping it first, pytest's "^FAILED" anchor never
+        # matches and nothing is ever parsed as a real test failure.
+        log = (
+            "2026-10-28T19:45:13.0019151Z FAILED tests/unit/test_foo.py::"
+            "test_bar - AssertionError: assert 1 == 2\n"
+        )
+        failures = parse_log_tail(log, job_name="unit-tests (3.12)")
+        assert failures == [
+            ParsedFailure(
+                test_type="pytest",
+                signature="tests/unit/test_foo.py::test_bar",
+                error_message="AssertionError: assert 1 == 2",
+            )
+        ]
+
+    def test_timestamped_unrecognized_linter_line_still_dedupes_across_runs(self):
+        # A tool with no dedicated stable-signature extractor (e.g. vale)
+        # falls back to the raw line; if the leading timestamp weren't
+        # stripped first, two runs hitting the same error would never
+        # collapse into one signature since the timestamp differs each time.
+        run_one = "2026-10-28T19:45:13.0019151Z vale: style violation found\n"
+        run_two = "2026-10-28T20:05:41.1187322Z vale: style violation found\n"
+        sig_one = parse_log_tail(run_one, job_name="qa")[0].signature
+        sig_two = parse_log_tail(run_two, job_name="qa")[0].signature
+        assert sig_one == sig_two
 
 
 class TestHasStructuredParserHint:

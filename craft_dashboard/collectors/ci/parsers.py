@@ -39,6 +39,22 @@ class ParsedFailure:
     is_environmental: bool = False
 
 
+# GitHub's job-log API prefixes every raw line with the time it was
+# written, e.g. "2026-10-28T19:45:13.0019151Z FAILED tests/foo.py::bar".
+# Every other parser below anchors its pattern at the start of the line
+# (pytest's ``FAILED``, Go's ``--- FAIL:``, ruff's ``path.py:LINE:COL:``),
+# so without stripping this prefix first, none of them ever match a real
+# production log tail -- and any fallback that keeps the raw line as its
+# signature would embed a timestamp that never repeats, defeating
+# deduplication across runs.
+_GHA_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z ?")
+
+
+def _strip_gha_timestamps(log_text: str) -> str:
+    """Remove GitHub Actions' leading per-line timestamp, if present."""
+    return "\n".join(_GHA_TIMESTAMP_RE.sub("", line) for line in log_text.splitlines())
+
+
 # Patterns that indicate the failure is environmental (runner/network/LXD)
 # rather than a real test assertion. Checked against the extracted error
 # message so any parser can tag a failure as `is_environmental`, not just
@@ -190,6 +206,22 @@ def parse_spread_failures(log_text: str) -> list[ParsedFailure]:
 # rule the tool actually flagged. Annotations only carry real content when a
 # project wires up a dedicated annotation-posting action, which none of the
 # tracked repos currently do.
+# OSV-scanner reports each finding against a stable vulnerability ID
+# (OSV/GitHub Security Advisory or CVE), unlike the surrounding table
+# formatting, which can shift between scans.
+_VULN_ID_RE = re.compile(
+    r"\b(?:CVE-\d{4}-\d+|GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4})\b"
+)
+# Matches real scan output (a vuln ID, or "N vulnerabilities found"/"no
+# vulnerabilities data available") but not GitHub Actions' own boilerplate
+# for the step/job named "osv-scanner" (install confirmation, command
+# echoes, ``##[group]`` markers) -- none of those mention a vulnerability
+# by name, but all contain the literal substring "osv-scanner" and would
+# otherwise be treated as a (never-repeating, timestamped) failure.
+_OSV_SCANNER_RE = re.compile(
+    rf"{_VULN_ID_RE.pattern}|\bvulnerabilit(?:y|ies)\b", re.IGNORECASE
+)
+
 _LINTER_TOOL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Matches both ruff's own failure-summary line and an individual
     # violation line (``path.py:LINE:COL: CODE ...``), since ruff doesn't
@@ -198,7 +230,7 @@ _LINTER_TOOL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "ruff",
         re.compile(r"\bruff\b.*error|^\S+\.py:\d+:\d+:\s+[A-Z]+\d+", re.IGNORECASE),
     ),
-    ("osv-scanner", re.compile(r"osv-scanner", re.IGNORECASE)),
+    ("osv-scanner", _OSV_SCANNER_RE),
     ("docs-lint", re.compile(r"docs-lint|linkcheck", re.IGNORECASE)),
     ("vale", re.compile(r"\bvale\b", re.IGNORECASE)),
     ("prettier", re.compile(r"\bprettier\b", re.IGNORECASE)),
@@ -210,12 +242,6 @@ _LINTER_TOOL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 # the line:col shifts whenever code above it changes, so only path+code is
 # kept for the signature.
 _RUFF_VIOLATION_RE = re.compile(r"^(?P<path>[\w./-]+):\d+:\d+:\s+(?P<code>[A-Z]+\d+)\b")
-# OSV-scanner reports each finding against a stable vulnerability ID
-# (OSV/GitHub Security Advisory or CVE), unlike the surrounding table
-# formatting, which can shift between scans.
-_VULN_ID_RE = re.compile(
-    r"\b(?:CVE-\d{4}-\d+|GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4})\b"
-)
 
 
 def _stable_tool_signature(tool: str, line: str, fallback: str) -> str:
@@ -338,6 +364,7 @@ def parse_log_tail(log_text: str, *, job_name: str) -> list[ParsedFailure]:
     specific framework, since a single job can run more than one tool (e.g.
     a combined "QA" job running both ruff and docs-lint).
     """
+    log_text = _strip_gha_timestamps(log_text)
     lowered = job_name.lower()
     results: list[ParsedFailure] = []
     if any(hint in lowered for hint in _SPREAD_HINTS):
