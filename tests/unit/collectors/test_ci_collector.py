@@ -266,6 +266,35 @@ class TestCollect:
         )
         assert test_failures == []
 
+    async def test_second_pass_does_not_duplicate_still_failing_job(
+        self, test_db_session, project_id
+    ):
+        # A job that's still within its rerun-eligible window gets refetched
+        # by every collection pass; without a (workflow_run_id, job_id)
+        # idempotency check this would insert a second CIJobFailure row and
+        # inflate the signature's occurrence count past the actual run count.
+        job = _make_job(check_run_url=None)
+        run = _make_run(conclusion="failure", jobs=[job])
+        collector = CIFailureCollector(token="x")
+        collector.gh = MagicMock()
+        collector.gh.get_repo.return_value.get_workflow_runs.return_value = [run]
+        collector._fetch_log_tail = AsyncMock(
+            return_value="FAILED tests/unit/test_bar.py::test_baz - ValueError\n"
+        )
+
+        await collector.collect("foo", project_id, test_db_session)
+        count = await collector.collect("foo", project_id, test_db_session)
+
+        assert count == 0
+        job_failures = (
+            (await test_db_session.execute(select(CIJobFailure))).scalars().all()
+        )
+        assert len(job_failures) == 1
+        test_failures = (
+            (await test_db_session.execute(select(CITestFailure))).scalars().all()
+        )
+        assert len(test_failures) == 1
+
     async def test_rerun_updates_existing_row_in_place(
         self, test_db_session, project_id
     ):

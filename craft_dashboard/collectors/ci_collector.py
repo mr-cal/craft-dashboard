@@ -272,9 +272,22 @@ class CIFailureCollector:
             )
             return 0
 
+        already_recorded = set(
+            await session.scalars(
+                sa.select(CIJobFailure.job_id).where(
+                    CIJobFailure.workflow_run_id == workflow_run_id
+                )
+            )
+        )
+
         failures_recorded = 0
         for job in run.jobs():
             if job.conclusion not in _FAILURE_CONCLUSIONS:
+                continue
+            if job.id in already_recorded:
+                # Still rerun-eligible (see _RERUN_GRACE_DAYS) and refetched
+                # by every pass until it ages out; already recorded on a
+                # prior pass, so re-inserting here would just duplicate it.
                 continue
             job_name, job_variant = _parse_job_variant(job.name)
             failed_step = next(

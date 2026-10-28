@@ -88,9 +88,17 @@ class CIWorkflowRun(Base):
 
 
 class CIJobFailure(Base):
-    """A failed job within a workflow run, with the step that failed."""
+    """A failed job within a workflow run, with the step that failed.
+
+    Unique per ``(workflow_run_id, job_id)``: a still-failing job stays
+    "rerun-eligible" (see ``_RERUN_GRACE_DAYS`` in ``ci_collector.py``) and
+    gets refetched by every collection pass for up to 7 days, so without
+    this constraint the same job failure would be re-inserted on every pass
+    and silently inflate occurrence counts past the total run count.
+    """
 
     __tablename__ = "ci_job_failures"
+    __table_args__ = (UniqueConstraint("workflow_run_id", "job_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     workflow_run_id: Mapped[int] = mapped_column(
