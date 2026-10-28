@@ -287,8 +287,15 @@ class CIRepository:
 
         rows = []
         for key, agg in groups.items():
-            project_id, workflow_name, job_name, job_variant, test_type, signature = key
-            branch_class = agg["branch_class"]
+            (
+                project_id,
+                workflow_name,
+                job_name,
+                job_variant,
+                test_type,
+                signature,
+                branch_class,
+            ) = key
             if filters.branch_class and branch_class != filters.branch_class:
                 continue
             if filters.workflow and workflow_name != filters.workflow:
@@ -348,6 +355,12 @@ class CIRepository:
         ID (the job query only selected failures for IDs in
         ``failed_run_ids``, itself built only from latest attempts), so no
         extra "is this superseded" check is needed here.
+
+        ``branch_class`` must be part of the key: ``total_counts`` (the fail
+        rate denominator) is keyed per branch class, so merging a signature's
+        pr/main/other occurrences into one group would let occurrence_count
+        sum run_ids from branch classes the row's single total_count lookup
+        never counted, producing fail rates above 100%.
         """
         latest = latest_by_run_id[job.workflow_run_id]
         key = (
@@ -357,12 +370,12 @@ class CIRepository:
             job.job_variant,
             test_type,
             signature,
+            latest.branch_class,
         )
         agg = groups.setdefault(
             key,
             {
                 "project_name": job.project_name,
-                "branch_class": latest.branch_class,
                 "run_ids": set(),
                 "is_environmental": False,
                 "last_seen_at": None,

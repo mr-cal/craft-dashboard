@@ -176,6 +176,45 @@ async def test_search_filters_by_branch_class(test_db_session):
     assert result.rows[0].branch_class == "main"
 
 
+async def test_same_signature_on_different_branch_classes_does_not_inflate_occurrence_count(
+    test_db_session,
+):
+    """A signature failing on both pr and main runs must split into two rows.
+
+    Folding both into one group would divide occurrence_count (summed
+    across branch classes) by a single branch class's total_count,
+    producing a fail rate above 100%.
+    """
+    session = test_db_session
+    project = await _add_project(session)
+    for i in range(2):
+        run = await _add_run(
+            session, project, run_id=i, event="push", head_branch="main"
+        )
+        job = await _add_job_failure(session, run, project)
+        await _add_test_failure(session, job, signature="shared-failure")
+    for i in range(10):
+        run = await _add_run(
+            session, project, run_id=300 + i, event="pull_request", head_branch="feat"
+        )
+        job = await _add_job_failure(session, run, project)
+        await _add_test_failure(session, job, signature="shared-failure")
+
+    repo = CIRepository(session)
+    result = await repo.search(
+        CIFilters(project="snapcraft"),
+        trunk_branches_by_project={"snapcraft": ["main"]},
+    )
+    rows_by_branch_class = {row.branch_class: row for row in result.rows}
+    assert set(rows_by_branch_class) == {"main", "pr"}
+    assert rows_by_branch_class["main"].occurrence_count == 2
+    assert rows_by_branch_class["main"].total_count == 2
+    assert rows_by_branch_class["pr"].occurrence_count == 10
+    assert rows_by_branch_class["pr"].total_count == 10
+    for row in result.rows:
+        assert row.occurrence_count <= row.total_count
+
+
 async def test_fail_rate_excludes_superseded_rerun_attempts(test_db_session):
     """A rerun that fixed the failure should not still count as failing."""
     session = test_db_session
