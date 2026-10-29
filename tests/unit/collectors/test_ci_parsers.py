@@ -113,6 +113,54 @@ class TestParseSpreadFailures:
         failures = parse_spread_failures(log)
         assert failures[0].is_environmental is True
 
+    def test_strips_backend_and_system_prefix_from_signature(self):
+        log = (
+            "Error executing openstack:ubuntu-24.04-64:"
+            "tests/spread/core24/linters-pack:library_gnome (oct281959-419853) : \n"
+        )
+        failures = parse_spread_failures(log)
+        assert failures[0].signature == "tests/spread/core24/linters-pack:library_gnome"
+
+    def test_same_task_on_different_ubuntu_versions_is_one_signature(self):
+        log = (
+            "Error executing openstack:ubuntu-20.04-64:"
+            "tests/spread/smoketests/foo (run-1)\n"
+            "Error executing openstack:ubuntu-22.04-64:"
+            "tests/spread/smoketests/foo (run-2)\n"
+        )
+        failures = parse_spread_failures(log)
+        assert {f.signature for f in failures} == {"tests/spread/smoketests/foo"}
+
+    def test_captures_multiline_error_block_between_delimiters(self):
+        log = (
+            "2026-10-28 20:06:37 Error executing "
+            "openstack:ubuntu-24.04-64:tests/spread/core24/linters-pack:"
+            "library_gnome (oct281959-419853) : \n"
+            "-----\n"
+            "+ cd library-gnome\n"
+            "+ snapcraft pack\n"
+            "-----\n"
+            ".\n"
+        )
+        failures = parse_spread_failures(log)
+        assert failures[0].error_message == "+ cd library-gnome\n+ snapcraft pack"
+
+    def test_no_delimiter_block_leaves_message_none(self):
+        log = "Error executing tests/spread/core24/foo (run-id)\nsome unrelated line\n"
+        failures = parse_spread_failures(log)
+        assert failures[0].error_message is None
+        assert failures[0].is_environmental is False
+
+    def test_detects_environmental_failure_in_multiline_block(self):
+        log = (
+            "Error executing tests/spread/core24/foo (run-id) : \n"
+            "-----\n"
+            "LXDError: Failed to start container\n"
+            "-----\n"
+        )
+        failures = parse_spread_failures(log)
+        assert failures[0].is_environmental is True
+
 
 class TestDetectInfraError:
     def test_matches_known_infra_patterns(self):

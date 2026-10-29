@@ -163,9 +163,37 @@ def parse_go_failures(log_text: str) -> list[ParsedFailure]:
 
 
 _SPREAD_ERROR_RE = re.compile(
-    r"Error executing (?P<suite_task>[\w./:-]+)\s*\((?P<run_id>[\w-]+)\)"
+    # Real spread runs prefix the task with "<backend>:<system>:" (e.g.
+    # "openstack:ubuntu-24.04-64:"), which is dropped rather than captured
+    # so the same task failing on different backends/Ubuntu versions is one
+    # signature, not a new one per version. Both components are restricted
+    # to word/dot/hyphen characters (no "/") since the suite/task path
+    # always contains at least one "/", so the two can't be confused.
+    r"Error executing (?:[\w.-]+:[\w.-]+:)?(?P<suite_task>[\w./:-]+)"
+    r"\s*\((?P<run_id>[\w-]+)\)"
     r"(?:\s*:\s*(?P<message>.*))?"
 )
+
+
+def _extract_spread_error_block(lines: list[str], error_line_index: int) -> str | None:
+    """Capture the multi-line error block Spread prints after "Error executing ...".
+
+    Real Spread output never puts the error detail on the same line as the
+    colon; instead it wraps whatever the task printed (shell trace,
+    assertion, traceback) between a pair of bare "-----" delimiter lines
+    immediately following the "Error executing" line.
+    """
+    if (
+        error_line_index + 1 >= len(lines)
+        or lines[error_line_index + 1].strip() != "-----"
+    ):
+        return None
+    block: list[str] = []
+    for line in lines[error_line_index + 2 :]:
+        if line.strip() == "-----":
+            break
+        block.append(line)
+    return "\n".join(block) if block else None
 
 
 def parse_spread_failures(log_text: str) -> list[ParsedFailure]:
@@ -176,11 +204,12 @@ def parse_spread_failures(log_text: str) -> list[ParsedFailure]:
     the same signature rather than a new one each time.
     """
     failures: list[ParsedFailure] = []
-    for line in log_text.splitlines():
+    lines = log_text.splitlines()
+    for index, line in enumerate(lines):
         match = _SPREAD_ERROR_RE.search(line)
         if not match:
             continue
-        message = match.group("message")
+        message = match.group("message") or _extract_spread_error_block(lines, index)
         is_env = bool(message) and detect_infra_error(message)
         failures.append(
             ParsedFailure(
