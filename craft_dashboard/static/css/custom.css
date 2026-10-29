@@ -471,16 +471,17 @@ table[role="grid"] col.col-summary   { width: auto; }
 
 /* CI signature "Recent runs": fixed shares per column, error column takes the rest.
  * Percentages (not px) because the table sits in the 75% half of a row--25-75. */
-table[role="grid"] col.col-run-project  { width: 9%; }
-table[role="grid"] col.col-run-workflow { width: 11%; }
-table[role="grid"] col.col-run-branch   { width: 17%; }
-table[role="grid"] col.col-run-id       { width: 7%; }
-table[role="grid"] col.col-run-when     { width: 17%; }
+table[role="grid"] col.col-run-project  { width: 8%; }
+table[role="grid"] col.col-run-workflow { width: 13%; }
+table[role="grid"] col.col-run-branch   { width: 16%; }
+table[role="grid"] col.col-run-id       { width: 12%; }
+table[role="grid"] col.col-run-when     { width: 16%; }
 table[role="grid"] col.col-run-error    { width: auto; }
 
-/* Branch names and timestamps wrap rather than ellipsize on narrow viewports. */
+/* Branch names, run IDs (11+ digits) and timestamps wrap rather than ellipsize on narrow viewports. */
 table.ci-runs-table td.wrap-cell {
   white-space: normal;
+  overflow-wrap: anywhere;
   overflow: visible;
   text-overflow: unset;
 }

@@ -60,7 +60,7 @@
           <td>{{ run.project_name }}</td>
           <td>{{ run.workflow_name }}</td>
           <td class="wrap-cell">{{ run.head_branch or "-" }} ({{ run.branch_class }})</td>
-          <td>{% if run.html_url %}<a href="{{ run.html_url }}" target="_blank" rel="noopener">#{{ run.run_id }}</a>{% else %}#{{ run.run_id }}{% endif %}</td>
+          <td class="wrap-cell">{% if run.html_url %}<a href="{{ run.html_url }}" target="_blank" rel="noopener">#{{ run.run_id }}</a>{% else %}#{{ run.run_id }}{% endif %}</td>
           <td class="wrap-cell">{{ run.created_at | local_datetime("-") }}</td>
           <td class="summary-cell" title="Click to expand">{{ run.error_message or "" }}</td>
         </tr>
