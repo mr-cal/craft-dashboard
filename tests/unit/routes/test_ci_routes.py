@@ -62,6 +62,7 @@ async def _seed_failure(
     conclusion: str = "failure",
     run_attempt: int = 1,
     when: datetime | None = None,
+    error_message: str | None = None,
 ) -> None:
     when = when or _NOW
     run = CIWorkflowRun(
@@ -102,7 +103,7 @@ async def _seed_failure(
             job_failure_id=job.id,
             test_type=test_type,
             signature=signature,
-            error_message=f"{signature} at test_module.py:42",
+            error_message=error_message or f"{signature} at test_module.py:42",
             is_environmental=False,
         )
         session.add(test_failure)
@@ -279,3 +280,49 @@ async def test_signature_detail_shows_sample_error_message(
     # addition to the recent-runs table row -- a bare signature like
     # ".github:98" is meaningless without the text that produced it.
     assert response.text.count("AssertionError: boom at test_module.py:42") >= 2
+
+
+@pytest.mark.asyncio
+async def test_signature_detail_recent_runs_expandable_and_untruncated(
+    test_client: TestClient, test_db_session
+):
+    proj = _project("snapcraft")
+    test_db_session.add(proj)
+    await test_db_session.commit()
+
+    # Well past the old 200-char server-side cut-off; the tail must reach the
+    # page so a click can reveal it.
+    long_error = "AssertionError: boom " + ("x" * 400) + " END-OF-ERROR"
+    await _seed_failure(
+        test_db_session, project=proj, run_id=1, error_message=long_error
+    )
+
+    response = test_client.get(
+        "/stats/ci/signature"
+        "?project=snapcraft&workflow=Tests&job=unit-tests&type=pytest"
+        "&signature=" + "AssertionError%3A%20boom"
+    )
+    assert response.status_code == 200
+    text = response.text
+    assert "END-OF-ERROR" in text
+    assert 'class="summary-cell"' in text
+    assert "/static/js/table-interact.js" in text
+    assert "row--25-75" in text
+    assert "<colgroup>" in text
+    # Shared local-time filter, not a hand-rolled strftime.
+    assert '<time class="local-time"' in text
+
+
+@pytest.mark.asyncio
+async def test_catalog_last_seen_uses_local_time(
+    test_client: TestClient, test_db_session
+):
+    proj = _project("snapcraft")
+    test_db_session.add(proj)
+    await test_db_session.commit()
+    for i in range(12):
+        await _seed_failure(test_db_session, project=proj, run_id=5000 + i)
+
+    response = test_client.get("/stats/ci?project=snapcraft")
+    assert response.status_code == 200
+    assert '<time class="local-time"' in response.text

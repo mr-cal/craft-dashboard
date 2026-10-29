@@ -73,7 +73,7 @@
           <span class="u-text--muted" title="Fewer than 10 runs observed">insufficient data</span>
           {% endif %}
         </td>
-        <td data-col="last_seen">{{ row.last_seen_at.strftime("%Y-%m-%d") if row.last_seen_at else "-" }}</td>
+        <td data-col="last_seen">{{ row.last_seen_at | local_datetime("-") }}</td>
       </tr>
       {% endmacro %}
       {% for row in rows %}

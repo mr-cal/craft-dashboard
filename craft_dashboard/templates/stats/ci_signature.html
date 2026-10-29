@@ -26,33 +26,51 @@
 <p class="u-text--muted">No rollup history yet for this signature.</p>
 {% endif %}
 
-<h3>Recent runs</h3>
-{% if detail.recent_runs %}
-<table role="grid" aria-label="Recent runs for this signature">
-  <thead>
-    <tr>
-      <th>Project</th>
-      <th>Workflow</th>
-      <th>Branch</th>
-      <th>Run</th>
-      <th>When</th>
-      <th>Error</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for run in detail.recent_runs %}
-    <tr>
-      <td>{{ run.project_name }}</td>
-      <td>{{ run.workflow_name }}</td>
-      <td>{{ run.head_branch or "-" }} ({{ run.branch_class }})</td>
-      <td>{% if run.html_url %}<a href="{{ run.html_url }}" target="_blank" rel="noopener">#{{ run.run_id }}</a>{% else %}#{{ run.run_id }}{% endif %}</td>
-      <td>{{ run.created_at.strftime("%Y-%m-%d %H:%M") if run.created_at else "-" }}</td>
-      <td>{{ (run.error_message or "")|truncate(200) }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p class="u-text--muted">No individual runs left in the 60-day detail retention window; see the chart above for longer-term history.</p>
-{% endif %}
+<hr class="p-rule" />
+
+<div class="row--25-75">
+  <div class="col">
+    <h3>Recent runs</h3>
+    <p class="u-text--muted">Most recent failures with this signature. Click a row to see the full error text.</p>
+  </div>
+  <div class="col">
+    {% if detail.recent_runs %}
+    <table role="grid" class="ci-runs-table" aria-label="Recent runs for this signature">
+      <colgroup>
+        <col class="col-run-project">
+        <col class="col-run-workflow">
+        <col class="col-run-branch">
+        <col class="col-run-id">
+        <col class="col-run-when">
+        <col class="col-run-error">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Project</th>
+          <th>Workflow</th>
+          <th>Branch</th>
+          <th>Run</th>
+          <th>When</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in detail.recent_runs %}
+        <tr>
+          <td>{{ run.project_name }}</td>
+          <td>{{ run.workflow_name }}</td>
+          <td class="wrap-cell">{{ run.head_branch or "-" }} ({{ run.branch_class }})</td>
+          <td>{% if run.html_url %}<a href="{{ run.html_url }}" target="_blank" rel="noopener">#{{ run.run_id }}</a>{% else %}#{{ run.run_id }}{% endif %}</td>
+          <td class="wrap-cell">{{ run.created_at | local_datetime("-") }}</td>
+          <td class="summary-cell" title="Click to expand">{{ run.error_message or "" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="u-text--muted">No individual runs left in the 60-day detail retention window; see the chart above for longer-term history.</p>
+    {% endif %}
+  </div>
+</div>
+<script src="/static/js/table-interact.js"></script>
 {% endblock %}
