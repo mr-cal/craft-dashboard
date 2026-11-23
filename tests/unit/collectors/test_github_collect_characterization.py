@@ -247,7 +247,13 @@ async def test_open_collection_reads_open_watermark_and_writes_start_time_on_suc
     monkeypatch.setattr(github_pass, "_upsert_collection_watermark", upsert_watermark)
     monkeypatch.setattr(github_pass, "generate_snapshot", AsyncMock())
     monkeypatch.setattr(github_pass, "record_open_poll_success", AsyncMock())
-    settings = SimpleNamespace(github_token=_TEST_TOKEN, refresh_age_days=7)
+    settings = SimpleNamespace(
+        github_token=_TEST_TOKEN,
+        refresh_age_days=7,
+        collect_dependencies_interval_hours=24,
+        collect_releases_interval_hours=24,
+        collect_ci_interval_hours=1,
+    )
     config = SimpleNamespace(
         maintainers=[],
         bots=[],
@@ -275,13 +281,15 @@ async def test_open_collection_reads_open_watermark_and_writes_start_time_on_suc
         since=watermark,
         collection_run_id=42,
     )
-    upsert_watermark.assert_awaited_once()
-    assert upsert_watermark.await_args.args[:3] == (
-        session,
-        9,
-        "github_issues_open",
-    )
-    written_at = upsert_watermark.await_args.args[3]
+    # The deps/releases phases also advance their own watermarks; scope the
+    # assertion to the open-issue watermark.
+    open_upserts = [
+        call
+        for call in upsert_watermark.await_args_list
+        if call.args[2] == "github_issues_open"
+    ]
+    assert len(open_upserts) == 1
+    written_at = open_upserts[0].args[3]
     assert isinstance(written_at, datetime)
     assert stats.issues_collected == 3
 
@@ -317,7 +325,13 @@ async def test_open_watermark_not_advanced_when_collect_issues_raises(
     upsert_watermark = AsyncMock()
     monkeypatch.setattr(github_pass, "_upsert_collection_watermark", upsert_watermark)
     monkeypatch.setattr(github_pass, "record_refresh_error", AsyncMock())
-    settings = SimpleNamespace(github_token=_TEST_TOKEN, refresh_age_days=7)
+    settings = SimpleNamespace(
+        github_token=_TEST_TOKEN,
+        refresh_age_days=7,
+        collect_dependencies_interval_hours=24,
+        collect_releases_interval_hours=24,
+        collect_ci_interval_hours=1,
+    )
     config = SimpleNamespace(
         maintainers=[],
         bots=[],
@@ -337,7 +351,13 @@ async def test_open_watermark_not_advanced_when_collect_issues_raises(
     )
 
     collector.collect_issues.assert_awaited_once()
-    upsert_watermark.assert_not_awaited()
+    # The deps/releases phases succeed and advance their own watermarks even
+    # when the open-issue phase fails; only the open-issue watermark must not
+    # advance.
+    assert not any(
+        call.args[2] == "github_issues_open"
+        for call in upsert_watermark.await_args_list
+    )
     assert stats.issues_collected == 0
     assert stats.errors == [{"project": "snapcraft", "error": "page fetch failed"}]
 

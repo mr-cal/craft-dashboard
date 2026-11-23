@@ -251,7 +251,13 @@ class TestCollectGithubLogging:
         self, monkeypatch, caplog
     ) -> None:
         token = ("tok", "en")[0] + ("tok", "en")[1]
-        settings = SimpleNamespace(github_token=token, refresh_age_days=7)
+        settings = SimpleNamespace(
+            github_token=token,
+            refresh_age_days=7,
+            collect_dependencies_interval_hours=24,
+            collect_releases_interval_hours=24,
+            collect_ci_interval_hours=1,
+        )
         config = SimpleNamespace(
             craft_projects=["snapcraft"],
             craft_applications=["snapcraft"],
@@ -320,7 +326,13 @@ class TestReleaseCollectionIndependentOfRefresh:
         self, monkeypatch, caplog
     ) -> None:
         token = ("tok", "en")[0] + ("tok", "en")[1]
-        settings = SimpleNamespace(github_token=token, refresh_age_days=7)
+        settings = SimpleNamespace(
+            github_token=token,
+            refresh_age_days=7,
+            collect_dependencies_interval_hours=24,
+            collect_releases_interval_hours=24,
+            collect_ci_interval_hours=1,
+        )
         config = SimpleNamespace(
             craft_projects=["snapcraft"],
             craft_applications=["snapcraft"],
@@ -376,7 +388,13 @@ class TestReleaseCollectionIndependentOfRefresh:
     async def test_releases_collected_for_libraries(self, monkeypatch, caplog) -> None:
         """Libraries should also have releases collected (for hotfix branch tracking)."""
         token = ("tok", "en")[0] + ("tok", "en")[1]
-        settings = SimpleNamespace(github_token=token, refresh_age_days=7)
+        settings = SimpleNamespace(
+            github_token=token,
+            refresh_age_days=7,
+            collect_dependencies_interval_hours=24,
+            collect_releases_interval_hours=24,
+            collect_ci_interval_hours=1,
+        )
         config = SimpleNamespace(
             craft_projects=["craft-parts"],
             craft_applications=[],  # craft-parts is a library, not app
@@ -475,7 +493,13 @@ class TestGitHubRateLimitHalt:
         self, monkeypatch, caplog
     ) -> None:
         token = ("tok", "en")[0] + ("tok", "en")[1]
-        settings = SimpleNamespace(github_token=token, refresh_age_days=7)
+        settings = SimpleNamespace(
+            github_token=token,
+            refresh_age_days=7,
+            collect_dependencies_interval_hours=24,
+            collect_releases_interval_hours=24,
+            collect_ci_interval_hours=1,
+        )
         config = SimpleNamespace(
             craft_projects=["snapcraft", "rockcraft"],
             craft_applications=["snapcraft", "rockcraft"],

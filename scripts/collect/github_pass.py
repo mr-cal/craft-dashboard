@@ -3,7 +3,8 @@
 import asyncio
 import logging
 import time
-from datetime import UTC, datetime
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 
 from craft_dashboard.collectors import RateLimitError
 from craft_dashboard.collectors.ci_collector import CIFailureCollector
@@ -157,8 +158,11 @@ async def _collect_project_dependencies(
     project_name: str,
     project_id: int,
     session: object,
-) -> None:
-    """Collect one project's dependencies, independent of the refresh schedule."""
+) -> bool:
+    """Collect one project's dependencies, independent of the refresh schedule.
+
+    Returns True when the phase completed, False when it failed.
+    """
     dep_collector = DependencyCollector(
         token=settings.github_token,
         org="canonical",
@@ -191,6 +195,9 @@ async def _collect_project_dependencies(
             project_name,
             exc_info=True,
         )
+        return False
+    else:
+        return True
 
 
 async def _collect_project_releases(
@@ -198,8 +205,11 @@ async def _collect_project_releases(
     project_name: str,
     project_id: int,
     session: object,
-) -> None:
-    """Collect one project's releases, independent of the refresh schedule."""
+) -> bool:
+    """Collect one project's releases, independent of the refresh schedule.
+
+    Returns True when the phase completed, False when it failed.
+    """
     try:
         releases_started_at = time.monotonic()
         release_count = await _retry_github(
@@ -226,6 +236,9 @@ async def _collect_project_releases(
             project_name,
             exc_info=True,
         )
+        return False
+    else:
+        return True
 
 
 async def _collect_project_ci(
@@ -234,8 +247,10 @@ async def _collect_project_ci(
     project_name: str,
     project_id: int,
     session: object,
-) -> None:
+) -> bool:
     """Collect one project's CI failure data, independent of the refresh schedule.
+
+    Returns True when the phase completed, False when it failed.
 
     Excluded repos skip collection entirely rather than recording an empty
     pass, mirroring how hide-prs/hide-releases are plain display filters but
@@ -246,7 +261,7 @@ async def _collect_project_ci(
     exclude_repos = getattr(ci_config, "exclude_repos", [])
     include_fork_prs = getattr(ci_config, "include_fork_prs", [])
     if project_name in exclude_repos:
-        return
+        return True
     try:
         ci_started_at = time.monotonic()
         failure_count = await _retry_github(
@@ -272,6 +287,47 @@ async def _collect_project_ci(
             project_name,
             exc_info=True,
         )
+        return False
+    else:
+        return True
+
+
+async def _run_phase_when_due(
+    session: object,
+    project_id: int,
+    project_name: str,
+    watermark_source: str,
+    interval_hours: int,
+    force: bool,
+    phase_name: str,
+    run: Callable[[], Awaitable[bool]],
+) -> None:
+    """Run an auxiliary collection phase when its watermark interval elapsed.
+
+    Dependencies, releases, and CI failures change slowly relative to open
+    issues, so the frequent open pass skips these phases until
+    ``interval_hours`` have passed since the phase last succeeded for the
+    project. ``force`` bypasses the gate: full refreshes always collect every
+    phase.
+
+    ``run`` must return True when the phase completed; only then is the phase
+    watermark advanced, so a failed phase is retried on the next pass.
+    """
+    last = await _get_collection_watermark(session, project_id, watermark_source)
+    if (
+        not force
+        and last is not None
+        and datetime.now(UTC) - last < timedelta(hours=interval_hours)
+    ):
+        logger.debug(
+            "  canonical/%s: %s not due (last collected %s)",
+            project_name,
+            phase_name,
+            last.isoformat(),
+        )
+        return
+    if await run():
+        await _upsert_collection_watermark(session, project_id, watermark_source)
 
 
 async def _collect_open_issues(
@@ -519,9 +575,11 @@ async def _collect_github(
         force_schedule: If True, ignore per-project schedule for closed pass.
         collection_run_id: ID of the active collection run.
         mode: Collection mode — "open" collects open issues for every project
-            on every run (no schedule gate); "full" collects all issues
-            (open + closed) per the per-project refresh schedule; "all"
-            forces a full collection for every project regardless of schedule.
+            on every run (no schedule gate), with the dependencies/releases/CI
+            phases gated on their own per-phase watermark intervals; "full"
+            collects all issues (open + closed) per the per-project refresh
+            schedule; "all" forces a full collection for every project
+            regardless of schedule.
 
     """
     collector = GitHubCollector(
@@ -556,14 +614,47 @@ async def _collect_github(
 
                 logger.info("Collecting GitHub data for %s%s", project_name, elapsed)
 
-                await _collect_project_dependencies(
-                    settings, config, project_name, project_id, session
+                # Dependencies, releases, and CI change slowly relative to
+                # open issues; gate them on per-phase watermarks
+                # ("github:deps"/"github:releases"/"github:ci") so the
+                # frequent pass mostly fetches issues. Full refreshes
+                # (rotation, --mode all) always collect every phase.
+                force_phases = full_refresh or mode == "all"
+                await _run_phase_when_due(
+                    session,
+                    project_id,
+                    project_name,
+                    "github:deps",
+                    settings.collect_dependencies_interval_hours,
+                    force_phases,
+                    "dependencies",
+                    lambda _pn=project_name, _pid=project_id, _s=session: (
+                        _collect_project_dependencies(settings, config, _pn, _pid, _s)
+                    ),
                 )
-                await _collect_project_releases(
-                    collector, project_name, project_id, session
+                await _run_phase_when_due(
+                    session,
+                    project_id,
+                    project_name,
+                    "github:releases",
+                    settings.collect_releases_interval_hours,
+                    force_phases,
+                    "releases",
+                    lambda _pn=project_name, _pid=project_id, _s=session: (
+                        _collect_project_releases(collector, _pn, _pid, _s)
+                    ),
                 )
-                await _collect_project_ci(
-                    ci_collector, config, project_name, project_id, session
+                await _run_phase_when_due(
+                    session,
+                    project_id,
+                    project_name,
+                    "github:ci",
+                    settings.collect_ci_interval_hours,
+                    force_phases,
+                    "CI failures",
+                    lambda _pn=project_name, _pid=project_id, _s=session: (
+                        _collect_project_ci(ci_collector, config, _pn, _pid, _s)
+                    ),
                 )
 
                 # Phase A — open issues, in every mode but "full". "open" stops

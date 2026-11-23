@@ -27,6 +27,15 @@ class Settings(BaseSettings):
     # Minimum worker version required to claim or submit evaluations
     eval_min_worker_version: str = "0.3.0"
 
+    # The 20-minute open pass collects dependencies, releases, and CI failures
+    # only when this much time has passed since that phase last succeeded for
+    # a project (watermarks "github:deps" / "github:releases" / "github:ci").
+    # Open issues are collected on every pass. A full refresh (rotation, or
+    # --mode all) ignores the gates and always collects every phase.
+    collect_dependencies_interval_hours: int = 24
+    collect_releases_interval_hours: int = 24
+    collect_ci_interval_hours: int = 1
+
     # Retention window (days) for evaluation transcripts belonging to
     # superseded (non-latest) evaluations. latest=True transcripts are kept
     # indefinitely regardless.

@@ -14,7 +14,10 @@ CLI and the run-level orchestration.
 - `runs.py` — `collection_runs` health records and the per-source concurrency
   guard.
 - `github_pass.py` — the per-project GitHub pass: dependencies, releases, the
-  open-issue phase, and the schedule-gated full phase.
+  open-issue phase, and the schedule-gated full phase. In the frequent open
+  pass the dependencies/releases/CI phases are gated on their own watermarks
+  (`github:deps`, `github:releases`, `github:ci`), each advanced only when the
+  phase succeeds; full refreshes ignore the gates.
 - `launchpad_pass.py` — the per-project Launchpad pass.
 
 ## Invariants
