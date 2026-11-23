@@ -52,6 +52,10 @@ jobs:
             type=raw,value=latest
             type=sha,prefix=
 
+      - name: Compute image version
+        id: version
+        run: echo "version=$(git describe --tags --abbrev=0)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         id: build
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
@@ -63,7 +67,7 @@ jobs:
           provenance: mode=max
           sbom: true
           build-args: |
-            SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0
+            SETUPTOOLS_SCM_PRETEND_VERSION=${{ steps.version.outputs.version }}
 
       - name: Scan the published image
         continue-on-error: true
