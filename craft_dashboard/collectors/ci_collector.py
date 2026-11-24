@@ -100,7 +100,7 @@ class CIFailureCollector:
                 pollute flake/persistence stats.
 
         """
-        self.gh = Github(auth=github.Auth.Token(token), timeout=30)
+        self.gh = Github(auth=github.Auth.Token(token), timeout=30, per_page=100)
         self.org = org
         self.include_fork_prs = include_fork_prs
         self._token = token
@@ -188,13 +188,10 @@ class CIFailureCollector:
         )
 
         paginator = repo.get_workflow_runs(created=f">={since.date().isoformat()}")
-        # PyGithub lists 30 runs per page by default; 100-run pages mean 3x
-        # fewer sequential list round trips (test doubles return plain lists,
-        # which have no per_page knob).
-        if hasattr(paginator, "per_page"):
-            paginator.per_page = 100
-        # Pagination is synchronous, so materialize in a thread instead of
-        # blocking the event loop.
+        # The Github instance is created with per_page=100 (PyGithub defaults
+        # to 30), so 3x fewer sequential list round trips. Pagination is
+        # synchronous, so materialize in a thread instead of blocking the
+        # event loop.
         runs = await asyncio.to_thread(lambda: list(paginator))
 
         for run in runs:
