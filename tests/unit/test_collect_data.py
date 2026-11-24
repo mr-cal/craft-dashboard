@@ -257,6 +257,7 @@ class TestCollectGithubLogging:
             collect_dependencies_interval_hours=24,
             collect_releases_interval_hours=24,
             collect_ci_interval_hours=1,
+            collect_project_concurrency=2,
         )
         config = SimpleNamespace(
             craft_projects=["snapcraft"],
@@ -332,6 +333,7 @@ class TestReleaseCollectionIndependentOfRefresh:
             collect_dependencies_interval_hours=24,
             collect_releases_interval_hours=24,
             collect_ci_interval_hours=1,
+            collect_project_concurrency=2,
         )
         config = SimpleNamespace(
             craft_projects=["snapcraft"],
@@ -394,6 +396,7 @@ class TestReleaseCollectionIndependentOfRefresh:
             collect_dependencies_interval_hours=24,
             collect_releases_interval_hours=24,
             collect_ci_interval_hours=1,
+            collect_project_concurrency=2,
         )
         config = SimpleNamespace(
             craft_projects=["craft-parts"],
@@ -499,6 +502,9 @@ class TestGitHubRateLimitHalt:
             collect_dependencies_interval_hours=24,
             collect_releases_interval_hours=24,
             collect_ci_interval_hours=1,
+            # Sequential execution keeps the halt deterministic: the first
+            # RateLimitError must stop later projects from starting.
+            collect_project_concurrency=1,
         )
         config = SimpleNamespace(
             craft_projects=["snapcraft", "rockcraft"],

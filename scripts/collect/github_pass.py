@@ -124,7 +124,7 @@ async def _log_rate_limit_after_project(
     """Log the remaining API quota and wait it out if it is running low."""
     try:
         rate_limit = await _retry_github(
-            collector.check_rate_limit,
+            lambda: asyncio.to_thread(collector.check_rate_limit),
             f"check_rate_limit after {project_name}",
         )
     except GithubException as exc:
@@ -148,8 +148,8 @@ async def _log_rate_limit_after_project(
         gql_rem,
         gql_lim,
     )
-    collector.wait_for_rate_limit(resource="core")
-    collector.wait_for_rate_limit(resource="graphql")
+    await asyncio.to_thread(collector.wait_for_rate_limit, resource="core")
+    await asyncio.to_thread(collector.wait_for_rate_limit, resource="graphql")
 
 
 async def _collect_project_dependencies(
@@ -590,135 +590,170 @@ async def _collect_github(
     ci_collector = CIFailureCollector(token=settings.github_token, org="canonical")
     stats = CollectionStats()
     bots = set(getattr(config, "bots", []))
-    _check_initial_rate_limit(collector)
+    await asyncio.to_thread(_check_initial_rate_limit, collector)
 
     project_list = projects if projects else config.craft_projects
-    try:
-        for i, project_name in enumerate(project_list):
-            async with session_factory() as session:
-                category = (
-                    "application"
-                    if project_name in config.craft_applications
-                    else (
-                        "library" if project_name in config.craft_libraries else "other"
+    concurrency = max(1, settings.collect_project_concurrency)
+    semaphore = asyncio.Semaphore(concurrency)
+    # Set on the first RateLimitError: tasks that have not started a project
+    # yet skip it, so a halt never starts new work.
+    halt = asyncio.Event()
+
+    async def _collect_one(i: int, project_name: str) -> None:
+        """Collect one project, bounded by the project semaphore."""
+        async with semaphore:
+            if halt.is_set():
+                return
+            try:
+                async with session_factory() as session:
+                    category = (
+                        "application"
+                        if project_name in config.craft_applications
+                        else (
+                            "library"
+                            if project_name in config.craft_libraries
+                            else "other"
+                        )
                     )
-                )
-                project_id = await _get_or_create_project(
-                    session, project_name, category, i
-                )
-                stats.projects_processed.add(project_name)
-                project_started_at = time.monotonic()
-                elapsed = ""
-                if run_started_at is not None:
-                    elapsed = f" (elapsed: {_format_duration(time.monotonic() - run_started_at)})"
+                    project_id = await _get_or_create_project(
+                        session, project_name, category, i
+                    )
+                    stats.projects_processed.add(project_name)
+                    project_started_at = time.monotonic()
+                    elapsed = ""
+                    if run_started_at is not None:
+                        elapsed = f" (elapsed: {_format_duration(time.monotonic() - run_started_at)})"
 
-                logger.info("Collecting GitHub data for %s%s", project_name, elapsed)
+                    logger.info(
+                        "Collecting GitHub data for %s%s", project_name, elapsed
+                    )
 
-                # Dependencies, releases, and CI change slowly relative to
-                # open issues; gate them on per-phase watermarks
-                # ("github:deps"/"github:releases"/"github:ci") so the
-                # frequent pass mostly fetches issues. Full refreshes
-                # (rotation, --mode all) always collect every phase.
-                force_phases = full_refresh or mode == "all"
-                await _run_phase_when_due(
-                    session,
-                    project_id,
-                    project_name,
-                    "github:deps",
-                    settings.collect_dependencies_interval_hours,
-                    force_phases,
-                    "dependencies",
-                    lambda _pn=project_name, _pid=project_id, _s=session: (
-                        _collect_project_dependencies(settings, config, _pn, _pid, _s)
-                    ),
-                )
-                await _run_phase_when_due(
-                    session,
-                    project_id,
-                    project_name,
-                    "github:releases",
-                    settings.collect_releases_interval_hours,
-                    force_phases,
-                    "releases",
-                    lambda _pn=project_name, _pid=project_id, _s=session: (
-                        _collect_project_releases(collector, _pn, _pid, _s)
-                    ),
-                )
-                await _run_phase_when_due(
-                    session,
-                    project_id,
-                    project_name,
-                    "github:ci",
-                    settings.collect_ci_interval_hours,
-                    force_phases,
-                    "CI failures",
-                    lambda _pn=project_name, _pid=project_id, _s=session: (
-                        _collect_project_ci(ci_collector, config, _pn, _pid, _s)
-                    ),
-                )
+                    # Dependencies, releases, and CI change slowly relative to
+                    # open issues; gate them on per-phase watermarks
+                    # ("github:deps"/"github:releases"/"github:ci") so the
+                    # frequent pass mostly fetches issues. Full refreshes
+                    # (rotation, --mode all) always collect every phase.
+                    force_phases = full_refresh or mode == "all"
+                    await _run_phase_when_due(
+                        session,
+                        project_id,
+                        project_name,
+                        "github:deps",
+                        settings.collect_dependencies_interval_hours,
+                        force_phases,
+                        "dependencies",
+                        lambda _pn=project_name, _pid=project_id, _s=session: (
+                            _collect_project_dependencies(
+                                settings, config, _pn, _pid, _s
+                            )
+                        ),
+                    )
+                    await _run_phase_when_due(
+                        session,
+                        project_id,
+                        project_name,
+                        "github:releases",
+                        settings.collect_releases_interval_hours,
+                        force_phases,
+                        "releases",
+                        lambda _pn=project_name, _pid=project_id, _s=session: (
+                            _collect_project_releases(collector, _pn, _pid, _s)
+                        ),
+                    )
+                    await _run_phase_when_due(
+                        session,
+                        project_id,
+                        project_name,
+                        "github:ci",
+                        settings.collect_ci_interval_hours,
+                        force_phases,
+                        "CI failures",
+                        lambda _pn=project_name, _pid=project_id, _s=session: (
+                            _collect_project_ci(ci_collector, config, _pn, _pid, _s)
+                        ),
+                    )
 
-                # Phase A — open issues, in every mode but "full". "open" stops
-                # here; "all" continues into the full pass below.
-                if mode != "full":
-                    await _collect_open_issues(
+                    # Phase A — open issues, in every mode but "full". "open"
+                    # stops here; "all" continues into the full pass below.
+                    if mode != "full":
+                        await _collect_open_issues(
+                            collector,
+                            config,
+                            session,
+                            session_factory,
+                            project_name,
+                            project_id,
+                            stats,
+                            bots,
+                            limit,
+                            collection_run_id,
+                        )
+                        if mode == "open":
+                            logger.info(
+                                "Completed GitHub open-issue collection for %s in %s",
+                                project_name,
+                                _format_duration(time.monotonic() - project_started_at),
+                            )
+                            await _log_rate_limit_after_project(collector, project_name)
+                            await asyncio.sleep(1)
+                            return
+
+                    # Phase B — open plus closed, gated by the refresh schedule
+                    # in "full" mode and forced in "all" mode.
+                    if not await _is_full_pass_due(
+                        session,
+                        project_name,
+                        project_id,
+                        project_started_at,
+                        mode,
+                        force_schedule,
+                    ):
+                        return
+
+                    await _collect_all_issues(
                         collector,
+                        settings,
                         config,
                         session,
                         session_factory,
                         project_name,
                         project_id,
+                        project_started_at,
                         stats,
                         bots,
                         limit,
                         collection_run_id,
+                        full_refresh,
                     )
-                    if mode == "open":
-                        logger.info(
-                            "Completed GitHub open-issue collection for %s in %s",
-                            project_name,
-                            _format_duration(time.monotonic() - project_started_at),
-                        )
-                        await _log_rate_limit_after_project(collector, project_name)
-                        await asyncio.sleep(1)
-                        continue
 
-                # Phase B — open plus closed, gated by the refresh schedule in
-                # "full" mode and forced in "all" mode.
-                if not await _is_full_pass_due(
-                    session,
-                    project_name,
-                    project_id,
-                    project_started_at,
-                    mode,
-                    force_schedule,
-                ):
-                    continue
+                    await _log_rate_limit_after_project(collector, project_name)
 
-                await _collect_all_issues(
-                    collector,
-                    settings,
-                    config,
-                    session,
-                    session_factory,
-                    project_name,
-                    project_id,
-                    project_started_at,
-                    stats,
-                    bots,
-                    limit,
-                    collection_run_id,
-                    full_refresh,
-                )
+                    # Avoid GitHub secondary rate limits between repos
+                    await asyncio.sleep(1)
+            except RateLimitError:
+                halt.set()
+                raise
 
-                await _log_rate_limit_after_project(collector, project_name)
-
-                # Avoid GitHub secondary rate limits between repos
-                await asyncio.sleep(1)
+    # Projects run concurrently (bounded by the semaphore); the sync
+    # PyGithub/GraphQL page fetches run in worker threads inside the
+    # collectors, so the event loop stays responsive while HTTP is in flight.
+    tasks = [
+        asyncio.create_task(_collect_one(i, project_name))
+        for i, project_name in enumerate(project_list)
+    ]
+    try:
+        await asyncio.gather(*tasks)
     except RateLimitError as exc:
         logger.warning(
             "GitHub rate limit exhausted: %s; stopping collection pass",
             exc,
         )
         stats.errors.append({"source": "github", "error": str(exc)})
+    finally:
+        # Drain remaining tasks: un-started ones bail on the halt flag; cancel
+        # anything still in flight. Cancelling finished tasks is a no-op.
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     return stats

@@ -17,7 +17,10 @@ CLI and the run-level orchestration.
   open-issue phase, and the schedule-gated full phase. In the frequent open
   pass the dependencies/releases/CI phases are gated on their own watermarks
   (`github:deps`, `github:releases`, `github:ci`), each advanced only when the
-  phase succeeds; full refreshes ignore the gates.
+  phase succeeds; full refreshes ignore the gates. Projects are collected
+  concurrently (`collect_project_concurrency`, default 2) with sync
+  PyGithub/GraphQL page fetches in worker threads; the first `RateLimitError`
+  sets a halt flag so un-started projects skip their pass.
 - `launchpad_pass.py` — the per-project Launchpad pass.
 
 ## Invariants

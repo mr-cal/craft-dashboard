@@ -59,6 +59,14 @@ class LLMEvaluation(Base):
             "issue_id",
             postgresql_where=text("latest = true"),
         ),
+        # Issue-detail history: WHERE issue_id = ? ORDER BY evaluated_at DESC.
+        # Without it the only issue_id index is the partial latest=True one,
+        # unusable here, so history fetches seq-scanned the whole table.
+        Index(
+            "ix_llm_evaluations_issue_history",
+            "issue_id",
+            "evaluated_at",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

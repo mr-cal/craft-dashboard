@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     collect_releases_interval_hours: int = 24
     collect_ci_interval_hours: int = 1
 
+    # How many projects a GitHub pass collects concurrently. The sync
+    # PyGithub/GraphQL page fetches run in worker threads, so concurrency
+    # hides their HTTP latency without blocking the event loop. 2 is the
+    # safe value for the 1GB VPS; raise on bigger hosts.
+    collect_project_concurrency: int = 2
+
     # Retention window (days) for evaluation transcripts belonging to
     # superseded (non-latest) evaluations. latest=True transcripts are kept
     # indefinitely regardless.

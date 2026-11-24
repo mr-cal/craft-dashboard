@@ -9,6 +9,7 @@ rate-limit/log-size defenses this mirrors from ``collectors/github.py``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import deque
 from datetime import UTC, datetime, timedelta
@@ -179,14 +180,24 @@ class CIFailureCollector:
 
         """
         since = await self._resolve_since(session, project_id)
-        repo = self.gh.get_repo(f"{self.org}/{project_name}")
+        repo = await asyncio.to_thread(self.gh.get_repo, f"{self.org}/{project_name}")
         failures_recorded = 0
         now = datetime.now(tz=UTC)
         allow_fork_prs = (
             self.include_fork_prs if include_fork_prs is None else include_fork_prs
         )
 
-        for run in repo.get_workflow_runs(created=f">={since.date().isoformat()}"):
+        paginator = repo.get_workflow_runs(created=f">={since.date().isoformat()}")
+        # PyGithub lists 30 runs per page by default; 100-run pages mean 3x
+        # fewer sequential list round trips (test doubles return plain lists,
+        # which have no per_page knob).
+        if hasattr(paginator, "per_page"):
+            paginator.per_page = 100
+        # Pagination is synchronous, so materialize in a thread instead of
+        # blocking the event loop.
+        runs = await asyncio.to_thread(lambda: list(paginator))
+
+        for run in runs:
             run_created = run.created_at
             if run_created is not None and run_created.replace(tzinfo=UTC) < since:
                 continue

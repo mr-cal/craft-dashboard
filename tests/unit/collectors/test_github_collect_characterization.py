@@ -253,6 +253,7 @@ async def test_open_collection_reads_open_watermark_and_writes_start_time_on_suc
         collect_dependencies_interval_hours=24,
         collect_releases_interval_hours=24,
         collect_ci_interval_hours=1,
+        collect_project_concurrency=2,
     )
     config = SimpleNamespace(
         maintainers=[],
@@ -331,6 +332,7 @@ async def test_open_watermark_not_advanced_when_collect_issues_raises(
         collect_dependencies_interval_hours=24,
         collect_releases_interval_hours=24,
         collect_ci_interval_hours=1,
+        collect_project_concurrency=2,
     )
     config = SimpleNamespace(
         maintainers=[],

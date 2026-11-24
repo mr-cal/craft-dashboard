@@ -1,8 +1,9 @@
 """GitHub data collector for issues, PRs, releases, and dependencies."""
 
+import asyncio
 import logging
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
@@ -271,13 +272,13 @@ class GitHubCollector:
         )
         time.sleep(sleep_seconds)
 
-    def _open_issue_source(
+    async def _open_issue_source(
         self,
         repo_name: str,
         limit: int,
         since: datetime | None,
-    ) -> Iterator[GraphQLIssueAdapter | GraphQLPullRequestAdapter]:
-        """Return the GraphQL-backed iterator of currently open issues and PRs.
+    ) -> list[GraphQLIssueAdapter | GraphQLPullRequestAdapter]:
+        """Return the GraphQL-backed list of currently open issues and PRs.
 
         Args:
             repo_name: Repository name (without org prefix).
@@ -285,7 +286,7 @@ class GitHubCollector:
             since: Only fetch items updated on or after this timestamp.
 
         Returns:
-            An iterator of GraphQL issue and PR adapters.
+            A list of GraphQL issue and PR adapters.
 
         """
         # Always fetch all currently-open issues; no schedule gate.
@@ -293,11 +294,19 @@ class GitHubCollector:
         # Use GraphQL (not REST) for the open pass: this runs every 10
         # minutes, and REST's N+1 per-item calls (comments, reviews, CI
         # checks) would blow the REST rate limit at that cadence.
-        self.wait_for_rate_limit(resource="graphql")
+        await asyncio.to_thread(self.wait_for_rate_limit, resource="graphql")
         requester = self.gh.requester
-        gh_issues = interleave_open_graphql_items(
-            paginated_issues(requester, self.org, repo_name, since=since),
-            paginated_pull_requests(requester, self.org, repo_name, since=since),
+        # PyGithub/GraphQL pagination is synchronous; materialize in a thread
+        # so the page round trips do not block the event loop.
+        gh_issues = await asyncio.to_thread(
+            lambda: list(
+                interleave_open_graphql_items(
+                    paginated_issues(requester, self.org, repo_name, since=since),
+                    paginated_pull_requests(
+                        requester, self.org, repo_name, since=since
+                    ),
+                )
+            )
         )
         logger.info(
             "  %s/%s: collecting open issues (via GraphQL)%s",
@@ -598,8 +607,8 @@ class GitHubCollector:
             len(missing_numbers),
             missing_numbers,
         )
-        reconciled = fetch_issue_states(
-            self.gh.requester, self.org, repo_name, missing_numbers
+        reconciled = await asyncio.to_thread(
+            fetch_issue_states, self.gh.requester, self.org, repo_name, missing_numbers
         )
         now_utc = datetime.now(UTC)
         count = 0
@@ -693,9 +702,9 @@ class GitHubCollector:
         gh_issues: Iterable[_CollectedItem]
         seen_open_external_ids: set[str] = set()
         if state == "open":
-            gh_issues = self._open_issue_source(repo_name, limit, since)
+            gh_issues = await self._open_issue_source(repo_name, limit, since)
         else:
-            repo = self.gh.get_repo(f"{self.org}/{repo_name}")
+            repo = await asyncio.to_thread(self.gh.get_repo, f"{self.org}/{repo_name}")
             rest_issues = await self._rest_issue_source(
                 repo,
                 repo_name,
@@ -818,7 +827,7 @@ class GitHubCollector:
             Number of branch+release rows upserted.
 
         """
-        self.wait_for_rate_limit(resource="graphql")
+        await asyncio.to_thread(self.wait_for_rate_limit, resource="graphql")
         requester = self.gh.requester
         # known_since is always None (no incremental fetch) even though every
         # 10-minute run refetches full release/branch history: the
@@ -829,10 +838,14 @@ class GitHubCollector:
         # since the watermark. The paginated_releases_and_branches() early-stop
         # optimization exists and is unit-tested but is intentionally unused
         # in production for this reason.
-        release_nodes, branch_names = paginated_releases_and_branches(
-            requester, self.org, repo_name, known_since=None
+        release_nodes, branch_names = await asyncio.to_thread(
+            paginated_releases_and_branches,
+            requester,
+            self.org,
+            repo_name,
+            known_since=None,
         )
-        repo = self.gh.get_repo(f"{self.org}/{repo_name}")
+        repo = await asyncio.to_thread(self.gh.get_repo, f"{self.org}/{repo_name}")
 
         # Collect all non-prerelease, non-draft releases
         all_releases: dict[str, dict[str, Any]] = {}
@@ -883,14 +896,18 @@ class GitHubCollector:
 
             # Compute commits since tag
             try:
-                comparison = repo.compare(best_tag, branch_name)
+                comparison = await asyncio.to_thread(
+                    repo.compare, best_tag, branch_name
+                )
                 commits_since = comparison.ahead_by
                 meta = await release_store.fetch_release_metadata(
                     session, project_id, branch_name
                 )
                 meta["commits_since_tag"] = commits_since
                 if branch_name != "main":
-                    meta["tag_on_main"] = _tag_on_main(repo, best_tag)
+                    meta["tag_on_main"] = await asyncio.to_thread(
+                        _tag_on_main, repo, best_tag
+                    )
                 await release_store.update_release_metadata(
                     session, project_id, branch_name, meta
                 )

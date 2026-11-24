@@ -64,6 +64,7 @@ class TestCollectGithubWatermarks:
             collect_dependencies_interval_hours=24,
             collect_releases_interval_hours=24,
             collect_ci_interval_hours=1,
+            collect_project_concurrency=2,
         )
         config = SimpleNamespace(
             craft_projects=["snapcraft"],
@@ -146,6 +147,7 @@ class TestCollectGithubWatermarks:
             collect_dependencies_interval_hours=24,
             collect_releases_interval_hours=24,
             collect_ci_interval_hours=1,
+            collect_project_concurrency=2,
         )
         config = SimpleNamespace(
             craft_projects=["snapcraft"],
@@ -224,6 +226,7 @@ class TestCollectGithubOpenIssueWatermarks:
             collect_dependencies_interval_hours=24,
             collect_releases_interval_hours=24,
             collect_ci_interval_hours=1,
+            collect_project_concurrency=2,
         )
         config = SimpleNamespace(
             craft_projects=["snapcraft"],
@@ -324,6 +327,7 @@ class TestCollectGithubOpenIssueWatermarks:
             collect_dependencies_interval_hours=24,
             collect_releases_interval_hours=24,
             collect_ci_interval_hours=1,
+            collect_project_concurrency=2,
         )
         config = SimpleNamespace(
             craft_projects=["snapcraft"],
@@ -421,6 +425,7 @@ class TestPhaseGating:
             collect_dependencies_interval_hours=24,
             collect_releases_interval_hours=24,
             collect_ci_interval_hours=1,
+            collect_project_concurrency=2,
         )
 
     @staticmethod
