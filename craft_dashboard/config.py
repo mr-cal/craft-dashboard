@@ -175,4 +175,12 @@ def load_config(config_path: Path) -> DashboardConfig:
             key.replace("-", "_"): value for key, value in normalized["ci"].items()
         }
 
+    # Launchpad's canonical username form is "~name"; stored issue authors are
+    # bare (see collectors.launchpad._lp_username), so maintainer matching
+    # must be tilde-agnostic. Accept either form in config.
+    if "launchpad_maintainers" in normalized:
+        normalized["launchpad_maintainers"] = [
+            name.removeprefix("~") for name in normalized["launchpad_maintainers"]
+        ]
+
     return DashboardConfig(**normalized)

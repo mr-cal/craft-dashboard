@@ -68,6 +68,19 @@ def _map_lp_status(lp_status: str) -> str:
     return "open"
 
 
+def _lp_username(link: str | None) -> str | None:
+    """Extract the username from a Launchpad person link, without the '~'.
+
+    Launchpad person resource paths are ``.../~name``; the tilde is part of
+    Launchpad's canonical URL form but not of our stored usernames — issues
+    store bare names so Launchpad authors display and compare exactly like
+    GitHub authors.
+    """
+    if not link:
+        return None
+    return str(link).rsplit("/", 1)[-1].removeprefix("~")
+
+
 def _fetch_bug_comments(bug: "Entry") -> list[dict]:
     """Fetch the last 50 messages on a Launchpad bug as comment dicts.
 
@@ -85,9 +98,7 @@ def _fetch_bug_comments(bug: "Entry") -> list[dict]:
     recent = messages[-_MAX_COMMENTS:]
     return [
         {
-            "author": str(m.owner_link).rsplit("/", 1)[-1]
-            if m.owner_link
-            else "unknown",
+            "author": _lp_username(m.owner_link) or "unknown",
             "body": (m.content or "")[:1000],
             "created_at": m.date_created.replace(tzinfo=UTC).isoformat()
             if m.date_created
@@ -114,7 +125,11 @@ class LaunchpadCollector:
 
         """
         self.projects = projects or []
-        self._maintainers: set[str] = set(launchpad_maintainers or [])
+        # Accept maintainer names with or without Launchpad's '~' URL prefix;
+        # stored usernames are bare (see _lp_username), so matching must be too.
+        self._maintainers: set[str] = {
+            m.removeprefix("~") for m in launchpad_maintainers or []
+        }
         self._lp = None
 
     def _get_launchpad(self) -> "Launchpad":
@@ -220,9 +235,7 @@ class LaunchpadCollector:
         for task in bug_tasks:
             bug = task.bug
             state = _map_lp_status(task.status)
-            author = (
-                str(task.owner_link).rsplit("/", 1)[-1] if task.owner_link else None
-            )
+            author = _lp_username(task.owner_link)
             author_is_maintainer = author in self._maintainers if author else False
             labels = list(bug.tags)
 

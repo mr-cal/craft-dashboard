@@ -64,6 +64,22 @@ class TestDashboardConfig:
 
         assert config.refresh_interval_days == 7
 
+    def test_load_config_strips_tilde_from_launchpad_maintainers(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Launchpad maintainers are stored bare; '~' in config is accepted."""
+        config_file = tmp_path / "craft-dashboard.toml"
+        config_file.write_text(
+            textwrap.dedent("""\
+                craft-projects = ["snapcraft"]
+                launchpad-maintainers = ["~mr-cal", "kyrofa"]
+            """)
+        )
+
+        config = load_config(config_file)
+
+        assert config.launchpad_maintainers == ["mr-cal", "kyrofa"]
+
     def test_load_config_missing_file(self, tmp_path: pathlib.Path) -> None:
         """Raise FileNotFoundError for missing config file."""
         config_file = tmp_path / "nonexistent.toml"

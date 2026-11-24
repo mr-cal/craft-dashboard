@@ -75,6 +75,13 @@ class TestLaunchpadCollector:
 
         assert collector._maintainers == {"mr-cal", "kyrofa"}
 
+    def test_init_normalizes_tilde_prefixed_maintainers(self) -> None:
+        """Tilde-prefixed config entries are accepted and normalized to bare."""
+        collector = LaunchpadCollector(
+            launchpad_maintainers=["~mr-cal", "kyrofa"],
+        )
+        assert collector._maintainers == {"mr-cal", "kyrofa"}
+
     def test_init_defaults_empty_maintainers(self) -> None:
         """LaunchpadCollector defaults to empty maintainers set."""
         collector = LaunchpadCollector(projects=["snapcraft"])
@@ -230,7 +237,9 @@ class TestCollectBugsAuthorExtraction:
             side_effect=self._make_insert_patch(captured),
         )
         await collector.collect_bugs("snapcraft", 1, AsyncMock())
-        assert captured["author"] == "~john-doe"
+        # The '~' is Launchpad's URL form; stored usernames are bare so
+        # Launchpad authors display and compare exactly like GitHub authors.
+        assert captured["author"] == "john-doe"
 
     async def test_author_is_bot_always_false(self, mocker) -> None:
         """Launchpad issues always have author_is_bot=False."""
@@ -246,6 +255,32 @@ class TestCollectBugsAuthorExtraction:
         )
         await collector.collect_bugs("snapcraft", 1, AsyncMock())
         assert captured["author_is_bot"] is False
+
+    async def test_comment_authors_stripped_of_tilde(self, mocker) -> None:
+        """Comment authors stored in issue comments are bare usernames."""
+        collector = LaunchpadCollector(projects=["snapcraft"])
+        mock_task = self._make_mock_task("https://api.launchpad.net/1.0/~john-doe")
+        description_msg = MagicMock(
+            owner_link="https://api.launchpad.net/1.0/~john-doe",
+            content="the description",
+            date_created=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+        comment_msg = MagicMock(
+            owner_link="https://api.launchpad.net/1.0/~jane-doe",
+            content="a reply",
+            date_created=datetime(2024, 1, 2, tzinfo=UTC),
+        )
+        mock_task.bug.messages = [description_msg, comment_msg]
+        mocker.patch.object(
+            collector, "_get_launchpad", return_value=self._make_mock_lp([mock_task])
+        )
+        captured = {}
+        mocker.patch(
+            "sqlalchemy.dialects.postgresql.insert",
+            side_effect=self._make_insert_patch(captured),
+        )
+        await collector.collect_bugs("snapcraft", 1, AsyncMock())
+        assert [c["author"] for c in captured["comments"]] == ["jane-doe"]
 
     async def test_none_owner_link(self, mocker) -> None:
         """None owner_link results in None author."""
@@ -398,7 +433,7 @@ class TestFetchBugComments:
         comments = _fetch_bug_comments(mock_bug)
 
         assert len(comments) == 1
-        assert comments[0]["author"] == "~commenter"
+        assert comments[0]["author"] == "commenter"
         assert comments[0]["body"] == "A reply"
         assert comments[0]["type"] == "comment"
 
@@ -569,7 +604,7 @@ class TestCollectBugsComments:
 
         assert captured["comments"] == [
             {
-                "author": "~commenter",
+                "author": "commenter",
                 "body": "A reply",
                 "created_at": "2024-01-02T00:00:00+00:00",
                 "type": "comment",
